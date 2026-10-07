@@ -23,7 +23,8 @@ mid-turn by a signal the test controls rather than by a timer.
 A test that compiles a graph itself freezes its team onto the lane with
 :func:`deterministic_model_assignment`, and takes a scripted scenario's agent,
 carrying the script it drives, from :func:`scripted_supervisor` or
-:func:`branch_researcher`.
+:func:`branch_researcher`. Both, and every test that needs the frozen selection
+itself, derive from :func:`frozen_deterministic_selection`.
 
 This module stays light on purpose: a gateway imports it at startup, and the
 model it registers, with its chat-model stack, loads only when a lane builds
@@ -35,7 +36,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -47,7 +48,8 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
     from ...providers import LaneRegistration, LaneRegistry
-    from ...providers.team_selection import FrozenLaneAssignment
+    from ...providers.provider_catalog import ProviderRecord, SelectionReference
+    from ...providers.team_selection import FrozenLaneAssignment, FrozenTeamSelection
     from ...team.team_config import AgentConfig, TeamConfig
     from .deterministic import UNATTENDED_REPLY as UNATTENDED_REPLY
     from .deterministic import (
@@ -64,6 +66,7 @@ __all__ = [
     "armed_lane_environment",
     "branch_researcher",
     "deterministic_model_assignment",
+    "frozen_deterministic_selection",
     "held_turns",
     "register_lanes",
     "scripted_supervisor",
@@ -128,26 +131,67 @@ def register_lanes(registry: LaneRegistry) -> None:
         registry.register(lane)
 
 
+def frozen_deterministic_selection(
+    required_roles: tuple[str, ...],
+    *,
+    model_value: str | None = None,
+    catalog_revision: str | None = None,
+    pinned_roles: tuple[str, ...] = (),
+    fallbacks: tuple[tuple[ProviderRecord, SelectionReference], ...] = (),
+) -> FrozenTeamSelection:
+    """Freeze *required_roles* onto the deterministic lane's offline served record.
+
+    The selection is the one production's team-selection freezer makes from the
+    record the gateway would serve for the lane, so what a test freezes is what a
+    real run would carry. *model_value* and *catalog_revision* restate the served
+    entry's model and catalog revision, for a run frozen against a catalog the
+    gateway has since moved past. Each of *pinned_roles* takes the selection as
+    an explicit per-role override. *fallbacks* name further lanes, each paired
+    with the served record that carries it.
+    """
+    from ...providers.team_selection import freeze_team_selection
+    from ..catalog import in_process_lane_selection
+
+    record, reference = in_process_lane_selection(DETERMINISTIC_LANE.provider)
+    catalog = record.catalog
+    if model_value is not None:
+        catalog = replace(
+            catalog,
+            models=(
+                replace(
+                    catalog.models[0],
+                    provider_value=model_value,
+                    display_name=model_value,
+                ),
+            ),
+        )
+    if catalog_revision is not None:
+        catalog = replace(
+            catalog, state=replace(catalog.state, revision=catalog_revision)
+        )
+        reference = replace(reference, catalog_revision=catalog_revision)
+    record = replace(record, catalog=catalog)
+    return freeze_team_selection(
+        selection=reference,
+        overrides=dict.fromkeys(pinned_roles, reference),
+        fallbacks=tuple(fallback for _, fallback in fallbacks),
+        required_roles=required_roles,
+        records=(record, *(served for served, _ in fallbacks)),
+    )
+
+
 def deterministic_model_assignment(
     team_config: TeamConfig,
 ) -> dict[str, FrozenLaneAssignment]:
     """Compile *team_config*'s per-role assignment on the deterministic lane.
 
-    Frozen by production's team-selection freezer over the lane's served record,
-    for the roles a run of this team must cover, so the assignment a test
+    Frozen for the roles a run of this team must cover, so the assignment a test
     compiles against is the one a real run would hand the worker.
     """
     from ...control.run_start_policy import required_role_ids
-    from ...providers.team_selection import freeze_team_selection
-    from ..catalog import in_process_lane_selection
 
-    record, selection = in_process_lane_selection(DETERMINISTIC_LANE.provider)
-    return freeze_team_selection(
-        selection=selection,
-        overrides={},
-        fallbacks=(),
-        required_roles=tuple(required_role_ids(team_config)),
-        records=(record,),
+    return frozen_deterministic_selection(
+        tuple(required_role_ids(team_config))
     ).compiler_map()
 
 

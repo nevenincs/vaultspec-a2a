@@ -14,29 +14,26 @@ wiring is the thing under test, so the wiring is what these tests exercise.
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import anyio
-import httpx
 import pytest
 
-from ...api.tests.permission_harness import park_permission, park_plan_approval
 from ...control._permission_response_contract import PermissionInput
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
-from ...control.tests.test_dispatch_failure_transitions import (
-    _seed_accepted_initial_action,
-)
 from ...graph.enums import PermissionType
-from ...testing import adopted_spawner, current_execution_metadata
+from ...testing import (
+    adopted_spawner,
+    current_execution_metadata,
+    park_permission,
+    park_plan_approval,
+    seed_create_action,
+    served_worker,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ApprovalStatus, ThreadStatus
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
 from .. import (
     create_thread,
     get_permission_logs_by_thread,
@@ -44,9 +41,9 @@ from .. import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
     from pathlib import Path
 
+    import httpx
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -75,27 +72,6 @@ _TOOL_PAUSE = _PauseSpec("bash", "bash", _TOOL_OPTIONS, plan_approval=False)
 _APPROVAL_PAUSE = _PauseSpec(
     "plan_approval_request", None, _APPROVAL_OPTIONS, plan_approval=True
 )
-
-
-@asynccontextmanager
-async def _worker(
-    checkpointer: AsyncSqliteSaver,
-) -> AsyncGenerator[httpx.AsyncClient]:
-    """Serve the production worker application over a real HTTP transport."""
-    bridge = WorkerBridge("http://127.0.0.1:1", "permission-audit-test")
-    executor = Executor(checkpointer, bridge)
-    app = create_worker_app()
-    app.state.executor = executor
-    async with anyio.create_task_group() as tasks:
-        app.state.task_group = tasks
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://worker",
-        ) as client:
-            yield client
-        tasks.cancel_scope.cancel()
-    await executor.shutdown()
-    await bridge.close()
 
 
 async def _pause_run(
@@ -129,7 +105,7 @@ async def _pause_run(
             allowed_options=pause.options,
             tool_call=pause.tool_call,
         )
-        await _seed_accepted_initial_action(db, thread_id, workspace=workspace)
+        await seed_create_action(db, thread_id, workspace=workspace)
         await db.commit()
     return request_id
 
@@ -184,11 +160,11 @@ async def test_approving_a_tool_call_records_a_durable_audit_row(
     )
     assert await _audit_rows(session_factory, thread_id) == []
 
-    async with _worker(checkpointer) as worker_client:
+    async with served_worker(checkpointer) as worker:
         result = await _decide(
             session_factory,
             checkpointer,
-            worker_client,
+            worker.client,
             thread_id=thread_id,
             request_id=request_id,
             option_id="allow_once",
@@ -225,11 +201,11 @@ async def test_rejecting_a_tool_call_records_the_denial_not_an_approval(
         pause=_TOOL_PAUSE,
     )
 
-    async with _worker(checkpointer) as worker_client:
+    async with served_worker(checkpointer) as worker:
         result = await _decide(
             session_factory,
             checkpointer,
-            worker_client,
+            worker.client,
             thread_id=thread_id,
             request_id=request_id,
             option_id="reject_once",
@@ -259,11 +235,11 @@ async def test_an_approval_pause_is_audited_under_the_plan_approval_sentinel(
         pause=_APPROVAL_PAUSE,
     )
 
-    async with _worker(checkpointer) as worker_client:
+    async with served_worker(checkpointer) as worker:
         result = await _decide(
             session_factory,
             checkpointer,
-            worker_client,
+            worker.client,
             thread_id=thread_id,
             request_id=request_id,
             option_id="approve",
@@ -296,11 +272,11 @@ async def test_a_guard_rejected_response_is_not_recorded_as_a_decision(
         pause=_TOOL_PAUSE,
     )
 
-    async with _worker(checkpointer) as worker_client:
+    async with served_worker(checkpointer) as worker:
         result = await _decide(
             session_factory,
             checkpointer,
-            worker_client,
+            worker.client,
             thread_id=thread_id,
             request_id=request_id,
             option_id="option_the_request_never_offered",
@@ -332,11 +308,11 @@ async def test_a_client_retry_records_one_decision_not_two(
         pause=_TOOL_PAUSE,
     )
 
-    async with _worker(checkpointer) as worker_client:
+    async with served_worker(checkpointer) as worker:
         first = await _decide(
             session_factory,
             checkpointer,
-            worker_client,
+            worker.client,
             thread_id=thread_id,
             request_id=request_id,
             option_id="allow_once",
@@ -345,7 +321,7 @@ async def test_a_client_retry_records_one_decision_not_two(
         second = await _decide(
             session_factory,
             checkpointer,
-            worker_client,
+            worker.client,
             thread_id=thread_id,
             request_id=request_id,
             option_id="allow_once",

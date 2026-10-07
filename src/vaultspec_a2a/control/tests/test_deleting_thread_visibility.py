@@ -21,8 +21,9 @@ from langgraph.checkpoint.memory import InMemorySaver
 from ...control.deletion_saga import create_deletion_saga
 from ...control.thread_listing import list_threads_service
 from ...control.thread_state_service import capture_thread_state
-from ...database import create_control_action, create_thread, get_thread
+from ...database import create_thread, get_thread
 from ...streaming.aggregator import EventAggregator
+from ...testing import seed_journaled_thread
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 
@@ -34,19 +35,10 @@ async def _seed_deleting_thread(
     session_factory: async_sessionmaker[AsyncSession], thread_id: str
 ) -> None:
     async with session_factory() as session:
-        authority = make_test_write_authority()
-        await create_thread(
+        await seed_journaled_thread(
             session,
-            write_authority=authority,
             thread_id=thread_id,
             status=ThreadStatus.COMPLETED,
-        )
-        await create_control_action(
-            session,
-            thread_id=thread_id,
-            action_type=authority.action_type,
-            idempotency_key=f"seed:{thread_id}",
-            dispatch_id=authority.action_receipt_id,
             recovery_deadline_at=datetime(2100, 1, 1, tzinfo=UTC),
         )
         await create_deletion_saga(session, thread_id=thread_id, manifest=[])

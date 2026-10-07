@@ -16,10 +16,9 @@ import httpx
 import pytest
 
 from ...streaming.aggregator import EventAggregator
-from ...testing import serve_on_loopback
+from ...testing import seed_live_thread, serve_on_loopback
 from ._relay_events import progress_event, relay_events
 from .conftest import make_app
-from .test_gateway_live import _seed_live_thread
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -73,7 +72,7 @@ async def test_attached_viewers_hold_no_pooled_connection(
     """
     aggregator = EventAggregator()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
-    run_id, _receipt = await _seed_live_thread(session_factory, title="pool")
+    run_id, _receipt = await seed_live_thread(session_factory, title="pool")
 
     pool = engine.sync_engine.pool
     assert isinstance(pool, _CheckedOutPool)
@@ -138,7 +137,7 @@ async def test_a_resuming_viewer_hands_its_replay_connection_back(
     """
     aggregator = EventAggregator()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
-    run_id, _receipt = await _seed_live_thread(session_factory, title="resume-pool")
+    run_id, _receipt = await seed_live_thread(session_factory, title="resume-pool")
 
     pool = engine.sync_engine.pool
     assert isinstance(pool, _CheckedOutPool)

@@ -42,7 +42,15 @@ from ...database.models import (
     ThreadModel,
 )
 from ...streaming.aggregator import EventAggregator
-from ...testing import DEFAULT_TEAM_PRESET, catalog_run_fields, settings_override
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    catalog_run_fields,
+    park_permission,
+    park_permissions,
+    park_plan_approval,
+    seed_journaled_thread,
+    settings_override,
+)
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
@@ -53,14 +61,8 @@ from ...thread.enums import (
 )
 from ...thread.idempotency import (
     permission_response_action_key,
-    thread_create_action_key,
 )
 from .conftest import make_app
-from .permission_harness import (
-    park_permission,
-    park_permissions,
-    park_plan_approval,
-)
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 type JsonValue = str | int | float | bool | list[JsonValue] | JsonObject | None
@@ -2724,20 +2726,8 @@ class TestDeleteThread:
                 {},
             )
             async with session_factory() as session:
-                authority = make_test_write_authority()
-                await create_thread(
-                    session,
-                    write_authority=authority,
-                    thread_id="thread-delete-terminal",
-                    status="completed",
-                )
-                await create_control_action(
-                    session,
-                    thread_id="thread-delete-terminal",
-                    action_type=authority.action_type,
-                    idempotency_key=thread_create_action_key("thread-delete-terminal"),
-                    dispatch_id=authority.action_receipt_id,
-                    recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+                await seed_journaled_thread(
+                    session, thread_id="thread-delete-terminal", status="completed"
                 )
                 await session.commit()
 

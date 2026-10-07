@@ -16,78 +16,28 @@ into a test.
 from __future__ import annotations
 
 import itertools
-from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-import anyio
 import httpx
 import pytest
 from httpx import ASGITransport
 
-from ...control.config import settings
-from ...domain_config import domain_config
-from ...testing import DEFAULT_TEAM_PRESET, async_catalog_run_fields
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    async_catalog_run_fields,
+    capacity_holders,
+    park_permission,
+    served_worker,
+)
 from .conftest import make_app
-from .permission_harness import park_permission
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
-    from fastapi import FastAPI
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 
 _RUN_SEQ = itertools.count(1)
-
-
-@asynccontextmanager
-async def _worker_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """No-op: ASGITransport never runs the real lifespan protocol."""
-    yield
-
-
-@asynccontextmanager
-async def _saturated_worker(
-    app: FastAPI, checkpointer: AsyncSqliteSaver, *, held_threads: list[str]
-) -> AsyncGenerator[Executor]:
-    """Serve the production worker app with *held_threads* already reserved.
-
-    The reservations are taken through the executor's own public capacity seam,
-    which is the same one the dispatch endpoint takes, so the worker refuses for
-    exactly the reason it would refuse a real concurrent turn.
-    """
-    bridge = WorkerBridge("http://control", "run-action-refusal-test")
-    executor = Executor(checkpointer, bridge)
-    worker_app = create_worker_app(lifespan=_worker_lifespan)
-    worker_app.state.executor = executor
-    try:
-        for thread_id in held_threads:
-            reservation, _reason = await executor.reserve_dispatch_capacity(thread_id)
-            assert reservation is not None
-        async with (
-            httpx.AsyncClient(
-                transport=ASGITransport(app=worker_app),
-                base_url="http://worker",
-                headers=(
-                    {"Authorization": f"Bearer {settings.internal_token}"}
-                    if settings.internal_token is not None
-                    else None
-                ),
-            ) as worker_client,
-            anyio.create_task_group() as tasks,
-        ):
-            worker_app.state.task_group = tasks
-            app.state.worker_client = worker_client
-            yield executor
-            tasks.cancel_scope.cancel()
-    finally:
-        await executor.shutdown()
-        await bridge.close()
 
 
 async def _start_run(client: httpx.AsyncClient) -> str:
@@ -156,7 +106,7 @@ async def test_a_permission_answer_to_a_busy_run_is_a_conflict_not_a_server_faul
             session_factory, checkpointer, thread_id=run_id
         )
 
-        async with _saturated_worker(app, checkpointer, held_threads=[run_id]):
+        async with served_worker(checkpointer, gateway=app, held_threads=[run_id]):
             refused = await client.post(
                 f"/v1/runs/{run_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
@@ -187,10 +137,9 @@ async def test_a_permission_answer_to_a_full_worker_asks_the_caller_to_retry(
             session_factory, checkpointer, thread_id=run_id
         )
 
-        held = [
-            f"holder-{index}" for index in range(domain_config.max_concurrent_threads)
-        ]
-        async with _saturated_worker(app, checkpointer, held_threads=held):
+        async with served_worker(
+            checkpointer, gateway=app, held_threads=capacity_holders()
+        ):
             refused = await client.post(
                 f"/v1/runs/{run_id}/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},

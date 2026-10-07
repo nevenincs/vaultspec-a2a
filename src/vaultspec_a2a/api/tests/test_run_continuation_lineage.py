@@ -21,8 +21,8 @@ from ...testing import (
 )
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...worker.graph_lifecycle import GraphLifecycleManager
+from ._relay_events import RelayContext, relay_terminal
 from .conftest import make_app
-from .test_gateway_drain import _relay_terminal, _RelayContext
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,10 +62,10 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
         }
         premature = await client.post("/v1/runs", json=successor)
         assert premature.status_code == 409, premature.text
-        await _relay_terminal(
+        await relay_terminal(
             client,
             "lineage-parent",
-            _RelayContext(checkpointer, worker, session_factory),
+            RelayContext(checkpointer, worker, session_factory),
         )
         checkpoint = await real_checkpoint()
         checkpoint["id"] = "cp-lineage-final"
@@ -124,10 +124,10 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
             },
         )
         assert other.status_code == 201, other.text
-        await _relay_terminal(
+        await relay_terminal(
             client,
             "lineage-other-workspace",
-            _RelayContext(checkpointer, worker, session_factory),
+            RelayContext(checkpointer, worker, session_factory),
         )
         wrong_workspace = await client.post(
             "/v1/runs",

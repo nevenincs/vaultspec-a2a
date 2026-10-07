@@ -10,10 +10,8 @@ answers instead.
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-import anyio
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -26,7 +24,9 @@ from ...testing import (
     DEFAULT_REQUIRED_ROLE,
     DEFAULT_TEAM_PRESET,
     adopted_spawner,
+    capacity_holders,
     current_execution_metadata,
+    served_worker,
 )
 from ...thread.action_receipts import (
     GraphActionReceipt,
@@ -35,9 +35,6 @@ from ...thread.action_receipts import (
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType
 from ...thread.executable_graph import freeze_graph_definition
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
 from ..accepted_input import freeze_accepted_input
 from ..circuit_breaker import WorkerCircuitBreaker
 from ..config import settings
@@ -45,7 +42,6 @@ from ..dispatch import safe_dispatch
 from ..execution_authority import resolve_execution_authority
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
     from pathlib import Path
 
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -53,34 +49,6 @@ if TYPE_CHECKING:
     from ...worker._dispatch_contract import DispatchCapacityReservation
 
 _TEST_INTERNAL_TOKEN = "dispatch-refusal-test-token"
-
-
-@pytest.fixture(autouse=True)
-def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give both sides of real worker dispatch the current IPC credential."""
-    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
-
-
-@asynccontextmanager
-async def _real_worker(
-    checkpointer: AsyncSqliteSaver,
-) -> AsyncGenerator[tuple[httpx.AsyncClient, Executor]]:
-    """Serve the production worker app over real ASGI with a real executor."""
-    bridge = WorkerBridge("http://control", "dispatch-refusal-test")
-    executor = Executor(checkpointer, bridge)
-    app = create_worker_app()
-    app.state.executor = executor
-    async with anyio.create_task_group() as tasks:
-        app.state.task_group = tasks
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://worker",
-            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-        ) as client:
-            yield client, executor
-        tasks.cancel_scope.cancel()
-    await executor.shutdown()
-    await bridge.close()
 
 
 def _breaker() -> WorkerCircuitBreaker:
@@ -133,17 +101,13 @@ async def test_a_full_worker_is_backpressure_and_says_when_to_return(
     checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Capacity is about the service, and it never counts against its health."""
-    async with _real_worker(checkpointer) as (client, executor):
-        for index in range(domain_config.max_concurrent_threads):
-            reservation, _reason = await executor.reserve_dispatch_capacity(
-                f"held-{index}"
-            )
-            assert reservation is not None
-
+    async with served_worker(
+        checkpointer, token=_TEST_INTERNAL_TOKEN, held_threads=capacity_holders()
+    ) as worker:
         breaker = _breaker()
         outcomes = [
             await safe_dispatch(
-                client,
+                worker.client,
                 _ingest(tmp_path, "overflow", f"overflow-{attempt}", with_receipt=True),
                 breaker,
                 adopted_spawner(),
@@ -166,14 +130,13 @@ async def test_a_worker_already_running_the_thread_refuses_it_as_busy(
     checkpointer: AsyncSqliteSaver,
 ) -> None:
     """One run's occupancy is a conflict about that run, not a service fault."""
-    async with _real_worker(checkpointer) as (client, executor):
-        reservation, _reason = await executor.reserve_dispatch_capacity("busy-thread")
-        assert reservation is not None
-
+    async with served_worker(
+        checkpointer, token=_TEST_INTERNAL_TOKEN, held_threads=("busy-thread",)
+    ) as worker:
         breaker = _breaker()
         outcomes = [
             await safe_dispatch(
-                client,
+                worker.client,
                 _ingest(
                     tmp_path, "busy-thread", f"second-{attempt}", with_receipt=True
                 ),
@@ -209,19 +172,21 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
     circuit the other runs opened.
     """
     threshold = settings.cb_failure_threshold
-    async with _real_worker(checkpointer) as (client, executor):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
         breaker = WorkerCircuitBreaker(
             failure_threshold=threshold,
             recovery_timeout=settings.cb_recovery_timeout_seconds,
         )
         held: list[DispatchCapacityReservation] = []
-        reservation, _reason = await executor.reserve_dispatch_capacity("busy-run")
+        reservation, _reason = await worker.executor.reserve_dispatch_capacity(
+            "busy-run"
+        )
         assert reservation is not None
         held.append(reservation)
 
         busy = [
             await safe_dispatch(
-                client,
+                worker.client,
                 _ingest(tmp_path, "busy-run", f"busy-{attempt}", with_receipt=True),
                 breaker,
                 adopted_spawner(),
@@ -231,7 +196,7 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
 
         # Fill the rest of the worker so the same breaker now meets capacity.
         for index in range(domain_config.max_concurrent_threads - 1):
-            reservation, _reason = await executor.reserve_dispatch_capacity(
+            reservation, _reason = await worker.executor.reserve_dispatch_capacity(
                 f"held-{index}"
             )
             assert reservation is not None
@@ -239,7 +204,7 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
 
         full = [
             await safe_dispatch(
-                client,
+                worker.client,
                 _ingest(tmp_path, "other-run", f"full-{attempt}", with_receipt=True),
                 breaker,
                 adopted_spawner(),
@@ -248,10 +213,10 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
         ]
 
         for reservation in held:
-            assert await executor.release_dispatch_capacity(reservation)
+            assert await worker.executor.release_dispatch_capacity(reservation)
 
         admitted = await safe_dispatch(
-            client,
+            worker.client,
             _ingest(tmp_path, "other-run", "other-admitted", with_receipt=True),
             breaker,
             adopted_spawner(),
@@ -278,10 +243,10 @@ async def test_a_dispatch_refused_before_the_worker_leaves_the_circuit_alone(
     the half-open probe on its way out: a request that was never sent cannot be
     the one probe that decides whether the worker is back.
     """
-    async with _real_worker(checkpointer) as (client, _executor):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
         breaker = _breaker()
         outcome = await safe_dispatch(
-            client,
+            worker.client,
             _ingest(tmp_path, "no-receipt-thread", "no-receipt", with_receipt=False),
             breaker,
             adopted_spawner(),
@@ -357,7 +322,7 @@ async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
     probe is unsettled nothing else is admitted, and once it settles the circuit
     is open to everyone again.
     """
-    async with _real_worker(checkpointer) as (client, _executor):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
         breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=0.0)
         breaker.force_open()
         assert breaker.state == "half_open"
@@ -367,7 +332,7 @@ async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
         probe = breaker.pre_dispatch()
         assert probe is not None
         blocked = await safe_dispatch(
-            client,
+            worker.client,
             _ingest(tmp_path, "probe-thread", "probe-blocked", with_receipt=True),
             breaker,
             adopted_spawner(),
@@ -376,7 +341,7 @@ async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
 
         breaker.release_probe(probe)
         admitted = await safe_dispatch(
-            client,
+            worker.client,
             _ingest(tmp_path, "probe-thread", "probe-admitted", with_receipt=True),
             breaker,
             adopted_spawner(),

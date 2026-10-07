@@ -21,26 +21,17 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import httpx
 import pytest
 
-from ...control.accepted_input import freeze_accepted_input
-from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.execution_authority import resolve_execution_authority
 from ...control.health import SERVICE_HEALTH_DEADLINE_SECONDS
 from ...database import (
-    create_control_action,
-    create_thread,
     get_thread,
     list_threads,
 )
-from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
-from ...team.team_config import load_team_config
 from ...testing import (
     DEFAULT_TEAM_PRESET,
     ProgressDeadline,
@@ -48,29 +39,27 @@ from ...testing import (
     actor_tokens_body,
     async_catalog_run_fields,
     async_run_start_body,
-    current_execution_metadata,
+    park_permission,
     read_frame,
     serve_on_loopback,
     wait_for_async,
 )
+from ...testing import seed_live_thread as _seed_live_thread
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
-from ...thread.enums import ControlActionType, ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
-from ...thread.idempotency import thread_create_action_key
+from ...thread.enums import ControlActionType
 from ..routes.gateway import admission_gate
 from .conftest import make_app
-from .permission_harness import park_permission
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
     from ...control.drain import DrainGate
-    from ...thread.action_receipts import GraphActionReceipt
     from .conftest import _InProcessWorker
 
 type SessionFactory = async_sessionmaker[AsyncSession]
@@ -124,54 +113,6 @@ async def _apply_sql_trace_callback(
 ) -> None:
     """Keep the untyped third-party connection behind the tested protocol seam."""
     await connection.set_trace_callback(trace_callback)
-
-
-async def _seed_live_thread(
-    session_factory: SessionFactory, *, title: str
-) -> tuple[str, GraphActionReceipt]:
-    """Create a live run with the accepted action startup recovery requires."""
-    workspace = Path.cwd()
-    metadata = current_execution_metadata(workspace)
-    authority = make_test_write_authority()
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=authority,
-            status=ThreadStatus.RUNNING,
-            team_preset=DEFAULT_TEAM_PRESET,
-            title=title,
-            metadata=metadata,
-        )
-        dispatch = DispatchRequest(
-            action="ingest",
-            thread_id=thread.id,
-            content="live stream fixture",
-            workspace_root=str(workspace),
-            recursion_limit=25,
-            team_preset=DEFAULT_TEAM_PRESET,
-            graph_definition=freeze_graph_definition(
-                load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
-                workspace_root=workspace,
-            ),
-            model_assignment=resolve_execution_authority(metadata).model_assignment,
-        )
-        await create_control_action(
-            session,
-            thread_id=thread.id,
-            action_type=authority.action_type,
-            idempotency_key=thread_create_action_key(thread.id),
-            dispatch_id=authority.action_receipt_id,
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-            payload=freeze_accepted_input(
-                dispatch, intent={"content": "live stream fixture"}
-            ),
-        )
-        receipt = await prepare_graph_action_receipt(
-            session, thread_id=thread.id, dispatch_id=authority.action_receipt_id
-        )
-        assert receipt is not None
-        await session.commit()
-        return thread.id, receipt
 
 
 async def _seed_permission(

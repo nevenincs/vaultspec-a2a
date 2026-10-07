@@ -38,7 +38,6 @@ first.
 from __future__ import annotations
 
 import uuid
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -47,7 +46,6 @@ import anyio
 import httpx
 import pytest
 import pytest_asyncio
-from langchain_core.messages import AIMessage
 
 from ...authoring import (
     AuthoringClient,
@@ -59,15 +57,11 @@ from ...authoring import (
     verdict_from_event,
 )
 from ...control._verdict_subscriber_config import VerdictSubscriberConfig
-from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.config import settings
-from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import relay_event
 from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import VerdictSubscriber
 from ...database import (
-    create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
     get_permission_request,
@@ -75,41 +69,31 @@ from ...database import (
     pending_document_approval_thread,
     record_permission_request,
 )
-from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import (
     DEFAULT_TEAM_PRESET,
-    add_test_node,
     adopted_spawner,
-    compile_test_graph,
     current_execution_metadata,
-    new_state_graph,
+    seed_create_action,
+    served_worker,
 )
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
-from ...thread.idempotency import authoring_verdict_action_key, thread_create_action_key
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
+from ...thread.idempotency import authoring_verdict_action_key
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncIterator
 
-    from fastapi import FastAPI
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from ...worker.ipc import WorkerBridge
+
 
 _TEST_INTERNAL_TOKEN = "verdict-subscriber-live-test-token"
-
-
-@pytest.fixture(autouse=True)
-def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give both sides of real worker dispatch the current IPC credential."""
-    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
 
 
 @pytest_asyncio.fixture
@@ -548,43 +532,21 @@ async def _seed_parked_gate(
         {},
     )
     async with session_factory() as session:
-        authority = make_test_write_authority()
         await create_thread(
             session,
-            write_authority=authority,
+            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             team_preset=seed.team_preset,
             metadata=metadata,
             status=seed.status,
         )
-        if seed.team_preset is not None and definition is not None:
-            dispatch = DispatchRequest(
-                dispatch_id=authority.action_receipt_id,
-                action="ingest",
-                thread_id=thread_id,
-                content="seed accepted graph authority",
+        if seed.team_preset is not None:
+            await seed_create_action(
+                session,
+                thread_id,
+                workspace=workspace,
                 team_preset=seed.team_preset,
-                graph_definition=definition,
-                workspace_root=str(workspace),
-                recursion_limit=25,
-                model_assignment=execution_authority.model_assignment,
             )
-            await create_control_action(
-                session,
-                thread_id=thread_id,
-                action_type=authority.action_type,
-                idempotency_key=thread_create_action_key(thread_id),
-                dispatch_id=authority.action_receipt_id,
-                payload=freeze_accepted_input(
-                    dispatch, intent={"content": "seed accepted graph authority"}
-                ),
-            )
-            receipt = await prepare_graph_action_receipt(
-                session,
-                thread_id=thread_id,
-                dispatch_id=authority.action_receipt_id,
-            )
-            assert receipt is not None
         await record_permission_request(
             session,
             request_id=proposal_id,
@@ -596,63 +558,6 @@ async def _seed_parked_gate(
             ],
         )
         await session.commit()
-
-
-def _install_receipt_graph(
-    executor: Executor,
-    checkpointer: AsyncSqliteSaver,
-    thread_id: str,
-) -> None:
-    async def complete(_state: Any) -> dict[str, Any]:
-        return {"messages": [AIMessage(content="resumed")], "next": "FINISH"}
-
-    builder = new_state_graph()
-    add_test_node(builder, "worker", complete)
-    builder.add_edge("__start__", "worker")
-    builder.add_edge("worker", "__end__")
-    workspace = Path.cwd()
-    definition = freeze_graph_definition(
-        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
-        workspace_root=workspace,
-    )
-    executor.register_compiled_graph(
-        thread_id,
-        (
-            DEFAULT_TEAM_PRESET,
-            str(workspace),
-            False,
-            resolve_execution_authority(
-                current_execution_metadata(workspace)
-            ).model_assignment_digest,
-            definition.digest(),
-        ),
-        compile_test_graph(builder, checkpointer=checkpointer),
-    )
-
-
-@asynccontextmanager
-async def _worker_runtime(
-    checkpointer: AsyncSqliteSaver,
-    *,
-    receipt_threads: tuple[str, ...] = (),
-) -> AsyncGenerator[tuple[httpx.AsyncClient, FastAPI, WorkerBridge]]:
-    bridge = WorkerBridge("http://127.0.0.1:1", "verdict-live-receipt-test")
-    executor = Executor(checkpointer, bridge)
-    for thread_id in receipt_threads:
-        _install_receipt_graph(executor, checkpointer, thread_id)
-    app = create_worker_app()
-    app.state.executor = executor
-    async with anyio.create_task_group() as tasks:
-        app.state.task_group = tasks
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://worker",
-            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-        ) as client:
-            yield client, app, bridge
-        tasks.cancel_scope.cancel()
-    await executor.shutdown()
-    await bridge.close()
 
 
 async def _wait_for_receipt(
@@ -755,16 +660,14 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
             team_preset=DEFAULT_TEAM_PRESET,
         ),
     )
-    async with _worker_runtime(checkpointer, receipt_threads=(thread_id,)) as (
-        worker_client,
-        worker_app,
-        bridge,
-    ):
+    async with served_worker(
+        checkpointer, token=_TEST_INTERNAL_TOKEN, receipt_threads=(thread_id,)
+    ) as worker:
         subscriber = VerdictSubscriber(
             VerdictSubscriberConfig(
                 session_factory=session_factory,
                 checkpointer=checkpointer,
-                worker_client=worker_client,
+                worker_client=worker.client,
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=3, recovery_timeout=30.0
                 ),
@@ -775,7 +678,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
 
         await subscriber._reconcile_parked_runs(live_engine)
 
-        assert len(worker_app.state.dispatch_ids) == 1
+        assert len(worker.app.state.dispatch_ids) == 1
         async with session_factory() as db:
             action = await get_control_action_by_idempotency_key(
                 db,
@@ -785,7 +688,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
             gate_row = await get_permission_request(db, info["proposal_id"])
             thread = await get_thread(db, thread_id)
         assert action is not None
-        assert action.dispatch_id in worker_app.state.dispatch_ids
+        assert action.dispatch_id in worker.app.state.dispatch_ids
         assert action.applied_at is None
         assert gate_row is not None
         assert gate_row.request_status == PermissionRequestStatus.PENDING.value
@@ -795,7 +698,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
         # A dispatched control action always carries its dispatch id;
         # the column is nullable for the pre-dispatch row only.
         assert action.dispatch_id is not None
-        receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
+        receipt = await _wait_for_receipt(worker.bridge, dispatch_id=action.dispatch_id)
         await relay_event(
             thread_id,
             receipt,
@@ -873,16 +776,14 @@ async def _run_clobbered_reconcile(
             team_preset=DEFAULT_TEAM_PRESET,
         ),
     )
-    async with _worker_runtime(checkpointer, receipt_threads=(seed.thread_id,)) as (
-        worker_client,
-        worker_app,
-        bridge,
-    ):
+    async with served_worker(
+        checkpointer, token=_TEST_INTERNAL_TOKEN, receipt_threads=(seed.thread_id,)
+    ) as worker:
         subscriber = VerdictSubscriber(
             VerdictSubscriberConfig(
                 session_factory=session_factory,
                 checkpointer=checkpointer,
-                worker_client=worker_client,
+                worker_client=worker.client,
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=3, recovery_timeout=30.0
                 ),
@@ -893,7 +794,7 @@ async def _run_clobbered_reconcile(
 
         await subscriber._reconcile_parked_runs(live_engine)
 
-        assert len(worker_app.state.dispatch_ids) == 1
+        assert len(worker.app.state.dispatch_ids) == 1
         async with session_factory() as db:
             action = await get_control_action_by_idempotency_key(
                 db,
@@ -905,7 +806,7 @@ async def _run_clobbered_reconcile(
         # A dispatched control action always carries its dispatch id;
         # the column is nullable for the pre-dispatch row only.
         assert action.dispatch_id is not None
-        receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
+        receipt = await _wait_for_receipt(worker.bridge, dispatch_id=action.dispatch_id)
         await relay_event(
             seed.thread_id,
             receipt,

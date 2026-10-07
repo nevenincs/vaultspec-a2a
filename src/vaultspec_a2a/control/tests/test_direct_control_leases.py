@@ -10,31 +10,23 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import httpx
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from langchain_core.messages import AIMessage
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
-from ...api.tests.permission_harness import park_permission
 from ...conftest import SqlitePosture
 from ...control import cancel_service
 from ...control._permission_response_contract import PermissionInput
-from ...control.accepted_input import freeze_accepted_input
 from ...control.action_lease import prepare_control_action_claim
 from ...control.cancel_service import CancelResult, cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.config import settings
-from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.execution_authority import resolve_execution_authority
 from ...control.leased_dispatch import DispatchTransport
 from ...control.message_service import send_followup_message
 from ...control.permission_service import respond_to_permission
@@ -42,216 +34,67 @@ from ...database import (
     RecoveryAttemptModel,
     ThreadModel,
     begin_write_transaction,
-    create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
     get_permission_request,
     get_thread,
     record_permission_request,
 )
-from ...ipc.schemas import DispatchRequest
-from ...team.team_config import load_team_config
 from ...testing import (
-    DEFAULT_TEAM_PRESET,
-    add_test_node,
     adopted_spawner,
-    compile_test_graph,
-    current_execution_metadata,
-    new_state_graph,
+    park_permission,
+    seed_accepted_thread,
+    served_worker,
     session_scratch_dir,
 )
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
 from ...thread.idempotency import (
     default_cancel_key,
     permission_response_action_key,
-    thread_create_action_key,
 )
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ...worker.graph_lifecycle import RegisteredCompiledGraph
-
 
 _TEST_INTERNAL_TOKEN = "direct-control-lease-test-token"
-
-
-@pytest.fixture(autouse=True)
-def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give both sides of real worker dispatch the current IPC credential."""
-    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
-
-
-@asynccontextmanager
-async def _worker_runtime(
-    checkpointer: AsyncSqliteSaver,
-    *,
-    receipt_threads: tuple[str, ...] = (),
-) -> AsyncGenerator[tuple[httpx.AsyncClient, FastAPI, WorkerBridge]]:
-    relayed_events: list[dict[str, object]] = []
-    event_sink = FastAPI()
-
-    @event_sink.post("/internal/events/batch")
-    async def accept_event_batch(request: Request) -> JSONResponse:
-        body = await request.json()
-        relayed_events.extend(cast("list[dict[str, object]]", body["events"]))
-        return JSONResponse({"status": "ok"})
-
-    bridge = WorkerBridge("http://control", "direct-control-lease-test")
-    await bridge._client.aclose()
-    bridge._client = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=event_sink),
-        base_url="http://control",
-    )
-    executor = Executor(checkpointer, bridge)
-    for thread_id in receipt_threads:
-        _install_receipt_graph(executor, checkpointer, thread_id)
-    app = create_worker_app()
-    app.state.executor = executor
-    app.state.relayed_events = relayed_events
-    async with anyio.create_task_group() as tasks:
-        app.state.task_group = tasks
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://worker",
-            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-        ) as client:
-            yield client, app, bridge
-        tasks.cancel_scope.cancel()
-    await executor.shutdown()
-    await bridge.close()
 
 
 def _circuit_breaker() -> WorkerCircuitBreaker:
     return WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30.0)
 
 
-def _install_receipt_graph(
-    executor: Executor,
-    checkpointer: AsyncSqliteSaver,
-    thread_id: str,
-) -> None:
-    """Register a real one-node graph so Executor emits application truth."""
-
-    async def complete(_state: Any) -> dict[str, Any]:
-        return {"messages": [AIMessage(content="applied")], "next": "FINISH"}
-
-    builder = new_state_graph()
-    add_test_node(builder, "worker", complete)
-    builder.add_edge("__start__", "worker")
-    builder.add_edge("worker", "__end__")
-    graph: RegisteredCompiledGraph = compile_test_graph(
-        builder, checkpointer=checkpointer
-    )
-    workspace = Path(_ACTIVE_PROJECT)
-    definition = freeze_graph_definition(
-        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
-        workspace_root=workspace,
-    )
-    executor.register_compiled_graph(
-        thread_id,
-        (
-            DEFAULT_TEAM_PRESET,
-            str(workspace),
-            False,
-            resolve_execution_authority(
-                current_execution_metadata(workspace)
-            ).model_assignment_digest,
-            definition.digest(),
-        ),
-        graph,
-    )
-
-
 # A follow-up inherits the active project its run was created with, so a thread
 # seeded for a dispatch-behaviour test needs a real one: without it the message
 # service refuses before reaching the behaviour under test. The directory is
 # real because the refusal is about presence, not shape.
-_ACTIVE_PROJECT = str(session_scratch_dir("vaultspec-active-project-"))
-
-
-def _active_project_metadata() -> str:
-    """Return current execution authority naming a real active project."""
-    return current_execution_metadata(Path(_ACTIVE_PROJECT))
-
-
-async def _running_thread(
-    sessions: async_sessionmaker[AsyncSession],
-    thread_id: str,
-    *,
-    team_preset: str = DEFAULT_TEAM_PRESET,
-) -> None:
-    async with sessions() as db:
-        await _create_current_thread(
-            db,
-            thread_id=thread_id,
-            status=ThreadStatus.RUNNING,
-            team_preset=team_preset,
-        )
-        await db.commit()
+_ACTIVE_PROJECT = session_scratch_dir("vaultspec-active-project-")
 
 
 async def _create_current_thread(
-    db: AsyncSession,
-    *,
-    thread_id: str,
-    status: ThreadStatus,
-    team_preset: str = DEFAULT_TEAM_PRESET,
+    db: AsyncSession, *, thread_id: str, status: ThreadStatus
 ) -> None:
     """Persist a thread with the complete current initial graph authority."""
-    authority = make_test_write_authority()
-    workspace = Path(_ACTIVE_PROJECT)
-    metadata = _active_project_metadata()
-    execution_authority = resolve_execution_authority(metadata)
-    definition = freeze_graph_definition(
-        load_team_config(team_preset, workspace_root=workspace),
-        workspace_root=workspace,
-    )
-    await create_thread(
+    await seed_accepted_thread(
         db,
-        write_authority=authority,
         thread_id=thread_id,
         status=status,
-        team_preset=team_preset,
-        metadata=metadata,
-    )
-    dispatch = DispatchRequest(
-        dispatch_id=authority.action_receipt_id,
-        action="ingest",
-        thread_id=thread_id,
-        content="seed accepted graph authority",
-        team_preset=team_preset,
-        graph_definition=definition,
-        workspace_root=str(workspace),
-        recursion_limit=25,
-        model_assignment=execution_authority.model_assignment,
-    )
-    await create_control_action(
-        db,
-        thread_id=thread_id,
-        action_type=authority.action_type,
-        idempotency_key=thread_create_action_key(thread_id),
-        dispatch_id=authority.action_receipt_id,
-        payload=freeze_accepted_input(
-            dispatch, intent={"content": "seed accepted graph authority"}
-        ),
+        workspace=_ACTIVE_PROJECT,
         recovery_deadline_at=datetime(2100, 1, 1, tzinfo=UTC),
     )
-    receipt = await prepare_graph_action_receipt(
-        db,
-        thread_id=thread_id,
-        dispatch_id=authority.action_receipt_id,
-    )
-    assert receipt is not None
+
+
+async def _running_thread(
+    sessions: async_sessionmaker[AsyncSession], thread_id: str
+) -> None:
+    async with sessions() as db:
+        await _create_current_thread(
+            db, thread_id=thread_id, status=ThreadStatus.RUNNING
+        )
+        await db.commit()
 
 
 @pytest.mark.asyncio
@@ -288,11 +131,7 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
     # The real worker accepts and schedules the dispatch, but no graph is
     # registered for this thread. Executor therefore produces no first graph
     # event and no dispatch_applied receipt.
-    async with _worker_runtime(checkpointer) as (
-        worker_client,
-        _worker_app,
-        _bridge,
-    ):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
         async with session_factory() as db:
             result = await respond_to_permission(
                 db,
@@ -302,7 +141,7 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
                 ),
                 checkpointer=checkpointer,
                 transport=DispatchTransport(
-                    worker_client=worker_client,
+                    worker_client=worker.client,
                     circuit_breaker=_circuit_breaker(),
                     worker_spawner=adopted_spawner(),
                 ),
@@ -486,11 +325,7 @@ async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
         assert before is not None
         requested_before = before.last_requested_action
 
-    async with _worker_runtime(checkpointer) as (
-        _worker_client,
-        worker_app,
-        _bridge,
-    ):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
         async with session_factory() as db:
             result = await send_followup_message(
                 db,
@@ -502,7 +337,7 @@ async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
         assert result.queued is False
         assert result.failure_type is FailureType.RUN_BUSY
         assert result.action_id == ""
-        assert len(worker_app.state.dispatch_ids) == 0
+        assert len(worker.app.state.dispatch_ids) == 0
 
     async with session_factory() as db:
         action = await get_control_action_by_idempotency_key(
@@ -538,25 +373,21 @@ async def test_cancel_retries_sqlite_lock_before_claim(
         return await original_claim(*args, **kwargs)
 
     monkeypatch.setattr(cancel_service, "prepare_control_action_claim", locked_once)
-    async with _worker_runtime(checkpointer) as (
-        worker_client,
-        worker_app,
-        _bridge,
-    ):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
         async with session_factory() as db:
             result = await cancel_thread(
                 db,
                 thread_id=thread_id,
                 idempotency_key=None,
                 transport=DispatchTransport(
-                    worker_client=worker_client,
+                    worker_client=worker.client,
                     circuit_breaker=_circuit_breaker(),
                     worker_spawner=adopted_spawner(),
                 ),
             )
         assert result.accepted
         assert attempts == 2
-        assert len(worker_app.state.dispatch_ids) == 1
+        assert len(worker.app.state.dispatch_ids) == 1
 
 
 @pytest.mark.asyncio
@@ -567,11 +398,7 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
     thread_id = "resource-cancel-thread"
     await _running_thread(session_factory, thread_id)
 
-    async with _worker_runtime(checkpointer) as (
-        worker_client,
-        worker_app,
-        _bridge,
-    ):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
 
         async def cancel(label: str) -> CancelResult:
             async with session_factory() as db:
@@ -580,7 +407,7 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
                     thread_id=thread_id,
                     idempotency_key=label,
                     transport=DispatchTransport(
-                        worker_client=worker_client,
+                        worker_client=worker.client,
                         circuit_breaker=_circuit_breaker(),
                         worker_spawner=adopted_spawner(),
                     ),
@@ -598,7 +425,7 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
             if not result.accepted:
                 assert result.failure_type is FailureType.CONFLICT
                 assert result.thread_status == ThreadStatus.RUNNING.value
-        assert len(worker_app.state.dispatch_ids) == 1
+        assert len(worker.app.state.dispatch_ids) == 1
 
         async with session_factory() as db:
             action = await get_control_action_by_idempotency_key(
@@ -607,7 +434,7 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
                 idempotency_key=default_cancel_key(thread_id),
             )
         assert action is not None
-        assert action.dispatch_id in worker_app.state.dispatch_ids
+        assert action.dispatch_id in worker.app.state.dispatch_ids
 
 
 @pytest.mark.asyncio

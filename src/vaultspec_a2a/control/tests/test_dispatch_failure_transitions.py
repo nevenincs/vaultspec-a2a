@@ -2,27 +2,17 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-import anyio
 import httpx
 import pytest
 
-from ...api.tests.clarification_harness import park_clarification
-from ...api.tests.permission_harness import park_permission
 from ...control._permission_response_contract import PermissionInput
-from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.clarification_service import (
     ClarificationRuntime,
     respond_to_clarification,
 )
-from ...control.config import settings
-from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.execution_authority import resolve_execution_authority
 from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
 from ...control.repair_transitions import (
@@ -30,39 +20,33 @@ from ...control.repair_transitions import (
     apply_repair_transition,
 )
 from ...database import (
-    create_control_action,
     create_thread,
     get_permission_request,
     get_thread,
     record_permission_request,
 )
-from ...domain_config import domain_config
-from ...ipc.schemas import DispatchRequest
 from ...providers.conditions import ProviderCondition
-from ...team.team_config import load_team_config
 from ...testing import (
-    DEFAULT_TEAM_PRESET,
     adopted_spawner,
+    capacity_holders,
     current_execution_metadata,
-    session_scratch_dir,
+    park_clarification,
+    park_permission,
+    seed_create_action,
+    served_worker,
 )
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, RepairStatus, ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
-from ...thread.idempotency import thread_create_action_key
 from ...thread.repair_policy import (
     DISPATCH_FAILED_TRANSITION,
     RepairPhase,
     repair_state_for_action,
 )
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from pathlib import Path
 
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import (
@@ -71,92 +55,6 @@ if TYPE_CHECKING:
     )
 
 _TEST_INTERNAL_TOKEN = "dispatch-failure-transition-test-token"
-
-
-@pytest.fixture
-def _dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give both sides of real worker dispatch the current IPC credential."""
-    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
-
-
-@asynccontextmanager
-async def _saturated_worker(
-    checkpointer: AsyncSqliteSaver,
-) -> AsyncGenerator[httpx.AsyncClient]:
-    """Serve the production worker app with every run slot already taken.
-
-    The capacity is exhausted through the executor's own reservation verb, so
-    the 429 the gateway meets is the one the worker composes for a full
-    service rather than a status written here.
-    """
-    bridge = WorkerBridge("http://control", "dispatch-failure-transition-test")
-    executor = Executor(checkpointer, bridge)
-    for index in range(domain_config.max_concurrent_threads):
-        reservation, _reason = await executor.reserve_dispatch_capacity(f"held-{index}")
-        assert reservation is not None
-    app = create_worker_app()
-    app.state.executor = executor
-    async with anyio.create_task_group() as tasks:
-        app.state.task_group = tasks
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://worker",
-            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-        ) as client:
-            yield client
-        tasks.cancel_scope.cancel()
-    await executor.shutdown()
-    await bridge.close()
-
-
-# A follow-up inherits the active project its run was created with, so a thread
-# seeded for a dispatch-behaviour test needs a real one: without it the message
-# service refuses before reaching the behaviour under test. The directory is
-# real because the refusal is about presence, not shape.
-_ACTIVE_PROJECT = str(session_scratch_dir("vaultspec-active-project-"))
-
-
-def _active_project_metadata() -> str:
-    """Return current execution authority naming a real active project."""
-    return current_execution_metadata(Path(_ACTIVE_PROJECT))
-
-
-async def _seed_accepted_initial_action(
-    session: AsyncSession, thread_id: str, *, workspace: Path | None = None
-) -> None:
-    thread = await get_thread(session, thread_id)
-    assert thread is not None
-    metadata = thread.thread_metadata or _active_project_metadata()
-    workspace = workspace or Path(_ACTIVE_PROJECT)
-    dispatch = DispatchRequest(
-        dispatch_id=thread.writer_action_receipt_id,
-        action="ingest",
-        thread_id=thread_id,
-        content="initial fixture",
-        workspace_root=str(workspace),
-        team_preset=DEFAULT_TEAM_PRESET,
-        graph_definition=freeze_graph_definition(
-            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
-            workspace_root=workspace,
-        ),
-        model_assignment=resolve_execution_authority(metadata).model_assignment,
-        recursion_limit=25,
-    )
-    await create_control_action(
-        session,
-        thread_id=thread_id,
-        action_type=thread.writer_action_type,
-        idempotency_key=thread_create_action_key(thread_id),
-        dispatch_id=thread.writer_action_receipt_id,
-        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-        payload=freeze_accepted_input(dispatch, intent={"content": "initial fixture"}),
-    )
-    assert (
-        await prepare_graph_action_receipt(
-            session, thread_id=thread_id, dispatch_id=thread.writer_action_receipt_id
-        )
-        is not None
-    )
 
 
 #: Every step of a control action the repair policy maps.
@@ -233,7 +131,7 @@ async def test_a_failed_dispatch_records_its_reason_and_condition(
             title="Failed dispatch",
             repair_status="healthy",
         )
-        await _seed_accepted_initial_action(session, thread.id)
+        await seed_create_action(session, thread.id)
         await session.commit()
 
     async with session_factory() as session:
@@ -277,7 +175,7 @@ async def test_an_undelivered_resume_does_not_stamp_a_failure_on_a_live_run(
             title="Undelivered resume",
             repair_status="healthy",
         )
-        await _seed_accepted_initial_action(session, thread.id)
+        await seed_create_action(session, thread.id)
         await session.commit()
 
     async with session_factory() as session:
@@ -326,7 +224,7 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
             repair_status="paused_resumable",
             metadata=current_execution_metadata(tmp_path),
         )
-        await _seed_accepted_initial_action(session, thread_id, workspace=tmp_path)
+        await seed_create_action(session, thread_id, workspace=tmp_path)
         await session.commit()
 
     spawner = adopted_spawner()
@@ -396,7 +294,7 @@ async def test_a_reasonless_failure_still_carries_a_condition(
             title="Reasonless failure",
             repair_status="healthy",
         )
-        await _seed_accepted_initial_action(session, thread.id)
+        await seed_create_action(session, thread.id)
         await session.commit()
 
     async with session_factory() as session:
@@ -448,13 +346,12 @@ async def _parked_permission_run(
             description="Allow the command?",
             allowed_options=[{"optionId": "allow_once", "name": "Allow once"}],
         )
-        await _seed_accepted_initial_action(session, thread_id, workspace=workspace)
+        await seed_create_action(session, thread_id, workspace=workspace)
         await session.commit()
     return request_id
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("_dispatch_auth")
 async def test_a_saturated_worker_leaves_the_parked_run_answerable(
     session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
@@ -474,7 +371,9 @@ async def test_a_saturated_worker_leaves_the_parked_run_answerable(
     )
 
     async with (
-        _saturated_worker(checkpointer) as worker_client,
+        served_worker(
+            checkpointer, token=_TEST_INTERNAL_TOKEN, held_threads=capacity_holders()
+        ) as worker,
         session_factory() as session,
     ):
         result = await respond_to_permission(
@@ -483,7 +382,7 @@ async def test_a_saturated_worker_leaves_the_parked_run_answerable(
             response=PermissionInput(request_id, "allow_once", "capacity-retry"),
             checkpointer=checkpointer,
             transport=DispatchTransport(
-                worker_client=worker_client,
+                worker_client=worker.client,
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=3, recovery_timeout=30.0
                 ),

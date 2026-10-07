@@ -14,8 +14,7 @@ than a number some other counter happened to hold.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -23,101 +22,23 @@ import pytest
 from ...database import (
     RunEventRecord,
     RunEventStore,
-    create_control_action,
     create_thread,
 )
 from ...database.models import ThreadModel
 from ...graph.enums import AgentLifecycleState
-from ...ipc.schemas import DispatchRequest
 from ...streaming import EventAggregator, RunSequenceAllocator
-from ...team.team_config import load_team_config
-from ...testing import DEFAULT_TEAM_PRESET
-from ...tests._checkpoint_seeding import real_checkpoint
+from ...testing import seed_completed_authority
 from ...tests._write_authority import make_test_write_authority
-from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.enums import ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
-from ...thread.idempotency import thread_create_action_key
-from ..accepted_input import freeze_accepted_input
-from ..dispatch_receipts import prepare_graph_action_receipt
 from ..event_handlers import _handle_terminal_event
 from ..thread_state_service import capture_thread_state
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import (
         AsyncSession,
         async_sessionmaker,
     )
-
-
-async def _seed_completed_authority(
-    session: AsyncSession, checkpointer: AsyncSqliteSaver, *, title: str
-) -> tuple[str, GraphActionReceipt]:
-    authority = make_test_write_authority()
-    workspace = Path.cwd()
-    thread = await create_thread(
-        session,
-        write_authority=authority,
-        status=ThreadStatus.RUNNING,
-        title=title,
-    )
-    dispatch = DispatchRequest(
-        dispatch_id=authority.action_receipt_id,
-        action="ingest",
-        thread_id=thread.id,
-        content="sequence fixture",
-        workspace_root=str(workspace),
-        team_preset=DEFAULT_TEAM_PRESET,
-        graph_definition=freeze_graph_definition(
-            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
-            workspace_root=workspace,
-        ),
-        recursion_limit=25,
-    )
-    await create_control_action(
-        session,
-        thread_id=thread.id,
-        action_type=authority.action_type,
-        idempotency_key=thread_create_action_key(thread.id),
-        dispatch_id=authority.action_receipt_id,
-        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-        payload=freeze_accepted_input(dispatch, intent={"content": "sequence fixture"}),
-    )
-    receipt = await prepare_graph_action_receipt(
-        session, thread_id=thread.id, dispatch_id=authority.action_receipt_id
-    )
-    assert receipt is not None
-    await session.commit()
-    config: RunnableConfig = {
-        "configurable": {"thread_id": thread.id, "checkpoint_ns": ""}
-    }
-    checkpoint = await real_checkpoint()
-    checkpoint["id"] = f"cp-{thread.id}"
-    checkpoint["channel_values"] = {
-        "active_graph_action_receipt": receipt.model_dump(mode="json"),
-        "graph_action_receipts": {receipt.dispatch_id: receipt.model_dump(mode="json")},
-        "graph_completion_receipts": {
-            receipt.dispatch_id: GraphCompletionReceipt(
-                schema_version="graph-completion-v1",
-                action=receipt,
-                outcome="completed",
-            ).model_dump(mode="json")
-        },
-    }
-    checkpoint["channel_versions"] = {
-        "active_graph_action_receipt": checkpointer.get_next_version(None, None),
-        "graph_action_receipts": checkpointer.get_next_version(None, None),
-        "graph_completion_receipts": checkpointer.get_next_version(None, None),
-    }
-    await checkpointer.aput(
-        config,
-        checkpoint,
-        {"source": "loop", "step": 1, "parents": {}},
-        checkpoint["channel_versions"],
-    )
-    return thread.id, receipt
 
 
 def _numbered_aggregator(
@@ -177,7 +98,7 @@ async def test_settle_records_the_number_the_allocator_issued(
     column agrees with it.
     """
     async with session_factory() as session:
-        thread_id, _receipt = await _seed_completed_authority(
+        thread_id, _receipt = await seed_completed_authority(
             session, checkpointer, title="terminal sequence capture"
         )
 
@@ -211,7 +132,7 @@ async def test_a_reconnecting_client_reads_the_true_cursor_after_settle(
     live allocator still holds.
     """
     async with session_factory() as session:
-        thread_id, _receipt = await _seed_completed_authority(
+        thread_id, _receipt = await seed_completed_authority(
             session, checkpointer, title="reconnect after settle"
         )
 
@@ -307,7 +228,7 @@ async def test_a_run_no_allocator_numbers_settles_without_a_cursor(
 ) -> None:
     """Replay disabled: nothing is numbered, so settle records no cursor at all."""
     async with session_factory() as session:
-        thread_id, _receipt = await _seed_completed_authority(
+        thread_id, _receipt = await seed_completed_authority(
             session, checkpointer, title="no allocator"
         )
 

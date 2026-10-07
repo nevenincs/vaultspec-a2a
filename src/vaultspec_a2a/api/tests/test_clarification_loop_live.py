@@ -53,45 +53,35 @@ from ...control.clarification_service import (
     ClarificationRuntime,
     redrive_clarification_actions,
 )
-from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.graph_definition import read_accepted_graph_definition
 from ...control.leased_dispatch import DispatchTransport, accepted_recursion_budget
 from ...database import (
-    create_control_action,
-    create_thread,
     get_control_action_by_idempotency_key,
     get_thread,
     thread_write_expectation,
 )
 from ...database.models import ControlActionModel
 from ...ipc.schemas import DispatchRequest
-from ...team.team_config import load_team_config
 from ...testing import (
     DEFAULT_TEAM_PRESET,
     adopted_spawner,
     async_catalog_run_fields,
-    current_execution_metadata,
+    clarification_graph,
     loopback_callback_bridge,
+    park_clarification,
+    seed_accepted_thread,
+    served_worker,
     wait_for_run_status_async,
 )
-from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,
     ClarificationAnswers,
 )
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
 from ...thread.idempotency import (
     clarification_response_action_key,
-    thread_create_action_key,
-)
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from .clarification_harness import (
-    clarification_graph,
-    park_clarification,
 )
 from .conftest import make_app
 
@@ -104,12 +94,12 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from ...database.models import ThreadModel
+    from ...testing import ParkedClarification
     from ...worker.graph_lifecycle import (
         GraphCompilationKey,
         GraphStateSnapshot,
         RegisteredCompiledGraph,
     )
-    from .clarification_harness import ParkedClarification
 
 _RUN_SEQ = itertools.count(1)
 
@@ -132,13 +122,6 @@ async def _cache_key_for_thread(
         authority.model_assignment_digest,
         graph_definition.digest(),
     )
-
-
-@asynccontextmanager
-async def _worker_test_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """No-op: ``httpx.ASGITransport`` never runs FastAPI's real lifespan
-    protocol, so state/task-group wiring is done explicitly by the caller."""
-    yield
 
 
 async def _wait_for_terminal_graph(
@@ -263,26 +246,17 @@ async def _real_worker(
     With *relay_to_gateway* the worker's own callback frames reach *app*'s real
     internal routes instead of being accepted and dropped.
     """
-    async with loopback_callback_bridge(app if relay_to_gateway else None) as bridge:
-        executor = Executor(checkpointer=checkpointer, bridge=bridge)
-        executor.register_compiled_graph(
-            target.thread_id, target.cache_key, target.graph
-        )
-        worker_app = create_worker_app(lifespan=_worker_test_lifespan)
-        worker_app.state.executor = executor
-        try:
-            async with (
-                httpx.AsyncClient(
-                    transport=ASGITransport(app=worker_app), base_url="http://worker"
-                ) as worker_client,
-                anyio.create_task_group() as tg,
-            ):
-                worker_app.state.task_group = tg
-                if app is not None:
-                    app.state.worker_client = worker_client
-                yield worker_client
-        finally:
-            await executor.shutdown()
+    async with (
+        loopback_callback_bridge(app if relay_to_gateway else None) as bridge,
+        served_worker(
+            checkpointer,
+            gateway=app,
+            bridge=bridge,
+            graphs={target.thread_id: (target.cache_key, target.graph)},
+            drain_dispatches=True,
+        ) as worker,
+    ):
+        yield worker.client
 
 
 @pytest.mark.asyncio
@@ -452,47 +426,12 @@ async def _seed_clarification_run(
     session_factory: SessionFactory,
 ) -> tuple[ThreadModel, str]:
     async with session_factory() as db:
-        authority = make_test_write_authority()
-        metadata = current_execution_metadata(Path.cwd())
-        thread = await create_thread(
-            db,
-            write_authority=authority,
-            status=ThreadStatus.RUNNING,
-            team_preset=DEFAULT_TEAM_PRESET,
-            metadata=metadata,
-        )
-        dispatch = DispatchRequest(
-            action="ingest",
-            thread_id=thread.id,
-            content="initial clarification run",
-            workspace_root=str(Path.cwd()),
-            recursion_limit=25,
-            team_preset=DEFAULT_TEAM_PRESET,
-            graph_definition=freeze_graph_definition(
-                load_team_config(DEFAULT_TEAM_PRESET, workspace_root=Path.cwd()),
-                workspace_root=Path.cwd(),
-            ),
-            model_assignment=resolve_execution_authority(metadata).model_assignment,
-        )
-        await create_control_action(
-            db,
-            thread_id=thread.id,
-            action_type=authority.action_type,
-            idempotency_key=thread_create_action_key(thread.id),
-            dispatch_id=authority.action_receipt_id,
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-            payload=freeze_accepted_input(
-                dispatch, intent={"content": "initial clarification run"}
-            ),
-        )
-        assert (
-            await prepare_graph_action_receipt(
-                db, thread_id=thread.id, dispatch_id=authority.action_receipt_id
-            )
-            is not None
-        )
+        thread_id, _receipt = await seed_accepted_thread(db)
         await db.commit()
-        return thread, metadata
+        thread = await get_thread(db, thread_id)
+    assert thread is not None
+    assert thread.thread_metadata is not None
+    return thread, thread.thread_metadata
 
 
 async def _prepare_expired_claim(

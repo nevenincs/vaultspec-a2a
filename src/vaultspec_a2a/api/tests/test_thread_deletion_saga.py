@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from fastapi.testclient import TestClient
@@ -32,49 +31,18 @@ from ...control.deletion_saga import (
     create_deletion_saga,
 )
 from ...database import (
-    create_control_action,
-    create_thread,
     get_thread,
 )
 from ...database.models import ThreadDeletionSagaModel
-from ...testing import settings_override
+from ...testing import seed_journaled_thread, settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
-from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import CleanupKind
-from ...thread.idempotency import thread_create_action_key
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
     import pathlib
 
     from langchain_core.runnables import RunnableConfig
-    from sqlalchemy.ext.asyncio import AsyncSession
-
-
-async def _seed_thread_with_action(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    status: str,
-    metadata: str | None = None,
-) -> None:
-    """Give a test-created thread the durable writer action required by elections."""
-    authority = make_test_write_authority()
-    await create_thread(
-        session,
-        write_authority=authority,
-        thread_id=thread_id,
-        status=status,
-        metadata=metadata,
-    )
-    await create_control_action(
-        session,
-        thread_id=thread_id,
-        action_type=authority.action_type,
-        idempotency_key=thread_create_action_key(thread_id),
-        dispatch_id=authority.action_receipt_id,
-        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-    )
 
 
 def _detached_checkpoint_store(db_file: pathlib.Path) -> AsyncSqliteSaver:
@@ -135,7 +103,7 @@ class TestVersionedDeletionVerb:
         async def _seed() -> None:
             await checkpointer.setup()
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="r-clean",
                     status="completed",
@@ -162,7 +130,7 @@ class TestVersionedDeletionVerb:
         async def _seed() -> None:
             await checkpointer.setup()
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="r-running",
                     status="running",
@@ -198,7 +166,7 @@ class TestVersionedDeletionVerb:
 
         async def _seed() -> None:
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="r-strand",
                     status="completed",
@@ -238,7 +206,7 @@ class TestDeletionSagaEndpoint:
         async def _seed() -> None:
             await checkpointer.setup()
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="t-replay",
                     status="completed",
@@ -279,7 +247,7 @@ class TestDeletionSagaEndpoint:
                 {},
             )
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="t-resume",
                     status="completed",
@@ -335,7 +303,7 @@ class TestDeletionSagaEndpoint:
         async def _seed() -> None:
             await checkpointer.setup()
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="t-running",
                     status="running",
@@ -376,7 +344,7 @@ class TestDeletionSagaEndpoint:
 
         async def _seed() -> None:
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="t-strand",
                     status="completed",
@@ -420,7 +388,7 @@ class TestDeletionSagaEndpoint:
 
         async def _seed() -> None:
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="t-both",
                     status="completed",

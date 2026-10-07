@@ -22,13 +22,18 @@ from ...database.run_event_repository import RunEventStore
 from ...streaming.aggregator import EventAggregator
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import SequenceAllocation
-from ...testing import SseReader, serve_on_loopback, settings_override
+from ...testing import (
+    SseReader,
+    record_completed_checkpoint,
+    seed_accepted_thread,
+    serve_on_loopback,
+    settings_override,
+)
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
 from .._stream_replay import ResumePosition, replay_window
 from ._relay_events import progress_event, relay_events, terminal_event
 from .conftest import make_app, seed_run_with_status
-from .test_internal import _record_completed_checkpoint, _seed_accepted_thread
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -210,9 +215,9 @@ async def test_a_cursor_past_the_runs_mark_is_answered_and_still_goes_live(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
     async with session_factory() as session:
-        _, receipt = await _seed_accepted_thread(session, thread_id=_RUN)
+        _, receipt = await seed_accepted_thread(session, thread_id=_RUN)
         await session.commit()
-    await _record_completed_checkpoint(checkpointer, receipt)
+    await record_completed_checkpoint(checkpointer, receipt)
 
     async with (
         serve_on_loopback(app) as base,

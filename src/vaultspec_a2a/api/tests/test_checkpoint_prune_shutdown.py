@@ -28,10 +28,10 @@ from httpx import ASGITransport, AsyncClient
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...lifecycle.shutdown import ShutdownDeadline
+from ...testing import record_completed_checkpoint, seed_accepted_thread
 from ...tests._checkpoint_seeding import real_checkpoint
 from ..app import _settle_checkpoint_prunes
 from .conftest import make_app
-from .test_internal import _record_completed_checkpoint, _seed_accepted_thread
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -138,9 +138,9 @@ async def test_a_relayed_terminal_prunes_through_the_relaying_apps_registry(
     """The whole path: real relay, the app's registry, its shutdown phase."""
     app: FastAPI = make_app(session_factory, checkpointer)[0]
     async with session_factory() as session:
-        thread_id, receipt = await _seed_accepted_thread(session)
+        thread_id, receipt = await seed_accepted_thread(session)
         await session.commit()
-    await _record_completed_checkpoint(checkpointer, receipt)
+    await record_completed_checkpoint(checkpointer, receipt)
     await _put_checkpoint(checkpointer, thread_id, f"a-{thread_id}")
 
     async with AsyncClient(

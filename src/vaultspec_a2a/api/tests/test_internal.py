@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import pathlib
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -21,159 +20,32 @@ from sqlalchemy import select
 from starlette.testclient import TestClient
 
 from ...control._worker_health import WorkerLiveness
-from ...control.accepted_input import freeze_accepted_input
-from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.execution_authority import resolve_execution_authority
 from ...database import (
-    ThreadStatusElectionOutcome,
-    create_control_action,
     create_thread,
-    elect_thread_status,
     get_permission_request,
-    get_thread,
     get_thread_execution_state,
     set_thread_repair_state,
-    thread_write_expectation,
 )
 from ...database.models import ThreadExecutionStateModel
-from ...ipc.schemas import DispatchRequest
 from ...providers import ProviderCondition
 from ...streaming.aggregator import EventAggregator
-from ...team.team_config import load_team_config
-from ...testing import DEFAULT_TEAM_PRESET, current_execution_metadata
-from ...tests._checkpoint_seeding import real_checkpoint
+from ...testing import park_plan_approval
+from ...testing import record_completed_checkpoint as _record_completed_checkpoint
+from ...testing import seed_accepted_thread as _seed_accepted_thread
 from ...tests._write_authority import make_test_write_authority
-from ...thread.action_receipts import GraphCompletionReceipt
-from ...thread.executable_graph import freeze_graph_definition
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
-from ...thread.idempotency import thread_create_action_key
 from ...worker.ipc import WorkerBridge
 from ..internal import internal_router
-from .permission_harness import park_plan_approval
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-    from sqlalchemy.ext.asyncio import AsyncSession
 
     from ...thread.action_receipts import GraphActionReceipt
-    from ...thread.enums import ThreadStatus
     from .conftest import SessionFactory
 
 # Every dispatch names an active project, as a real one does. This package's own
 # directory is real, absolute, and present on either platform.
 _WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
-
-
-async def _seed_accepted_thread(
-    session: AsyncSession,
-    *,
-    thread_id: str | None = None,
-    status: str = "running",
-) -> tuple[str, GraphActionReceipt]:
-    """Seed one current accepted graph action for relay-contract tests."""
-    workspace = pathlib.Path(_WORKSPACE)
-    metadata = current_execution_metadata(workspace)
-    authority = make_test_write_authority()
-    thread = await create_thread(
-        session,
-        write_authority=authority,
-        thread_id=thread_id,
-        status=status,
-        team_preset=DEFAULT_TEAM_PRESET,
-        metadata=metadata,
-    )
-    dispatch = DispatchRequest(
-        action="ingest",
-        thread_id=thread.id,
-        content="relay fixture",
-        workspace_root=_WORKSPACE,
-        recursion_limit=25,
-        team_preset=DEFAULT_TEAM_PRESET,
-        graph_definition=freeze_graph_definition(
-            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
-            workspace_root=workspace,
-        ),
-        model_assignment=resolve_execution_authority(metadata).model_assignment,
-    )
-    await create_control_action(
-        session,
-        thread_id=thread.id,
-        action_type=authority.action_type,
-        idempotency_key=thread_create_action_key(thread.id),
-        dispatch_id=authority.action_receipt_id,
-        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-        payload=freeze_accepted_input(dispatch, intent={"content": "relay fixture"}),
-    )
-    receipt = await prepare_graph_action_receipt(
-        session, thread_id=thread.id, dispatch_id=authority.action_receipt_id
-    )
-    assert receipt is not None
-    return thread.id, receipt
-
-
-async def _elect_status(
-    session: AsyncSession,
-    thread_id: str,
-    status: ThreadStatus,
-    *,
-    failure_reason: str | None = None,
-    provider_condition: str | None = None,
-) -> None:
-    """Move a run to *status* as the action that owns it does, from its own row.
-
-    The witness is the row as it stands and the writer is the action already
-    holding the run, so this is the state-only election a settlement makes. It
-    fails loudly when the run holds no journal row for its writer, which no
-    election accepts.
-    """
-    thread = await get_thread(session, thread_id)
-    assert thread is not None
-    expectation = thread_write_expectation(thread)
-    authority = expectation.authority
-    election = await elect_thread_status(
-        session,
-        thread_id,
-        expectation=expectation,
-        status=status,
-        action_type=authority.action_type,
-        action_receipt_id=authority.action_receipt_id,
-        failure_reason=failure_reason,
-        provider_condition=provider_condition,
-    )
-    assert election.outcome is ThreadStatusElectionOutcome.WON
-
-
-async def _record_completed_checkpoint(
-    checkpointer: AsyncSqliteSaver, receipt: GraphActionReceipt
-) -> None:
-    config: RunnableConfig = {
-        "configurable": {"thread_id": receipt.thread_id, "checkpoint_ns": ""}
-    }
-    checkpoint = await real_checkpoint()
-    checkpoint["id"] = f"cp-{receipt.thread_id}"
-    checkpoint["channel_values"] = {
-        "active_graph_action_receipt": receipt.model_dump(mode="json"),
-        "graph_action_receipts": {receipt.dispatch_id: receipt.model_dump(mode="json")},
-        "graph_completion_receipts": {
-            receipt.dispatch_id: GraphCompletionReceipt(
-                schema_version="graph-completion-v1",
-                action=receipt,
-                outcome="completed",
-            ).model_dump(mode="json")
-        },
-    }
-    checkpoint["channel_versions"] = {
-        "active_graph_action_receipt": checkpointer.get_next_version(None, None),
-        "graph_action_receipts": checkpointer.get_next_version(None, None),
-        "graph_completion_receipts": checkpointer.get_next_version(None, None),
-    }
-    await checkpointer.aput(
-        config,
-        checkpoint,
-        {"source": "loop", "step": 1, "parents": {}},
-        checkpoint["channel_versions"],
-    )
 
 
 def _failed_payload(

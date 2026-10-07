@@ -209,8 +209,9 @@ class ThreadStateCapture:
 
     ``checkpoint_projection`` is the one projection of the checkpoint the
     snapshot was built from, present exactly when that checkpoint was read and
-    projected. A field read from the checkpoint - its channel values, the
-    pending clarification - reads it rather than projecting the tuple again.
+    projected. A field read from the checkpoint - its channel values - reads it
+    rather than projecting the tuple again; the pending clarification was read
+    from it once, onto the snapshot, which every surface then serves.
 
     ``transcript`` states whether the snapshot's messages are the run's record
     or an artefact of an unread checkpoint. It is carried here rather than

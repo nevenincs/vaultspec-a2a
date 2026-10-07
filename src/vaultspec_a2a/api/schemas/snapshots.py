@@ -18,13 +18,13 @@ from ...graph.enums import (
     ToolCallStatus,
     ToolKind,
 )
+from ...thread.clarification import ClarificationRequest
 from ...thread.enums import DegradedReason, ThreadStatus
 from ...thread.models import PlanEntry
 
 __all__ = [
     "AgentSnapshot",
     "ArtifactSnapshot",
-    "ClarificationRequestSnapshot",
     "ExecutionTaskSnapshot",
     "MessageSnapshot",
     "PermissionSnapshot",
@@ -116,28 +116,6 @@ class PermissionSnapshot(BaseModel):
     tool_kind: ToolKind | None = None
 
 
-class ClarificationQuestionSnapshot(BaseModel):
-    """Layer 1 equivalent of ``thread.snapshots.ClarificationQuestionData``."""
-
-    id: str
-    prompt: str
-    kind: str
-    required: bool = False
-    options: list[str] = Field(default_factory=list)
-
-
-class ClarificationRequestSnapshot(BaseModel):
-    """Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.
-
-    A pending mid-run clarification, disclosed on ``run-status`` so a reload
-    re-renders the questionnaire from authoritative state alone, never from a
-    relay frame.
-    """
-
-    request_id: str
-    questions: list[ClarificationQuestionSnapshot] = Field(default_factory=list)
-
-
 class PermissionOptionSnapshot(BaseModel):
     """Permission option within a snapshot."""
 
@@ -189,7 +167,9 @@ class ThreadStateSnapshot(BaseModel):
     messages: list[MessageSnapshot] = Field(default_factory=list)
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
     pending_permissions: list[PermissionSnapshot] = Field(default_factory=list)
-    pending_clarification: ClarificationRequestSnapshot | None = None
+    # The producer's own bounded model, the one run-status serves, so history
+    # cannot disclose a questionnaire in a shape or under rules status refuses.
+    pending_clarification: ClarificationRequest | None = None
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
     plan: list[PlanEntry] = Field(default_factory=list)
     agents: list[AgentSnapshot] = Field(default_factory=list)

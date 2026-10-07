@@ -37,6 +37,8 @@ from .models import PlanEntry
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
+    from .clarification import ClarificationRequest
+
 __all__ = [
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
     "PERMISSION_REQUEST_EVENT_TYPES",
@@ -44,8 +46,6 @@ __all__ = [
     "AgentData",
     "ArtifactData",
     "CheckpointProjection",
-    "ClarificationQuestionData",
-    "ClarificationRequestData",
     "ExecutionStateProjection",
     "ExecutionTaskData",
     "LiveInterrupt",
@@ -56,7 +56,6 @@ __all__ = [
     "ThreadStateData",
     "ToolCallData",
     "build_agent_descriptor",
-    "clarification_data_from_interrupt",
     "classify_message_role",
     "classify_permission_pause_reason",
     "classify_transcript_availability",
@@ -200,76 +199,6 @@ def classify_permission_pause_reason(tool_call: str | None) -> str:
     return str(tool_call or InterruptType.PERMISSION_REQUEST.value)
 
 
-def _clarification_options(raw_map: dict[str, object]) -> list[str]:
-    options: object = raw_map.get("options", [])
-    if not isinstance(options, list):
-        return []
-    return [
-        option for option in cast("list[object]", options) if isinstance(option, str)
-    ]
-
-
-def _clarification_question(raw: object) -> ClarificationQuestionData | None:
-    if not isinstance(raw, dict):
-        return None
-    raw_map = cast("dict[str, object]", raw)
-    qid = raw_map.get("id")
-    prompt = raw_map.get("prompt")
-    if not isinstance(qid, str) or not qid or not isinstance(prompt, str) or not prompt:
-        return None
-    kind_raw = raw_map.get("kind")
-    kind = (
-        kind_raw
-        if isinstance(kind_raw, str) and kind_raw in ("choice", "text")
-        else "text"
-    )
-    return ClarificationQuestionData(
-        id=qid,
-        prompt=prompt,
-        kind=kind,
-        required=bool(raw_map.get("required", False)),
-        options=_clarification_options(raw_map),
-    )
-
-
-def clarification_data_from_interrupt(
-    interrupt: ProjectedInterrupt,
-) -> ClarificationRequestData | None:
-    """Project a checkpoint-sourced clarification interrupt to its wire shape.
-
-    Returns ``None`` for any interrupt whose type is not
-    :attr:`InterruptType.CLARIFICATION_REQUEST`, or whose ``questions`` list
-    contains no readable entry — this is checkpoint-truth disclosure: the
-    pending clarification survives a reload from
-    ``run-status`` alone because it is read from ``ProjectedInterrupt``
-    (:func:`project_checkpoint_tuple`), never from in-memory state.
-
-    Malformed questions are dropped rather than failing the projection —
-    consistent with the node's own bound-by-truncation discipline — so a
-    drifted producer degrades the disclosed set instead of hiding the whole
-    request.
-    """
-    if interrupt.interrupt_type != InterruptType.CLARIFICATION_REQUEST:
-        return None
-    payload = interrupt.payload
-    if type(payload) is not dict:
-        return None
-    raw_questions: object = payload.get("questions", [])
-    if not isinstance(raw_questions, list):
-        return None
-    questions: list[ClarificationQuestionData] = []
-    for raw in cast("list[object]", raw_questions):
-        question = _clarification_question(raw)
-        if question is not None:
-            questions.append(question)
-    if not questions:
-        return None
-    return ClarificationRequestData(
-        request_id=interrupt.interrupt_id,
-        questions=questions,
-    )
-
-
 @dataclass(slots=True)
 class ProjectedInterrupt:
     """Normalized persisted interrupt extracted from a checkpoint tuple.
@@ -402,35 +331,6 @@ class PermissionData:
 
 
 @dataclass(slots=True)
-class ClarificationQuestionData:
-    """Layer 1 equivalent of ``ClarificationQuestionSnapshot``.
-
-    One bounded question within a pending clarification request.
-    """
-
-    id: str
-    prompt: str
-    kind: str
-    required: bool = False
-    options: list[str] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-class ClarificationRequestData:
-    """Layer 1 equivalent of ``ClarificationRequestSnapshot``.
-
-    A pending mid-run clarification request. ``request_id`` is the same
-    checkpoint-derived interrupt id every other interrupt
-    projection uses (:class:`ProjectedInterrupt`), so the respond route's
-    ``{run_id}/clarifications/{request_id}/respond`` path segment is exactly
-    the id disclosed here.
-    """
-
-    request_id: str
-    questions: list[ClarificationQuestionData] = field(default_factory=list)
-
-
-@dataclass(slots=True)
 # Flat data mirrors the public agent snapshot schema.
 class AgentData:  # pylint: disable=too-many-instance-attributes
     """Canonical agent descriptor.
@@ -483,7 +383,10 @@ class ThreadStateData:  # pylint: disable=too-many-instance-attributes
     messages: list[MessageData] = field(default_factory=list)
     tool_calls: list[ToolCallData] = field(default_factory=list)
     pending_permissions: list[PermissionData] = field(default_factory=list)
-    pending_clarification: ClarificationRequestData | None = None
+    # The questionnaire the run is parked on, read once from the checkpoint
+    # projection as the producer's own model, so every surface serving this
+    # snapshot discloses the same bounded request run-status does.
+    pending_clarification: ClarificationRequest | None = None
     artifacts: list[ArtifactData] = field(default_factory=list)
     plan: list[PlanEntry] = field(default_factory=list)
     agents: list[AgentData] = field(default_factory=list)

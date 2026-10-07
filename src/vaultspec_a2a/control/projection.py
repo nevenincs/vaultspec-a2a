@@ -30,6 +30,7 @@ from ..graph.acp_options import option_id_of, option_kind, valid_option_ids
 from ..graph.enums import PermissionType
 from ..ipc.schemas import ExecutionTaskProjectionPayload
 from ..streaming.types import classify_tool_kind
+from ..thread.clarification import pending_clarification
 from ..thread.enums import (
     TERMINAL_STATUS_VALUES,
     ApprovalStatus,
@@ -46,7 +47,6 @@ from ..thread.snapshots import (
     PermissionData,
     PermissionOptionData,
     ThreadStateData,
-    clarification_data_from_interrupt,
     record_repair_posture,
 )
 
@@ -233,20 +233,6 @@ def _permission_data_from_model(
     )
 
 
-def _merge_checkpoint_clarification(
-    snapshot: ThreadStateData, projection: CheckpointProjection
-) -> None:
-    """Add the first parked clarification the checkpoint holds."""
-    # Mid-run clarification: checkpoint-truth disclosure only. A parked
-    # clarification is read from this projection on every reload.
-    if snapshot.pending_clarification is None:
-        for interrupt in projection.pending_interrupts:
-            clarification = clarification_data_from_interrupt(interrupt)
-            if clarification is not None:
-                snapshot.pending_clarification = clarification
-                break
-
-
 def apply_checkpoint_projection(
     snapshot: ThreadStateData,
     projection: CheckpointProjection,
@@ -263,8 +249,9 @@ def apply_checkpoint_projection(
     snapshot.history_depth = projection.history_depth
     if snapshot.pause_cause is None:
         snapshot.pause_cause = projection.pause_cause
-
-    _merge_checkpoint_clarification(snapshot, projection)
+    # Checkpoint-truth disclosure only: the parked questionnaire is read from
+    # this projection and from nowhere else.
+    snapshot.pending_clarification = pending_clarification(projection)
 
     for reason in projection.degraded_reasons:
         mark_degraded(snapshot, reason)

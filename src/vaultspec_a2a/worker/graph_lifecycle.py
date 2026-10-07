@@ -10,20 +10,18 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, override
+from typing import TYPE_CHECKING, Any, Protocol, Unpack, cast, override
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from ..database import read_latest_checkpoint
 from ..domain_config import domain_config
-from ..graph._compiler_models import resolve_model_for_worker
 from ..graph.compiler import compile_team_graph
 from ..ipc.schemas import canonical_project_root
 from ..providers.team_selection import model_assignment_digest
 from ..providers.warmup import warm_model_imports
 from ..streaming import StreamableGraph, node_metadata_from_graph
 from ..team.team_config import (
-    AgentConfig,
     TopologyType,
 )
 from ..telemetry import operation_span
@@ -47,7 +45,6 @@ if TYPE_CHECKING:
     from ..authoring import DocumentProposalSubmitter, FeedbackContextReader
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
-    from ..providers.team_selection import FrozenLaneAssignment
     from ..streaming.aggregator import EventAggregator
     from .authoring_binding import AuthoringBindingProvider
     from .ipc import WorkerBridge
@@ -140,86 +137,6 @@ class RegisteredCompiledGraph(StreamableGraph, Protocol):
         graph_input: Mapping[str, object] | Command[str],
         config: RunnableConfig,
     ) -> object: ...
-
-
-class _AuthoringAttachOptional(TypedDict, total=False):
-    frozen_assignment: dict[str, FrozenLaneAssignment] | None
-
-
-class _AuthoringAttachArgs(_AuthoringAttachOptional):
-    harness: Any
-    provider_factory: Any
-
-
-def assert_armed_authoring_attachable(
-    team_config: Any,
-    agent_configs: dict[str, AgentConfig],
-    ws_root: Path | None,
-    **kwargs: Unpack[_AuthoringAttachArgs],
-) -> None:
-    """Refuse an authoring-bridge-armed preset a worker cannot mount the bridge onto.
-
-    ``providers._acp_authoring.attach_authoring_tools`` dispatches the run's
-    authoring binding onto the resolved model's own surface (``with_mcp_servers``
-    for the ACP lane, ``with_authoring_mcp_server`` for Codex) and, since the
-    codex-authoring-bridge-attachment fix, raises loud when a model exposes
-    neither — but that raise fires per-turn, inside the worker node, only once
-    the run has already started and begun burning its step timeout waiting on an
-    agent that will never see its tools. This gate asks the identical question
-    at COMPILE time, for every worker in an ``authoring_bridge``-armed preset,
-    so a provider with no attachment surface at all is refused with a served
-    compile-time reason before the run ever starts — never a live-run timeout.
-
-    A no-op when *harness* does not arm the authoring bridge. The scope is
-    authoring_bridge specifically because the mcp_servers-only case fails
-    SOFTLY: ``compose_harness_mcp_servers`` returns a model with no delivery
-    mechanism unchanged rather than raising, so there is no per-turn error for a
-    compile-time gate to pull forward. That is a weaker guarantee than a gate,
-    and it is deliberately not restated as one here - this docstring previously
-    claimed the mcp_servers path was "already proven to reach every known
-    provider", which was untrue on three of the four topologies at the time it
-    was written, because only the research_adr compiler read the declaration at
-    all. The forwarding now happens in every worker-compiling topology; what
-    remains unguarded here is a lane whose model exposes neither delivery
-    surface, and that stays a silent no-op by design rather than by omission.
-    """
-    harness = kwargs["harness"]
-    provider_factory = kwargs["provider_factory"]
-    frozen_assignment = kwargs.get("frozen_assignment")
-    if harness is None or not harness.authoring_bridge:
-        return
-    unsupported: list[str] = []
-    for worker_ref in team_config.workers:
-        agent_config = agent_configs.get(worker_ref.agent_id)
-        if agent_config is None:
-            continue
-        try:
-            model, _resolved_provider, _frozen_model = resolve_model_for_worker(
-                worker_ref,
-                agent_config,
-                team_config,
-                ws_root,
-                provider_factory=provider_factory,
-                frozen_assignment=frozen_assignment,
-            )
-        except ValueError:
-            # Provider exhaustion is a distinct failure surfaced by compile.
-            continue
-        has_attach_surface = (
-            getattr(model, "with_mcp_servers", None) is not None
-            or getattr(model, "with_authoring_mcp_server", None) is not None
-        )
-        if not has_attach_surface:
-            unsupported.append(f"{worker_ref.agent_id!r} ({type(model).__name__})")
-    if unsupported:
-        raise ConfigError(
-            f"harness-armed preset {team_config.id!r} declares "
-            "[team.harness] authoring_bridge = true, but the following worker(s) "
-            f"resolved to a provider with no authoring attachment surface: "
-            f"{'; '.join(unsupported)}. The declared authoring tools cannot "
-            "mount onto this provider; refusing before the run starts rather "
-            "than spawning an agent whose tools silently never attach."
-        )
 
 
 def _validated_checkpoint_digest(values: dict[str, object], field: str) -> str:
@@ -549,7 +466,7 @@ class GraphLifecycleManager:
                             req.thread_id,
                             team_preset,
                         )
-                        span.record_exception(exc)
+                        # The span records the propagating error on exit.
                         span.set_attribute("error", True)
                         raise GraphCompilationError(str(exc)) from exc
 
@@ -696,31 +613,12 @@ class GraphLifecycleManager:
         # binding provider, built here behind the same fail-closed contract as the
         # submitter: a run that cannot reach the engine to fetch its catalog never
         # starts vague. Only a coding topology can arm this (the config validator
-        # rejects authoring_bridge on document-authoring presets).
+        # rejects authoring_bridge on document-authoring presets). Compilation
+        # refuses a worker whose built model cannot mount the binding.
         authoring_binding_provider = None
         harness = team_config.effective_harness()
         if harness is not None and harness.authoring_bridge:
             authoring_binding_provider = await self._build_authoring_binding_provider()
-
-        # Compile gate: an ARMED preset - one declaring the authoring bridge OR
-        # harness MCP servers - must have an attachment surface on every worker.
-        # No credential gate runs here: providers authenticate themselves from
-        # the ambient environment they inherit, and an unauthenticated lane
-        # reports its own failure at run time. The declared-surface invariant is
-        # enforced at spawn by the run-workspace MCP projection and confinement
-        # settings, not by refusing the run for a missing credential.
-        armed = harness is not None and (
-            harness.authoring_bridge or bool(harness.mcp_servers)
-        )
-        if armed:
-            assert_armed_authoring_attachable(
-                team_config,
-                agent_configs,
-                ws_root,
-                harness=harness,
-                provider_factory=self._ports.provider_factory,
-                frozen_assignment=req.model_assignment,
-            )
 
         from ..database.checkpoints import concurrent_checkpointer
 

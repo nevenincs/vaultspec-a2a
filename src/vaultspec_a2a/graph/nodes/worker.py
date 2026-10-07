@@ -63,9 +63,11 @@ _logger = logging.getLogger(__name__)
 
 
 __all__ = [
+    "compose_worker_turn_model",
     "create_worker_node",
     "render_research_findings",
     "resolve_effective_worker_model",
+    "worker_turn_preamble",
 ]
 
 # A lane name and a model id are bounded configuration values, not free text, and
@@ -124,23 +126,39 @@ class RoutingNode(Protocol):
         ...
 
 
-def _worker_rule_message(
-    state: TeamState, workspace_root: Path | None, role: str | None
-) -> SystemMessage | None:
-    """Compile the workspace rules visible to this worker role."""
+def worker_turn_preamble(
+    state: TeamState,
+    *,
+    system_prompt: str,
+    workspace_root: Path | None,
+    role: str | None,
+) -> list[BaseMessage]:
+    """Open a role's turn: its persona prompt, then the workspace rules it sees.
+
+    The head every model turn shares, a worker node's and a research branch's
+    alike. A document-authoring *role* is scoped to its own bundled
+    conventions; every other role compiles the whole WORKSPACE corpus
+    (role=None) and does NOT receive the bundled defaults - the bundled dir is
+    gated on document roles, so the ``roles:``-tagged conventions never leak
+    into a coder turn (compile(None) disables the role filter, which would
+    otherwise re-admit them). A coder's own workspace rules are never stripped.
+
+    The rules are globbed and read from disk, so callers run this off the loop.
+    """
+    messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
     effective_workspace_root = workspace_root or state.get("workspace_root")
     if not effective_workspace_root:
-        return None
+        return messages
     is_document_role = is_document_authoring_role(role)
-    compile_role = role if is_document_role else None
-    bundled_dir = DEFAULT_BUNDLED_RULES_DIR if is_document_role else None
     rules = RuleManager(
         Path(effective_workspace_root),
-        bundled_rules_dir=bundled_dir,
-    ).compile(compile_role)
-    if not rules:
-        return None
-    return SystemMessage(content=f"## Project Coding Rules & Guidelines\n\n{rules}")
+        bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR if is_document_role else None,
+    ).compile(role if is_document_role else None)
+    if rules:
+        messages.append(
+            SystemMessage(content=f"## Project Coding Rules & Guidelines\n\n{rules}")
+        )
+    return messages
 
 
 def _finding_source_lines(locators: object) -> list[str]:
@@ -246,12 +264,8 @@ def _build_worker_messages(
 ) -> list[BaseMessage]:
     """Build the worker prompt/message list before model invocation.
 
-    A document-authoring *role* is scoped to its own bundled conventions; every
-    other role (coders, etc.) compiles the whole WORKSPACE corpus (role=None) and
-    does NOT receive the bundled defaults - the bundled dir is gated on document
-    roles, so the ``roles:``-tagged conventions never leak into a coder turn
-    (compile(None) disables the role filter, which would otherwise re-admit them).
-    A coder's own workspace rules are never stripped.
+    Opens with :func:`worker_turn_preamble`, then the turn's grounding, then
+    the (possibly compacted) history.
     """
     working_state = (
         compact_context(state, domain_config.context_limit_tokens)
@@ -259,10 +273,9 @@ def _build_worker_messages(
         else state
     )
     anchoring = build_anchoring_context(state)
-    messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
-    rule_message = _worker_rule_message(state, workspace_root, role)
-    if rule_message is not None:
-        messages.append(rule_message)
+    messages = worker_turn_preamble(
+        state, system_prompt=system_prompt, workspace_root=workspace_root, role=role
+    )
     if anchoring:
         messages.append(SystemMessage(content=anchoring))
     if grounding.mounted_context:
@@ -678,6 +691,81 @@ def _compose_worker_harness(
     )
 
 
+class _TurnModelSettings(TypedDict):
+    autonomous: bool
+    role: str | None
+    workspace_root: Path | None
+    harness_mcp_servers: list[str] | None
+    runtime_identity_port: RuntimeIdentityPort | None
+
+
+class _TurnModelOptions(_TurnModelSettings, total=False):
+    authoring_binding: AuthoringToolBinding | None
+    answers_reach_the_node: bool
+
+
+def compose_worker_turn_model(
+    model: BaseChatModel,
+    *,
+    answers: Mapping[str, str],
+    thread_id: str | None,
+    **options: Unpack[_TurnModelOptions],
+) -> BaseChatModel:
+    """Compose the model one role's turn invokes, in the order every turn uses.
+
+    The single composition a worker node and a research branch share: the
+    supervised permission rung, the run's authoring binding, the team harness
+    servers, the native read floor with the lane's earned web tools, the native
+    workspace grant and the runtime-identity recorder. Each step layers onto the
+    copy the previous one returned, never onto the compiled model, so a compiled
+    graph never owns a run's grants.
+
+    *answers_reach_the_node* is False for a node whose input is fixed when it is
+    dispatched; see :func:`resolve_effective_worker_model`.
+    """
+    autonomous = options["autonomous"]
+    workspace_root = options["workspace_root"]
+    effective_model = resolve_effective_worker_model(
+        model=model,
+        autonomous=autonomous,
+        answers=answers,
+        answers_reach_the_node=options.get("answers_reach_the_node", True),
+    )
+    effective_model = _attach_authoring_tools(
+        effective_model, options.get("authoring_binding"), autonomous=autonomous
+    )
+    effective_model = _compose_worker_harness(
+        effective_model, options["harness_mcp_servers"], autonomous, workspace_root
+    )
+    from ...providers._native_read_tools import compose_native_read_tools
+    from ...providers.lane_admission import web_tool_names_for
+
+    # Web grounding rides the read floor but is gated one axis further: the
+    # floor is a property of the ROLE, while outward reach is a property of the
+    # LANE, and only a lane whose own live retrieval proof is recorded
+    # contributes any name here. An unproven lane - and a model that declared
+    # no lane at all - composes an empty tuple, so the capability stays dark
+    # through the same code path that will later light it, rather than through
+    # a branch that has never run.
+    effective_model = compose_native_read_tools(
+        effective_model,
+        autonomous=autonomous,
+        role=options["role"],
+        extra_tool_names=web_tool_names_for(getattr(effective_model, "provider", None)),
+    )
+    from ...providers._native_role import bind_model_native_workspace
+    from ...providers._runtime_identity import bind_model_runtime_identity
+
+    effective_model = bind_model_native_workspace(
+        effective_model, workspace=workspace_root
+    )
+    return bind_model_runtime_identity(
+        effective_model,
+        thread_id=thread_id,
+        port=options["runtime_identity_port"],
+    )
+
+
 class _WorkerNodeOptions(TypedDict, total=False):
     autonomous: bool
     workspace_root: Path | None
@@ -832,56 +920,23 @@ def create_worker_node(
             )
         )
         compacted = should_compact(state, domain_config.context_limit_tokens)
-        effective_model = resolve_effective_worker_model(
-            model=model,
-            autonomous=settings["autonomous"],
-            answers=permission_answers,
-        )
         # Build this role's authoring binding per invoke from the run's thread_id
         # and this worker's agent_id (``name``) - never closed over, so the shared
-        # compiled graph holds no run-scoped tokens (R7). Absent provider or
-        # coverage yields no binding, leaving the session's MCP surface unchanged.
+        # compiled graph holds no run-scoped tokens. Absent provider or coverage
+        # yields no binding, leaving the session's MCP surface unchanged.
         authoring_binding = await _authoring_binding_for_state(
             thread_id, name, settings["authoring_binding_provider"]
         )
-        effective_model = _attach_authoring_tools(
-            effective_model, authoring_binding, autonomous=settings["autonomous"]
-        )
-        effective_model = _compose_worker_harness(
-            effective_model,
-            settings["harness_mcp_servers"],
-            settings["autonomous"],
-            settings["workspace_root"],
-        )
-        from ...providers._native_read_tools import compose_native_read_tools
-        from ...providers.lane_admission import web_tool_names_for
-
-        # Web grounding rides the read floor but is gated one axis further: the
-        # floor is a property of the ROLE, while outward reach is a property of the
-        # LANE, and only a lane whose own live retrieval proof is recorded
-        # contributes any name here. An unproven lane - and a model that declared
-        # no lane at all - composes an empty tuple, so the capability stays dark
-        # through the same code path that will later light it, rather than through
-        # a branch that has never run.
-        effective_model = compose_native_read_tools(
-            effective_model,
+        effective_model = compose_worker_turn_model(
+            model,
+            answers=permission_answers,
+            thread_id=thread_id,
             autonomous=settings["autonomous"],
             role=settings["role"],
-            extra_tool_names=web_tool_names_for(
-                getattr(effective_model, "provider", None)
-            ),
-        )
-        from ...providers._native_role import bind_model_native_workspace
-        from ...providers._runtime_identity import bind_model_runtime_identity
-
-        effective_model = bind_model_native_workspace(
-            effective_model, workspace=settings["workspace_root"]
-        )
-
-        effective_model = bind_model_runtime_identity(
-            effective_model,
-            thread_id=thread_id,
-            port=settings["runtime_identity_port"],
+            workspace_root=settings["workspace_root"],
+            harness_mcp_servers=settings["harness_mcp_servers"],
+            runtime_identity_port=settings["runtime_identity_port"],
+            authoring_binding=authoring_binding,
         )
 
         model_label = _describe_worker_model(effective_model)

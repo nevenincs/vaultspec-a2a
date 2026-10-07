@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
+    from langchain_core.language_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
     from langchain_core.runnables.graph import Graph as DrawableGraph
     from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -364,6 +365,11 @@ def _compile_worker_node(
     a worker that never advertised it - a declaration the config layer parsed,
     validated, and then dropped on the floor.
 
+    A worker handed an authoring binding provider is checked for an attachment
+    surface on the model built here, the one the node will invoke, so a preset
+    whose lane cannot mount the bridge is refused at compile time rather than
+    one turn later, inside the run.
+
     Deliberately stops short of ``builder.add_node``. pipeline_loop wraps
     exactly one returned node - its own loop node - in ``_wrap_loop_node``
     before adding it, which needs a seam between "node built" and "node added"
@@ -383,11 +389,8 @@ def _compile_worker_node(
         provider_factory=options["provider_factory"],
         frozen_assignment=options["frozen_assignment"],
     )
-    # Flat and team-level, exactly as the research_adr path reads it: the harness
-    # schema carries no per-role MCP field, so every worker of the team gets the
-    # team's declaration. Empty when no harness is declared, which composes to a
-    # no-op rather than to some inherited default.
-    harness = team_config.effective_harness()
+    if options["authoring_binding_provider"] is not None:
+        _require_authoring_attach_surface(team_config, worker_ref, model)
     worker_node = create_worker_node(
         model,
         composed_worker_prompt(agent_cfg, model),
@@ -403,13 +406,49 @@ def _compile_worker_node(
         # return retires the validation errors that blocked it. Reading it here
         # keeps the mapping in the one place that owns it.
         phase=_ROLE_TO_PHASE.get(agent_cfg.role),
-        harness_mcp_servers=list(harness.mcp_servers) if harness is not None else [],
+        harness_mcp_servers=team_config.harness_mcp_servers(),
         # Every worker these topologies compile sits behind a mount node that
         # refreshes the vault index; the worker expands the documents itself.
         context_mounter=create_context_mounter(workspace_root),
     )
     metadata = _agent_node_metadata(agent_cfg, used_provider, model_name)
     return worker_node, metadata
+
+
+def _require_authoring_attach_surface(
+    team_config: Any, worker_ref: Any, model: BaseChatModel
+) -> None:
+    """Refuse a bridged worker whose model has no surface to mount the bridge on.
+
+    ``providers._acp_authoring.attach_authoring_tools`` dispatches the run's
+    authoring binding onto the model's own surface (``with_mcp_servers`` for
+    the ACP lane, ``with_authoring_mcp_server`` for Codex) and raises when a
+    model exposes neither - but per turn, inside the worker node, once the run
+    has already started burning its step timeout. This asks the same question
+    of the model compilation built, so a lane with no attachment surface is
+    refused with a served compile-time reason before the run ever starts.
+
+    Scoped to the authoring binding because harness ``mcp_servers`` composition
+    fails softly: ``compose_harness_mcp_servers`` returns a model with no
+    delivery surface unchanged rather than raising, so there is no per-turn
+    error for a compile-time refusal to pull forward. No credential is checked
+    here: providers authenticate from the environment they inherit and report
+    an unauthenticated lane at run time.
+    """
+    if (
+        getattr(model, "with_mcp_servers", None) is not None
+        or getattr(model, "with_authoring_mcp_server", None) is not None
+    ):
+        return
+    raise ConfigError(
+        f"harness-armed preset {team_config.id!r} declares "
+        "[team.harness] authoring_bridge = true, but the following worker(s) "
+        f"resolved to a provider with no authoring attachment surface: "
+        f"{worker_ref.agent_id!r} ({type(model).__name__}). The declared "
+        "authoring tools cannot mount onto this provider; refusing before the "
+        "run starts rather than spawning an agent whose tools silently never "
+        "attach."
+    )
 
 
 class _DivergeStageArgs(TypedDict):

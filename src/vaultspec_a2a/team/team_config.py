@@ -93,6 +93,11 @@ class TopologyType(StrEnum):
     PIPELINE_LOOP = "pipeline_loop"
     RESEARCH_ADR = "research_adr"
 
+    @property
+    def requires_supervisor(self) -> bool:
+        """Whether a graph of this topology is compiled around a supervisor agent."""
+        return self in (TopologyType.STAR, TopologyType.PIPELINE_LOOP)
+
 
 # Bundled preset directories, resolved from the installed ``vaultspec_a2a.team``
 # package rather than a checkout-relative ``__file__`` path, so preset discovery
@@ -667,6 +672,17 @@ class TeamConfig(BaseModel):
         if self.is_document_authoring:
             return TeamHarnessConfig()
         return None
+
+    def harness_mcp_servers(self) -> list[str]:
+        """Return the harness MCP servers composed into every worker's session.
+
+        Flat and team-level: the harness schema carries no per-role server field,
+        so every worker of every topology is handed the same declaration. Empty
+        when no harness applies, which composes to a no-op rather than to some
+        inherited default.
+        """
+        harness = self.effective_harness()
+        return list(harness.mcp_servers) if harness is not None else []
 
     @classmethod
     def from_toml(cls, path: Path) -> "TeamConfig":

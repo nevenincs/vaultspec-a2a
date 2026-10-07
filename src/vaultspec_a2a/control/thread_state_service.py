@@ -21,7 +21,11 @@ from ..database import (
     retained_high_water_mark,
 )
 from ..domain_config import domain_config
-from ..graph.enums import SemanticPhase, research_adr_semantic_phase
+from ..graph.enums import (
+    ProviderCondition,
+    SemanticPhase,
+    research_adr_semantic_phase,
+)
 from ..providers.team_selection import TeamSelectionError
 from ..team.team_config import AuthoringCapability, authoring_capability
 from ..thread.enums import (
@@ -440,7 +444,14 @@ async def capture_thread_state(
         status=ThreadStatus(thread.status),
         last_sequence=await _served_last_sequence(db, thread, relay_hub),
         failure_reason=thread.failure_reason,
-        provider_condition=thread.provider_condition,
+        # Resolved to its member here rather than carried as the stored string:
+        # the read model declares the vocabulary, and the column is only ever
+        # written from it, so a value outside it is store corruption and says so.
+        provider_condition=(
+            None
+            if thread.provider_condition is None
+            else ProviderCondition(thread.provider_condition)
+        ),
         repair_reason=thread.repair_reason,
     )
     snapshot = await enrich_snapshot_from_durable_state(

@@ -10,6 +10,7 @@ from contextlib import suppress
 from typing import Never, TypedDict, Unpack
 
 from ..control.config import settings
+from ..graph.enums import ProviderCondition
 from ..utils.enums import AcpRequestId
 from ._acp_request import issue_request
 from ._acp_types import (
@@ -20,7 +21,6 @@ from ._acp_types import (
 )
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from .acp_exceptions import AcpAuthError, AcpErrorCode
-from .conditions import ProviderCondition
 
 __all__: list[str] = []
 

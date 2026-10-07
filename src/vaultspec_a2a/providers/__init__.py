@@ -16,6 +16,7 @@ Providers implement :mod:`vaultspec_a2a.graph.protocols` for
 import importlib
 from typing import TYPE_CHECKING
 
+from ..graph.enums import ProviderCondition as ProviderCondition
 from ._json_contract import JsonObject as JsonObject
 from ._json_contract import JsonValue as JsonValue
 from .acp_exceptions import AcpAuthError as AcpAuthError
@@ -24,7 +25,6 @@ from .acp_exceptions import AcpErrorCode as AcpErrorCode
 from .acp_exceptions import AcpPromptCancelledError as AcpPromptCancelledError
 from .acp_exceptions import AcpPromptError as AcpPromptError
 from .acp_exceptions import AcpSessionError as AcpSessionError
-from .conditions import ProviderCondition as ProviderCondition
 from .warmup import warm_model_imports as warm_model_imports
 
 if TYPE_CHECKING:

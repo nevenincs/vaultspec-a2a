@@ -9,6 +9,7 @@ from typing import cast
 
 import pytest
 
+from ...graph.enums import ProviderCondition
 from ...utils.enums import AcpRequestId
 from .._acp_auth import authenticate_rpc
 from .._acp_types import AcpModelConfig, AcpResponseFutures
@@ -19,7 +20,6 @@ from ..acp_exceptions import (
     AcpPromptError,
     AcpSessionError,
 )
-from ..conditions import ProviderCondition
 
 
 class _AuthWriter:

@@ -358,7 +358,10 @@ def test_each_served_vocabulary_has_exactly_one_declaration_site() -> None:
         "DocumentCapability": "team/team_config.py",
         "PresetOrigin": "team/preset_origin.py",
         "Provider": "graph/enums.py",
-        "ProviderCondition": "providers/conditions.py",
+        # In Layer 1 beside the lane discriminator, because the run read model
+        # carries it: declared under `providers/`, it could not be named by a
+        # Layer-1 field and run-history published the condition as a bare string.
+        "ProviderCondition": "graph/enums.py",
         "RepairStatus": "thread/enums.py",
         "ReplayStatus": "thread/enums.py",
         "SemanticPhase": "graph/enums.py",

@@ -27,7 +27,7 @@ from langchain_core.messages import (
 )
 
 from ...database import ProviderRuntimeIdentityModel, create_thread
-from ...graph.enums import Provider
+from ...graph.enums import Provider, ProviderCondition
 from ...testing import declared_lane_model_value
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
@@ -48,7 +48,6 @@ from ..cli_resolution import (
     ProviderRuntimeUnavailableError,
 )
 from ..codex_chat_model import CodexChatModel
-from ..conditions import ProviderCondition
 from ..factory import ProviderFactory, codex_binary_proof_reason
 from ..provider_readiness import probe_provider_readiness
 

@@ -38,7 +38,6 @@ from ...database import (
     get_permission_logs_by_thread,
     resolve_session_factory,
 )
-from ...providers import ProviderCondition
 from ...streaming import RelayHub
 from ...thread.constants import (
     MAX_DISCOVERY_RESULTS,
@@ -302,9 +301,7 @@ async def run_status_endpoint(
         # keyword arguments rather than validated from the snapshot: nothing here
         # is dropped silently, but nothing arrives without being written either,
         # which is how the reason itself was missed when it was first persisted.
-        provider_condition=_optional_enum(
-            ProviderCondition, snapshot.provider_condition
-        ),
+        provider_condition=snapshot.provider_condition,
         # The account of an operation that did not take on a run that is still
         # alive. Its writers decline to set the failure reason precisely because
         # the run survives, so without this line their account is durable and

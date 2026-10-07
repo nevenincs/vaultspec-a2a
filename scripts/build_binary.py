@@ -60,7 +60,11 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     print(f"+ {' '.join(command)}", flush=True)
     return subprocess.run(
-        command, text=True, cwd=cwd, capture_output=capture_output, check=False
+        command,
+        encoding="utf-8",
+        cwd=cwd,
+        capture_output=capture_output,
+        check=False,
     )
 
 

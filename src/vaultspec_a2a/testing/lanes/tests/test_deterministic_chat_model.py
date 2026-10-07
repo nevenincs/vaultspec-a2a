@@ -15,7 +15,7 @@ from ....providers.factory import ProviderFactory
 from ....providers.in_process_catalog import in_process_lane
 from ....team.team_config import AgentConfig, AgentPersonaConfig, load_team_config
 from ....thread.constants import DEFAULT_SUPERVISOR_ID
-from .. import UNATTENDED_REPLY, DeterministicResearchAdrChatModel
+from .. import UNATTENDED_REPLY, DeterministicResearchAdrChatModel, path_writer
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -263,3 +263,44 @@ async def test_a_held_turn_with_no_gate_configured_refuses_loudly() -> None:
     model = _authored("deterministic-hold-then-complete")
     with pytest.raises(RuntimeError, match="served without a hold gate"):
         await model.ainvoke([HumanMessage(content="x")])
+
+
+@pytest.mark.asyncio
+async def test_the_path_writer_scenario_puts_a_real_document_on_disk(
+    tmp_path: Path,
+) -> None:
+    """Resolved through the production factory, a real turn writes a real file.
+
+    No worker, gateway or subprocess: the model is built the way a compiled
+    graph's worker node builds it, and the write is the turn's own, not a
+    test reaching around the model to fake one.
+    """
+    target = tmp_path / "plan.md"
+    model = ProviderFactory().create(
+        Provider.DETERMINISTIC,
+        model="deterministic",
+        execution_mode="in-process-deterministic",
+        agent_config=path_writer(target),
+    )
+    assert isinstance(model, DeterministicResearchAdrChatModel)
+
+    result = await model.ainvoke([HumanMessage(content="write the plan")])
+
+    assert isinstance(result, AIMessage)
+    assert result.content == "Deterministic document written to disk."
+    assert target.read_text(encoding="utf-8") == "# plan\n"
+
+
+@pytest.mark.asyncio
+async def test_the_path_writer_scenario_with_no_target_refuses_loudly() -> None:
+    """A preset carrying no single target path fails fast, not silently."""
+    blank_script = AgentConfig(
+        id="deterministic-path-writer",
+        display_name="deterministic-path-writer",
+        role="plan-author",
+        description="deterministic-path-writer with no script line",
+        persona=AgentPersonaConfig(system_prompt=""),
+    )
+    model = DeterministicResearchAdrChatModel(agent_config=blank_script)
+    with pytest.raises(RuntimeError, match="exactly one target path"):
+        await model.ainvoke([HumanMessage(content="write the plan")])

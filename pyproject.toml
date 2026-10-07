@@ -262,6 +262,7 @@ exclude = [
   "src/vaultspec_a2a/team/presets/agents/deterministic-revising-reviewer.toml",
   "src/vaultspec_a2a/team/presets/teams/deterministic-research-branches.toml",
   "src/vaultspec_a2a/team/presets/agents/deterministic-branch-researcher.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-path-writer.toml",
 ]
 
   [tool.hatch.build.targets.wheel.force-include]

@@ -16,7 +16,7 @@ from .._claude_tool_policy import claude_bypass_declined_meta
 from .._factory_commands import _classify_acp_command
 from ..acp_catalog import discover_acp_catalog
 from ..cli_resolution import resolve_provider_cli_executable
-from ..factory import _discover_claude_catalog, claude_auth_env
+from ..factory import _discover_claude_family_catalog, claude_auth_env
 from ..provider_catalog import (
     AuthenticationState,
     CatalogStatus,
@@ -86,7 +86,7 @@ async def test_the_production_claude_probe_opens_a_session_on_this_host(
 
     The test above supplies the session meta itself, which proves the adapter
     accepts it but not that production sends it. This drives the production
-    assembly end to end instead: whatever posture ``_discover_claude_catalog``
+    assembly end to end instead: whatever posture ``_discover_claude_family_catalog``
     composes is the posture the real adapter is handed, and a probe that cannot
     open a session reports the lane unavailable - indistinguishable, from the
     gateway, from a lane that is genuinely missing.
@@ -96,7 +96,7 @@ async def test_the_production_claude_probe_opens_a_session_on_this_host(
         Provider.CLAUDE.value, f"claude-agent-acp:{settings.acp_backend}"
     )
 
-    discovery = await _discover_claude_catalog(key, Path.cwd())
+    discovery = await _discover_claude_family_catalog(Provider.CLAUDE, key, Path.cwd())
 
     assert discovery.catalog.state.status is CatalogStatus.AVAILABLE, (
         discovery.catalog.state.reason

@@ -42,7 +42,7 @@ from ..cli_resolution import (
     resolve_provider_cli_executable,
     resolve_service_executable,
 )
-from ..factory import ProviderFactory, _discover_claude_catalog
+from ..factory import ProviderFactory, _discover_claude_family_catalog
 from ..provider_catalog import CatalogStatus, HealthState, ProviderCatalogKey
 
 if TYPE_CHECKING:
@@ -116,7 +116,8 @@ async def test_the_catalog_probe_pins_the_same_claude(tmp_path: Path) -> None:
     workspace.mkdir()
 
     with settings_override(capsule_assets_root=capsule), suppress(AcpError):
-        await _discover_claude_catalog(
+        await _discover_claude_family_catalog(
+            Provider.CLAUDE,
             ProviderCatalogKey(
                 provider_id=Provider.CLAUDE.value,
                 execution_mode="claude-agent-acp:node",
@@ -309,7 +310,9 @@ async def test_catalog_reports_a_missing_selected_cli_as_unavailable(
     key = ProviderCatalogKey(Provider.CLAUDE.value, "claude-agent-acp:node")
 
     with settings_override(capsule_assets_root=capsule):
-        discovery = await _discover_claude_catalog(key, tmp_path)
+        discovery = await _discover_claude_family_catalog(
+            Provider.CLAUDE, key, tmp_path
+        )
 
     assert discovery.catalog.state.status is CatalogStatus.UNAVAILABLE
     assert discovery.catalog.state.reason == (

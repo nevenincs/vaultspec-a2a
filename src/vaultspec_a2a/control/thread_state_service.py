@@ -51,11 +51,10 @@ from ..thread.snapshots import (
     finalize_snapshot_replay_status,
     project_checkpoint_tuple,
 )
-from ..utils.coercion import coerce_object_mapping, coerce_string_list
+from ..utils.coercion import coerce_string_list
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 
 if TYPE_CHECKING:
-    from langgraph.checkpoint.base import CheckpointTuple
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database.checkpoints import Checkpointer
@@ -142,19 +141,13 @@ def project_semantic_phase(
     return SemanticPhase.RUNNING
 
 
-def _channel_values(checkpoint_tuple: CheckpointTuple) -> dict[str, object]:
-    """Return the channel values of a checkpoint tuple, or an empty mapping."""
-    channel_values: object = checkpoint_tuple.checkpoint.get("channel_values")
-    return coerce_object_mapping(channel_values) or {}
-
-
 def derive_run_authoring_ids(
-    checkpoint_tuple: CheckpointTuple | None,
+    projection: CheckpointProjection | None,
 ) -> tuple[list[str], list[str]]:
-    """Derive ``(proposal_ids, changeset_ids)`` from an already-read snapshot."""
-    if checkpoint_tuple is None:
+    """Derive ``(proposal_ids, changeset_ids)`` from one projection."""
+    if projection is None:
         return [], []
-    values = _channel_values(checkpoint_tuple)
+    values = projection.channel_values
     return (
         coerce_string_list(values.get(PROPOSAL_ID_FIELD), drop_empty=True) or [],
         coerce_string_list(values.get(CHANGESET_ID_FIELD), drop_empty=True) or [],
@@ -211,23 +204,22 @@ class ThreadStateCapture:
     """One coherent durable and checkpoint-backed run-status read.
 
     The gateway must derive every response field from this capture.  Keeping the
-    tuple with its fully reconciled snapshot prevents a second checkpoint or
-    thread read from mixing different moments of a progressing run.
+    checkpoint projection with its fully reconciled snapshot prevents a second
+    checkpoint or thread read from mixing different moments of a progressing run.
 
-    ``checkpoint_projection`` is the one projection of ``checkpoint_tuple`` the
-    snapshot was built from, present exactly when the tuple is. A field read
-    from the checkpoint's pending interrupts - the pending clarification - reads
-    it rather than projecting the tuple a second time.
+    ``checkpoint_projection`` is the one projection of the checkpoint the
+    snapshot was built from, present exactly when that checkpoint was read and
+    projected. A field read from the checkpoint - its channel values, the
+    pending clarification - reads it rather than projecting the tuple again.
 
     ``transcript`` states whether the snapshot's messages are the run's record
     or an artefact of an unread checkpoint. It is carried here rather than
-    re-derived by each reader because ``checkpoint_tuple`` alone cannot answer
-    it: a ``None`` tuple is a not-yet-dispatched run, a lost checkpoint, and an
-    unreachable checkpoint store all at once.
+    re-derived by each reader because ``checkpoint_projection`` alone cannot
+    answer it: a ``None`` projection is a not-yet-dispatched run, a lost
+    checkpoint, and an unreachable checkpoint store all at once.
     """
 
     snapshot: ThreadStateData
-    checkpoint_tuple: CheckpointTuple | None
     checkpoint_projection: CheckpointProjection | None
     team_preset: str | None
     thread_metadata: str | None
@@ -240,12 +232,12 @@ def _optional_str(value: object) -> str | None:
 
 
 def derive_run_semantic_context(
-    checkpoint_tuple: CheckpointTuple | None,
+    projection: CheckpointProjection | None,
 ) -> SemanticContext:
-    """Derive the target feature and authoring session from a read snapshot."""
-    if checkpoint_tuple is None:
+    """Derive the target feature and authoring session from one projection."""
+    if projection is None:
         return SemanticContext(feature_tag=None, authoring_session_id=None)
-    values = _channel_values(checkpoint_tuple)
+    values = projection.channel_values
     return SemanticContext(
         feature_tag=_optional_str(values.get(ACTIVE_FEATURE_FIELD)),
         authoring_session_id=_optional_str(values.get(AUTHORING_SESSION_FIELD)),
@@ -258,7 +250,6 @@ class _CheckpointSnapshotRead:
     loaded: bool
     present: bool
     error: bool
-    captured_tuple: CheckpointTuple | None
     captured_projection: CheckpointProjection | None
 
 
@@ -272,7 +263,6 @@ async def _read_projected_checkpoint(
     checkpoint_loaded = False
     checkpoint_present = False
     checkpoint_error = False
-    captured_tuple: CheckpointTuple | None = None
     captured_projection: CheckpointProjection | None = None
 
     try:
@@ -305,7 +295,6 @@ async def _read_projected_checkpoint(
                 snapshot, projection
             )
             checkpoint_loaded = True
-            captured_tuple = checkpoint_tuple
             captured_projection = projection
     except TimeoutError:
         checkpoint_error = True
@@ -336,7 +325,6 @@ async def _read_projected_checkpoint(
         loaded=checkpoint_loaded,
         present=checkpoint_present,
         error=checkpoint_error,
-        captured_tuple=captured_tuple,
         captured_projection=captured_projection,
     )
 
@@ -366,13 +354,13 @@ async def capture_thread_state(
     aggregator: EventAggregator,
     checkpointer: Checkpointer,
 ) -> ThreadStateCapture | None:
-    """Capture a coherent thread snapshot and its successfully projected tuple.
+    """Capture a coherent thread snapshot and its checkpoint projection.
 
     A single durable thread/permission read is reconciled against exactly one
-    checkpoint tuple.  The tuple is exposed only after its projection succeeds,
-    so consumers cannot combine a partial snapshot with untrusted checkpoint
-    fields.  Does **not** raise ``HTTPException`` — the route handler owns HTTP
-    response mapping.
+    checkpoint tuple.  Its projection is exposed only once the snapshot has been
+    built from it, so consumers cannot combine a partial snapshot with untrusted
+    checkpoint fields.  Does **not** raise ``HTTPException`` — the route handler
+    owns HTTP response mapping.
     """
     thread = await get_thread(db, thread_id)
     if thread is None or thread.status == ThreadStatus.DELETING.value:
@@ -441,7 +429,7 @@ async def capture_thread_state(
     checkpoint_loaded = checkpoint_read.loaded
     checkpoint_present = checkpoint_read.present
     checkpoint_error = checkpoint_read.error
-    captured_tuple = checkpoint_read.captured_tuple
+    captured_projection = checkpoint_read.captured_projection
 
     if _should_clear_permissions_without_checkpoint(
         thread,
@@ -459,12 +447,12 @@ async def capture_thread_state(
         checkpoint_id=snapshot.checkpoint_id,
     )
 
-    # Gated on checkpoint_loaded, not merely captured_tuple: an unread
+    # Gated on checkpoint_loaded, not merely captured_projection: an unread
     # checkpoint already carries its own "unavailable" degraded reason above,
     # and asserting emptiness on top of an unread snapshot would misreport
     # "unread" as "produced nothing" - see apply_authoring_completion_check.
     if checkpoint_loaded:
-        proposal_ids, changeset_ids = derive_run_authoring_ids(captured_tuple)
+        proposal_ids, changeset_ids = derive_run_authoring_ids(captured_projection)
         snapshot = apply_authoring_completion_check(
             snapshot,
             thread_status=thread.status,
@@ -484,8 +472,7 @@ async def capture_thread_state(
     )
     return ThreadStateCapture(
         snapshot=finalized_snapshot,
-        checkpoint_tuple=captured_tuple,
-        checkpoint_projection=checkpoint_read.captured_projection,
+        checkpoint_projection=captured_projection,
         team_preset=thread.team_preset,
         thread_metadata=thread.thread_metadata,
         transcript=classify_transcript_availability(

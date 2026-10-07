@@ -45,6 +45,7 @@ async def _suspend_on_permission(
         interrupt(
             {
                 "type": "permission_request",
+                "request_id": "perm-edit",
                 "tool_name": "Edit",
                 "tool_input": {"path": "src/a.py"},
                 "options": state["acp_options"],

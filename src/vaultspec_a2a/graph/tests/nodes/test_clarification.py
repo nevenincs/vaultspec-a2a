@@ -32,6 +32,7 @@ from ....testing import (
     compile_test_graph,
     new_state_graph,
 )
+from ....thread import project_checkpoint_tuple
 from ....thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,
     ClarificationAnswers,
@@ -371,7 +372,10 @@ async def test_parked_questionnaire_is_readable_from_the_real_checkpoint() -> No
     await graph.ainvoke(_base_state(), config=config)
 
     tuple_ = await saver.aget_tuple(config)
-    recovered = pending_clarification(tuple_, thread_id="clarify-checkpoint")
+    assert tuple_ is not None
+    recovered = pending_clarification(
+        project_checkpoint_tuple(tuple_, thread_id="clarify-checkpoint")
+    )
 
     assert recovered is not None
     assert recovered.request_id == "clarify-recover"
@@ -389,7 +393,13 @@ async def test_parked_questionnaire_is_readable_from_the_real_checkpoint() -> No
         config=config,
     )
     settled = await saver.aget_tuple(config)
-    assert pending_clarification(settled, thread_id="clarify-checkpoint") is None
+    assert settled is not None
+    assert (
+        pending_clarification(
+            project_checkpoint_tuple(settled, thread_id="clarify-checkpoint")
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio

@@ -77,7 +77,15 @@ def test_folding_adds_the_pending_interrupt_view_onto_a_base_projection() -> Non
             (
                 "task-1",
                 "__interrupt__",
-                [Interrupt(value={"type": "plan_approval_request"}, id="i-1")],
+                [
+                    Interrupt(
+                        value={
+                            "type": "plan_approval_request",
+                            "request_id": "plan-approval-1",
+                        },
+                        id="i-1",
+                    )
+                ],
             )
         ]
     )
@@ -85,12 +93,12 @@ def test_folding_adds_the_pending_interrupt_view_onto_a_base_projection() -> Non
         tuple_with_interrupt, thread_id="t-1", history_depth=2
     )
 
-    fold_pending_writes(projection, tuple_with_interrupt, thread_id="t-1")
+    fold_pending_writes(projection, tuple_with_interrupt)
 
     assert projection.pending_write_count == 1
     assert projection.pending_write_channels == ["__interrupt__"]
     assert projection.pause_cause == "plan_approval_request"
-    assert projection.pending_interrupts[0].interrupt_id == "i-1"
+    assert projection.pending_interrupts[0].interrupt_id == "plan-approval-1"
 
 
 def test_folding_marks_unknown_history_as_degraded() -> None:
@@ -98,7 +106,7 @@ def test_folding_marks_unknown_history_as_degraded() -> None:
     tup = _tuple()
     projection = extract_checkpoint_fields(tup, thread_id="t-1", history_depth=None)
 
-    fold_pending_writes(projection, tup, thread_id="t-1")
+    fold_pending_writes(projection, tup)
 
     assert "checkpoint_history_unknown" in projection.degraded_reasons
 
@@ -110,7 +118,7 @@ def test_folding_flags_an_untyped_interrupt_payload() -> None:
     )
     projection = extract_checkpoint_fields(tup, thread_id="t-1", history_depth=1)
 
-    fold_pending_writes(projection, tup, thread_id="t-1")
+    fold_pending_writes(projection, tup)
 
     assert "interrupt_payload_untyped" in projection.degraded_reasons
     assert projection.pending_interrupts == []
@@ -198,7 +206,15 @@ def test_the_composed_function_equals_the_two_stages_run_in_order() -> None:
             (
                 "task-1",
                 "__interrupt__",
-                [Interrupt(value={"type": "plan_approval_request"}, id="i-9")],
+                [
+                    Interrupt(
+                        value={
+                            "type": "plan_approval_request",
+                            "request_id": "plan-approval-9",
+                        },
+                        id="i-9",
+                    )
+                ],
             )
         ]
     )
@@ -206,6 +222,6 @@ def test_the_composed_function_equals_the_two_stages_run_in_order() -> None:
     combined = project_checkpoint_tuple(tup, thread_id="t-1", history_depth=4)
 
     staged = extract_checkpoint_fields(tup, thread_id="t-1", history_depth=4)
-    fold_pending_writes(staged, tup, thread_id="t-1")
+    fold_pending_writes(staged, tup)
 
     assert combined == staged

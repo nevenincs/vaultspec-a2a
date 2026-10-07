@@ -23,6 +23,7 @@ from ..ipc.schemas import (
     ExecutionTaskProjectionPayload,
 )
 from ..providers import ProviderCondition
+from ..thread import live_interrupts, named_request_id
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
@@ -30,14 +31,13 @@ from ..thread.checkpoint_evidence import (
 )
 from ..thread.enums import TERMINAL_STATUSES, DegradedReason, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
-from ..thread.snapshots import live_interrupts, named_request_id
 from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
     from ..database.checkpoints import Checkpointer
     from ..streaming.types import StreamableGraph
+    from ..thread import LiveInterrupt
     from ..thread.action_receipts import GraphActionReceipt
-    from ..thread.snapshots import LiveInterrupt
     from .graph_lifecycle import RegisteredCompiledGraph
     from .ipc import WorkerBridge
 

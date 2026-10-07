@@ -1367,6 +1367,7 @@ class TestThreadState:
                             Interrupt(
                                 value={
                                     "type": "permission_request",
+                                    "request_id": "perm-thread-state-checkpoint-only",
                                     "tool_name": "bash",
                                     "options": [
                                         {

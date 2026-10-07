@@ -1194,6 +1194,7 @@ async def test_checkpoint_only_pending_permission_does_not_surface_in_thread_sta
                         Interrupt(
                             value={
                                 "type": "permission_request",
+                                "request_id": "perm-checkpoint-only",
                                 "tool_name": "bash",
                                 "options": [
                                     {

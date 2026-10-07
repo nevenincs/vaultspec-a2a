@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     )
     from .snapshots import CheckpointProjection as CheckpointProjection
     from .snapshots import ExecutionStateProjection as ExecutionStateProjection
+    from .snapshots import LiveInterrupt as LiveInterrupt
     from .snapshots import ProjectedInterrupt as ProjectedInterrupt
     from .snapshots import classify_message_role as classify_message_role
     from .snapshots import derive_message_id as derive_message_id
@@ -80,10 +81,15 @@ if TYPE_CHECKING:
     from .snapshots import (
         finalize_snapshot_replay_status as finalize_snapshot_replay_status,
     )
+    from .snapshots import live_interrupts as live_interrupts
+    from .snapshots import named_request_id as named_request_id
     from .snapshots import normalize_artifacts as normalize_artifacts
     from .snapshots import normalize_plan_entries as normalize_plan_entries
     from .snapshots import project_checkpoint_tuple as project_checkpoint_tuple
     from .snapshots import stamp_message_created_at as stamp_message_created_at
+    from .snapshots import (
+        unanswered_interrupt_values as unanswered_interrupt_values,
+    )
     from .state import TeamState as TeamState
     from .write_authority import RECEIPT_ID_MAX_LENGTH as RECEIPT_ID_MAX_LENGTH
     from .write_authority import RunWriteAuthority as RunWriteAuthority
@@ -134,15 +140,19 @@ _LAZY_IMPORTS = {
     "PLAN_APPROVAL_PAUSE_CAUSES": ".snapshots",
     "CheckpointProjection": ".snapshots",
     "ExecutionStateProjection": ".snapshots",
+    "LiveInterrupt": ".snapshots",
     "ProjectedInterrupt": ".snapshots",
     "classify_message_role": ".snapshots",
     "derive_message_id": ".snapshots",
     "extract_message_timestamp": ".snapshots",
     "finalize_snapshot_replay_status": ".snapshots",
+    "live_interrupts": ".snapshots",
+    "named_request_id": ".snapshots",
     "normalize_artifacts": ".snapshots",
     "normalize_plan_entries": ".snapshots",
     "project_checkpoint_tuple": ".snapshots",
     "stamp_message_created_at": ".snapshots",
+    "unanswered_interrupt_values": ".snapshots",
     "TeamState": ".state",
     "RECEIPT_ID_MAX_LENGTH": ".write_authority",
     "RunWriteAuthority": ".write_authority",
@@ -186,6 +196,7 @@ __all__ = [
     "ExecutionStateProjection",
     "InterruptType",
     "InvalidTransitionError",
+    "LiveInterrupt",
     "NicknameConflictError",
     "PermissionAnswer",
     "PermissionDeniedError",
@@ -210,6 +221,8 @@ __all__ = [
     "derive_message_id",
     "extract_message_timestamp",
     "finalize_snapshot_replay_status",
+    "live_interrupts",
+    "named_request_id",
     "normalize_artifacts",
     "normalize_plan_entries",
     "parse_approval_verdict",
@@ -217,5 +230,6 @@ __all__ = [
     "permission_resume_value",
     "project_checkpoint_tuple",
     "stamp_message_created_at",
+    "unanswered_interrupt_values",
     "validate_clarification_answers",
 ]

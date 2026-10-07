@@ -107,7 +107,7 @@ def main() -> None:
     # and --json payloads. The serve subcommand reconfigures to the service lane
     # when it boots the gateway.
     reconfigure_console_utf8()
-    configure_logging("cli")
+    configure_logging("cli", settings=settings)
 
 
 def _acquire_desktop_singleton() -> RuntimeSingleton | None:

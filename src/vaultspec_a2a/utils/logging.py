@@ -30,12 +30,11 @@ from enum import Enum
 from logging.handlers import RotatingFileHandler
 from pathlib import PurePath
 from types import MappingProxyType, TracebackType
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, override
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, overload, override
 
 from opentelemetry import trace
 from opentelemetry.trace.span import format_span_id, format_trace_id
 
-from ..control.state_layout import seal_state_home, state_layout
 from .redaction import REDACTED, is_secret_name, redact_text
 
 if TYPE_CHECKING:
@@ -68,12 +67,18 @@ _FILE_MAX_BYTES = 10 * 1024 * 1024
 _FILE_BACKUP_COUNT = 5
 
 
+class _LogsLayout(Protocol):
+    """The one state-layout path the service lane writes under."""
+
+    @property
+    def logs_dir(self) -> Path: ...
+
+
 class _LoggingSettings(Protocol):
     """Structural type for the settings attributes :func:`configure_logging` reads.
 
-    Note: ty does not yet have a Pydantic plugin (astral-sh/ty#2403), so
-    Pydantic models passed here require ``# ty: ignore[invalid-argument-type]``
-    at call sites.
+    The caller hands its settings in, so this leaf module never reaches up into
+    the configuration that owns the state layout and its directory preparation.
     """
 
     @property
@@ -89,7 +94,9 @@ class _LoggingSettings(Protocol):
     def is_dev(self) -> bool: ...
 
     @property
-    def a2a_home(self) -> Path: ...
+    def state_layout(self) -> _LogsLayout: ...
+
+    def prepare_state_dir(self, directory: Path) -> Path: ...
 
 
 # Standard LogRecord attributes that should not be included as extra fields.
@@ -383,14 +390,6 @@ def reconfigure_console_utf8() -> None:
             continue
 
 
-def _resolve_settings(settings_override: _LoggingSettings | None) -> _LoggingSettings:
-    if settings_override is not None:
-        return settings_override
-    from ..control.config import settings
-
-    return settings
-
-
 def _numeric_level(level: Any) -> int:
     """Coerce a LogLevel/str level to a numeric logging level (INFO fallback)."""
     if hasattr(level, "value"):
@@ -503,10 +502,9 @@ def _configure_service(settings: _LoggingSettings, service_name: str) -> None:
         _stderr_json_handler(level, service=service_name)
     ]
 
-    runtime_dir = state_layout(settings.a2a_home).logs_dir
+    runtime_dir = settings.state_layout.logs_dir
     try:
-        seal_state_home(settings.a2a_home)
-        runtime_dir.mkdir(parents=True, exist_ok=True)
+        settings.prepare_state_dir(runtime_dir)
         file_handler = RotatingFileHandler(
             runtime_dir / f"{service_name}.log",
             maxBytes=_FILE_MAX_BYTES,
@@ -573,28 +571,48 @@ def _configure_protocol() -> None:
     _assert_no_stdout_handler(root)
 
 
+@overload
+def configure_logging(
+    kind: Literal["service"],
+    *,
+    settings: _LoggingSettings,
+    service_name: str = ...,
+) -> None: ...
+
+
+@overload
+def configure_logging(kind: Literal["cli"], *, settings: _LoggingSettings) -> None: ...
+
+
+@overload
+def configure_logging(kind: Literal["protocol", "library"]) -> None: ...
+
+
 def configure_logging(
     kind: ProcessKind,
     *,
+    settings: _LoggingSettings | None = None,
     service_name: str = "service",
-    settings_override: _LoggingSettings | None = None,
 ) -> None:
     """Configure the process's output lanes for its *kind* (see module docstring).
 
+    ``settings`` is the caller's configuration, read by the ``service`` and
+    ``cli`` lanes; the ``protocol`` and ``library`` lanes read none.
     ``service_name`` names the rotating file lane for the ``service`` kind
-    (e.g. ``"gateway"``, ``"worker"``). ``settings_override`` injects settings for
-    tests; production reads the config singleton lazily so import stays side-effect
-    free. ``library`` returns immediately, leaving the root logger untouched.
+    (e.g. ``"gateway"``, ``"worker"``). ``library`` returns immediately, leaving
+    the root logger untouched.
     """
     if kind == "library":
-        return
-    if kind == "cli":
-        _configure_cli(_resolve_settings(settings_override))
         return
     if kind == "protocol":
         _configure_protocol()
         return
+    if settings is None:
+        raise TypeError(f"the {kind!r} logging lane reads settings; pass them in")
+    if kind == "cli":
+        _configure_cli(settings)
+        return
     if kind == "service":
-        _configure_service(_resolve_settings(settings_override), service_name)
+        _configure_service(settings, service_name)
         return
     raise ValueError(f"unknown process kind: {kind!r}")

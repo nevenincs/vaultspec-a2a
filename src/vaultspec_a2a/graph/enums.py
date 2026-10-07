@@ -23,6 +23,7 @@ __all__ = [
     "Provider",
     "SemanticPhase",
     "ServerEventType",
+    "StreamFrameKind",
     "ToolCallStatus",
     "ToolKind",
     "is_rejection_response",
@@ -67,6 +68,24 @@ class ServerEventType(StrEnum):
     # serializer's dispatch, and a reader comparing the two must not treat the
     # difference as a missing case.
     HEARTBEAT = "heartbeat"
+
+
+class StreamFrameKind(StrEnum):
+    """Discriminator for the progress-stream frames no graph event produces.
+
+    The stream mints these about itself - where the run stood at attachment,
+    why a stream was refused, what a viewer lost - and the worker's terminal
+    relay names the run's outcome with one. They sit beside
+    :class:`ServerEventType` rather than inside it because the interprocess
+    serializer dispatches on that vocabulary, and a member here has no domain
+    event to dispatch from. The keepalive stays there: the worker's own
+    heartbeat posts already share that member.
+    """
+
+    STREAM_SNAPSHOT = "stream_snapshot"
+    THREAD_TERMINAL = "thread_terminal"
+    STREAM_REJECTED = "stream_rejected"
+    PROGRESS_DROPPED = "progress_dropped"
 
 
 class PipelinePhase(StrEnum):

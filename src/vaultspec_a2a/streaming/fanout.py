@@ -26,18 +26,17 @@ import asyncio
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
-from ..graph.events import ErrorOccurred
-
-if TYPE_CHECKING:
-    from .types import SequencedEvent
+from ..graph.enums import ServerEventType, StreamFrameKind
 
 __all__ = ["PROTECTED_WIRE_TYPES", "deliver_bounded"]
 
 logger = logging.getLogger(__name__)
 
-PROTECTED_WIRE_TYPES = frozenset({"error", "thread_terminal"})
+PROTECTED_WIRE_TYPES = frozenset(
+    {ServerEventType.ERROR, StreamFrameKind.THREAD_TERMINAL}
+)
 """Relayed frame types that outlive their queue position under backpressure.
 
 Both state an outcome exactly once. Every other frame on this stream is either
@@ -52,16 +51,12 @@ give up, rather than one per buffer.
 def _is_protected(payload: object) -> bool:
     """Report whether *payload* is an outcome frame rather than progress.
 
-    Handles both shapes that cross this queue: the relayed worker payloads,
-    which are already wire dictionaries, and the in-process domain events, which
-    are not yet projected onto the wire vocabulary and so are recognised by their
-    own type instead of by a string they do not yet carry.
+    An outcome is recognised by its wire type, which a relayed payload already
+    carries; anything that is not a wire mapping is ordinary progress.
     """
-    if isinstance(payload, Mapping):
-        return cast("Mapping[str, object]", payload).get("type") in (
-            PROTECTED_WIRE_TYPES
-        )
-    return isinstance(getattr(payload, "event", None), ErrorOccurred)
+    if not isinstance(payload, Mapping):
+        return False
+    return cast("Mapping[str, object]", payload).get("type") in PROTECTED_WIRE_TYPES
 
 
 def _evict_one(queue: asyncio.Queue[Any]) -> bool:
@@ -101,7 +96,7 @@ def _evict_one(queue: asyncio.Queue[Any]) -> bool:
     if not evicted:
         held.pop(0)
     for item in held:
-        queue.put_nowait(cast("SequencedEvent", item))
+        queue.put_nowait(item)
     return True
 
 
@@ -158,7 +153,7 @@ def deliver_bounded(
             extra={**extra, "action": "relay_drop_oldest"} if extra else None,
         )
     try:
-        queue.put_nowait(cast("SequencedEvent", payload))
+        queue.put_nowait(payload)
     except asyncio.QueueFull:
         logger.warning(
             "Relay event dropped for client %s - queue still full",

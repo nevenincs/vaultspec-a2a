@@ -16,6 +16,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, cast
 
 from ..domain_config import domain_config
+from ..graph.enums import StreamFrameKind
 from ..ipc.schemas import (
     ExecutionStateProjectionPayload,
     ExecutionTaskProjectionPayload,
@@ -840,7 +841,7 @@ class StateProjector:
             )
         )
         payload: dict[str, object] = {
-            "event_type": "thread_terminal",
+            "event_type": StreamFrameKind.THREAD_TERMINAL,
             "thread_id": thread_id,
             "status": outcome,
         }

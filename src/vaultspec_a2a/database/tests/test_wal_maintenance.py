@@ -18,21 +18,40 @@ of them survives contact with real SQLite:
   SQLite so the decision recorded in ``session.py`` is checked rather than
   asserted.
 
-Every test drives real SQLite files and the real administrative CLI in a real
-subprocess.  Nothing here is simulated.
+Every test drives real SQLite files, and the reclaim verb runs as the real
+``vaultspec-a2a migrate --compact`` in a real subprocess.  Its listener guard is
+proven against a real loopback listener and against a real gateway.
 """
 
 from __future__ import annotations
 
+import http.server
+import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
+import httpx
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
+from ...desktop.profile import derive_state_paths
+from ...testing import free_port
+from ...testing.cli import run_cli
+from ...testing.tests._support.http_handlers import JsonReplyHandler
+from ...testing.tests._support.listeners import serve_handler
 from ...tests._write_authority import make_test_thread_authority_columns
+from ...tests.gateway_boot import (
+    LOOPBACK_TIMEOUT,
+    broker_gateway_env,
+    gateway_script,
+    reap_gateway,
+    seat_valid_database,
+    seed_credentials,
+    spawn_gateway,
+    spawn_until_ready,
+)
 from ..models import Base, ControlActionModel, ThreadModel
 from ..session import (
     CheckpointMode,
@@ -43,9 +62,10 @@ from ..session import (
     inspect_sqlite_database,
     seat_sqlite_posture,
 )
-from ._admin_cli import run_admin
 
 if TYPE_CHECKING:
+    import subprocess
+    from collections.abc import Mapping
     from pathlib import Path
 
 # WAL evidence depends on pages written, not on the number of commits. A larger
@@ -385,7 +405,7 @@ def test_auto_vacuum_requires_a_full_vacuum_to_change_on_an_existing_database(
 ) -> None:
     """Enabling it on any existing install means rewriting the whole file.
 
-    Which is the operation ``migrate --fix`` already performs on demand, so
+    Which is the operation ``migrate --compact`` already performs on demand, so
     enabling ``auto_vacuum`` would buy nothing that path does not already give -
     at the price of page moves on every commit.
     """
@@ -455,25 +475,77 @@ def test_incremental_vacuum_reclaims_far_less_than_a_full_vacuum(
 
 
 # ---------------------------------------------------------------------------
-# The administrative reclaim verb
+# The reclaim verb
 # ---------------------------------------------------------------------------
+
+_GATEWAY_PORT_ENV = "VAULTSPEC_A2A_PORT"
+_WORKER_PORT_ENV = "VAULTSPEC_A2A_WORKER_PORT"
+
+_ATTACH = "attach-credential-compaction-1234567890abcdef"
+_OWNERSHIP = "ownership-capability-compaction-fedcba0987654321"
+
+
+def _verb_env(overrides: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Return the environment a ``migrate`` child runs under in these tests.
+
+    Both configured service ports point at free ports, because ``--compact``
+    refuses while anything listens on either one, and a child left on the
+    defaults would refuse whenever a development service runs on this host. The
+    blocked-checkpoint proof needs a nonzero wait, not the production default's
+    five seconds of idle time, and the compaction connection honors the same
+    setting as every other SQLite connection authority.
+    """
+    env = {
+        _GATEWAY_PORT_ENV: str(free_port()),
+        _WORKER_PORT_ENV: str(free_port()),
+        "VAULTSPEC_A2A_SQLITE_BUSY_TIMEOUT_MS": "50",
+    }
+    if overrides is not None:
+        env.update(overrides)
+    return env
+
+
+def _migrate(
+    home: Path, *flags: str, env: Mapping[str, str] | None = None
+) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+    """Run ``vaultspec-a2a migrate`` against *home* and parse its JSON result."""
+    result = run_cli("migrate", "--app-home", str(home), *flags, env=_verb_env(env))
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"migrate printed no JSON result (exit {result.returncode}):\n"
+            f"{result.stdout}\n{result.stderr}"
+        ) from exc
+    assert isinstance(payload, dict), result.stdout
+    return result, cast("dict[str, object]", payload)
 
 
 def _seat_wal_mode(database: Path) -> None:
     """Put the migrated database into WAL mode, as the gateway's first connect does.
 
-    The migration path builds its own synchronous engine and does not carry the
-    application connect listener, so a freshly migrated file is still on a
-    rollback journal.  Seating WAL here is what makes the tests below exercise
-    the write-ahead log at all - and, in rollback mode, a held read transaction
-    takes a shared lock that blocks writers outright, which is a different
-    failure from the one under test.
+    The migrate verb builds its own engine without the application connect
+    listener, so a freshly migrated file is still on a rollback journal.  Seating
+    WAL here is what makes the tests below exercise the write-ahead log at all -
+    and, in rollback mode, a held read transaction takes a shared lock that
+    blocks writers outright, which is a different failure from the one under
+    test.
     """
     conn = sqlite3.connect(str(database), isolation_level=None)
     try:
         assert conn.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
     finally:
         conn.close()
+
+
+def _migrated_home(base: Path) -> tuple[Path, Path]:
+    """Migrate a fresh application home; return it and its primary store in WAL."""
+    home = base / "app"
+    result, payload = _migrate(home)
+    assert payload["status"] == "succeeded", (payload, result.stderr)
+    database = derive_state_paths(home).database_path
+    _seat_wal_mode(database)
+    return home, database
 
 
 def _write_threads(database: Path, count: int) -> None:
@@ -507,18 +579,19 @@ def _write_threads(database: Path, count: int) -> None:
         engine.dispose()
 
 
-def test_migrate_fix_reclaims_the_log_and_reports_success(runtime_dir: Path) -> None:
-    """The ordinary path: a real log is truncated away, and exit zero says so.
+def test_migrate_compact_reclaims_the_log_and_reports_success(
+    runtime_dir: Path,
+) -> None:
+    """The ordinary path: a real log is truncated away, and success says so.
 
     An idle connection is held open for the duration, for two reasons: SQLite
     removes the ``-wal`` file entirely when the last connection closes, which
-    would leave this test reclaiming nothing and passing anyway; and an
-    idle-but-open reader is the shape the running gateway actually has, so the
-    reclaim is proven against it rather than against a quiesced database.
+    would leave this test reclaiming nothing and passing anyway; and an idle
+    reader holds no snapshot, so the reclaim is proven not to need a store that
+    nobody has open.  The configured ports are free, so this is also the case in
+    which the listener guard lets the verb proceed.
     """
-    database = runtime_dir / "reclaim.db"
-    assert run_admin(database, "migrate").returncode == 0
-    _seat_wal_mode(database)
+    home, database = _migrated_home(runtime_dir)
 
     holder = sqlite3.connect(str(database), isolation_level=None)
     try:
@@ -528,7 +601,7 @@ def test_migrate_fix_reclaims_the_log_and_reports_success(runtime_dir: Path) -> 
         _write_threads(database, 128)
         grown = _wal_bytes(database)
 
-        result = run_admin(database, "migrate", "--fix")
+        result, payload = _migrate(home, "--compact")
         reclaimed = _wal_bytes(database)
     finally:
         holder.close()
@@ -536,8 +609,9 @@ def test_migrate_fix_reclaims_the_log_and_reports_success(runtime_dir: Path) -> 
     # Asserted before the outcome so a database that never built a log cannot
     # make this test pass by reclaiming nothing.
     assert grown > 0, "no write-ahead log was produced to reclaim"
-    assert result.returncode == 0, result.stderr
-    assert "WAL checkpoint and VACUUM complete." in result.stdout
+    assert result.returncode == 0, (payload, result.stderr)
+    assert payload["status"] == "succeeded"
+    assert payload["failed_stage"] is None
     # Not zero: the checkpoint truncates the log, and then VACUUM rewrites the
     # whole database through that same log, leaving its own frames behind.  What
     # the verb promises is that the accumulated log is gone, which is the
@@ -545,20 +619,17 @@ def test_migrate_fix_reclaims_the_log_and_reports_success(runtime_dir: Path) -> 
     assert reclaimed < grown / 2, (grown, reclaimed)
 
 
-def test_migrate_fix_reports_a_blocked_checkpoint_instead_of_announcing_success(
+def test_migrate_compact_reports_a_blocked_checkpoint_instead_of_announcing_success(
     runtime_dir: Path,
 ) -> None:
     """The reclaim path must not report completion when it reclaimed nothing.
 
-    This is the defect: the checkpoint's result row was discarded and
-    "WAL checkpoint and VACUUM complete." was printed unconditionally, so an
-    operator investigating a growing database was told the one path that returns
-    space had run cleanly - while a held read transaction meant it had done
-    nothing at all.
+    This is the defect the verb guards against: a checkpoint's result row
+    discarded and completion announced unconditionally, so an operator
+    investigating a growing database is told the one path that returns space ran
+    cleanly - while a held read transaction meant it had done nothing at all.
     """
-    database = runtime_dir / "blocked.db"
-    assert run_admin(database, "migrate").returncode == 0
-    _seat_wal_mode(database)
+    home, database = _migrated_home(runtime_dir)
 
     reader = sqlite3.connect(str(database), isolation_level=None)
     try:
@@ -568,20 +639,125 @@ def test_migrate_fix_reports_a_blocked_checkpoint_instead_of_announcing_success(
         _write_threads(database, 128)
 
         pinned_size = _wal_bytes(database)
-        result = run_admin(database, "migrate", "--fix")
+        result, payload = _migrate(home, "--compact")
         size_after = _wal_bytes(database)
     finally:
         reader.close()
 
     assert pinned_size > 0, "the reader failed to pin any log frames"
-    assert result.returncode == 1, result.stdout
-    assert "WAL checkpoint blocked" in result.stderr
-    assert "VACUUM skipped" in result.stderr
-    assert "complete." not in result.stdout
+    assert result.returncode == 1, payload
+    assert payload["status"] == "failed"
+    assert payload["failed_stage"] == "compact"
+    assert payload["error_class"] == "CompactionBlockedError"
+    detail = str(payload["detail"])
+    assert "WAL checkpoint blocked" in detail
+    assert "VACUUM skipped" in detail
     # The log is exactly as large as it was: the report matches reality.
     assert size_after == pinned_size
 
 
+class _UnauthorizedHandler(JsonReplyHandler, http.server.BaseHTTPRequestHandler):
+    """Answers every request 401, as an authenticated gateway answers a probe.
+
+    A guard that treats any HTTP error as "not running" reads a gateway with
+    tokens configured - which refuses an unauthenticated health request - as
+    stopped, and goes on to rewrite the store the gateway still holds open.
+    """
+
+    def do_GET(self) -> None:
+        """Refuse the request the way an authenticated gateway does."""
+        self._reply(401, {"detail": "unauthorized"})
+
+
+@pytest.mark.parametrize("held_port_env", [_GATEWAY_PORT_ENV, _WORKER_PORT_ENV])
+def test_migrate_compact_refuses_while_an_authenticated_service_holds_a_port(
+    runtime_dir: Path, held_port_env: str
+) -> None:
+    """A 401 answer is a running service, not an absent one."""
+    home, database = _migrated_home(runtime_dir)
+
+    holder = sqlite3.connect(str(database), isolation_level=None)
+    try:
+        _write_threads(database, 16)
+        grown = _wal_bytes(database)
+
+        with serve_handler(_UnauthorizedHandler) as held_port:
+            result, payload = _migrate(
+                home, "--compact", env={held_port_env: str(held_port)}
+            )
+        size_after = _wal_bytes(database)
+    finally:
+        holder.close()
+
+    assert grown > 0, "no write-ahead log was produced to protect"
+    assert result.returncode == 1, payload
+    assert payload["status"] == "failed"
+    assert payload["failed_stage"] == "lock"
+    assert payload["error_class"] == "StoreLockedError"
+    assert f"listening on port {held_port}" in str(payload["detail"])
+    assert payload["stores"] == []
+    # Refused before any store was touched: the log was never checkpointed.
+    assert size_after == grown
+
+
+@pytest.mark.resource("desktop-processes", shared=True)
+def test_migrate_compact_refuses_while_a_real_gateway_holds_the_store(
+    tmp_path: Path,
+) -> None:
+    """A live authenticated gateway over the home refuses compaction at ``lock``.
+
+    The lock probe alone would admit this run: a gateway between requests holds
+    no lock on its store, so ``BEGIN IMMEDIATE`` succeeds beside it.  Only the
+    listener guard stands between the verb and a VACUUM under a live service, so
+    it is proven against the real product as well as against a bare listener.
+    """
+    app_home = tmp_path / "app-home"
+    app_home.mkdir()
+    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
+    seat_valid_database(app_home)
+
+    log_path = tmp_path / "gateway.log"
+    with log_path.open("wb") as log_handle:
+
+        def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
+            return spawn_gateway(
+                script=gateway_script(log_level="warning"),
+                gateway_port=gateway_port,
+                env=broker_gateway_env(
+                    app_home,
+                    gateway_port=gateway_port,
+                    worker_port=worker_port,
+                    gateway_token=_ATTACH,
+                ),
+                log_handle=log_handle,
+            )
+
+        proc, gateway_port, worker_port, base = spawn_until_ready(
+            _spawn, log_path=log_path
+        )
+        try:
+            result, payload = _migrate(
+                app_home,
+                "--compact",
+                env={
+                    _GATEWAY_PORT_ENV: str(gateway_port),
+                    _WORKER_PORT_ENV: str(worker_port),
+                },
+            )
+            health = httpx.get(f"{base}/health", timeout=LOOPBACK_TIMEOUT)
+        finally:
+            reap_gateway(proc)
+
+    assert result.returncode == 1, payload
+    assert payload["status"] == "failed"
+    assert payload["failed_stage"] == "lock"
+    assert payload["error_class"] == "StoreLockedError"
+    assert f"listening on port {gateway_port}" in str(payload["detail"])
+    assert payload["stores"] == []
+    # The refusal left the service it detected serving.
+    assert health.status_code == 200
+
+
 def test_the_models_the_reclaim_test_writes_are_the_production_models() -> None:
-    """Guards the test above against drifting onto a hand-rolled table."""
+    """Guards the tests above against drifting onto a hand-rolled table."""
     assert ThreadModel.__tablename__ in Base.metadata.tables

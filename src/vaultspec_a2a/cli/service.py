@@ -20,7 +20,8 @@ opening a second code path:
   stores through the desktop migration authority; ``migrate`` is the
   dashboard-spawnable upgrade step of the dashboard-owned update transaction
   (the dashboard drains, snapshots, and rolls back itself - a2a only executes
-  the schema work).
+  the schema work), and ``migrate --compact`` is the operator's way to return
+  the primary store's freed pages to the operating system.
 
 Every verb is idempotent from the dashboard's perspective: starting a running
 service, stopping a stopped one, and re-running setup against an initialised
@@ -382,6 +383,7 @@ def migrate_service(
     *,
     expect_from: str | None = None,
     expect_head: str | None = None,
+    compact: bool = False,
 ) -> dict[str, Any]:
     """Upgrade the home's quiesced stores to the packaged schema head.
 
@@ -389,8 +391,10 @@ def migrate_service(
     caller owns ordering (drain, snapshot, migrate, activate) and rollback
     (its snapshot); this verb only executes a2a's schema work through the
     desktop migration authority, refusing live or locked stores and failing
-    closed on an ``expect_from``/``expect_head`` assertion mismatch. Returns
-    the bounded JSON-ready result.
+    closed on an ``expect_from``/``expect_head`` assertion mismatch. *compact*
+    then truncates the primary store's write-ahead log and vacuums it, refusing
+    while a service listens on a configured port. Returns the bounded JSON-ready
+    result.
     """
     import asyncio
 
@@ -398,7 +402,9 @@ def migrate_service(
 
     home = _resolved_app_home(app_home)
     result = asyncio.run(
-        migrate_stores(home, expect_from=expect_from, expect_head=expect_head)
+        migrate_stores(
+            home, expect_from=expect_from, expect_head=expect_head, compact=compact
+        )
     )
     payload = result.model_dump(mode="json")
     payload["app_home"] = str(home)
@@ -529,13 +535,25 @@ def setup_command(app_home: Path | None, capsule_root: Path | None) -> None:
     default=None,
     help="Refuse unless the packaged Alembic head is this revision.",
 )
+@click.option(
+    "--compact",
+    is_flag=True,
+    default=False,
+    help=(
+        "After migrating, truncate the primary store's write-ahead log and run "
+        "VACUUM; refused while a service listens on a configured port."
+    ),
+)
 def migrate_command(
-    app_home: Path | None, expect_from: str | None, expect_head: str | None
+    app_home: Path | None,
+    expect_from: str | None,
+    expect_head: str | None,
+    compact: bool,
 ) -> None:
     """Migrate quiesced stores to the packaged head (dashboard-spawnable)."""
     try:
         payload = migrate_service(
-            app_home, expect_from=expect_from, expect_head=expect_head
+            app_home, expect_from=expect_from, expect_head=expect_head, compact=compact
         )
     except Exception as exc:
         raise _service_error(exc) from exc

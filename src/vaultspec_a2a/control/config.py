@@ -217,12 +217,11 @@ class Settings(DomainSettingsConfig, InfraConfig):
 
     @model_validator(mode="after")
     def _validate_synchronous_url_derivation(self) -> Self:
-        """Refuse a configured URL that has no synchronous SQLAlchemy equivalent.
+        """Refuse a configured URL SQLAlchemy cannot parse or has no driver for.
 
-        The admin and command-line paths - schema creation and the destructive
-        ``db clear`` - run on synchronous engines built from these URLs. Leaving the
-        check to those call sites means a shipped-configuration typo first surfaces
-        part-way through a destructive command; here it surfaces at boot.
+        Left to the first engine built from the URL, a shipped-configuration typo
+        surfaces wherever that engine happens to be created; here it surfaces at
+        boot, with a message that never echoes the URL's credential.
 
         Declared after the desktop seating so it validates the URLs the process will
         actually use, not the ones the seating is about to replace. The anchoring
@@ -263,8 +262,8 @@ class Settings(DomainSettingsConfig, InfraConfig):
 
     def _check_backends(self) -> Self:
         # Resolving the backends here raises when a declared backend and its URL
-        # disagree, which the synchronous admin engines built from these values
-        # have no other seam to catch.
+        # disagree, at construction rather than at the first engine built from
+        # these values.
         _ = self.resolved_database_backend
         if self.checkpoint_database_url is not None:
             _ = self.resolved_checkpoint_backend
@@ -482,32 +481,6 @@ class Settings(DomainSettingsConfig, InfraConfig):
 
         return url.replace("postgresql+asyncpg://", "postgresql://", 1).replace(
             "postgresql+psycopg://", "postgresql://", 1
-        )
-
-    @property
-    def database_sync_url(self) -> str:
-        """Return a synchronous SQLAlchemy URL for admin/CLI operations.
-
-        URL/backend agreement is enforced at construction rather than here, so this
-        reads as the pure derivation it is.
-        """
-        return _synchronous_url(self.database_url, setting="VAULTSPEC_A2A_DATABASE_URL")
-
-    @property
-    def checkpoint_sync_url(self) -> str:
-        """Return a synchronous SQLAlchemy URL for the checkpoint store.
-
-        Falls back to the application database when no dedicated checkpoint URL
-        is configured, matching the runtime savers: the two stores share one file
-        by default and split only when explicitly configured.
-        """
-        if self.checkpoint_database_url is None:
-            return _synchronous_url(
-                self.database_url, setting="VAULTSPEC_A2A_DATABASE_URL"
-            )
-        return _synchronous_url(
-            self.checkpoint_database_url,
-            setting="VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
         )
 
     def validate_postgres_requirement(self) -> None:

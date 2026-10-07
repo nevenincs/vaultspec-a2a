@@ -2770,7 +2770,7 @@
           "ineligible"
         ],
         "title": "ProviderEligibility",
-        "description": "Whether at least one subprocess provider can actually run on this host.\n\nComputed through the credential-aware readiness probe: the configured\ncredential is checked first, then command resolvability. The probe is still\nno-instantiation - no provider is constructed and no subprocess is spawned\nto determine it - but a resolvable launch command is not on its own\nsufficient, because a provider whose binary is installed with its\ncredential absent cannot run. Codex is the deliberate exception: its auth\nis a file-based persisted session rather than a configured secret, so it\ngates on command resolvability alone."
+        "description": "Whether at least one subprocess provider may be served work on this host.\n\nDecided by lane admission, which requires a recorded completed-turn proof\nfor the lane, a resolved launcher whose reported version that proof admits,\nand the lane's own readiness - its configuration present and its launch\ncommand resolvable. All three, conjunctively.\n\nCredential readiness is NECESSARY and never SUFFICIENT: a lane whose\ncredential resolves and whose launcher is installed is still ``ineligible``\nuntil a live test has completed a real turn on it. An eligibility that\nstopped at the credential served lanes with handshake coverage only, which\nis the whole reason the proof term exists. No provider is constructed to\ndecide this, and the launcher's version report is cached per launch identity."
       },
       "ProviderHealthResponse": {
         "properties": {
@@ -3022,7 +3022,7 @@
           "blocked"
         ],
         "title": "RunAdmission",
-        "description": "Whether the gateway would admit a run right now - the execution-ready fact.\n\n``ready`` means execution-ready: a reachable worker and a provider that is\nboth installed and credentialed, so this staged gate and the\ncredential-aware gate launch applies agree, rather than admitting a run and\nreserving capacity for it that the latter then refuses.\n``deferred`` means gateway-ready but not yet execution-ready - the worker is\ncold or starting and will start on demand. It remains informational on the\nreadiness surface, while staged ``prepare`` admission refuses it fail-closed.\n``blocked`` means a hard dependency or the profile's required native\nexecution isolation is unavailable. Attachment can remain gateway-ready."
+        "description": "Whether the gateway would admit a run right now - the execution-ready fact.\n\n``ready`` means execution-ready: a reachable worker and a provider this host\nmay be served, so this staged gate and the admission gate launch applies\nagree, rather than admitting a run and reserving capacity for it that the\nlatter then refuses.\n``deferred`` means gateway-ready but not yet execution-ready - the worker is\ncold or starting and will start on demand. It remains informational on the\nreadiness surface, while staged ``prepare`` admission refuses it fail-closed.\n``blocked`` means a hard dependency or the profile's required native\nexecution isolation is unavailable. Attachment can remain gateway-ready."
       },
       "RunAgentSummary": {
         "properties": {

@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...testing import request_permission_params
-from ...workspace.concurrency import git_workspace_mutex
 from .._acp_request import jsonrpc_result
 from .._acp_rpc_handlers import (
     on_fs_write_text_file,
@@ -23,6 +22,7 @@ from .._acp_rpc_handlers import (
 )
 from .._acp_rpc_terminal_handlers import release_owned_terminal
 from .._acp_types import AcpModelConfig, AcpSessionContext
+from .._write_lock import ProviderWriteLock
 from ._terminal_process import retain_terminal_process
 
 if TYPE_CHECKING:
@@ -31,7 +31,9 @@ if TYPE_CHECKING:
     from .._json_contract import JsonObject, JsonValue
 
 
-def _config(root: Path) -> AcpModelConfig:
+def _config(
+    root: Path, *, write_lock: ProviderWriteLock | None = None
+) -> AcpModelConfig:
     return AcpModelConfig(
         agent_config=None,
         permission_callback=None,
@@ -43,6 +45,7 @@ def _config(root: Path) -> AcpModelConfig:
         provider=None,
         provider_command=None,
         auth_mode=None,
+        write_lock=write_lock if write_lock is not None else ProviderWriteLock(),
     )
 
 
@@ -281,12 +284,20 @@ async def test_owner_write_remains_permitted(
     ) == "owner content"
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["replace", "close"])
-async def test_write_rechecks_session_after_waiting_for_workspace_mutex(
+async def test_write_rechecks_session_after_waiting_for_the_path_lock(
     tmp_path: Path, acp_session_context: AcpSessionContext, change: str
 ) -> None:
-    async with git_workspace_mutex:
+    """Session authority is re-read after the wait, not carried over it.
+
+    The write waits on the lock for its own target file, held here through the
+    production API, so the wait is the one a competing writer of that file
+    imposes. A session replaced or closed during the wait must refuse the write
+    that was admitted under the old one.
+    """
+    write_lock = ProviderWriteLock()
+    async with write_lock.hold(tmp_path / "created.txt"):
         pending = asyncio.create_task(
             on_fs_write_text_file(
                 1,
@@ -296,7 +307,7 @@ async def test_write_rechecks_session_after_waiting_for_workspace_mutex(
                     "content": "old session",
                 },
                 acp_session_context,
-                _config(tmp_path),
+                _config(tmp_path, write_lock=write_lock),
             )
         )
         await asyncio.sleep(0)

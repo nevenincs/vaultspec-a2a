@@ -26,6 +26,7 @@ from ._factory_commands import ProviderCommand
 from ._json_contract import JsonObject
 from ._project_scope import RunProjectScope
 from ._subprocess import STDERR_TAIL_LINES
+from ._write_lock import ProviderWriteLock, provider_write_lock
 
 __all__: list[str] = []
 
@@ -110,6 +111,11 @@ class AcpModelConfig:
     # Exact session-wide provider config values frozen at run admission, keyed
     # by the ACP adapter's advertised configuration option id.
     desired_config_options: dict[str, str] = field(default_factory=dict)
+    # The lock a filesystem write acquires, keyed by the file it replaces.
+    # Carried here rather than reached for at the point of use so every writer
+    # names the lock it waits on, and defaulted to the process-wide registry
+    # because the reach has to cover every writer of one file.
+    write_lock: ProviderWriteLock = field(default_factory=provider_write_lock)
 
     @property
     def project_scope(self) -> RunProjectScope:

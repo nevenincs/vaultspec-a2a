@@ -120,8 +120,6 @@ Workspace
 
 .. automoduledoc:: vaultspec_a2a.workspace
 
-.. py:data:: concurrency.git_workspace_mutex
-
 Public entry points
 -------------------
 

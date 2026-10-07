@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import SettingsConfigDict
@@ -18,10 +18,12 @@ from .settings_base import (
 from .state_layout import DEFAULT_HOME
 
 __all__ = [
+    "ACP_BACKENDS",
     "DEFAULT_MOCK_API_BASE",
     "GATEWAY_URL_ENV",
     "INTERNAL_TOKEN_ENV",
     "WORKER_URL_ENV",
+    "AcpBackend",
     "InfraConfig",
     "_synchronous_url",
     "_warn_seating_discard",
@@ -45,6 +47,11 @@ DEFAULT_MOCK_API_BASE = "http://localhost:8100"
 DEFAULT_OTLP_ENDPOINT = "http://localhost:4317"
 
 logger = logging.getLogger("vaultspec_a2a.control.config")
+
+AcpBackend = Literal["node", "binary"]
+# Derived from the Literal so a frozen lane's backend suffix is checked against
+# the one declaration the ``acp_backend`` setting is validated by.
+ACP_BACKENDS: frozenset[str] = frozenset(get_args(AcpBackend))
 
 # The synchronous SQLAlchemy driver this project ships for each supported backend.
 # Keyed on the SQLAlchemy *backend* name rather than on the full drivername, so the
@@ -703,7 +710,7 @@ class InfraConfig(ProjectSettings):
     )
 
     # ACP backend selection
-    acp_backend: Literal["node", "binary"] = Field(
+    acp_backend: AcpBackend = Field(
         default="node",
         description=(
             "ACP gateway backend: 'node' uses the npm-installed index.js, "

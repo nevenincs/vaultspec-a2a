@@ -673,10 +673,10 @@ def _persist_team_selection(
 
 
 def _modern_frozen_disclosure(
-    frozen: Any,
+    frozen: FrozenTeamSelection | None,
 ) -> FrozenTeamAssignmentSummary | None:
     """Project only validated modern selections onto the public frozen shape."""
-    if not isinstance(frozen, FrozenTeamSelection):
+    if frozen is None:
         return None
     return FrozenTeamAssignmentSummary.model_validate(frozen.disclosure())
 

@@ -41,6 +41,7 @@ from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
 from ..desktop.native_isolation import NativeLaunchAuthority, NativeWorkspaceAuthority
+from ..graph.enums import Provider
 from ..team.team_config import AgentConfig
 from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
@@ -87,6 +88,7 @@ from ._stream_lifetime import ProcessChatModel
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .binary_version import probe_binary_version
 from .conditions import ProviderCondition
+from .execution_modes import EXTERNAL_EXECUTION_MODES
 from .lane_admission import is_web_lane_proven
 
 if TYPE_CHECKING:
@@ -227,7 +229,7 @@ class CodexChatModel(ProcessChatModel):
             "runtime_authority": identity_text(
                 self.runtime_authority, field="runtime authority"
             ),
-            "adapter_name": "codex-app-server",
+            "adapter_name": EXTERNAL_EXECUTION_MODES[Provider.CODEX],
             "adapter_version": match.group(1),
             "adapter_entry_path": cli,
             "cli_executable_path": cli,

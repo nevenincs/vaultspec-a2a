@@ -9,8 +9,7 @@ Run standalone::
     python -m uvicorn vaultspec_a2a.worker.app:create_worker_app \
         --factory --host 127.0.0.1 --port 18001
 
-Or via the ``vaultspec-worker`` console script (once registered in
-``pyproject.toml``).
+Or as ``python -m vaultspec_a2a.worker``, which runs :func:`main`.
 """
 
 from __future__ import annotations
@@ -40,8 +39,12 @@ from ..control.config import settings
 from ..control.settings_base import build_now
 from ..database.checkpoints import open_checkpointer
 from ..domain_config import domain_config
-from ..ipc.body_limit import BoundedHttpBodyMiddleware, worker_body_limit
-from ..ipc.schemas import DispatchRequest, DispatchResponse
+from ..ipc import (
+    BoundedHttpBodyMiddleware,
+    DispatchRequest,
+    DispatchResponse,
+    worker_body_limit,
+)
 from ..lifecycle.pairing import DispatchPairingStatus, resolve_worker_gateway_target
 from ..lifecycle.registration import deregister_serve, register_serve
 from ..lifecycle.shutdown import ShutdownDeadline, build_shutdown_server, finish_before
@@ -526,8 +529,9 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
             # only its target looks correctly paired to a gateway that no longer
             # exists. These two say WHICH gateway incarnation started this worker
             # and which spawn attempt it was. Empty when the worker was started
-            # by something other than a gateway spawn - Compose, an operator, or
-            # a test - which is itself the honest answer rather than a default.
+            # by something other than a gateway spawn - the process registry, an
+            # operator, or a test - which is itself the honest answer rather than
+            # a default.
             "paired_gateway_lifetime": settings.gateway_lifetime_id,
             "worker_generation": settings.worker_generation,
         }

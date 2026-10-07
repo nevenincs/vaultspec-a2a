@@ -145,9 +145,9 @@ def _declaring_modules(pattern: str) -> list[str]:
             "declarations, and a further pair in authoring/discovery.py the "
             "original sweep missed. All narrow an already-parsed value to a "
             "string-keyed dict, returning None rather than raising. Distinct on "
-            "purpose from `_json_object(encoded: str)` in "
-            "control/event_handlers.py, the STRING-decode sibling that calls "
-            "``validate_json`` rather than ``validate_python``.",
+            "purpose from `decode_json_object(encoded: str | None)` in the same "
+            "module, the TEXT-decode sibling that calls ``validate_json`` rather "
+            "than ``validate_python``.",
         ),
         (
             "strict object-list narrower",

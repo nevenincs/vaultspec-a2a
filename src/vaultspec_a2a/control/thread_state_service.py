@@ -1,8 +1,8 @@
 """Thread state snapshot assembly service.
 
-Extracts the 95-line orchestration from the ``/threads/{id}/state``
-endpoint into a testable, protocol-agnostic function.  The route
-handler validates input and serves the result.
+Assembles one run's snapshot and checkpoint projection in a testable,
+transport-agnostic function.  The route handlers validate input and serve the
+result.
 """
 
 from __future__ import annotations

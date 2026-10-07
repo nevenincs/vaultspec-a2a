@@ -1,9 +1,9 @@
 """The relayed event-type key pair must hold wherever a payload is normalised.
 
 A relayed event names its type under two keys, ``type`` and ``event_type``, and
-both have live readers. The rule that keeps them in step had three near-copies,
-and the normaliser could repair only one direction, so the same event
-classified differently depending only on which producer built it.
+both have live readers. The rule that keeps them in step is stated once and the
+normaliser repairs either direction, so the same event classifies the same
+whichever producer built it.
 
 These tests bind the normaliser and the remaining relay predicates to that rule
 directly, so a payload is classifiable under whichever key names its type.
@@ -26,11 +26,6 @@ from ...thread.snapshots import (
 )
 
 # ---------------------------------------------------------------------------
-# The bypass: a WS-origin terminal payload reaching a real client
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
 # The seam: mirroring is bidirectional, and classification agrees either way
 # ---------------------------------------------------------------------------
 
@@ -38,9 +33,8 @@ from ...thread.snapshots import (
 def test_normalizer_repairs_a_type_only_payload() -> None:
     """A payload naming its type under ``type`` alone leaves carrying both.
 
-    The direction the SSE-side normaliser structurally could not repair: it
-    returned early whenever ``type`` was present, so an ``event_type`` reader
-    downstream saw an untyped payload.
+    The ``type``-only direction must be repaired too, or an ``event_type``
+    reader downstream sees an untyped payload.
     """
     normalized = normalize_wire_event_type({"type": "thread_terminal", "status": "ok"})
     assert normalized["type"] == "thread_terminal"
@@ -79,9 +73,8 @@ def test_classifiers_agree_whichever_key_names_the_type(
 ) -> None:
     """The relay predicates classify a payload identically under either key.
 
-    They previously read different keys - terminal read ``event_type``, the other
-    one read ``type`` - so the same event classified differently depending only
-    on which producer built it.
+    A predicate that read only one key would classify the same event
+    differently depending only on which producer built it.
     """
     under_type = {"type": event_type, "status": ThreadStatus.FAILED.value}
     under_event_type = {"event_type": event_type, "status": ThreadStatus.FAILED.value}

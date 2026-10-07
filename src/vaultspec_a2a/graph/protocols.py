@@ -121,9 +121,9 @@ class ProviderFactoryProtocol(Protocol):
 class TelemetryHook(Protocol):
     """Protocol for pluggable telemetry instrumentation.
 
-    The aggregator and graph compiler accept an optional ``TelemetryHook``
-    at construction time.  Core ships with :class:`NullTelemetryHook` as
-    the default no-op implementation.
+    The worker's ``RunEventProducer`` and the gateway's ``RelayHub`` accept an
+    optional ``TelemetryHook`` at construction time.  Core ships with
+    :class:`NullTelemetryHook` as the default no-op implementation.
     """
 
     def start_span(self, name: str, **attrs: Any) -> AbstractContextManager[Any]: ...

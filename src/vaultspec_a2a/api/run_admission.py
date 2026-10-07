@@ -162,8 +162,9 @@ def _digest(body: RunStartRequest, excluded: frozenset[str]) -> str:
     depends on the values rather than on dictionary ordering or formatting.
     """
     omitted = set(excluded)
-    # This optional field was added after fingerprints were persisted. Its
-    # absent value must retain the exact bytes of those older requests.
+    # Dropped under every rule rather than listed in one rule's exclusion set:
+    # an unset continuation id keeps the payload of a request that never named
+    # one byte-identical to the fingerprint stored before the field existed.
     if body.continues_run_id is None:
         omitted.add("continues_run_id")
     payload = body.model_dump(mode="json", exclude=omitted)

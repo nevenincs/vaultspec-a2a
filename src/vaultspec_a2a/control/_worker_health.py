@@ -489,8 +489,8 @@ async def worker_ready_and_ours(
     ARMED desktop profile the authenticated pairing verdict is the authority -
     only a worker whose reported gateway lifetime and spawn generation classify
     as ``OWNED`` is adopted; missing, blank, or foreign evidence fails closed.
-    Unarmed profiles require an exact declared ``gateway_url`` match. Registry-
-    and Compose-managed workers publish that current evidence through health.
+    Unarmed profiles require an exact declared ``gateway_url`` match.
+    Registry-managed workers publish that current evidence through health.
 
     An occupant that answered but reported nothing readable is not ours under
     either profile. This is the opposite reading from the spawn path, which

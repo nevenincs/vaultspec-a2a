@@ -157,7 +157,7 @@ class _RelayContext:
     prune_registry: Any
     # The seated replay recorder, resolved once per ingest rather than per
     # event: seating it is also what binds the run-sequence authority, so an
-    # ingest that reaches the aggregator has either both or neither.
+    # ingest that reaches the relay hub has either both or neither.
     replay: Any = None
 
     @classmethod
@@ -178,7 +178,7 @@ class _RelayContext:
 async def _relay_single_event(
     thread_id: str, payload: dict[str, Any], context: _RelayContext
 ) -> None:
-    """Aggregate and relay a single worker event.
+    """Relay a single worker event through the gateway's relay hub.
 
     *drain_gate* is the process-wide run-admission gate seated on ``app.state``;
     it travels to the terminal handler, which releases the run from it, exactly
@@ -187,8 +187,8 @@ async def _relay_single_event(
     One frame is relayed differently. A terminal says the RUN ended, and only
     the control plane knows whether it did: a run with a continuation waiting
     takes the next turn instead of settling, and this relay reaches the
-    aggregator first, so it used to show that run a terminal it then kept
-    running past. The terminal is therefore handed to the control plane as a
+    hub first, so it used to show that run a terminal it then kept running
+    past. The terminal is therefore handed to the control plane as a
     publisher rather than fanned out here, and released on the far side of the
     decision. Every other frame crosses as it always has.
     """
@@ -200,7 +200,7 @@ async def _relay_single_event(
         return
     if payload.get("type") == "dispatch_applied":
         # Application receipts are a private worker->gateway settlement signal.
-        # They deliberately bypass the public aggregator/SSE projection so the
+        # They deliberately bypass the public relay-hub/SSE projection so the
         # stable dispatch identity never becomes a progress-frame field.
         await relay_event(
             thread_id,
@@ -223,7 +223,7 @@ async def _relay_single_event(
         publish_terminal = partial(context.agg.relay_payload, thread_id, payload)
     else:
         context.agg.relay_payload(thread_id, payload)
-    # Mirrors the event into the aggregator's agent, tool-call and node state
+    # Mirrors the event into the relay hub's agent, tool-call and node state
     # before the handlers below, whose settled path purges that state.
     context.agg.sync_worker_event(thread_id, payload)
     await relay_event(

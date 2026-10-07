@@ -5,7 +5,7 @@ its own owner-restricted file beneath the application home's credentials directo
 
 * **attach control** - created by the dashboard, read by the gateway, presented on
   every versioned control verb, product application programming interface (API)
-  call, event WebSocket, and terminal settlement callback.
+  call, event stream, and terminal settlement callback.
 * **ownership capability** - created by the dashboard and bound to the install
   receipt, read by the gateway, additionally required on receipt-bound lifecycle
   operations such as administrative shutdown. Discovery never references it.

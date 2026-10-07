@@ -40,6 +40,7 @@ __all__ = [
     "DispatchResponse",
     "ExecutionStateProjectionPayload",
     "HeartbeatRequest",
+    "SeedTranscriptMessage",
     "WorkerEventBatch",
     "WorkerEventEnvelope",
     "canonical_project_root",

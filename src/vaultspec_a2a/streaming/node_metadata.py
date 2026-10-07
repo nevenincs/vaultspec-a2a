@@ -1,17 +1,19 @@
 """The single definition of a graph node's team-status metadata fields.
 
-Four sites read the same six fields off a compiled graph node's ``metadata``
+Several sites read the same five fields off a compiled graph node's ``metadata``
 mapping and flatten them to strings: the worker's ``graph_registered`` payload
-builder, this package's subscriber cache, the relayed-payload sync that
-rebuilds that cache on the control surface, and the team-status emitter that
-defaults them into an agent summary. They agreed field-for-field only by
-repetition, so a field added to one would have silently gone missing from the
-others - the direct-vs-relayed split is exactly where that drift hides.
+builder, the producer's per-run node cache, the relayed-payload sync that
+rebuilds that cache in the gateway's live-state mirror, the team-status emitter
+that defaults them into an agent summary, and the snapshot enrichment that
+validates a checkpointed descriptor against the field set. They agreed
+field-for-field only by repetition, so a field added to one would have silently
+gone missing from the others - the direct-vs-relayed split is exactly where
+that drift hides.
 
-Home rationale: three of the four readers live in this package, and the fourth
-(``vaultspec_a2a.worker.graph_lifecycle``) already imports from
+Home rationale: most readers live in this package, and the others
+(``vaultspec_a2a.worker`` and ``vaultspec_a2a.control``) already import from
 ``vaultspec_a2a.streaming``, so this adds no dependency edge. Nothing here
-imports ``worker``, so the direction stays one-way.
+imports either, so the direction stays one-way.
 """
 
 from __future__ import annotations

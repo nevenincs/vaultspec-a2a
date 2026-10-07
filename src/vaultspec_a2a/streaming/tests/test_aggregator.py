@@ -1170,11 +1170,11 @@ class TestLangGraphStreamProcessing:
 
 
 # ---------------------------------------------------------------------------
-# Provider-internal tool-call chunks (F17): commandExecution/fileChange/
-# mcpToolCall never go through a real BaseTool/ToolNode, so the only place
-# their activity reaches astream_events is tool_call_chunks on a streamed
-# AIMessageChunk -- previously read nowhere, so every one of these calls
-# stayed unregistered for a run's whole live stream.
+# Provider-internal tool-call chunks: commandExecution/fileChange/mcpToolCall
+# never go through a real BaseTool/ToolNode, so the only place their activity
+# reaches astream_events is tool_call_chunks on a streamed AIMessageChunk --
+# the chunks must be read, or every one of these calls stays unregistered for
+# a run's whole live stream.
 # ---------------------------------------------------------------------------
 
 
@@ -1207,7 +1207,7 @@ def _action_chunk_frame(
 
 
 class TestProviderActionToolCallChunks:
-    """F17: a provider action item's terminal status/content/locations must
+    """A provider action item's terminal status/content/locations must
     reach a ToolCallStart + ToolCallUpdate pair instead of being dropped."""
 
     @pytest.mark.asyncio
@@ -1216,8 +1216,8 @@ class TestProviderActionToolCallChunks:
     ) -> None:
         """A completed commandExecution action advances past PENDING.
 
-        Fails on unfixed code: chunk.tool_call_chunks was never read, so
-        neither event below is emitted and the queue stays empty.
+        The chunk's ``tool_call_chunks`` must be read: otherwise neither event
+        below is emitted and the queue stays empty.
         """
         queue = _relayed(producer, "thread-1")
 
@@ -1334,9 +1334,7 @@ class TestProviderActionToolCallChunks:
     ) -> None:
         """A completed fileChange action reports the paths it touched.
 
-        F17 also named empty ``locations`` on every one of the 15 stuck
-        tool calls as part of the defect - a frontend could never show what
-        any call touched.
+        Without ``locations`` a consumer could never show what a call touched.
         """
         queue = _relayed(producer, "thread-1")
 

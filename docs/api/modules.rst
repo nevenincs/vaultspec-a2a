@@ -47,8 +47,8 @@ Control
 
 .. automoduledoc:: vaultspec_a2a.control
 
-Control objects live in direct child modules. The package ``__all__``
-advertises module names but doesn't bind those modules as attributes.
+Control objects live in direct child modules. The package root binds none of
+them, so import each from the module that owns it.
 
 Database
 ~~~~~~~~
@@ -131,10 +131,11 @@ API application
 .. py:module:: vaultspec_a2a.api.app
    :synopsis: FastAPI application construction.
 
-.. py:function:: create_app(lifespan=None, *, allow_unauthenticated_v1_for_testing=False)
+.. py:function:: create_app(lifespan=None)
 
-   Construct the gateway application. Production callers must leave the
-   unauthenticated ``/v1`` test bypass disabled.
+   Construct the gateway application. Every ``/v1`` request requires the
+   attach bearer; the application snapshots the configured gateway token or
+   generates a per-process one.
 
 .. py:module:: vaultspec_a2a.api.auth
    :synopsis: Bearer authentication for engine-facing gateway routes.
@@ -151,12 +152,7 @@ API application
    :synopsis: Bounded gateway lifecycle and lease-status wire models.
 
 .. py:module:: vaultspec_a2a.ipc.body_limit
-   :synopsis: Pre-parser memory bound for authenticated v1 write bodies.
-
-.. py:module:: vaultspec_a2a.api.websocket
-   :synopsis: WebSocket connection and command handling.
-
-.. py:class:: ConnectionManager(aggregator)
+   :synopsis: Pre-parser memory bound for gateway and worker HTTP request bodies.
 
 Command-line entry point
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -181,8 +177,6 @@ Desktop capsule contract
 .. py:class:: ComponentManifest
 
 .. py:function:: component_manifest_schema()
-
-.. py:function:: contract_versions_compatible(declared, supported)
 
 .. py:function:: export_component_manifest_schema()
 
@@ -258,25 +252,18 @@ Provider construction
 
 .. py:class:: ProviderFactory
 
-Event aggregation
-~~~~~~~~~~~~~~~~~
+Event streaming
+~~~~~~~~~~~~~~~
 
 .. py:module:: vaultspec_a2a.streaming.aggregator
-   :synopsis: Runtime event ingestion, sequencing, and emission.
+   :synopsis: The worker's event producer: graph ingestion, buffering, and relay hooks.
 
-.. py:class:: EventAggregator(telemetry=None)
+.. py:class:: RunEventProducer(telemetry=None)
 
-Workspace management
-~~~~~~~~~~~~~~~~~~~~
+.. py:module:: vaultspec_a2a.streaming.subscribers
+   :synopsis: The gateway's relay hub: subscriber queues, numbering, and live state.
 
-.. py:module:: vaultspec_a2a.workspace.git_manager
-   :synopsis: Git worktree lifecycle management.
-
-.. py:class:: GitManager(repo_root)
-
-.. py:class:: MergeStrategy
-
-.. py:class:: WorktreeInfo(path, branch, head_sha, is_main)
+.. py:class:: RelayHub(telemetry=None)
 
 Collaborating modules
 ---------------------
@@ -285,7 +272,7 @@ API and protocols
 ~~~~~~~~~~~~~~~~~
 
 .. py:module:: vaultspec_a2a.api.schemas
-   :synopsis: Hypertext Transfer Protocol (HTTP) and WebSocket wire schemas.
+   :synopsis: Hypertext Transfer Protocol (HTTP) wire schemas.
 
 .. py:module:: vaultspec_a2a.protocols.mcp
    :synopsis: Per-run authoring bridge package boundary.
@@ -354,7 +341,12 @@ Control services
 
 .. py:class:: ActiveRunDiscoveryResult
 
-.. py:function:: discover_active_runs(db, *, workspace_root=None, feature_tag=None, limit=50)
+.. py:function:: discover_active_runs(db, *, checkpointer, workspace_root=None, feature_tag=None, limit=50)
+
+.. py:module:: vaultspec_a2a.control.reconciliation
+   :synopsis: Startup entry to the shared durable recovery authority.
+
+.. py:function:: reconcile_threads_on_startup(session, checkpointer)
 
 .. py:module:: vaultspec_a2a.control.verdict_subscriber
    :synopsis: Authoring verdict delivery.
@@ -370,13 +362,11 @@ Persistence
 
 .. py:class:: CheckpointSchemaError
 
-.. py:function:: install_checkpoint_schema_identity(checkpoint_path)
+.. py:function:: install_checkpoint_schema_identity(checkpoint_path, *, busy_timeout_ms=None)
 
-.. py:function:: open_checkpoint_read_only(checkpoint_path)
+.. py:function:: open_checkpoint_read_only(checkpoint_path, *, busy_timeout_ms=None)
 
 .. py:function:: validate_checkpoint_schema_connection(connection)
-
-.. py:function:: validate_checkpoint_schema_identity(checkpoint_path)
 
 .. py:module:: vaultspec_a2a.database.models
    :synopsis: SQLAlchemy persistence models.
@@ -396,8 +386,14 @@ Persistence
 .. py:module:: vaultspec_a2a.database.cost_repository
    :synopsis: Cost tracking persistence operations.
 
+.. py:module:: vaultspec_a2a.database.deletion_saga_repository
+   :synopsis: Durable row behind a cross-store thread delete.
+
 .. py:module:: vaultspec_a2a.database.permission_repository
    :synopsis: Permission request and decision-log persistence operations.
+
+.. py:module:: vaultspec_a2a.database.recovery_attempt_repository
+   :synopsis: Durable retry schedule of exact run writers.
 
 .. py:module:: vaultspec_a2a.database.thread_repository
    :synopsis: Thread persistence operations.
@@ -447,7 +443,7 @@ as an owner-restricted handoff before :func:`read_resident_service` returns it.
 
 .. py:function:: read_resident_service(a2a_home)
 
-.. py:function:: write_service_json(path, *, port, pid, service_token=None, now_ms=None)
+.. py:function:: write_service_json(path, *, port, pid, service_token=None, now_ms=None, allow_tokenless=False)
 
 .. py:module:: vaultspec_a2a.lifecycle.procs_config
    :synopsis: Development-process configuration.
@@ -461,9 +457,6 @@ as an owner-restricted handoff before :func:`read_resident_service` returns it.
 .. py:module:: vaultspec_a2a.lifecycle.manager
    :synopsis: Development-process lifecycle operations.
 
-.. py:module:: vaultspec_a2a.lifecycle.reconciliation
-   :synopsis: Pure thread-recovery decisions after a gateway restart.
-
 Team and telemetry
 ~~~~~~~~~~~~~~~~~~
 
@@ -474,7 +467,7 @@ Team and telemetry
    :synopsis: OpenTelemetry and LangSmith setup.
 
 .. py:module:: vaultspec_a2a.telemetry.middleware
-   :synopsis: FastAPI and WebSocket instrumentation.
+   :synopsis: HTTP request tracing, operation spans, and trace propagation.
 
 Thread and workspace support
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

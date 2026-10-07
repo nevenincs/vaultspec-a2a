@@ -90,7 +90,7 @@ async def test_settle_records_the_number_the_allocator_issued(
 ) -> None:
     """The durable column holds the allocator's mark, and the mark outlives the purge.
 
-    The settle handler purges the aggregator's per-run state in its own final
+    The settle handler purges the relay hub's per-run state in its own final
     step. The allocator forgets the live counter on that purge but keeps the
     floor it reached, so the mark it issued stays readable afterwards and the
     column agrees with it.
@@ -127,7 +127,7 @@ async def test_a_reconnecting_client_reads_the_true_cursor_after_settle(
 ) -> None:
     """The read a reconnecting client actually makes: after the run has settled.
 
-    A SECOND, LATER call, once the settle handler has purged the aggregator's
+    A SECOND, LATER call, once the settle handler has purged the relay hub's
     state for the run: the cursor served is the durable column, not whatever the
     live allocator still holds.
     """

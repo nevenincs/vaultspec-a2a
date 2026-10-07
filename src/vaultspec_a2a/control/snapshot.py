@@ -1,4 +1,4 @@
-"""Snapshot enrichment business logic extracted from api/endpoints.py."""
+"""Snapshot enrichment: project checkpointed and live run state onto a snapshot."""
 
 from __future__ import annotations
 
@@ -247,8 +247,8 @@ def enrich_snapshot_from_state(
     # commandExecution/fileChange/mcpToolCall) never produces a ToolMessage
     # - no ToolNode ever dispatched it - so it fell to the else-PENDING
     # branch below unconditionally, FOREVER, regardless of what it actually
-    # did (F17: 15/15 tool calls on a completed run served pending, one of
-    # them a policy-rejected command the model narrated as failed). Codex's
+    # did (every tool call on a completed run would serve pending, even a
+    # policy-rejected command the model narrated as failed). Codex's
     # own model (codex_chat_model._completed_action_chunk) already encodes
     # that item's terminal status/content/locations into its tool_call's
     # args as a deliberate durability move - "parity with a mechanism

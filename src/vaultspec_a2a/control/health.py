@@ -621,6 +621,8 @@ def assemble_desktop_readiness(
     return DesktopReadiness(
         gateway_pid=os.getpid(),
         generation=package_version(),
+        # The unarmed development profile keeps serving the name "compose": the
+        # value is part of the published readiness payload.
         profile="desktop" if settings.desktop_profile_armed else "compose",
         liveness=LivenessState.ALIVE,
         gateway_readiness=gateway_readiness,
@@ -767,8 +769,8 @@ async def build_full_health(
 
     *include_pairing* adds what the worker reported about which gateway
     incarnation spawned it. It is opt-in and defaults off because this payload
-    is served verbatim on the UNAUTHENTICATED health endpoint under the Compose
-    and development profiles, and the gateway's lifetime identity is exactly the
+    is served verbatim on the UNAUTHENTICATED health endpoint under the unarmed
+    development profile, and the gateway's lifetime identity is exactly the
     value a port squatter must not be able to learn: the armed adoption check
     trusts it precisely because it is unguessable. Only the attach-authenticated
     readiness surface asks for it.

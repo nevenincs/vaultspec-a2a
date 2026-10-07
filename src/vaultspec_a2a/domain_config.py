@@ -40,46 +40,48 @@ class DomainSettingsConfig(ProjectSettings):
         env_ignore_empty=True,
     )
 
-    # -- Event aggregator debounce / buffer --------------------------------
+    # -- Event production, relay queues and checkpoint reads ---------------
 
     tool_call_debounce_seconds: float = Field(
         default=0.100,
-        description="Aggregator: debounce window for ToolCallUpdateEvents (seconds).",
+        description="Producer: debounce window for ToolCallUpdate events (seconds).",
     )
     plan_update_debounce_seconds: float = Field(
         default=0.250,
-        description="Aggregator: debounce window for PlanUpdateEvents (seconds).",
+        description="Producer: debounce window for PlanUpdate events (seconds).",
     )
     chunk_flush_interval_seconds: float = Field(
         default=0.050,
-        description="Aggregator: interval between streaming chunk flushes (seconds).",
+        description="Producer: interval between streaming chunk flushes (seconds).",
     )
     debounce_map_max_entries: int = Field(
         default=1000,
         description=(
-            "Aggregator: maximum debounce-map entries before oldest are evicted."
+            "Producer: maximum debounce-map entries before oldest are evicted."
         ),
     )
     chunk_buffer_max_bytes: int = Field(
         default=4096,
         description=(
-            "Aggregator: maximum bytes buffered per streaming chunk before flush."
+            "Producer: maximum bytes buffered per streaming chunk before flush."
         ),
     )
     tool_arg_truncate_len: int = Field(
         default=1000,
         description=(
-            "Aggregator: maximum length of tool argument strings before truncation."
+            "Producer: maximum length of tool argument strings before truncation."
         ),
     )
     event_queue_maxsize: int = Field(
         default=512,
-        description="Aggregator: asyncio queue depth for outgoing events.",
+        description=(
+            "Relay hub: asyncio queue depth for each subscriber's outgoing events."
+        ),
     )
     max_subscriptions_per_client: int = Field(
         default=512,
         description=(
-            "Aggregator: maximum thread subscriptions a single client may hold. "
+            "Relay hub: maximum thread subscriptions a single client may hold. "
             "The gateway's connection limit bounds how many clients exist; this "
             "bounds the fan-out work each one can demand, since every "
             "subscription is matched against every broadcast event. Zero "
@@ -102,7 +104,9 @@ class DomainSettingsConfig(ProjectSettings):
     )
     aget_state_timeout_seconds: float = Field(
         default=10.0,
-        description="Aggregator: timeout (seconds) for checkpointer aget_state calls.",
+        description=(
+            "Checkpoint reads: timeout (seconds) for checkpointer aget_state calls."
+        ),
     )
     ingest_event_stall_timeout_seconds: float = Field(
         default=90.0,

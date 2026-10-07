@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 from ..control.config import settings
 from ..domain_config import domain_config
+from ..thread import checkpoint_tuple_id
 from ..utils.coercion import coerce_object_mapping
 from .checkpoint_schema import checkpoint_pragmas
 
@@ -99,12 +100,7 @@ class CheckpointRead:
 
         The id the checkpoint records, falling back to the one its config names.
         """
-        stored = self.checkpoint_tuple
-        checkpoint = coerce_object_mapping(getattr(stored, "checkpoint", None)) or {}
-        config = coerce_object_mapping(getattr(stored, "config", None)) or {}
-        configurable = coerce_object_mapping(config.get("configurable")) or {}
-        raw = checkpoint.get("id") or configurable.get("checkpoint_id")
-        return None if raw is None else str(raw)
+        return checkpoint_tuple_id(self.checkpoint_tuple)
 
     def tuple_or_raise(self) -> CheckpointTuple | None:
         """Return the tuple, ``None`` when absent, or raise the read's failure."""

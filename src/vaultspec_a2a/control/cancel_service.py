@@ -229,7 +229,7 @@ async def _existing_cancel_claim(
             failure_type=FailureType.CONFLICT,
         )
     if not claim.acquired:
-        current_thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+        current_thread = await get_thread(db, thread_id, refresh=True)
         if current_thread is None:
             return ControlActionOutcome(
                 action_id=claim.action_id,

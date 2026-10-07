@@ -274,6 +274,8 @@ from .thread_repository import (
     set_thread_approval_state as set_thread_approval_state,
 )
 from .thread_repository import set_thread_repair_state as set_thread_repair_state
+from .thread_repository import thread_exists as thread_exists
+from .thread_repository import thread_last_sequence as thread_last_sequence
 from .thread_repository import thread_owned_by as thread_owned_by
 from .thread_repository import (
     thread_write_expectation as thread_write_expectation,
@@ -413,6 +415,8 @@ __all__ = [
     "surviving_transcript",
     "swap_cleanup_ledger",
     "sweep_replay_log_periodically",
+    "thread_exists",
+    "thread_last_sequence",
     "thread_owned_by",
     "thread_write_expectation",
     "unscheduled_recovery_actions",

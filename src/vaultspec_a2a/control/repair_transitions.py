@@ -84,7 +84,7 @@ async def record_failed_permission_resume(
     lost election means a newer writer owns the run, so neither the status nor
     the repair posture of a stale failure is written; ``None`` is returned.
     """
-    thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+    thread = await get_thread(db, thread_id, refresh=True)
     if thread is None:
         return None
     expectation = thread_write_expectation(thread)

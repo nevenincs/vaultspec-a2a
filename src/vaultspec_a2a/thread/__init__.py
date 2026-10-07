@@ -78,6 +78,7 @@ if TYPE_CHECKING:
     from .snapshots import ExecutionStateProjection as ExecutionStateProjection
     from .snapshots import LiveInterrupt as LiveInterrupt
     from .snapshots import ProjectedInterrupt as ProjectedInterrupt
+    from .snapshots import checkpoint_tuple_id as checkpoint_tuple_id
     from .snapshots import classify_message_role as classify_message_role
     from .snapshots import derive_message_id as derive_message_id
     from .snapshots import extract_message_timestamp as extract_message_timestamp
@@ -145,6 +146,7 @@ _LAZY_IMPORTS = {
     "ExecutionStateProjection": ".snapshots",
     "LiveInterrupt": ".snapshots",
     "ProjectedInterrupt": ".snapshots",
+    "checkpoint_tuple_id": ".snapshots",
     "classify_message_role": ".snapshots",
     "derive_message_id": ".snapshots",
     "extract_message_timestamp": ".snapshots",
@@ -221,6 +223,7 @@ __all__ = [
     "WorkerExecutionError",
     "canonical_digest",
     "canonical_json",
+    "checkpoint_tuple_id",
     "classify_message_role",
     "derive_message_id",
     "extract_message_timestamp",

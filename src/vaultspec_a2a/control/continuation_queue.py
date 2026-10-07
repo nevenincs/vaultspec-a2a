@@ -33,7 +33,6 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from ..database import (
-    CONTROL_ACTION_LEASE_TTL,
     ControlActionModel,
     clear_lease,
     count_queued_continuations,
@@ -142,7 +141,6 @@ class QueuedContinuationRequest:
     lifetime_deadline_at: datetime
     limits: ContinuationQueueLimits
     now: datetime | None = None
-    lease_ttl: timedelta = CONTROL_ACTION_LEASE_TTL
 
 
 def promoted_turn_deadline(
@@ -300,9 +298,7 @@ async def reserve_queued_continuation(
             None,
             action.result_status,
         )
-    claim_token = await take_action_lease(
-        session, action.id, now=instant, ttl=request.lease_ttl
-    )
+    claim_token = await take_action_lease(session, action.id, now=instant)
     position = await enqueue_continuation(session, action)
     return QueuedContinuation(
         QueuedContinuationDisposition.QUEUED,

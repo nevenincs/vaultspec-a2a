@@ -6,7 +6,6 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
 from ..database import (
@@ -14,6 +13,7 @@ from ..database import (
     ThreadStatusElectionOutcome,
     elect_thread_status,
     get_control_action_by_dispatch_id,
+    get_thread,
     persist_graph_action_receipt,
     thread_write_expectation,
 )
@@ -111,11 +111,7 @@ async def prepare_graph_action_receipt(
     an older action over a newer writer. Missing evidence stays absent so the
     dispatch boundary returns its typed incompatible-authority refusal.
     """
-    thread = await db.scalar(
-        select(ThreadModel)
-        .where(ThreadModel.id == thread_id)
-        .execution_options(populate_existing=True)
-    )
+    thread = await get_thread(db, thread_id, refresh=True)
     action = await get_control_action_by_dispatch_id(
         db, thread_id=thread_id, dispatch_id=dispatch_id
     )
@@ -187,7 +183,7 @@ async def bind_graph_action_receipt(
     # A separate read transaction sees only committed acceptance and is closed
     # before network delivery. It cannot publish or discard the caller's writes.
     async with AsyncSession(bind=db.bind) as reader:
-        thread = await reader.get(ThreadModel, dispatch.thread_id)
+        thread = await get_thread(reader, dispatch.thread_id)
         action = await get_control_action_by_dispatch_id(
             reader,
             thread_id=dispatch.thread_id,

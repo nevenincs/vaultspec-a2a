@@ -20,6 +20,7 @@ from ..database import (
     begin_write_transaction,
     elect_thread_status,
     get_permission_request,
+    get_thread,
     lock_thread_row,
     read_latest_checkpoint,
     set_thread_approval_state,
@@ -240,7 +241,7 @@ async def reconcile_run_pause(
     prompt reads again. The status moves under the current writer's own identity
     because the pause is a fact about the dispatch that raised it.
     """
-    thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+    thread = await get_thread(db, thread_id, refresh=True)
     recorded = _RecordedPause.of(thread) if thread is not None else None
     await db.rollback()
     if recorded is None or not recorded.recordable:

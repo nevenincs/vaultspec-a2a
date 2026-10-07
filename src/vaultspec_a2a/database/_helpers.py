@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, cast, override
 
 from sqlalchemy import and_
 
 if TYPE_CHECKING:
     from enum import StrEnum
 
+    from sqlalchemy import CursorResult, Result
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql.elements import ColumnElement
 
@@ -21,6 +22,7 @@ __all__ = [
     "_UnsetType",
     "_coerce",
     "_journal_row_for",
+    "affected_rows",
     "save_model",
 ]
 
@@ -30,6 +32,16 @@ async def save_model[M: Base](session: AsyncSession, model: M) -> M:
     session.add(model)
     await session.flush()
     return model
+
+
+def affected_rows(result: Result[Any]) -> int:
+    """Return how many rows a conditional write matched.
+
+    A DML execution always yields a cursor result; only the declared return
+    type of ``Session.execute`` is the wider ``Result``, which carries no
+    ``rowcount``.
+    """
+    return cast("CursorResult[Any]", result).rowcount
 
 
 def _journal_row_for(

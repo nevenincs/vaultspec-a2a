@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, TypedDict, Unpack
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -20,10 +20,9 @@ from sqlalchemy import exists, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from datetime import datetime
 
-    from sqlalchemy.engine import CursorResult
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.sql import Select
     from sqlalchemy.sql.elements import ColumnElement
@@ -36,7 +35,7 @@ from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
 )
-from ._helpers import _coerce, _journal_row_for, save_model
+from ._helpers import _coerce, _journal_row_for, affected_rows, save_model
 from ._leases import CONTROL_ACTION_LEASE, clear_lease, require_lease_window
 from .models import ControlActionModel, ThreadModel, utcnow
 from .thread_repository import thread_owned_by
@@ -275,8 +274,7 @@ async def acquire_control_action_lease(
         )
         .values(**CONTROL_ACTION_LEASE.granted(claim_token, claim_expires_at))
     )
-    result = cast("CursorResult[Any]", await session.execute(stmt))
-    return result.rowcount == 1
+    return affected_rows(await session.execute(stmt)) == 1
 
 
 async def commit_control_action_lease(
@@ -317,15 +315,12 @@ async def release_control_action_lease(
     claim_token: str,
 ) -> bool:
     """Release ownership only for a dispatch proven not to have been delivered."""
-    result = cast(
-        "CursorResult[Any]",
-        await session.execute(
-            update(ControlActionModel)
-            .where(*_held_unapplied(action_id, claim_token))
-            .values(**CONTROL_ACTION_LEASE.released())
-        ),
+    result = await session.execute(
+        update(ControlActionModel)
+        .where(*_held_unapplied(action_id, claim_token))
+        .values(**CONTROL_ACTION_LEASE.released())
     )
-    return result.rowcount == 1
+    return affected_rows(result) == 1
 
 
 async def settle_control_action_lease(
@@ -337,23 +332,20 @@ async def settle_control_action_lease(
     result_status: ControlActionResultStatus | str = ControlActionResultStatus.APPLIED,
 ) -> bool:
     """Settle application iff the caller still owns the durable lease."""
-    result = cast(
-        "CursorResult[Any]",
-        await session.execute(
-            update(ControlActionModel)
-            .where(*_held_unapplied(action_id, claim_token))
-            .values(
-                applied_at=applied_at or utcnow(),
-                result_status=_coerce(
-                    ControlActionResultStatus,
-                    result_status,
-                    label="control action result status",
-                ).value,
-                **CONTROL_ACTION_LEASE.released(),
-            )
-        ),
+    result = await session.execute(
+        update(ControlActionModel)
+        .where(*_held_unapplied(action_id, claim_token))
+        .values(
+            applied_at=applied_at or utcnow(),
+            result_status=_coerce(
+                ControlActionResultStatus,
+                result_status,
+                label="control action result status",
+            ).value,
+            **CONTROL_ACTION_LEASE.released(),
+        )
     )
-    return result.rowcount == 1
+    return affected_rows(result) == 1
 
 
 async def _read_action(
@@ -569,6 +561,29 @@ def _settle_applied(
     clear_lease(action)
 
 
+def _settle_duplicate(action: ControlActionModel) -> None:
+    action.result_status = ControlActionResultStatus.DUPLICATE.value
+
+
+def _settle_superseded(action: ControlActionModel) -> None:
+    action.result_status = ControlActionResultStatus.SUPERSEDED.value
+    action.superseded_at = utcnow()
+
+
+async def _mutate_action(
+    session: AsyncSession,
+    action_id: str,
+    mutation: Callable[[ControlActionModel], None],
+) -> ControlActionModel | None:
+    """Apply *mutation* to the journal action and flush it, or return ``None``."""
+    action = await get_control_action(session, action_id)
+    if action is None:
+        return None
+    mutation(action)
+    await session.flush()
+    return action
+
+
 async def mark_control_action_applied(
     session: AsyncSession,
     action_id: str,
@@ -576,39 +591,27 @@ async def mark_control_action_applied(
     applied_at: datetime | None = None,
     result_status: ControlActionResultStatus | str = ControlActionResultStatus.APPLIED,
 ) -> ControlActionModel | None:
-    action = await get_control_action(session, action_id)
-    if action is None:
-        return None
-    _settle_applied(
-        action, applied_at=applied_at or utcnow(), result_status=result_status
+    return await _mutate_action(
+        session,
+        action_id,
+        lambda action: _settle_applied(
+            action, applied_at=applied_at or utcnow(), result_status=result_status
+        ),
     )
-    await session.flush()
-    return action
 
 
 async def mark_control_action_duplicate(
     session: AsyncSession,
     action_id: str,
 ) -> ControlActionModel | None:
-    action = await get_control_action(session, action_id)
-    if action is None:
-        return None
-    action.result_status = ControlActionResultStatus.DUPLICATE.value
-    await session.flush()
-    return action
+    return await _mutate_action(session, action_id, _settle_duplicate)
 
 
 async def mark_control_action_superseded(
     session: AsyncSession,
     action_id: str,
 ) -> ControlActionModel | None:
-    action = await get_control_action(session, action_id)
-    if action is None:
-        return None
-    action.result_status = ControlActionResultStatus.SUPERSEDED.value
-    action.superseded_at = utcnow()
-    await session.flush()
-    return action
+    return await _mutate_action(session, action_id, _settle_superseded)
 
 
 async def count_queued_continuations(

@@ -171,8 +171,14 @@ async def get_pending_permission_requests(
     session: AsyncSession,
     *,
     thread_id: str | None = None,
+    pause_reason_type: str | None = None,
     include_answered_pending_apply: bool = True,
 ) -> Sequence[PermissionRequestModel]:
+    """Return unsettled permission requests, oldest first.
+
+    ``thread_id`` and ``pause_reason_type`` narrow the rows in the query itself,
+    so a caller that wants one kind of pause never loads and filters the rest.
+    """
     statuses = (
         _OUTSTANDING_PERMISSION_STATUSES
         if include_answered_pending_apply
@@ -183,6 +189,8 @@ async def get_pending_permission_requests(
     )
     if thread_id is not None:
         stmt = stmt.where(PermissionRequestModel.thread_id == thread_id)
+    if pause_reason_type is not None:
+        stmt = stmt.where(PermissionRequestModel.pause_reason_type == pause_reason_type)
     stmt = stmt.order_by(PermissionRequestModel.created_at.asc())
     return (await session.execute(stmt)).scalars().all()
 

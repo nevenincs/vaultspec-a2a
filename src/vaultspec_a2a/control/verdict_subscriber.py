@@ -142,10 +142,13 @@ async def settle_verdict_dispatch_receipt(
     ):
         return False
     await mark_control_action_applied(db, action.id)
-    pending = await get_pending_permission_requests(db, thread_id=action.thread_id)
+    pending = await get_pending_permission_requests(
+        db,
+        thread_id=action.thread_id,
+        pause_reason_type="document_approval_request",
+    )
     for permission in pending:
-        if permission.pause_reason_type == "document_approval_request":
-            await mark_permission_request_applied(db, request_id=permission.request_id)
+        await mark_permission_request_applied(db, request_id=permission.request_id)
     await update_thread_status(db, action.thread_id, ThreadStatus.RUNNING)
     return True
 

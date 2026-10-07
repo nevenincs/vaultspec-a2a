@@ -22,6 +22,7 @@ from ..control.projection import (
     clear_permissions_without_checkpoint_truth,
     enrich_snapshot_from_durable_state,
     enrich_snapshot_from_execution_state,
+    mark_degraded,
     reconcile_checkpoint_permissions_with_durable_state,
 )
 from ..control.recovery_authority import (
@@ -39,6 +40,7 @@ from ..domain_config import domain_config
 from ..graph.enums import SemanticPhase, research_adr_semantic_phase
 from ..team.team_config import load_agent_config, load_team_config
 from ..thread.enums import (
+    DegradedReason,
     RepairStatus,
     ReplayStatus,
     ThreadStatus,
@@ -333,11 +335,12 @@ async def _read_projected_checkpoint(
             thread_id,
         )
         checkpoint_error = True
-        snapshot.snapshot_complete = False
-        snapshot.degraded_reasons.append("checkpoint_timeout")
+        mark_degraded(
+            snapshot,
+            DegradedReason.CHECKPOINT_TIMEOUT,
+            repair=RepairStatus.CHECKPOINT_UNAVAILABLE,
+        )
         snapshot.replay_status = ReplayStatus.UNKNOWN.value
-        snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
-        snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
     except Exception:
         logger.warning(
@@ -346,11 +349,12 @@ async def _read_projected_checkpoint(
             exc_info=True,
         )
         checkpoint_error = True
-        snapshot.snapshot_complete = False
-        snapshot.degraded_reasons.append("checkpoint_unavailable")
+        mark_degraded(
+            snapshot,
+            DegradedReason.CHECKPOINT_UNAVAILABLE,
+            repair=RepairStatus.CHECKPOINT_UNAVAILABLE,
+        )
         snapshot.replay_status = ReplayStatus.UNKNOWN.value
-        snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
-        snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
 
     return _CheckpointSnapshotRead(
@@ -449,12 +453,9 @@ async def capture_thread_state(
         expected_assignment_digest = resolve_execution_authority(
             thread.thread_metadata
         ).model_assignment_digest
-    except ExecutionAuthorityError as exc:
+    except ExecutionAuthorityError:
         expected_assignment_digest = None
-        snapshot.snapshot_complete = False
-        snapshot.degraded_reasons.append(
-            f"incompatible_execution_authority_{exc.reason.value}"
-        )
+        mark_degraded(snapshot, DegradedReason.INCOMPATIBLE_EXECUTION_AUTHORITY)
     durable_permission_ids = {
         permission.request_id for permission in snapshot.pending_permissions
     }

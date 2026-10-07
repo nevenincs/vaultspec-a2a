@@ -12,6 +12,7 @@ from ..database import (
     get_thread_execution_state,
 )
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
+from .permission_options import extract_allowed_option_ids
 from .repositories.continuation_queue import count_queued_continuations
 
 if TYPE_CHECKING:
@@ -47,8 +48,31 @@ from ..thread.snapshots import (
     clarification_data_from_interrupt,
 )
 
-_PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
+__all__ = [
+    "apply_authoring_completion_check",
+    "apply_checkpoint_projection",
+    "apply_execution_state_projection",
+    "clear_permissions_without_checkpoint_truth",
+    "durable_approval",
+    "enrich_snapshot_from_durable_state",
+    "enrich_snapshot_from_execution_state",
+    "escalate_repair_posture",
+    "execution_state_is_stale",
+    "mark_degraded",
+    "project_execution_state_model",
+    "reconcile_checkpoint_permissions_with_durable_state",
+]
+
 _JSON_LIST_ADAPTER = TypeAdapter(list[object])
+
+#: How far each degraded repair posture holds a run back. The postures absent
+#: here (healthy, paused, cancel pending) demand nothing and yield to all of them.
+_REPAIR_SEVERITY: dict[str, int] = {
+    RepairStatus.REPLAY_GAP: 1,
+    RepairStatus.NEEDS_RECONCILIATION: 2,
+    RepairStatus.CHECKPOINT_UNAVAILABLE: 3,
+    RepairStatus.OPERATOR_INTERVENTION_REQUIRED: 4,
+}
 
 
 def _decode_json_list(raw: str | None, *, field_name: str) -> list[object]:
@@ -67,56 +91,48 @@ def _decode_json_list(raw: str | None, *, field_name: str) -> list[object]:
         raise ValueError(msg) from exc
 
 
-def _mark_execution_state_stale(snapshot: ThreadStateData) -> None:
-    """Fail closed when durable execution-state lineage no longer matches truth."""
-    snapshot.snapshot_complete = False
-    if "execution_state_projection_stale" not in snapshot.degraded_reasons:
-        snapshot.degraded_reasons.append("execution_state_projection_stale")
-
-    if snapshot.repair_status not in {
-        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
-        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
-    }:
-        snapshot.repair_status = RepairStatus.NEEDS_RECONCILIATION.value
-    if snapshot.execution_readiness not in {
-        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
-        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
-    }:
-        snapshot.execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+def _escalated(current: str | None, demanded: RepairStatus) -> str:
+    demanded_severity = _REPAIR_SEVERITY.get(demanded, 0)
+    if current is None or _REPAIR_SEVERITY.get(current, 0) < demanded_severity:
+        return demanded.value
+    return current
 
 
-def _mark_terminal_permission_residue(snapshot: ThreadStateData) -> None:
-    """Fail closed when terminal threads still carry pending permission residue."""
-    snapshot.snapshot_complete = False
-    if "terminal_thread_pending_permission_residue" not in snapshot.degraded_reasons:
-        snapshot.degraded_reasons.append("terminal_thread_pending_permission_residue")
+def escalate_repair_posture(
+    repair_status: str | None,
+    execution_readiness: str | None,
+    demanded: RepairStatus,
+) -> tuple[str, str]:
+    """Apply a demanded repair posture to both repair columns, fail-closed.
 
-    if snapshot.repair_status not in {
-        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
-        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
-    }:
-        snapshot.repair_status = RepairStatus.NEEDS_RECONCILIATION.value
-    if snapshot.execution_readiness not in {
-        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
-        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
-    }:
-        snapshot.execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+    Each column moves to *demanded* unless it already holds a posture that
+    demands at least as much, so a cause found late in a read can never talk a
+    run back down from the posture an earlier cause put it in.
+    """
+    return _escalated(repair_status, demanded), _escalated(
+        execution_readiness, demanded
+    )
 
 
-def _mark_no_artifact_produced(snapshot: ThreadStateData) -> None:
-    """Fail closed when a document-authoring run completed without output.
+def mark_degraded(
+    snapshot: ThreadStateData,
+    reason: DegradedReason,
+    *,
+    repair: RepairStatus | None = None,
+) -> None:
+    """Record why *snapshot* is less than complete, once per reason.
 
-    Unlike the two markers above, this does NOT touch ``repair_status`` /
-    ``execution_readiness``: those columns classify checkpoint-lineage
-    integrity, and the checkpoint here is genuinely healthy - readable and
-    internally consistent. The defect is that the run produced nothing, a
-    question repair_status was never asked. Overloading it would make "needs
-    reconciliation" ambiguous between checkpoint corruption and an empty
-    result, corrupting a signal that is currently correct.
+    *repair* is the repair posture the cause demands of the run, applied through
+    :func:`escalate_repair_posture`. A cause that says nothing about checkpoint
+    lineage passes none and leaves both repair columns as they are.
     """
     snapshot.snapshot_complete = False
-    if "authoring_run_produced_no_proposal" not in snapshot.degraded_reasons:
-        snapshot.degraded_reasons.append("authoring_run_produced_no_proposal")
+    if reason not in snapshot.degraded_reasons:
+        snapshot.degraded_reasons.append(reason)
+    if repair is not None:
+        snapshot.repair_status, snapshot.execution_readiness = escalate_repair_posture(
+            snapshot.repair_status, snapshot.execution_readiness, repair
+        )
 
 
 def apply_authoring_completion_check(
@@ -152,7 +168,11 @@ def apply_authoring_completion_check(
         and not proposal_ids
         and not changeset_ids
     ):
-        _mark_no_artifact_produced(snapshot)
+        # No repair posture: the repair columns classify checkpoint-lineage
+        # integrity, and this checkpoint is healthy. Demanding reconciliation
+        # here would make that signal ambiguous between corruption and an
+        # empty result.
+        mark_degraded(snapshot, DegradedReason.AUTHORING_RUN_PRODUCED_NO_PROPOSAL)
     return snapshot
 
 
@@ -180,10 +200,10 @@ def clear_permissions_without_checkpoint_truth(
     snapshot.approval_status = None
     snapshot.approval_request_id = None
     _clear_non_actionable_pause_state(snapshot)
-    if had_actionable_permission_state and (
-        "pending_permission_without_checkpoint_truth" not in snapshot.degraded_reasons
-    ):
-        snapshot.degraded_reasons.append("pending_permission_without_checkpoint_truth")
+    if had_actionable_permission_state:
+        mark_degraded(
+            snapshot, DegradedReason.PENDING_PERMISSION_WITHOUT_CHECKPOINT_TRUTH
+        )
     return snapshot
 
 
@@ -197,7 +217,7 @@ def _permission_data_from_model(
     tool_call = permission.tool_call
     if (
         tool_call in (None, "")
-        and permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
+        and permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
     ):
         tool_call = PermissionType.PLAN_APPROVAL.value
     options: list[PermissionOptionData] = []
@@ -380,8 +400,7 @@ def apply_checkpoint_projection(
     _merge_checkpoint_interrupts(snapshot, projection)
 
     for reason in projection.degraded_reasons:
-        if reason not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append(reason)
+        mark_degraded(snapshot, reason)
 
     return snapshot
 
@@ -404,19 +423,11 @@ def reconcile_checkpoint_permissions_with_durable_state(
         return snapshot
 
     snapshot.pending_permissions = filtered_permissions
-    snapshot.snapshot_complete = False
-    if "checkpoint_permission_without_durable_row" not in snapshot.degraded_reasons:
-        snapshot.degraded_reasons.append("checkpoint_permission_without_durable_row")
-    if snapshot.repair_status not in {
-        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
-        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
-    }:
-        snapshot.repair_status = RepairStatus.NEEDS_RECONCILIATION.value
-    if snapshot.execution_readiness not in {
-        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
-        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
-    }:
-        snapshot.execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+    mark_degraded(
+        snapshot,
+        DegradedReason.CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW,
+        repair=RepairStatus.NEEDS_RECONCILIATION,
+    )
 
     if snapshot.approval_request_id in dropped_request_ids:
         snapshot.approval_status = None
@@ -469,8 +480,10 @@ def project_execution_state_model(
                 has_result=persisted_task.has_result,
             )
         )
+    # A reason outside the vocabulary makes the row unreadable here, at the
+    # trust boundary, rather than failing the narrowed field it would reach.
     degraded_reasons = [
-        str(item)
+        DegradedReason(str(item))
         for item in _decode_json_list(
             model.degraded_reasons_json,
             field_name="degraded_reasons_json",
@@ -499,15 +512,43 @@ def apply_execution_state_projection(
     snapshot.pending_interrupt_count = projection.interrupt_count
     snapshot.execution_tasks = list(projection.execution_tasks)
     for reason in projection.degraded_reasons:
-        if reason not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append(reason)
+        mark_degraded(snapshot, reason)
     return snapshot
+
+
+def durable_approval(
+    permissions: Sequence[PermissionRequestModel],
+) -> tuple[ApprovalStatus | None, str | None]:
+    """Return the plan approval a run's durable pending rows leave actionable.
+
+    The latest plan-approval row is pending when it offers an option the respond
+    route would accept. An unreadable plan-approval row withholds the approval
+    altogether: once one of them cannot be read, the run's approval state can no
+    longer be trusted, whichever row it would have named.
+    """
+    plan_approvals = [
+        permission
+        for permission in permissions
+        if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
+    ]
+    if not plan_approvals:
+        return None, None
+    try:
+        for permission in plan_approvals:
+            _decode_json_list(
+                permission.allowed_options_json, field_name="allowed_options_json"
+            )
+    except ValueError:
+        return None, None
+    latest = plan_approvals[-1]
+    if not extract_allowed_option_ids(latest.allowed_options_json):
+        return None, None
+    return ApprovalStatus.PENDING, latest.request_id
 
 
 def _merge_durable_permissions(
     snapshot: ThreadStateData, durable_permissions: Sequence[PermissionRequestModel]
-) -> bool:
-    corrupted_plan_approval = False
+) -> None:
     if durable_permissions and snapshot.pause_cause is None:
         snapshot.pause_cause = durable_permissions[0].pause_reason_type
     existing = {permission.request_id for permission in snapshot.pending_permissions}
@@ -517,20 +558,13 @@ def _merge_durable_permissions(
         try:
             projected = _permission_data_from_model(permission)
         except (TypeError, ValueError, json.JSONDecodeError):
-            snapshot.snapshot_complete = False
-            if "permission_projection_unreadable" not in snapshot.degraded_reasons:
-                snapshot.degraded_reasons.append("permission_projection_unreadable")
-            snapshot.repair_status = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
-            snapshot.execution_readiness = (
-                RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+            mark_degraded(
+                snapshot,
+                DegradedReason.PERMISSION_PROJECTION_UNREADABLE,
+                repair=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
             )
-            if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
-                snapshot.approval_status = None
-                snapshot.approval_request_id = None
-                corrupted_plan_approval = True
             continue
         snapshot.pending_permissions.append(projected)
-    return corrupted_plan_approval
 
 
 async def enrich_snapshot_from_durable_state(
@@ -560,69 +594,42 @@ async def enrich_snapshot_from_durable_state(
     )
     if is_terminal_thread:
         if durable_permissions or snapshot.approval_status == ApprovalStatus.PENDING:
-            _mark_terminal_permission_residue(snapshot)
+            mark_degraded(
+                snapshot,
+                DegradedReason.TERMINAL_THREAD_PENDING_PERMISSION_RESIDUE,
+                repair=RepairStatus.NEEDS_RECONCILIATION,
+            )
         snapshot.pending_permissions = []
         snapshot.pending_clarification = None
         snapshot.approval_status = None
         snapshot.approval_request_id = None
         return snapshot
 
-    corrupted_plan_approval = _merge_durable_permissions(snapshot, durable_permissions)
-    projected_plan_approvals = [
-        permission
-        for permission in snapshot.pending_permissions
-        if permission.tool_call in _PLAN_APPROVAL_PAUSE_CAUSES
-    ]
-    if corrupted_plan_approval:
-        snapshot.approval_status = None
-        snapshot.approval_request_id = None
-    elif projected_plan_approvals:
-        snapshot.approval_status = ApprovalStatus.PENDING
-        snapshot.approval_request_id = projected_plan_approvals[-1].request_id
-    elif snapshot.approval_status is not None:
-        snapshot.approval_status = None
-        snapshot.approval_request_id = None
+    _merge_durable_permissions(snapshot, durable_permissions)
+    snapshot.approval_status, snapshot.approval_request_id = durable_approval(
+        durable_permissions
+    )
     _clear_non_actionable_pause_state(snapshot)
 
     return snapshot
 
 
-def _mark_execution_projection_unavailable(
-    snapshot: ThreadStateData,
-    reason: DegradedReason,
-    *,
-    repair_required: bool = False,
-) -> None:
-    snapshot.snapshot_complete = False
-    if reason.value not in snapshot.degraded_reasons:
-        snapshot.degraded_reasons.append(reason.value)
-    if repair_required:
-        snapshot.repair_status = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
-        snapshot.execution_readiness = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
-
-
-def _execution_state_projection_is_stale(
+def execution_state_is_stale(
     row: ThreadExecutionStateModel,
     thread: ThreadModel,
     *,
     checkpoint_present: bool,
     checkpoint_id: str | None,
 ) -> bool:
-    """Return whether durable execution state can be joined to the snapshot."""
+    """Return whether a durable execution-state row has lost its lineage.
+
+    The row is stale when no checkpoint backs it, when it was recorded in an
+    earlier recovery epoch, or when it describes a checkpoint other than the
+    run's current one.
+    """
     if not checkpoint_present or row.recovery_epoch != thread.recovery_epoch:
         return True
     return checkpoint_id is not None and row.checkpoint_id != checkpoint_id
-
-
-def _mark_stale_execution_state(
-    snapshot: ThreadStateData,
-    projection: ExecutionStateProjection,
-) -> None:
-    """Carry projection diagnostics forward before marking its lineage stale."""
-    for reason in projection.degraded_reasons:
-        if reason not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append(reason)
-    _mark_execution_state_stale(snapshot)
 
 
 async def enrich_snapshot_from_execution_state(
@@ -637,18 +644,16 @@ async def enrich_snapshot_from_execution_state(
     row = await get_thread_execution_state(session, thread.id)
     if row is None:
         if checkpoint_present:
-            _mark_execution_projection_unavailable(
-                snapshot, DegradedReason.EXECUTION_STATE_PROJECTION_MISSING
-            )
+            mark_degraded(snapshot, DegradedReason.EXECUTION_STATE_PROJECTION_MISSING)
         return snapshot
 
     try:
         projection = project_execution_state_model(row)
     except ValueError:
-        _mark_execution_projection_unavailable(
+        mark_degraded(
             snapshot,
             DegradedReason.EXECUTION_STATE_PROJECTION_UNREADABLE,
-            repair_required=True,
+            repair=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
         )
         return snapshot
 
@@ -658,13 +663,21 @@ async def enrich_snapshot_from_execution_state(
     if is_terminal:
         return snapshot
 
-    if _execution_state_projection_is_stale(
+    if execution_state_is_stale(
         row,
         thread,
         checkpoint_present=checkpoint_present,
         checkpoint_id=checkpoint_id,
     ):
-        _mark_stale_execution_state(snapshot, projection)
+        # The row's own diagnostics still describe the run, so they are carried
+        # forward even though its lineage is not.
+        for reason in projection.degraded_reasons:
+            mark_degraded(snapshot, reason)
+        mark_degraded(
+            snapshot,
+            DegradedReason.EXECUTION_STATE_PROJECTION_STALE,
+            repair=RepairStatus.NEEDS_RECONCILIATION,
+        )
         return snapshot
 
     return apply_execution_state_projection(snapshot, projection)

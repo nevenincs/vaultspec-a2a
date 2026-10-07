@@ -30,11 +30,6 @@ if TYPE_CHECKING:
 __all__ = ["build_team_status"]
 
 
-def _has_valid_permission_options(raw_options_json: str | None) -> bool:
-    """Return True only when a durable pending row exposes usable option ids."""
-    return bool(extract_allowed_option_ids(raw_options_json))
-
-
 @dataclass(frozen=True, slots=True)
 class PendingPermissionInfo:
     """Protocol-agnostic pending permission."""
@@ -136,7 +131,7 @@ async def build_team_status(
             request_status=p.request_status,
         )
         for p in nonterminal_durable_pending
-        if _has_valid_permission_options(p.allowed_options_json)
+        if extract_allowed_option_ids(p.allowed_options_json)
         and p.thread_id not in checkpoint_unavailable_thread_ids
     ]
     active_threads = sorted(

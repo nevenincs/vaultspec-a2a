@@ -47,6 +47,7 @@ from ...thread.dispatch_policy import FailureType
 from ...thread.enums import (
     ApprovalStatus,
     CleanupKind,
+    DegradedReason,
     RepairStatus,
     ThreadStatus,
     TranscriptAvailability,
@@ -524,12 +525,7 @@ class RunStatusResponse(BaseModel):
     queued_messages: int = Field(default=0, ge=0)
     repair_status: RepairStatus | None = None
     execution_readiness: RepairStatus | None = None
-    # Left as bare strings pending the narrowing, NOT because this list lacks an
-    # owning vocabulary - ``thread.enums.DegradedReason`` declares it - but
-    # because the projection that appends to it is under concurrent revision and
-    # a member added there while this field is narrowed would fail the response
-    # rather than the write. Narrowed once that projection derives from the type.
-    degraded_reasons: list[str] = Field(default_factory=list)
+    degraded_reasons: list[DegradedReason] = Field(default_factory=list)
     # The capped, single-line reason this run last transitioned to FAILED,
     # sourced from the durable threads.failure_reason column (never a live SSE
     # frame), so a reloaded panel recovers the SAME reason a connected client

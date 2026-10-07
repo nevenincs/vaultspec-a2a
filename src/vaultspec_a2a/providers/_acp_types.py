@@ -72,8 +72,7 @@ def require_workspace_root(value: str | None, *, surface: str) -> Path:
 
 
 @dataclass(frozen=True)
-# Frozen ACP configuration is passed unchanged through provider helpers.
-class AcpModelConfig:  # pylint: disable=too-many-instance-attributes
+class AcpModelConfig:
     """Frozen snapshot of read-only ACP model configuration.
 
     Built once in ``AcpChatModel.model_post_init`` and threaded through
@@ -129,8 +128,7 @@ class AcpModelConfig:  # pylint: disable=too-many-instance-attributes
 
 
 @dataclass
-# Session context mirrors the ACP lifecycle contract consumed by helpers.
-class AcpSessionContext:  # pylint: disable=too-many-instance-attributes
+class AcpSessionContext:
     """Consolidated state for an active ACP session."""
 
     process: asyncio.subprocess.Process

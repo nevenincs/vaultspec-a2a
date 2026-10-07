@@ -29,9 +29,7 @@ from langgraph.types import Command
 from ..authoring.contract import RESEARCH_ADR_ROLES
 from ..thread.constants import MAX_REQUEST_ID_CHARS
 from ..thread.errors import ConfigError
-from ..thread.state import (
-    TeamState,  # noqa: TC001 - LangGraph inspects route annotations
-)
+from ..thread.state import TeamState
 from ._compiler_models import resolve_model_for_worker
 from ._compiler_prompts import composed_worker_prompt
 from ._compiler_retry import _NODE_RETRY_POLICY, _SUBMIT_RETRY_POLICY

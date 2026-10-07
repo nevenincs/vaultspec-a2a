@@ -9,7 +9,7 @@ from ...thread.action_receipts import (
     GraphActionReceipt,
     GraphCompletionReceipt,
 )
-from ...thread.state import TeamState  # noqa: TC001 - LangGraph inspects node input
+from ...thread.state import TeamState
 
 GRAPH_COMPLETION_NODE = "_record_graph_completion"
 

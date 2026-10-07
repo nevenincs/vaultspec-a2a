@@ -216,8 +216,7 @@ def existing_rejection_error(existing_action: object) -> str | None:
 
 
 @dataclass(frozen=True, slots=True)
-# Flat outcome fields are mapped directly to the permission response schema.
-class PermissionResult:  # pylint: disable=too-many-instance-attributes
+class PermissionResult:
     """Outcome of a permission response operation.
 
     The route handler translates this into an HTTP response or exception.

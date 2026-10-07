@@ -129,7 +129,7 @@ tooling = [
   "packaging>=25.0",
   "prek>=0.3.2",
   # Module length and the class-shape design limits ruff has no rule for
-  # (C0302, R0902, R0904, R0916). Everything else pylint would report is
+  # (C0302, R0904, R0916). Everything else pylint would report is
   # already covered by ruff and stays disabled in [tool.pylint].
   "pylint>=4.0",
   "pytest>=9.0.2",
@@ -392,6 +392,10 @@ target-version = "py313"
       "pydantic_settings.BaseSettings",
       "vaultspec_a2a.control.settings_base.ProjectSettings",
     ]
+    # LangGraph resolves the TeamState annotation of a node or route function at
+    # runtime, so that import must stay at module scope. Ruff matches a relative
+    # import by its spelling, so each depth that imports it is listed.
+    exempt-modules = ["typing", "..thread.state", "...thread.state"]
 
   [tool.ruff.format]
   indent-style = "space"
@@ -531,7 +535,7 @@ executionEnvironments = [
 max-complexity = 15
 
 # ── Module length and class design ───────────────────────────────────────────
-# pylint runs ONLY for the four limits ruff has no rule for. Everything else it
+# pylint runs ONLY for the three limits ruff has no rule for. Everything else it
 # would report is already covered by ruff, so enabling more would mean two
 # tools disagreeing about the same finding.
 [tool.pylint.main]
@@ -545,7 +549,6 @@ py-version = "3.13"
 disable = ["all"]
 enable = [
   "too-many-lines",               # C0302 - module length
-  "too-many-instance-attributes", # R0902
   "too-many-public-methods",      # R0904
   "too-many-boolean-expressions", # R0916
 ]
@@ -555,7 +558,6 @@ enable = [
 max-module-lines = 1000
 
 [tool.pylint.design]
-max-attributes = 7      # R0902 default
 max-bool-expr = 5       # R0916 default
 max-public-methods = 20 # R0904 default
 

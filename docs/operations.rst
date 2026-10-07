@@ -313,28 +313,20 @@ there is no production application Compose stack.
 
 .. list-table::
    :header-rows: 1
-   :widths: 18 22 18 20 22
+   :widths: 25 25 25 25
 
-   * - Family
-     - Inspect
+   * - Inspect
      - Start
      - Status
      - Stop
-   * - Integration
-     - ``stack-integration-config``
+   * - ``stack-integration-config``
      - ``stack-integration-up``
      - ``stack-integration-status``
      - ``stack-integration-down``
-   * - Infrastructure
-     - ``stack-infrastructure-config``
-     - ``stack-infrastructure-up``
-     - ``stack-infrastructure-status``
-     - ``stack-infrastructure-down``
 
-Prefix the table's recipe names with ``just``. Each family starts Jaeger in its
-own project. Both use ``service/docker-compose.integration.yml``. Their published
-ports bind to loopback. With default ports, run only one fixture project at a
-time. Don't register fixture containers as named host processes.
+Prefix the table's recipe names with ``just``. The project starts only Jaeger,
+from ``service/docker-compose.integration.yml``, and its published ports bind to
+loopback. Don't register fixture containers as named host processes.
 
 Scratchpad convention
 ---------------------

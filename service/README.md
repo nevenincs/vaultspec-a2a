@@ -48,19 +48,8 @@ OTLP HTTP and Jaeger's health endpoint remain inside the Compose network.
 
 ## Trace debugging
 
-For Jaeger alone, use the separate infrastructure project:
-
-```console
-just stack-infrastructure-config
-just stack-infrastructure-up
-just stack-infrastructure-status
-just stack-infrastructure-down
-```
-
-The infrastructure recipes use the same Compose definition but start only
-Jaeger. Use either fixture project at a time with the default ports, or assign
-different ports when running both. Configure native trace exporters through
-the settings in `.env.example`.
+Configure native trace exporters through the settings in `.env.example`, and
+start the Jaeger fixture above to receive them.
 
 HTTP trace URL attributes omit query strings, fragments, and URL user
 information. Trace paths, server addresses, and run/thread identifiers remain

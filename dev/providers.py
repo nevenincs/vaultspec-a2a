@@ -28,13 +28,15 @@ import asyncio
 import json
 import os
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from dev.exit_codes import FAILED, OK
+from dev.paths import REPO_ROOT
 from vaultspec_a2a.testing import LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vaultspec_a2a.providers.provider_catalog import ProviderCatalog
 
 __all__ = ["main"]
@@ -237,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     # the same settings, so this reporter must not describe a different posture.
     os.environ.setdefault("VAULTSPEC_A2A_ENVIRONMENT", "development")
 
-    lanes = _as_payload(asyncio.run(_discover(Path.cwd())))
+    lanes = _as_payload(asyncio.run(_discover(REPO_ROOT)))
 
     if args.exports:
         return _render_exports(lanes, args.exports, args.option, args.shell)

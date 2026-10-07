@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BinaryVersionProbeError",
+    "binary_version_text",
     "next_minor_version",
     "parse_binary_version",
     "probe_binary_version",
@@ -40,6 +41,12 @@ def parse_binary_version(value: str) -> tuple[int, int, int] | None:
         return None
     major, minor, patch = matches[0]
     return int(major), int(minor), int(patch)
+
+
+def binary_version_text(value: str) -> str | None:
+    """Read one CLI version from its report in dotted form, or ``None``."""
+    version = parse_binary_version(value)
+    return None if version is None else ".".join(map(str, version))
 
 
 def next_minor_version(version: tuple[int, int, int]) -> tuple[int, int, int]:
@@ -99,9 +106,7 @@ def _reported_version(
         return None
     if completed.returncode != 0:
         return None
-    reported = f"{completed.stdout}\n{completed.stderr}"
-    version = parse_binary_version(reported)
-    return ".".join(map(str, version)) if version is not None else None
+    return binary_version_text(f"{completed.stdout}\n{completed.stderr}")
 
 
 def probe_binary_version(

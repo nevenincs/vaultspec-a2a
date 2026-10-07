@@ -11,6 +11,7 @@ import pytest
 from ..binary_version import (
     BinaryVersionProbeError,
     _launch_identity,
+    binary_version_text,
     parse_binary_version,
     probe_binary_version,
 )
@@ -65,6 +66,12 @@ def test_missing_or_malformed_launcher_version_is_refused(tmp_path: Path) -> Non
     with pytest.raises(BinaryVersionProbeError, match="version is unavailable"):
         probe_binary_version(launcher)
     assert parse_binary_version("probe-cli 1.2.3 and 2.3.4") is None
+    assert binary_version_text("probe-cli 1.2.3 and 2.3.4") is None
+
+
+def test_version_report_is_read_in_dotted_form() -> None:
+    assert binary_version_text("codex-cli 1.2.3\n") == "1.2.3"
+    assert binary_version_text("no version here") is None
 
 
 def test_shim_identity_tracks_current_target(tmp_path: Path) -> None:

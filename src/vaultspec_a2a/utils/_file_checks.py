@@ -1,11 +1,12 @@
-"""The two filesystem refusals every local secret, journal and state file shares.
+"""The filesystem refusals every local secret, journal and state file shares.
 
-"Is this name a link?" and "is this a regular file with exactly one name?" are
-asked before this product trusts, hardens, publishes or reads a file it owns.
-They live under ``utils`` rather than beside the owner-restriction primitives in
-``desktop`` because the audited atomic writer, which is a ``utils`` module and
-cannot import ``desktop``, asks the first question too; a home the writer could
-not reach would leave it holding its own copy.
+"Is this name a link?", "is this a regular file with exactly one name?" and "is
+this a real directory?" are asked before this product trusts, hardens,
+publishes or reads a file or directory it owns. They live under ``utils``
+rather than beside the owner-restriction primitives in ``desktop`` because the
+audited atomic writer, which is a ``utils`` module and cannot import
+``desktop``, asks the first question too; a home the writer could not reach
+would leave it holding its own copy.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
     import os
     from pathlib import Path
 
-__all__ = ["is_single_regular_file", "path_is_link_like"]
+__all__ = ["is_real_directory", "is_single_regular_file", "path_is_link_like"]
 
 
 def path_is_link_like(path: Path) -> bool:
@@ -29,6 +30,16 @@ def path_is_link_like(path: Path) -> bool:
     other reason raises rather than answering that it is not a link.
     """
     return path.is_symlink() or path.is_junction()
+
+
+def is_real_directory(path: Path) -> bool:
+    """Return whether *path* names a directory itself, not a link to one.
+
+    A symlink or junction to a directory answers ``is_dir`` as true, which is
+    exactly the aliasing a caller that owns the directory refuses. An absent
+    path, or a name that is not a directory, is not a real directory.
+    """
+    return not path_is_link_like(path) and path.is_dir()
 
 
 def is_single_regular_file(metadata: os.stat_result) -> bool:

@@ -18,7 +18,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from ...domain_config import domain_config
-from ...ipc.schemas import DispatchRequest
+from ...ipc.body_limit import dispatch_envelope_budget
+from ...ipc.schemas import DispatchRequest, SeedTranscriptMessage
 from ...team.team_config import load_team_config
 from ...testing import (
     DEFAULT_REQUIRED_ROLE,
@@ -32,6 +33,7 @@ from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
 )
+from ...thread.constants import MAX_RUN_MESSAGE_CHARS
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType
 from ...thread.executable_graph import freeze_graph_definition
@@ -93,6 +95,76 @@ def _ingest(
             )
         }
     )
+
+
+def _oversized_ingest(workspace: Path, thread_id: str) -> DispatchRequest:
+    """An ingest every field of which is within its own published bound.
+
+    The seed transcript is a legal collection of legal messages: the published
+    caps admit 100 of them at 65,536 characters each, and the default transcript
+    depth is 20, so the sum crosses the internal delivery allowance while no
+    single field is anywhere near its own. Nothing here is a crafted payload -
+    this is a long conversation being continued.
+    """
+    base = _ingest(workspace, thread_id, f"{thread_id}-dispatch", with_receipt=True)
+    return base.model_copy(
+        update={
+            "seed_transcript": [
+                SeedTranscriptMessage(role="user", content="x" * MAX_RUN_MESSAGE_CHARS)
+                for _ in range(domain_config.successor_transcript_depth)
+            ]
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_envelope_is_refused_before_any_delivery(
+    tmp_path: Path,
+) -> None:
+    """The budget refuses it where it is built, not at the far end of a delivery.
+
+    No worker is listening at all: the client points at a closed loopback port.
+    Any refusal produced by attempting the delivery would therefore read as an
+    unreachable worker, and the condition would be one the recovery coordinator
+    retries forever against bytes that can never shrink. The typed refusal
+    instead means the delivery was never attempted.
+    """
+    dispatch = _oversized_ingest(tmp_path, "oversized-run")
+    budget = dispatch_envelope_budget(settings)
+    assert len(dispatch.encoded_envelope()) > budget
+
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as nobody:
+        outcome = await safe_dispatch(
+            nobody, dispatch, _breaker(), adopted_spawner("http://127.0.0.1:1")
+        )
+
+    assert outcome.failure_type == FailureType.ENVELOPE_TOO_LARGE.value, outcome.detail
+    assert str(budget) in (outcome.detail or "")
+
+
+@pytest.mark.asyncio
+async def test_an_envelope_inside_the_budget_still_reaches_the_worker(
+    tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """The budget admits an ordinary continuation: it is a bound, not a ban."""
+    dispatch = _ingest(tmp_path, "sized-run", "sized-dispatch", with_receipt=True)
+    dispatch = dispatch.model_copy(
+        update={
+            "seed_transcript": [
+                SeedTranscriptMessage(role="user", content="x" * 4096)
+                for _ in range(domain_config.successor_transcript_depth)
+            ]
+        }
+    )
+    assert len(dispatch.encoded_envelope()) < dispatch_envelope_budget(settings)
+
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
+        outcome = await safe_dispatch(
+            worker.client, dispatch, _breaker(), adopted_spawner()
+        )
+
+    assert outcome.success, outcome.detail
 
 
 @pytest.mark.asyncio

@@ -53,6 +53,10 @@ class FailureType(StrEnum):
     # which is the worker's own refusal: no worker was involved and nothing was
     # applied, so the caller simply retries.
     STORE_BUSY = "store_busy"
+    # The encoded dispatch envelope is larger than the receiver admits. The one
+    # condition on this list a retry cannot change: the bytes are the same every
+    # time, so the run's accumulated input has to shrink for it to be deliverable.
+    ENVELOPE_TOO_LARGE = "envelope_too_large"
 
 
 # Whether a dispatch failure of each type moves the run to FAILED. A type absent

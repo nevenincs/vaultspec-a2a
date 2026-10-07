@@ -56,6 +56,7 @@ from .graph_lifecycle import (
     RegisteredCompiledGraph,
 )
 from .state_projection import (
+    PARKED_OUTCOME,
     PreflightDecision,
     ResumeAdmission,
     ResumeRefusal,
@@ -459,9 +460,19 @@ class Executor(SettlementMixin):
         the tokens must survive park->resume and are dropped only when the run
         truly terminates (the token window closes at termination, not at an
         interrupt-park).
+
+        The same distinction decides what the permission janitor may collect: a
+        parked run is still held, so its unanswered request survives however long
+        the human it is waiting for takes.
         """
         async with self._ingest_lock:
+            parked = self._capacity.parked_threads
+            if outcome in TERMINAL_STATUSES:
+                parked.discard(thread_id)
+            elif outcome == PARKED_OUTCOME:
+                parked.add(thread_id)
             active_snapshot = self._active_ingests.thread_ids() - {thread_id}
+            held_snapshot = active_snapshot | parked
         # Drop the run's actor tokens when its active window truly closes,
         # i.e. a terminal outcome - never on an interrupt-park that will resume.
         if outcome in TERMINAL_STATUSES:
@@ -469,8 +480,8 @@ class Executor(SettlementMixin):
         self._bridge.untrack_thread(thread_id)
         # Prune sequences for threads that are no longer actively executing.
         self._producer.prune_sequences(active_snapshot)
-        # Prune permissions older than 5 minutes regardless of thread state.
-        self._producer.prune_stale_permissions()
+        # Collect aged permission records of runs this worker no longer holds.
+        self._producer.prune_stale_permissions(held_thread_ids=held_snapshot)
         await self._release_held_capacity(reservation)
 
     @override
@@ -716,7 +727,7 @@ class Executor(SettlementMixin):
                 "earlier attempt; it was not re-run",
             )
             return True
-        if outcome == "interrupted":
+        if outcome == PARKED_OUTCOME:
             logger.info(
                 "Thread %s checkpoint is paused at interrupt"
                 " — skipping ingest; awaiting resume dispatch",
@@ -724,10 +735,10 @@ class Executor(SettlementMixin):
                 extra=self._dispatch_log_extra(
                     req,
                     action="checkpoint_preflight_interrupted",
-                    outcome="interrupted",
+                    outcome=PARKED_OUTCOME,
                 ),
             )
-            span.set_attribute("pre_flight", "interrupted")
+            span.set_attribute("pre_flight", PARKED_OUTCOME)
             return True
         return False
 

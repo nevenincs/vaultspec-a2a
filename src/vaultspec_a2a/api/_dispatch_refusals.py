@@ -59,6 +59,14 @@ _REFUSED = _ServedRefusal(
 _UNSITED = _ServedRefusal(
     422, "The run carries no active project, so the action cannot be sited."
 )
+# The same status an oversized request body meets at the edge, for the same
+# reason: a payload larger than its receiver admits. Here the gateway built it,
+# from state the run accumulated, so the message names the measured size.
+_TOO_LARGE = _ServedRefusal(
+    413,
+    "The dispatch this action would deliver is larger than the worker admits. "
+    "Nothing was delivered, and a retry sends the same bytes.",
+)
 _UPSTREAM = _ServedRefusal(
     502,
     "The worker could not be reached, refused the dispatch outright, or failed "
@@ -102,6 +110,8 @@ def _served(failure_type: FailureType) -> _ServedRefusal:
             return _REFUSED
         case FailureType.NO_ACTIVE_PROJECT:
             return _UNSITED
+        case FailureType.ENVELOPE_TOO_LARGE:
+            return _TOO_LARGE
         case (
             FailureType.UNREACHABLE
             | FailureType.REJECTED

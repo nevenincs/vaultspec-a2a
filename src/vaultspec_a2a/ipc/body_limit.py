@@ -10,7 +10,12 @@ if TYPE_CHECKING:
 
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-__all__ = ["BoundedHttpBodyMiddleware", "gateway_body_limit", "worker_body_limit"]
+__all__ = [
+    "BoundedHttpBodyMiddleware",
+    "dispatch_envelope_budget",
+    "gateway_body_limit",
+    "worker_body_limit",
+]
 
 _MAX_V1_WRITE_BODY_BYTES: Final = 1024 * 1024
 
@@ -40,6 +45,21 @@ def worker_body_limit(settings: _BodyLimitSettings) -> _BodyLimit:
         return max_bytes, f"Internal request body exceeds {max_bytes} bytes"
 
     return limit
+
+
+def dispatch_envelope_budget(settings: _BodyLimitSettings) -> int:
+    """The bytes one gateway-to-worker dispatch envelope may occupy.
+
+    The sender's budget IS the receiver's allowance, named here beside it rather
+    than restated anywhere else. A dispatch is built from state the gateway
+    accepted earlier - a seed transcript, a frozen graph, a context preamble -
+    and the sum of those is not bounded by any one of their own caps, so an
+    envelope can legitimately exceed what the worker's own body limit admits.
+    Measuring it against this number before delivery is what turns that into a
+    refusal the caller is told about, instead of a 413 discovered at the far end
+    of work the gateway has already accepted.
+    """
+    return settings.internal_max_http_body_bytes
 
 
 def gateway_body_limit(settings: _BodyLimitSettings) -> _BodyLimit:

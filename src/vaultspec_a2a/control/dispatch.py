@@ -25,6 +25,7 @@ from ..database import (
     list_threads,
     thread_write_expectation,
 )
+from ..ipc.body_limit import dispatch_envelope_budget
 from ..ipc.schemas import (
     DispatchRequest,
     DispatchResponse,
@@ -34,6 +35,7 @@ from ..thread.enums import ThreadStatus
 from ..utils.coercion import coerce_object_mapping, decode_json_object
 from ._thread_metadata import workspace_root_from_metadata
 from .accepted_input import read_accepted_input, restore_accepted_dispatch
+from .config import settings
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .terminal_settlement import TerminalEvidence, lock_terminal_run, settle_terminal
@@ -86,6 +88,28 @@ class DispatchError(Exception):
 
 class IncompatibleDispatchAuthorityError(DispatchError):
     """Current durable graph-action evidence is absent or inconsistent."""
+
+
+class DispatchEnvelopeTooLargeError(DispatchError):
+    """The envelope is larger than the receiver is configured to admit.
+
+    Raised before delivery rather than discovered as the worker's 413, because
+    the bytes are the same on every attempt: a retry cannot make this envelope
+    smaller, so the caller has to be told now and by this condition rather than
+    by a transport error it would reasonably retry.
+    """
+
+    def __init__(
+        self, thread_id: str, dispatch_id: str, size: int, budget: int
+    ) -> None:
+        self.thread_id = thread_id
+        self.dispatch_id = dispatch_id
+        self.size = size
+        self.budget = budget
+        super().__init__(
+            f"dispatch envelope is {size} bytes, over the {budget}-byte internal "
+            f"delivery budget, for dispatch_id={dispatch_id} thread {thread_id}"
+        )
 
 
 class WorkerCircuitOpenError(DispatchError):
@@ -172,6 +196,8 @@ async def dispatch_to_worker(
     5. Return a ``DispatchResponse`` on success.
 
     Raises:
+        DispatchEnvelopeTooLargeError: The encoded envelope exceeds the receiver's
+            own allowance, so no worker is asked for it.
         WorkerCircuitOpenError: Circuit breaker is open (caller should 503).
         WorkerAtCapacityError: Worker returned 429 (caller decides policy).
         WorkerDispatchRejectedError: Worker returned non-2xx (e.g. 500/503).
@@ -181,6 +207,21 @@ async def dispatch_to_worker(
         dispatch.graph_receipt_if_required()
     except ValueError as exc:
         raise IncompatibleDispatchAuthorityError(str(exc)) from exc
+    # Sized before a worker is started: an envelope nothing will admit must not
+    # be the reason a worker process is spawned.
+    body = dispatch.encoded_envelope()
+    budget = dispatch_envelope_budget(settings)
+    if len(body) > budget:
+        logger.warning(
+            "Refusing oversized dispatch_id=%s for thread %s: %d bytes over %d",
+            dispatch.dispatch_id,
+            dispatch.thread_id,
+            len(body),
+            budget,
+        )
+        raise DispatchEnvelopeTooLargeError(
+            dispatch.thread_id, dispatch.dispatch_id, len(body), budget
+        )
     await spawner.ensure_worker()
 
     # Cancellation bypasses admission but not classification: it must reach a
@@ -198,8 +239,8 @@ async def dispatch_to_worker(
         try:
             resp = await worker_client.post(
                 "/dispatch",
-                json=dispatch.model_dump(),
-                headers=headers or None,
+                content=body,
+                headers={**headers, "content-type": "application/json"},
             )
         except httpx.HTTPError as exc:
             circuit_breaker.record_failure()
@@ -655,6 +696,13 @@ async def safe_dispatch(
         return _DispatchOutcome(
             success=False,
             failure_type="incompatible_state",
+            exception=exc,
+            detail=str(exc),
+        )
+    except DispatchEnvelopeTooLargeError as exc:
+        return _DispatchOutcome(
+            success=False,
+            failure_type=FailureType.ENVELOPE_TOO_LARGE.value,
             exception=exc,
             detail=str(exc),
         )

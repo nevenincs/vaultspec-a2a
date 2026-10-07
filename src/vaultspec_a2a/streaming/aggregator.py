@@ -71,9 +71,13 @@ class RunEventProducer:
         self._channel.prune(active_thread_ids)
         self._state.prune_tool_calls(active_thread_ids)
 
-    def prune_stale_permissions(self, max_age_seconds: float = 300.0) -> int:
-        """Drop pending permission requests older than *max_age_seconds*."""
-        return self._emitters.prune_stale_permissions(max_age_seconds)
+    def prune_stale_permissions(
+        self, max_age_seconds: float | None = None, *, held_thread_ids: set[str]
+    ) -> int:
+        """Drop aged pending permissions of runs *held_thread_ids* does not name."""
+        return self._emitters.prune_stale_permissions(
+            max_age_seconds, held_thread_ids=held_thread_ids
+        )
 
     def clear_thread_state(self, thread_id: str) -> None:
         """Purge all in-memory producer state scoped to ``thread_id``."""

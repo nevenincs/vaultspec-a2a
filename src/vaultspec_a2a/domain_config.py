@@ -128,6 +128,20 @@ class DomainSettingsConfig(ProjectSettings):
             "line."
         ),
     )
+    pending_permission_max_age_seconds: float = Field(
+        default=300.0,
+        ge=0.0,
+        description=(
+            "Worker stream state: how long the in-memory record of a pending "
+            "permission request is kept for a run the worker NO LONGER HOLDS "
+            "(seconds). It bounds nothing else: a run still executing, and a "
+            "run still parked on the request, keep theirs however long the "
+            "human they are waiting for takes, because dropping a held park's "
+            "record lets the next projection of the same unanswered request "
+            "emit a duplicate frame for it. What this collects is the residue "
+            "of a run whose end this worker never saw."
+        ),
+    )
 
     # -- Context window sizing -----------------------------------------------
 

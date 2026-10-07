@@ -214,13 +214,30 @@ class EventEmitters:
             del self._pending_permissions[request_id]
         return len(expired)
 
-    def prune_stale_permissions(self, max_age_seconds: float = 300.0) -> int:
-        """Remove permission requests older than *max_age_seconds*."""
+    def prune_stale_permissions(
+        self, max_age_seconds: float | None = None, *, held_thread_ids: set[str]
+    ) -> int:
+        """Drop aged requests of runs this worker no longer holds.
+
+        The age bound alone is the wrong rule. A parked run waits for a HUMAN,
+        which routinely takes longer than any bound worth setting, and dropping
+        its record lets the next projection of the same unanswered request emit a
+        duplicate frame for it. So age only decides WHEN a droppable record goes;
+        *held_thread_ids* decides WHICH are droppable, and a run the worker is
+        still executing or still holding parked is never one of them. What is
+        left for the bound to clean up is the record of a run whose end this
+        worker never saw - the gateway restarted, the run was abandoned - which
+        no terminal release will ever reach.
+
+        *max_age_seconds* defaults to the configured bound.
+        """
+        if max_age_seconds is None:
+            max_age_seconds = domain_config.pending_permission_max_age_seconds
         cutoff = time.monotonic() - max_age_seconds
         stale = [
             rid
-            for rid, (_evt, created_at) in self._pending_permissions.items()
-            if created_at < cutoff
+            for rid, (evt, created_at) in self._pending_permissions.items()
+            if created_at < cutoff and evt.thread_id not in held_thread_ids
         ]
         for rid in stale:
             del self._pending_permissions[rid]

@@ -507,12 +507,46 @@ class TestEventEmission:
         )
 
         # The age-based janitor cannot touch a request this young.
-        assert producer.prune_stale_permissions() == 0
+        assert producer.prune_stale_permissions(held_thread_ids=set()) == 0
 
         assert producer._emitters.expire_thread_permissions("thread-1") == 1
         assert not producer._emitters.has_pending_permission("perm-fresh")
         # A sibling thread's pending request is untouched.
         assert producer._emitters.has_pending_permission("perm-other-thread")
+
+    @pytest.mark.asyncio
+    async def test_no_age_prunes_a_held_runs_pending_permission(
+        self, producer: RunEventProducer
+    ) -> None:
+        """A parked run waits for a human, so no bound may collect its request.
+
+        The janitor exists for the record of a run whose end this worker never
+        saw. Keyed on age alone it also collected the record of every run still
+        waiting for an answer - a wait that routinely outlasts any bound worth
+        setting - after which the next projection of the same unanswered request
+        emitted a duplicate frame for it.
+        """
+        for thread_id, request_id in (
+            ("held-run", "perm-held"),
+            ("forgotten-run", "perm-forgotten"),
+        ):
+            await producer._emitters.emit_permission_request(
+                thread_id=thread_id,
+                agent_id="agent-1",
+                request_id=request_id,
+                description="Allow action?",
+                options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
+            )
+
+        # The oldest age any caller can ask for: every record is collectable by
+        # age, so only what the worker still holds decides.
+        collected = producer.prune_stale_permissions(
+            max_age_seconds=0.0, held_thread_ids={"held-run"}
+        )
+
+        assert collected == 1
+        assert producer._emitters.has_pending_permission("perm-held")
+        assert not producer._emitters.has_pending_permission("perm-forgotten")
 
     @pytest.mark.asyncio
     async def test_emit_error(self, producer: RunEventProducer) -> None:

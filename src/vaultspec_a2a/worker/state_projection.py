@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from .ipc import WorkerBridge
 
 __all__ = [
+    "PARKED_OUTCOME",
     "ResumeAdmission",
     "ResumeRefusal",
     "ResumeRefusalCause",
@@ -46,6 +47,15 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+PARKED_OUTCOME = "interrupted"
+"""The ingest outcome of a run that parked at an interrupt instead of ending.
+
+The one non-terminal outcome, and the reason it is named: the worker keeps a
+parked run's state - its tokens, its compiled graph, its unanswered permission
+record - because the run is still alive and will resume, and every site that
+makes that distinction has to spell this value the same way.
+"""
 
 
 class ResumeRefusalCause(StrEnum):
@@ -111,7 +121,7 @@ class PreflightDecision:
     """What the latest checkpoint says an arriving ingest dispatch should do.
 
     Attributes:
-        outcome: ``"completed"``, ``"failed"`` or ``"interrupted"`` when this
+        outcome: ``"completed"``, ``"failed"`` or :data:`PARKED_OUTCOME` when this
             action already reached that state and must not run again; ``None``
             when it should run.
         is_first_ingest: No checkpoint exists for the thread at all.
@@ -135,7 +145,7 @@ _SETTLED_PREFLIGHTS: Mapping[CheckpointEvidenceKind, PreflightDecision] = {
     CheckpointEvidenceKind.PRIOR_ACTION: PreflightDecision(),
     CheckpointEvidenceKind.COMPLETED: PreflightDecision(outcome=ThreadStatus.COMPLETED),
     CheckpointEvidenceKind.FAILED: PreflightDecision(outcome=ThreadStatus.FAILED),
-    CheckpointEvidenceKind.INTERRUPTED: PreflightDecision(outcome="interrupted"),
+    CheckpointEvidenceKind.INTERRUPTED: PreflightDecision(outcome=PARKED_OUTCOME),
 }
 
 _UNREADABLE_CHECKPOINT = PreflightDecision(

@@ -127,6 +127,9 @@
           "409": {
             "description": "The run was not started as asked: its id already belongs to a different request, its nickname is taken, its predecessor cannot be continued, the commit does not match its prepared reservation, or the worker refused the first dispatch with the typed code every run action shares."
           },
+          "413": {
+            "description": "The dispatch this action would deliver is larger than the worker admits. Nothing was delivered, and a retry sends the same bytes."
+          },
           "502": {
             "description": "The worker could not be reached, refused the dispatch outright, or failed inside itself. Reconcile from run-status."
           },
@@ -812,6 +815,9 @@
               }
             }
           },
+          "413": {
+            "description": "The dispatch this action would deliver is larger than the worker admits. Nothing was delivered, and a retry sends the same bytes."
+          },
           "502": {
             "description": "The answer was accepted and retained but the worker could not be reached or failed inside itself. Reconcile from run-status."
           },
@@ -894,6 +900,9 @@
           "409": {
             "description": "The resolution was not taken: a different one is already accepted, the run is not active or cannot be confirmed to have applied it, or the worker refused the dispatch with the typed code every run action shares."
           },
+          "413": {
+            "description": "The dispatch this action would deliver is larger than the worker admits. Nothing was delivered, and a retry sends the same bytes."
+          },
           "502": {
             "description": "The worker could not be reached, refused the dispatch outright, or failed inside itself. Reconcile from run-status."
           },
@@ -972,6 +981,9 @@
           },
           "409": {
             "description": "The run's state refuses cancellation - it settled some other way, its accepted deadline expired, or its authority changed - and no retry will change that; re-read run-status. Cancelling a run that is already cancelled is not refused."
+          },
+          "413": {
+            "description": "The dispatch this action would deliver is larger than the worker admits. Nothing was delivered, and a retry sends the same bytes."
           },
           "502": {
             "description": "The worker could not be reached, refused the dispatch outright, or failed inside itself. Reconcile from run-status."

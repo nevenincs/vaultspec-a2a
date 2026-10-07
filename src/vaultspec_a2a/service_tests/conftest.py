@@ -56,12 +56,6 @@ def service_stack(
 
 
 @pytest.fixture
-def service_started_at(service_stack: ServiceStack) -> float:
-    """Convenience fixture for trace-window assertions."""
-    return service_stack.started_at
-
-
-@pytest.fixture
 def provisioned_workspace(tmp_path: Path) -> Path:
     """A freshly provisioned, harness-ready run workspace.
 

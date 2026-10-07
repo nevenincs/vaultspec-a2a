@@ -296,7 +296,6 @@ def certified_gateway(
     *,
     attach_token: str = "attach-certification-1234567890abcdef",
     ownership_capability: str = "ownership-certification-fedcba0987654321",
-    settlement_url: str | None = None,
     log_name: str = "gateway.log",
     **extra_env: str,
 ) -> Generator[CertifiedGateway]:
@@ -339,8 +338,6 @@ def certified_gateway(
         # deployment that must select one, because an executing run here may
         # never spend. Set before *extra_env* so a caller can still override it.
         env["VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES"] = "true"
-        if settlement_url is not None:
-            env["VAULTSPEC_A2A_DESKTOP_SETTLEMENT_URL"] = settlement_url
         env.update(extra_env)
         return spawn_gateway(
             script=script,

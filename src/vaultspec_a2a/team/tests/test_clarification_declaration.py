@@ -240,8 +240,6 @@ def test_a_topology_that_never_asks_is_untouched_when_it_declares_nothing() -> N
 def test_every_shipping_preset_still_loads() -> None:
     """Adding the block must not disturb a preset that never declares it."""
     for path in sorted(_PRESET_DIR.glob("*.toml")):
-        if path.stem == "mock-invalid":
-            continue  # deliberately malformed fixture
         load_team_config(path.stem)
 
 

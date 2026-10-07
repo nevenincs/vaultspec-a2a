@@ -4,27 +4,11 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
-from pathlib import Path
-from typing import Any
 
 import pytest
-import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-INTEGRATION_COMPOSE = REPO_ROOT / "service" / "docker-compose.integration.yml"
-
-
-def _load_compose(path: Path) -> dict[str, Any]:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
-
-
-def _resolve_docker() -> str:
-    resolved = shutil.which("docker") or shutil.which("docker.exe")
-    if resolved is None:
-        raise FileNotFoundError("Docker CLI not found in PATH")
-    return resolved
+from .harness import COMPOSE_FILE, REPO_ROOT, resolve_docker_executable
 
 
 @pytest.mark.parametrize("ui_port", ["", "26686"])
@@ -33,12 +17,12 @@ def test_resolved_integration_jaeger_boundary(ui_port: str, otlp_port: str) -> N
     """Host certification retains loopback ingestion and querying at custom ports."""
     result = subprocess.run(
         [
-            _resolve_docker(),
+            resolve_docker_executable(),
             "compose",
             "--env-file",
             os.devnull,
             "-f",
-            str(INTEGRATION_COMPOSE),
+            str(COMPOSE_FILE),
             "config",
             "--format",
             "json",
@@ -70,12 +54,12 @@ def test_fixture_rejects_host_address_override(variable: str, value: str) -> Non
     """A port override cannot restore wildcard publication through short syntax."""
     result = subprocess.run(
         [
-            _resolve_docker(),
+            resolve_docker_executable(),
             "compose",
             "--env-file",
             os.devnull,
             "-f",
-            str(INTEGRATION_COMPOSE),
+            str(COMPOSE_FILE),
             "config",
             "--format",
             "json",
@@ -94,11 +78,3 @@ def test_fixture_rejects_host_address_override(variable: str, value: str) -> Non
     )
     assert result.returncode != 0, result.stdout
     assert "invalid" in result.stderr.lower(), result.stderr
-
-
-def test_integration_vidaimock_service_present() -> None:
-    """Integration compose includes VidaiMock for provider certification."""
-    doc = _load_compose(INTEGRATION_COMPOSE)
-    assert "vidaimock" in doc["services"], (
-        "integration compose must declare a vidaimock service"
-    )

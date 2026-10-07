@@ -20,8 +20,10 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START
+from langgraph.types import interrupt
 
 from ..database import record_permission_request
+from ..graph.acp_options import valid_option_ids
 from ..graph.nodes._worker_permissions import (
     permission_callback_for,
     recorded_permission_answers,
@@ -32,7 +34,7 @@ from ..graph.nodes.clarification import (
 )
 from ..graph.nodes.phase_gate import create_phase_gate_node, create_phase_submit_node
 from ..graph.nodes.supervisor import create_plan_approval_node
-from ..thread import project_checkpoint_tuple
+from ..thread import InterruptType, project_checkpoint_tuple
 from ..thread.clarification import (
     ClarificationKind,
     ClarificationQuestion,
@@ -118,12 +120,41 @@ def _only(request_ids: list[str]) -> str:
     return request_ids[0]
 
 
+def _unanswerable_payload(
+    tool_name: str, tool_input: dict[str, Any], offered: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """The interrupt payload of a parked request nothing can be answered with.
+
+    Named plainly rather than by this release's own derivation, because the
+    thing it stands in for is a checkpoint THIS release could not have written:
+    the worker refuses a call offering no option a human could pick, so no run
+    it starts parks on one. A stored checkpoint is untrusted input, though, and
+    the respond route still has to refuse one a foreign generation or a
+    corrupted store left holding such a request.
+    """
+    return {
+        "type": InterruptType.PERMISSION_REQUEST.value,
+        "request_id": f"perm-unanswerable-{tool_name}",
+        "tool_name": tool_name,
+        "tool_input": tool_input,
+        "options": offered,
+    }
+
+
 def _asking(
     tool_name: str, tool_input: dict[str, Any], offered: list[dict[str, Any]]
 ) -> Any:
-    """A node that asks for one tool call through the worker's own callback."""
+    """A node that asks for one tool call through the worker's own callback.
+
+    Unless the call offers no option a human could pick: the callback refuses
+    that rather than parking, so the park is raised directly - see
+    :func:`_unanswerable_payload` for the state it stands in for.
+    """
 
     async def ask(state: TeamState) -> dict[str, Any]:
+        if not valid_option_ids(offered):
+            interrupt(_unanswerable_payload(tool_name, tool_input, offered))
+            return {}
         callback = permission_callback_for(recorded_permission_answers(state))
         await callback(tool_name, tool_input, offered)
         return {}

@@ -23,7 +23,6 @@ import contextvars
 import itertools
 import json
 import logging
-import re
 import sys
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -37,6 +36,7 @@ from opentelemetry import trace
 from opentelemetry.trace.span import format_span_id, format_trace_id
 
 from ..control.state_layout import seal_state_home, state_layout
+from .redaction import REDACTED, is_secret_name, redact_text
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
@@ -232,53 +232,25 @@ class LogContextFilter(logging.Filter):
         return True
 
 
-# Key segments that name a credential. Matched per segment, and only against a
-# string value, so ``input_tokens`` counts and a ``token_usage`` mapping pass.
-_SENSITIVE_KEY_SEGMENTS: frozenset[str] = frozenset(
-    {
-        "apikey",
-        "authorization",
-        "bearer",
-        "cookie",
-        "credential",
-        "credentials",
-        "passwd",
-        "password",
-        "secret",
-        "token",
-    }
-)
-# Credential shapes a value can carry wherever it appears, message text included.
-_SECRET_VALUE = re.compile(
-    r"(?i)\bbearer\s+[a-z0-9._~+/=-]{8,}"
-    r"|\bsk-[a-z0-9_-]{16,}"
-    r"|\b(?:ghp|gho|ghs|ghu|github_pat)_[a-z0-9_]{16,}"
-    r"|\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}"
-)
-_REDACTED = "[redacted]"
+def _redacted_entry(key: object, value: object) -> object:
+    """Return one keyed value safe to log.
 
-
-def _is_sensitive_key(key: str) -> bool:
-    normalized = key.lower()
-    segments = set(re.split(r"[^a-z0-9]+", normalized))
-    return bool(segments & _SENSITIVE_KEY_SEGMENTS) or any(
-        marker in normalized for marker in ("api_key", "private_key")
-    )
+    A text value under a secret-named key goes whole; anything else is
+    redacted by content. Only text is masked by its key, so ``input_tokens``
+    counts and a ``token_usage`` mapping pass.
+    """
+    if isinstance(key, str) and is_secret_name(key) and isinstance(value, str):
+        return REDACTED
+    return _redacted(value)
 
 
 def _redacted(value: object) -> object:
     """Return *value* with credential-shaped content replaced, recursively."""
     if isinstance(value, str):
-        return _SECRET_VALUE.sub(_REDACTED, value)
+        return redact_text(value)
     if isinstance(value, dict):
         return {
-            key: (
-                _REDACTED
-                if isinstance(key, str)
-                and _is_sensitive_key(key)
-                and isinstance(item, str)
-                else _redacted(item)
-            )
+            key: _redacted_entry(key, item)
             for key, item in cast("dict[object, object]", value).items()
         }
     if isinstance(value, list | tuple):
@@ -348,12 +320,9 @@ class JSONFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key in _STANDARD_LOG_ATTRS or key.startswith("_"):
                 continue
-            safe = (
-                _REDACTED
-                if _is_sensitive_key(key) and isinstance(value, str)
-                else _redacted(value)
+            log_data[f"extra_{key}" if key in log_data else key] = _redacted_entry(
+                key, value
             )
-            log_data[f"extra_{key}" if key in log_data else key] = safe
 
         exception = self._exception_text(record.exc_info)
         if exception is not None:

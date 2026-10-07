@@ -21,10 +21,11 @@ from ..control.workspace import (
     require_admitted_workspace_root,
 )
 from ..team.team_config import AgentConfig
+from ..utils import redact_text
 from ._acp_terminal_output import AcpTerminalOutput
 from ._json_contract import JsonObject
 from ._project_scope import RunProjectScope
-from ._subprocess import STDERR_TAIL_LINES, redact_secrets
+from ._subprocess import STDERR_TAIL_LINES
 
 __all__: list[str] = []
 
@@ -252,7 +253,7 @@ class AcpSessionContext:  # pylint: disable=too-many-instance-attributes
 
     def retain_stderr_line(self, text: str) -> None:
         """Keep one redacted line of the child's standard error."""
-        self.stderr_tail.append(redact_secrets(text))
+        self.stderr_tail.append(redact_text(text))
 
     def rendered_stderr_tail(self) -> str:
         """Return the retained, redacted tail, or the empty string when silent."""

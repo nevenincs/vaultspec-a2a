@@ -10,6 +10,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from ..thread.errors import ConfigError
+from ..utils import redact_text
 from ._json_contract import (
     FrozenJsonObject,
     FrozenJsonValue,
@@ -17,7 +18,6 @@ from ._json_contract import (
     JsonValue,
     freeze_json,
 )
-from ._subprocess import redact_secrets
 from .cli_resolution import resolve_service_executable
 
 if TYPE_CHECKING:
@@ -706,7 +706,7 @@ def registry_launch_divergence(
         expected = declared.get(key)
         actual = spec.get(key)
         if actual != expected:
-            return redact_secrets(
+            return redact_text(
                 f"declares the {key} {actual!r} where its registry entry declares "
                 f"{expected!r}"
             )

@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import SettingsConfigDict
 
+from ..utils import redact_url
 from ..utils.enums import CodexWebSearchMode, Environment, LogLevel
 from .env_prefix import ENV_PREFIX
 from .settings_base import (
@@ -113,10 +114,6 @@ def _warn_seating_discard(env_name: str, supplied: object, derived: object) -> N
     )
 
 
-#: Query parameters libpq and the async drivers accept a secret through.
-_SECRET_QUERY_KEYS = frozenset({"password", "sslpassword", "token"})
-
-
 def _loggable(value: object) -> object:
     """Return ``value`` safe to log: a URL's secrets are masked, never echoed.
 
@@ -125,21 +122,7 @@ def _loggable(value: object) -> object:
     value this warning reports.
     """
     text = str(value)
-    if "://" not in text:
-        return value
-    from sqlalchemy.engine.url import make_url
-    from sqlalchemy.exc import ArgumentError
-
-    try:
-        url = make_url(text)
-        masked = {
-            key: ("***" if key.lower() in _SECRET_QUERY_KEYS else item)
-            for key, item in url.query.items()
-        }
-        return url.set(query=masked).render_as_string(hide_password=True)
-    except ArgumentError:
-        # Unparseable: report that a value was discarded without the value.
-        return "<unparseable URL>"
+    return redact_url(text) if "://" in text else value
 
 
 def _valid_kimi_capability(token: str) -> bool:

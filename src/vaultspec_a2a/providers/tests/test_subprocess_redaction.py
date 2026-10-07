@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from .._subprocess import redact_secrets
+from ...utils import redact_text
 
 
 @pytest.mark.parametrize(
@@ -26,7 +26,7 @@ from .._subprocess import redact_secrets
 )
 def test_credential_shaped_values_are_masked(line: str, must_not_contain: str) -> None:
     """The value goes; the name stays, so the line is still diagnostic."""
-    redacted = redact_secrets(line)
+    redacted = redact_text(line)
 
     assert must_not_contain not in redacted
     assert "<redacted>" in redacted
@@ -42,7 +42,7 @@ def test_credential_shaped_values_are_masked(line: str, must_not_contain: str) -
 )
 def test_ordinary_diagnostics_survive_untouched(line: str) -> None:
     """Over-redaction would destroy the value the buffer exists to provide."""
-    assert redact_secrets(line) == line
+    assert redact_text(line) == line
 
 
 def test_the_redactor_is_not_inert() -> None:
@@ -52,7 +52,7 @@ def test_the_redactor_is_not_inert() -> None:
     expression made it match nothing, so every line passed through unchanged
     while the code read as if it redacted.
     """
-    assert redact_secrets("API_KEY=value") != "API_KEY=value"
+    assert redact_text("API_KEY=value") != "API_KEY=value"
 
 
 def test_a_multi_line_block_is_masked_per_occurrence() -> None:
@@ -70,7 +70,7 @@ def test_a_multi_line_block_is_masked_per_occurrence() -> None:
         "server exited with code 3"
     )
 
-    redacted = redact_secrets(block)
+    redacted = redact_text(block)
 
     assert "sk-ant-first" not in redacted
     assert "second-value" not in redacted
@@ -96,18 +96,18 @@ def test_json_shaped_credentials_are_masked() -> None:
         f'{{"apiKey":"{secret}"}}',
         f"'password': '{secret}'",
     ):
-        masked = redact_secrets(line)
+        masked = redact_text(line)
         assert secret not in masked, masked
         assert "<redacted>" in masked, masked
 
 
 def test_masking_preserves_the_quoting_it_found() -> None:
     """A masked JSON value still reads as JSON, so a tail stays parseable."""
-    masked = redact_secrets('{"apiKey":"sk-secret"}')
+    masked = redact_text('{"apiKey":"sk-secret"}')
     assert masked == '{"apiKey":"<redacted>"}'
 
 
 def test_text_without_a_credential_name_is_untouched() -> None:
     """Masking keys on the introducing NAME, so ordinary output is unharmed."""
     line = "listing 4 models for provider moonshot-ai"
-    assert redact_secrets(line) == line
+    assert redact_text(line) == line

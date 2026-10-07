@@ -32,7 +32,6 @@ from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
     PermissionRequestStatus,
-    ThreadStatus,
 )
 from ..thread.idempotency import (
     default_permission_response_key,
@@ -87,8 +86,8 @@ from .action_lease import (
 from .leased_dispatch import DispatchRefusal, build_followon_dispatch, dispatch_leased
 from .pause import project_checkpoint_read
 from .repair_transitions import (
-    apply_dispatch_failure,
     apply_repair_transition,
+    record_failed_permission_resume,
 )
 
 if TYPE_CHECKING:
@@ -790,12 +789,7 @@ async def _failed_permission_dispatch(
         DispatchFailureDisposition.DEFINITE_NON_DELIVERY,
         DispatchFailureDisposition.AMBIGUOUS_DELIVERY,
     }:
-        await apply_dispatch_failure(
-            db,
-            thread_id,
-            failed_status=ThreadStatus.INPUT_REQUIRED,
-            reason=failure.detail,
-        )
+        await record_failed_permission_resume(db, thread_id, reason=failure.detail)
 
     await db.commit()
     return ControlActionOutcome(

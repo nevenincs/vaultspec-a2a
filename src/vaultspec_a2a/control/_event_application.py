@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from pydantic import ValidationError
 
 from ..ipc.schemas import DispatchApplicationReceiptPayload
 from ..thread import named_request_id
 from ..thread.action_receipts import GRAPH_ACTION_VERB
+from ..thread.enums import ControlActionType
 from ..thread.permission_fsm import compute_permission_resolution_effects
 from ..thread.repair_policy import RepairPhase, repair_state_for_action
 from .permission_options import response_is_rejection
@@ -28,6 +29,16 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+#: The repair step recorded when an accepted action is proven applied, for the
+#: actions whose settlement is only to mark them applied. A follow-up is
+#: journaled as requested and recorded as applied under its own applied type.
+_APPLIED_REPAIR_ACTION: Final[dict[str, ControlActionType]] = {
+    ControlActionType.INGEST.value: ControlActionType.INGEST,
+    ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value: (
+        ControlActionType.MESSAGE_FOLLOWUP_APPLIED
+    ),
+}
 
 
 async def apply_permission_resolution(
@@ -207,27 +218,19 @@ async def commit_proven_application(
     application: DispatchApplicationReceiptPayload,
     stored_receipt: GraphActionReceipt,
 ) -> None:
-    from sqlalchemy import select
-
     from ..database import (
-        ThreadModel,
         begin_write_transaction,
         get_control_action_by_dispatch_id,
+        lock_thread_row,
         mark_control_action_applied,
     )
-    from ..thread.enums import ControlActionType
     from .dispatch_receipts import validate_current_graph_receipt
     from .repair_transitions import apply_repair_transition
 
     # ``proven_application_receipt`` ends its read transaction before the
     # checkpoint proof, so this settlement owns the whole re-read and write.
     await begin_write_transaction(db)
-    thread = await db.scalar(
-        select(ThreadModel)
-        .where(ThreadModel.id == thread_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
+    thread = await lock_thread_row(db, thread_id)
     action = await get_control_action_by_dispatch_id(
         db, thread_id=thread_id, dispatch_id=application.dispatch_id, lock=True
     )
@@ -238,23 +241,13 @@ async def commit_proven_application(
         or validate_current_graph_receipt(thread, action) != stored_receipt
     ):
         return
-    if action.action_type == ControlActionType.INGEST.value:
+    applied_repair_action = _APPLIED_REPAIR_ACTION.get(action.action_type)
+    if applied_repair_action is not None:
         await mark_control_action_applied(db, action.id)
         await apply_repair_transition(
             db,
             thread_id,
-            repair_state_for_action(ControlActionType.INGEST, RepairPhase.APPLIED),
-        )
-        await db.commit()
-        return
-    if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
-        await mark_control_action_applied(db, action.id)
-        await apply_repair_transition(
-            db,
-            thread_id,
-            repair_state_for_action(
-                ControlActionType.MESSAGE_FOLLOWUP_APPLIED, RepairPhase.APPLIED
-            ),
+            repair_state_for_action(applied_repair_action, RepairPhase.APPLIED),
         )
         await db.commit()
         return

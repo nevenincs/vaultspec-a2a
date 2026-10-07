@@ -12,7 +12,6 @@ from ..database import (
     set_thread_repair_state,
     thread_write_expectation,
 )
-from ..providers.conditions import ProviderCondition
 from ..thread.enums import ThreadStatus
 from ..thread.repair_policy import (
     DISPATCH_FAILED_TRANSITION,
@@ -25,8 +24,8 @@ if TYPE_CHECKING:
     from ..thread.repair_policy import RepairTransition
 
 __all__ = [
-    "apply_dispatch_failure",
     "apply_repair_transition",
+    "record_failed_permission_resume",
     "record_undelivered_dispatch",
 ]
 
@@ -60,68 +59,44 @@ async def apply_repair_transition(
     )
 
 
-async def apply_dispatch_failure(
+async def record_failed_permission_resume(
     db: AsyncSession,
     thread_id: str,
     *,
-    failed_status: ThreadStatus,
-    reason: str | None = None,
+    reason: str,
 ) -> ThreadModel | None:
-    """Apply the shared dispatch-failure state transition.
+    """Record that a permission resume failed outright and left the run parked.
 
-    Run creation, message follow-up, and permission resume all react to a
-    should-mark-failed dispatch outcome by pairing a thread-status change with
-    the dispatch-failed repair transition. Centralizing the pair keeps a caller
-    from updating one without the other.
+    An undelivered resume leaves the run parked on its question rather than
+    dead, so the status stays ``INPUT_REQUIRED`` and ``failure_reason`` and
+    ``provider_condition`` are never written: both describe a run that FAILED,
+    and stamping them on a run that is still alive would make a reloading client
+    report a failure that never happened. The account lands on the repair
+    reason, beside the dispatch-failed transition that hands the run to an
+    operator.
 
-    ``reason`` is the caller's own account of why the dispatch failed, and every
-    caller has one - it was previously spent on an HTTP response body and then
-    discarded, so a client that reloaded saw a failed run with no reason at all.
-
-    Where it lands depends on where the run lands, and the distinction is not
-    cosmetic. ``failure_reason`` and ``provider_condition`` describe why a run
-    FAILED, so they are written only when this transition actually fails it. The
-    permission-resume caller passes ``INPUT_REQUIRED``: an undelivered resume
-    leaves the run parked on its question rather than dead, and stamping a
-    failure reason on a run that is still alive would make a reloading client
-    report a failure that never happened. That path carries its account on the
-    repair reason instead, which every arm writes.
-
-    The provider condition, when written, is always the floor - a decision rather
-    than an omission. A dispatch that never reached the worker engaged no
-    provider, so there is none to report; naming one would describe the LOCAL
-    worker as though it were the model vendor and send the reader after the wrong
-    remedy. The dispatch layer's own failure vocabulary stays in the reason text.
+    *reason* is the caller's own account of why the dispatch failed; without it a
+    client that reloaded would see a quarantined run with no explanation.
 
     The status moves by election under the run's current writer, from the row as
     this call reads it, because a failed dispatch is a fact about the action that
-    owns the run. A run already in *failed_status* has nothing to elect, and a
+    owns the run. A run already ``INPUT_REQUIRED`` has nothing to elect, and a
     lost election means a newer writer owns the run, so neither the status nor
     the repair posture of a stale failure is written; ``None`` is returned.
     """
-    run_actually_failed = failed_status is ThreadStatus.FAILED
     thread = await db.get(ThreadModel, thread_id, populate_existing=True)
     if thread is None:
         return None
     expectation = thread_write_expectation(thread)
-    if expectation.status is not failed_status:
+    if expectation.status is not ThreadStatus.INPUT_REQUIRED:
         authority = expectation.authority
         election = await elect_thread_status(
             db,
             thread_id,
             expectation=expectation,
-            status=failed_status,
+            status=ThreadStatus.INPUT_REQUIRED,
             action_type=authority.action_type,
             action_receipt_id=authority.action_receipt_id,
-            failure_reason=reason if run_actually_failed else None,
-            # The condition rides the FAILURE, not the reason. Gating it on the
-            # reason too would let a caller that failed a run without a message
-            # persist a failed row with no classification at all - the blank
-            # terminal this campaign exists to remove, reintroduced through the
-            # back door. A reason is nice to have; a condition is the invariant.
-            provider_condition=(
-                ProviderCondition.UNKNOWN.value if run_actually_failed else None
-            ),
         )
         if election.outcome is not ThreadStatusElectionOutcome.WON:
             return None

@@ -6,14 +6,15 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeIs, cast
 
-from ..graph.acp_options import valid_option_ids
-from ..graph.enums import PermissionOptionKind, PermissionType
+from ..database import decode_allowed_options
+from ..graph.acp_options import APPROVAL_OPTIONS, valid_option_ids
+from ..graph.enums import PermissionType
 from ..thread.enums import ApprovalStatus
 from ..thread.snapshots import (
     PERMISSION_REQUEST_EVENT_TYPES,
     PLAN_APPROVAL_PAUSE_CAUSES,
 )
-from .permission_options import answer_is_rejection, decode_allowed_options
+from .permission_options import answer_is_rejection
 
 if TYPE_CHECKING:
     from ..database import PermissionRequestModel, ThreadModel
@@ -35,14 +36,6 @@ __all__ = [
     "response_payload",
     "response_verdict",
 ]
-
-#: The answers a plan or document decision accepts. An approval gate's interrupt
-#: names its request but offers no choices, so this pair is the whole offer; a
-#: tool permission's offer is the one its interrupt carries.
-_APPROVAL_OPTIONS: tuple[dict[str, str], ...] = (
-    {"option_id": "approve", "kind": PermissionOptionKind.ALLOW_ONCE.value},
-    {"option_id": "reject", "kind": PermissionOptionKind.REJECT_ONCE.value},
-)
 
 
 def response_payload(option_id: str, notes: str | None) -> dict[str, object]:
@@ -91,7 +84,7 @@ class ParkedPermission:
         offered: list[object]
         tool_call: str | None = None
         if interrupt.interrupt_type in PLAN_APPROVAL_PAUSE_CAUSES:
-            offered = [*_APPROVAL_OPTIONS]
+            offered = [*APPROVAL_OPTIONS]
         else:
             options: object = interrupt.payload.get("options")
             offered = cast("list[object]", options) if isinstance(options, list) else []

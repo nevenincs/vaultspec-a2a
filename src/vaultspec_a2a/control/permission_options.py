@@ -1,40 +1,41 @@
-"""Durable-column adapter over the canonical ACP option rules.
+"""Control-layer policy over a durable permission row's offered options.
 
-The control layer stores the options a permission request offered as a JSON
-string in the ``allowed_options_json`` column. This module owns that column's one
-decode; whether an answer denies the request is answered by the canonical Layer 1
-option rules over a decoded list, whichever source the list came from.
+The repository decodes the options a permission request offered from its
+``allowed_options_json`` column; whether an answer denies the request is answered
+by the canonical Layer 1 option rules over a decoded list, whichever source the
+list came from, and this module holds what the control layer decides from it.
 """
 
 from __future__ import annotations
 
-import json
-from typing import cast
+from typing import TYPE_CHECKING
 
-from ..graph.acp_options import is_rejection, offered_option
+from ..database import decode_allowed_options
+from ..graph.acp_options import is_rejection, offered_option, valid_option_ids
+
+if TYPE_CHECKING:
+    from ..database import PendingPermission
 
 __all__ = [
     "answer_is_rejection",
-    "decode_allowed_options",
+    "pending_is_actionable",
+    "pending_option_ids",
     "response_is_rejection",
 ]
 
 
-def decode_allowed_options(raw_options_json: str | None) -> list[object] | None:
-    """Decode the offered options of a durable permission row.
+def pending_option_ids(pending: PendingPermission) -> set[str]:
+    """The option ids a response to *pending* could name."""
+    return valid_option_ids(pending.offered)
 
-    An absent column offered nothing, so it decodes to an empty list. A column
-    that is present but empty, malformed JSON, or not a JSON list is unreadable
-    and decodes to ``None``, so a caller that must fail closed on a broken row
-    can tell it apart from a row that offered nothing.
+
+def pending_is_actionable(pending: PendingPermission) -> bool:
+    """Whether a response could still be addressed to *pending*.
+
+    It must offer a usable option, and its run must still have checkpoint truth
+    to resume from.
     """
-    if raw_options_json is None:
-        return []
-    try:
-        decoded: object = json.loads(raw_options_json)
-    except (TypeError, json.JSONDecodeError):
-        return None
-    return cast("list[object]", decoded) if isinstance(decoded, list) else None
+    return bool(pending_option_ids(pending)) and not pending.checkpoint_unavailable
 
 
 def answer_is_rejection(

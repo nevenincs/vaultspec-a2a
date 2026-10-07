@@ -27,14 +27,16 @@ from ..database import (
     settle_control_action_lease,
     thread_write_expectation,
 )
-from ..thread.clarification import (
+from ..thread import (
     ClarificationAnswers,
     ClarificationRequest,
+    pending_clarification,
+    validate_clarification_answers,
+)
+from ..thread.clarification import (
     ClarificationResolution,
     clarification_resolution_fingerprint,
     parse_clarification_resolution,
-    pending_clarification,
-    validate_clarification_answers,
 )
 from ..thread.dispatch_policy import FailureType
 from ..thread.enums import NON_ACTIVE_STATUSES, ControlActionType

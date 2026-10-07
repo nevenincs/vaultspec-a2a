@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
+from ..graph.acp_options import APPROVE_OPTION_ID
 from .enums import VERDICT_APPROVED, VERDICT_REJECTED
 from .snapshots import LOCALLY_RESPONDABLE_PAUSE_CAUSES, named_request_id
 
@@ -131,7 +132,7 @@ def permission_resume_value(
         return PermissionAnswer(
             request_id=request_id, option_id=option_id
         ).as_resume_value()
-    verdict = VERDICT_APPROVED if option_id == "approve" else VERDICT_REJECTED
+    verdict = VERDICT_APPROVED if option_id == APPROVE_OPTION_ID else VERDICT_REJECTED
     return ApprovalVerdict(
         request_id=request_id, verdict=verdict, notes=notes
     ).as_resume_value()

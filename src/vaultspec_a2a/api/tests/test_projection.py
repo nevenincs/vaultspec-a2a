@@ -289,6 +289,7 @@ def test_apply_checkpoint_projection_merges_clarification_request() -> None:
                 interrupt_type="clarification_request",
                 payload={
                     "type": "clarification_request",
+                    "request_id": "interrupt-clarify-1",
                     "questions": [
                         {
                             "id": "provider",
@@ -340,6 +341,7 @@ def test_apply_checkpoint_projection_uses_later_valid_clarification_sibling() ->
                 interrupt_type="clarification_request",
                 payload={
                     "type": "clarification_request",
+                    "request_id": "interrupt-valid-clarification",
                     "questions": [
                         {
                             "id": "provider",

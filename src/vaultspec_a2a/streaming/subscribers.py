@@ -191,6 +191,24 @@ class RunSequenceAllocator:
         self._counters[thread_id] = advanced
         return advanced
 
+    def issued_high_water(self, thread_id: str) -> int | None:
+        """Return the highest number issued to *thread_id*, or ``None`` if unnumbered.
+
+        The one reading of a run's numbering that is recorded as, and served
+        as, the run's cursor. A live counter answers with its current value; a
+        run forgotten while its floor is remembered answers with that floor,
+        because forgetting bounds memory and retracts nothing already stamped.
+
+        ``None`` is the answer for a run this process does not number: never
+        seeded here, or unseedable. A caller must read it as "no value", never
+        as zero - a counter this process did not keep says nothing about the
+        frames another gateway lifetime numbered.
+        """
+        if thread_id in self._unnumbered:
+            return None
+        live = self._counters.get(thread_id)
+        return live if live is not None else self._issued.get(thread_id)
+
     def is_numbered(self, thread_id: str) -> bool:
         """Whether this gateway's own numbers are what this run's frames carry.
 
@@ -206,9 +224,7 @@ class RunSequenceAllocator:
         survives. Its frames carry the producing worker's own counter, which
         restarts with that process and must never be offered back as a cursor.
         """
-        if thread_id in self._unnumbered:
-            return False
-        return thread_id in self._counters or thread_id in self._issued
+        return self.issued_high_water(thread_id) is not None
 
     def forget(self, thread_id: str) -> None:
         """Drop *thread_id*'s in-memory numbering state.

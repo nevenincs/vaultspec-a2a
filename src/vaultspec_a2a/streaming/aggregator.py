@@ -93,10 +93,17 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         self._emitters.bind_buffering(self._buffering)
         self._ingest = IngestManager(self._emitters, self._buffering, self._telemetry)
 
-    # -- Sequence management (delegates to emitters) --------------------
+    # -- Sequence management --------------------------------------------
 
-    def get_sequence(self, thread_id: str) -> int:
-        return self._emitters.get_sequence(thread_id)
+    def issued_sequence(self, thread_id: str) -> int | None:
+        """Return the highest frame number issued to *thread_id*, or ``None``.
+
+        ``None`` covers a process that numbers nothing - a worker's aggregator,
+        or a gateway serving no replay - and a run left unnumbered, so a caller
+        recording the answer records nothing for either.
+        """
+        allocator = self._subscribers_mgr.sequence_allocator
+        return None if allocator is None else allocator.issued_high_water(thread_id)
 
     def prune_sequences(self, active_thread_ids: set[str]) -> int:
         return self._emitters.prune_sequences(active_thread_ids)

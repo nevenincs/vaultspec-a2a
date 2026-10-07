@@ -706,8 +706,9 @@ async def _handle_terminal_event(
     if not is_terminal_event(payload):
         return
     # Capture before the durable write and before aggregator state is pruned.
+    # ``None`` - nothing numbers this run - leaves the settled cursor unwritten.
     last_sequence = (
-        aggregator.get_sequence(thread_id) if aggregator is not None else None
+        aggregator.issued_sequence(thread_id) if aggregator is not None else None
     )
     terminal_status = _validated_terminal_status(thread_id, payload)
     if terminal_status is None:

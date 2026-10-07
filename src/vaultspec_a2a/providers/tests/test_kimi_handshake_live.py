@@ -14,6 +14,7 @@ Service-marked; skips with a pointer when `kimi` is unavailable (an infra gate).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,12 +25,17 @@ from .._factory_commands import classify_provider_command
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
 
+if TYPE_CHECKING:
+    from ...conftest import ExternalPrerequisiteRule
+
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_kimi_acp_keyless_handshake_surface() -> None:
+async def test_kimi_acp_keyless_handshake_surface(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     if resolve_provider_cli_executable(Provider.KIMI) is None:
-        pytest.fail("kimi CLI unavailable; install with 'uv tool install kimi-cli'")
+        external_prerequisite.absent("kimi-cli", "the service resolves no kimi CLI")
 
     command = classify_provider_command(Provider.KIMI)
     workspace = str(Path.cwd())

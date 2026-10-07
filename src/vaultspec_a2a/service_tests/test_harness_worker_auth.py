@@ -2,20 +2,13 @@
 
 from __future__ import annotations
 
-from ..service_tests.harness import _INTERNAL_TOKEN, ServiceStack
+from ..service_tests.harness import _INTERNAL_TOKEN, unstarted_service_stack
 from ..utils import bearer_header
-
-_PORTS = {
-    "gateway": 18000,
-    "worker": 18001,
-    "jaeger_ui": 16686,
-    "jaeger_otlp": 4317,
-}
 
 
 def test_worker_probe_presents_the_internal_bearer() -> None:
     """The harness worker client carries the worker IPC bearer the surface requires."""
-    stack = ServiceStack(project_name="harness-unit-probe", ports=dict(_PORTS))
+    stack = unstarted_service_stack("harness-unit-probe")
     with stack._worker_client() as client:
         assert (
             client.headers["authorization"]
@@ -25,6 +18,6 @@ def test_worker_probe_presents_the_internal_bearer() -> None:
 
 def test_worker_env_and_probe_share_one_token() -> None:
     """The injected worker token and the probe bearer come from one source."""
-    stack = ServiceStack(project_name="harness-unit-env", ports=dict(_PORTS))
+    stack = unstarted_service_stack("harness-unit-env")
     env = stack._local_env()
     assert env["VAULTSPEC_A2A_INTERNAL_TOKEN"] == _INTERNAL_TOKEN

@@ -20,7 +20,7 @@ import asyncio
 import threading
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import pytest_asyncio
@@ -48,6 +48,9 @@ from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
 from ..factory import claude_auth_env
+
+if TYPE_CHECKING:
+    from ...conftest import ExternalPrerequisiteRule
 
 _CATALOG: JsonObject = {
     "schema_version": CATALOG_SCHEMA_VERSION,
@@ -123,9 +126,12 @@ async def authoring_http() -> AsyncGenerator[_AuthoringHttpServer]:
 @pytest.mark.asyncio
 async def test_real_agent_connects_to_authoring_bridge(
     authoring_http: _AuthoringHttpServer,
+    external_prerequisite: "ExternalPrerequisiteRule",
 ) -> None:
     if resolve_provider_cli_executable(Provider.CLAUDE) is None:
-        pytest.fail("claude CLI unavailable; start it per the ACP runbook")
+        external_prerequisite.absent(
+            "claude-cli", "the service resolves no Claude CLI to start"
+        )
 
     command = _classify_acp_command(settings.acp_backend)
     workspace = str(Path.cwd())

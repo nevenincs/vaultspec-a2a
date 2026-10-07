@@ -30,6 +30,7 @@ from ..provider_catalog import (
 )
 
 if TYPE_CHECKING:
+    from ...conftest import ExternalPrerequisiteRule
     from .._json_contract import JsonObject
 
 _KEY = ProviderCatalogKey("kimi", "cli")
@@ -181,10 +182,11 @@ def test_stdout_and_stderr_share_one_aggregate_output_budget() -> None:
     assert str(raised.value) == "Kimi discovery output exceeds one MiB"
 
 
-def _installed_kimi() -> str:
+@pytest.fixture
+def installed_kimi(external_prerequisite: ExternalPrerequisiteRule) -> str:
     executable = resolve_provider_cli_executable(Provider.KIMI)
     if executable is None:
-        pytest.fail("Kimi CLI is not installed")
+        external_prerequisite.absent("kimi-cli", "the service resolves no Kimi CLI")
     return executable
 
 
@@ -306,9 +308,9 @@ async def test_real_process_timeout_reaps() -> None:
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_installed_kimi_configured_lane_enumerates_without_prompt(
-    tmp_path: Path,
+    tmp_path: Path, installed_kimi: str
 ) -> None:
-    executable = _installed_kimi()
+    executable = installed_kimi
     environment, secret, model = _configured_runtime_environment(tmp_path)
     parent = psutil.Process()
     baseline = {child.pid for child in parent.children(recursive=True)}
@@ -338,9 +340,9 @@ async def test_installed_kimi_configured_lane_enumerates_without_prompt(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_installed_kimi_unconfigured_lane_is_truthfully_unavailable(
-    tmp_path: Path,
+    tmp_path: Path, installed_kimi: str
 ) -> None:
-    executable = _installed_kimi()
+    executable = installed_kimi
     environment = _runtime_environment(tmp_path)
     parent = psutil.Process()
     baseline = {child.pid for child in parent.children(recursive=True)}
@@ -366,8 +368,10 @@ async def test_installed_kimi_unconfigured_lane_is_truthfully_unavailable(
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_installed_kimi_failure_is_static_and_reaps(tmp_path: Path) -> None:
-    executable = _installed_kimi()
+async def test_installed_kimi_failure_is_static_and_reaps(
+    tmp_path: Path, installed_kimi: str
+) -> None:
+    executable = installed_kimi
     environment = _runtime_environment(tmp_path)
     parent = psutil.Process()
     baseline = {child.pid for child in parent.children(recursive=True)}
@@ -391,9 +395,9 @@ async def test_installed_kimi_failure_is_static_and_reaps(tmp_path: Path) -> Non
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_installed_kimi_discovery_reaps_when_cancelled(
-    tmp_path: Path,
+    tmp_path: Path, installed_kimi: str
 ) -> None:
-    executable = _installed_kimi()
+    executable = installed_kimi
     environment = _runtime_environment(tmp_path)
     parent = psutil.Process()
     baseline = {child.pid for child in parent.children(recursive=True)}

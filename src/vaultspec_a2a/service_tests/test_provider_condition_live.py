@@ -59,6 +59,7 @@ from ..providers.conditions import ProviderCondition
 from ..testing import (
     GATEWAY_AUTH_HEADERS,
     async_fetch_provider_catalog,
+    is_selectable,
     named_lane_selection,
     resolve_gateway_url,
     wait_for_run_status_async,
@@ -66,7 +67,7 @@ from ..testing import (
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
 
 #: Names the condition the operator has armed the stack to produce. Its presence
 #: is also the consent to spend a real credential: without it this module never
@@ -159,15 +160,16 @@ def _selection_from_catalog(catalog: JsonObject) -> dict[str, Any] | None:
     refused the moment the catalog turned over.
     """
     for record in lenient_json_object_list(catalog.get("providers")):
+        if not is_selectable(record):
+            continue
         models = lenient_json_object_list(
             lenient_json_object(record.get("catalog")).get("models")
         )
         provider_id = record.get("provider_id")
         execution_mode = record.get("execution_mode")
-        entry_id = models[0].get("entry_id") if models else None
+        entry_id = models[0].get("entry_id")
         if (
-            lenient_json_object(record.get("health")).get("selectable") is True
-            and isinstance(provider_id, str)
+            isinstance(provider_id, str)
             and isinstance(execution_mode, str)
             and isinstance(entry_id, str)
         ):

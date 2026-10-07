@@ -1,39 +1,31 @@
 """Reading a service response a live test just received, and its fields.
 
 A live-service test asserts on a real JSON body, and before it can read anything
-it must establish that what came back has the shape the contract promises. Nine
-service suites had each written that out for themselves, so the same four readers
-existed nine times over with three different failure vocabularies between them.
+it must establish that what came back has the shape the contract promises. These
+readers do that once for every tier, under one failure vocabulary.
 
-The failure text is why these are worth sharing rather than inlining. A service
-test that reads a wrong-shaped payload fails a long way from the request that
-produced it, so every message carries an ``at`` locator naming the response and
-the path within it. Independent copies of that convention drift, and a drifted
-locator is a test whose failure no longer says which call went wrong.
+Every message carries an ``at`` locator naming the response and the path within
+it. A service test that reads a wrong-shaped payload fails a long way from the
+request that produced it, so a failure without the locator no longer says which
+call went wrong.
 
-Two decisions worth knowing before adding to this module.
+Two guarantees to know before adding to this module.
 
 ``AssertionError``, because that is what these are: an assertion about a payload
-a service returned, not a type error in the caller. The suite that self-tests its
-readers already asserted exactly that, so converging kept its coverage intact
-rather than requiring it to be rewritten.
+a service returned, not a type error in the caller.
 
-VALIDATION, not narrowing, and this is the distinction that matters most. These
-run ``TypeAdapter.validate_python`` over an untyped decoded payload, which walks
-the whole recursive structure. That is a different operation from
+VALIDATION, not narrowing. :func:`json_object` and :func:`json_object_list` run
+``TypeAdapter.validate_python`` over an untyped decoded payload, which walks the
+whole recursive structure. That is a different operation from
 :func:`vaultspec_a2a.providers._json_contract.json_object`, which is an
 ``isinstance`` cast over an ALREADY-typed union - it narrows so the next subscript
 typechecks, and validates nothing. The two share a name and an ``at`` convention
-and are not interchangeable: routing these callers through that one would replace
-deep validation with a shallow cast, and no type checker would report it. Proven
-rather than assumed - ``TypeAdapter(JsonObject)`` rejects ``{"a": object()}``
-where both ``TypeAdapter(dict[str, object])`` and the narrowing cast accept it.
-
-That same proof is why the readers here validate against ``JsonObject`` rather
-than the looser ``dict[str, object]`` several callers used: the loose adapter only
-ever proved "a dict with string keys", which is what the narrowing cast already
-does. For a payload decoded from real JSON the tightening is a no-op in practice,
-but it IS a tightening and is declared as one.
+and are not interchangeable: ``TypeAdapter(JsonObject)`` rejects ``{"a": object()}``
+where both ``TypeAdapter(dict[str, object])`` and the narrowing cast accept it, so
+substituting the cast would replace deep validation with a shallow check that no
+type checker would report. The readers validate against ``JsonObject`` for that
+reason; the looser ``dict[str, object]`` adapter only proves a dict with string
+keys.
 
 :func:`json_list` and :func:`json_text` are the exception, and deliberately so:
 they are the array and string siblings of that narrowing cast, for a test already
@@ -48,13 +40,13 @@ from typing import TYPE_CHECKING, Final
 
 from pydantic import TypeAdapter, ValidationError
 
-from ..providers._json_contract import JsonObject
+from ..providers import JsonObject
 from ..utils.coercion import coerce_string_list
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from ..providers._json_contract import JsonValue
+    from ..providers import JsonValue
 
 __all__ = [
     "json_list",

@@ -22,8 +22,7 @@ import pytest_asyncio
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
-from ...authoring import AuthoringClient, AuthoringSession, mint_actor_token
-from ...authoring._envelope import AuthoringResponse
+from ...authoring import AuthoringClient, AuthoringSession
 from ...authoring.catalog import fetch_catalog
 from ...protocols.mcp.authoring_stdio import (
     ENV_ACTOR_TOKEN,
@@ -32,6 +31,7 @@ from ...protocols.mcp.authoring_stdio import (
     ENV_RUN_ID,
     ENV_SERVER_NAME,
 )
+from ...testing import mint_raw_token
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 
 if TYPE_CHECKING:
@@ -49,11 +49,7 @@ async def run_context(live_engine: EngineEndpoint) -> AsyncGenerator[RunContext]
     """Mint an actor token and open a real run, yielding the bridge env."""
     base_url, bearer = live_engine.base_url, live_engine.bearer_token
     async with AuthoringClient(base_url, bearer) as client:
-        minted = await mint_actor_token(
-            client, actor_id="agent:stdio-bridge-test", kind="agent"
-        )
-        assert isinstance(minted, AuthoringResponse)
-        actor_token = minted.data["raw_token"]
+        actor_token = await mint_raw_token(client, "agent:stdio-bridge-test", "agent")
         client._actor_token = actor_token
         session = AuthoringSession(client, "stdio-bridge-test-run")
         await session.create_session(scope="repo", title="stdio bridge test")

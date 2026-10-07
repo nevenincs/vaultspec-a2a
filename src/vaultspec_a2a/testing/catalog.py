@@ -109,11 +109,11 @@ __all__ = [
 # DNS.
 _CATALOG_READ_TIMEOUT_S: Final = 240.0
 
-type _SelectionKey = tuple[str, str, str | None]
+type _SelectionKey = tuple[str, str]
 
-# One selection per gateway, workspace and lane preference. A replayed or
-# committed request is only recognised when its selection is byte-identical to
-# the one it replays, so the choice is made once and handed out as fresh copies.
+# One selection per gateway and workspace. A replayed or committed request is
+# only recognised when its selection is byte-identical to the one it replays, so
+# the choice is made once and handed out as fresh copies.
 _SELECTION_CACHE: dict[_SelectionKey, ProviderCatalogSelection] = {}
 
 
@@ -231,9 +231,7 @@ def _served_summary(records: list[dict[str, Any]]) -> str:
     )
 
 
-def _choose_in_process(
-    payload: Any, prefer_provider_id: str | None
-) -> ProviderCatalogSelection:
+def _choose_in_process(payload: Any) -> ProviderCatalogSelection:
     records = _lanes(payload)
     candidates = [
         record for record in records if _is_in_process(record) and is_selectable(record)
@@ -249,10 +247,7 @@ def _choose_in_process(
             f"a selection. Arm them on the gateway with {arming}. Served: "
             + _served_summary(records)
         )
-    record = next(
-        (item for item in candidates if item["provider_id"] == prefer_provider_id),
-        candidates[0],
-    )
+    record = candidates[0]
     # First advertised entry: legal here and only here. The lane bills nothing,
     # and the provider's own ordering is a better default than any ranking this
     # module could invent - which it must not, per the production resolver.
@@ -298,24 +293,15 @@ def _named_selection(
     return _selection(record, entry_id, controls or {})
 
 
-def in_process_selection(
-    payload: Any, *, prefer_provider_id: str | None = None
-) -> dict[str, Any]:
+def in_process_selection(payload: Any) -> dict[str, Any]:
     """Select an in-process lane's first advertised entry.
-
-    ``prefer_provider_id`` names the in-process lane to use when it is served.
-    Callers pass the lane their preset is pinned to, because in-process lanes
-    are not interchangeable: a preset answered by the wrong one still completes
-    while testing something else entirely. An unserved or unnamed
-    preference falls back to the first in-process lane rather than failing, since
-    any of them satisfies a caller that expressed no preference.
 
     An EXTERNAL lane is never returned, even when one is selectable and the
     in-process lanes are not. That is the whole safety property: the caller asked
     for a lane that bills nothing, and silently upgrading it to a real provider
     would be the expensive surprise this module exists to prevent.
     """
-    return _choose_in_process(payload, prefer_provider_id).model_dump(mode="json")
+    return _choose_in_process(payload).model_dump(mode="json")
 
 
 def named_lane_selection(
@@ -353,7 +339,7 @@ def fetch_provider_catalog(
     timeout: float = _CATALOG_READ_TIMEOUT_S,
 ) -> Any:
     """Read the catalog the gateway serves for *workspace_root*."""
-    from ..api.routes import PROVIDER_CATALOG_PATH
+    from ..api.schemas.provider_catalog import PROVIDER_CATALOG_PATH
 
     return _catalog_body(
         client.get(
@@ -371,7 +357,7 @@ async def async_fetch_provider_catalog(
     timeout: float = _CATALOG_READ_TIMEOUT_S,
 ) -> Any:
     """The async twin of :func:`fetch_provider_catalog`."""
-    from ..api.routes import PROVIDER_CATALOG_PATH
+    from ..api.schemas.provider_catalog import PROVIDER_CATALOG_PATH
 
     return _catalog_body(
         await client.get(
@@ -391,33 +377,29 @@ def _catalog_body(response: httpx.Response) -> Any:
 
 
 def _selection_key(
-    client: httpx.Client | httpx.AsyncClient,
-    workspace_root: str,
-    prefer_provider_id: str | None,
+    client: httpx.Client | httpx.AsyncClient, workspace_root: str
 ) -> _SelectionKey:
-    return (str(client.base_url), workspace_root, prefer_provider_id)
+    return (str(client.base_url), workspace_root)
 
 
 def fetch_in_process_selection(
     client: httpx.Client,
     workspace_root: str,
     *,
-    prefer_provider_id: str | None = None,
     cache: bool = False,
     timeout: float = _CATALOG_READ_TIMEOUT_S,
 ) -> dict[str, Any]:
     """Read the served catalog and select an in-process lane from it.
 
-    ``cache`` remembers the choice per gateway, workspace and preference, for a
-    caller that sends the same selection on several requests; the default reads
-    afresh, which is what a test that restarts its gateway needs.
+    ``cache`` remembers the choice per gateway and workspace, for a caller that
+    sends the same selection on several requests; the default reads afresh,
+    which is what a test that restarts its gateway needs.
     """
-    key = _selection_key(client, workspace_root, prefer_provider_id)
+    key = _selection_key(client, workspace_root)
     chosen = _SELECTION_CACHE.get(key) if cache else None
     if chosen is None:
         chosen = _choose_in_process(
-            fetch_provider_catalog(client, workspace_root, timeout=timeout),
-            prefer_provider_id,
+            fetch_provider_catalog(client, workspace_root, timeout=timeout)
         )
         if cache:
             _SELECTION_CACHE[key] = chosen
@@ -428,7 +410,6 @@ async def async_fetch_in_process_selection(
     client: httpx.AsyncClient,
     workspace_root: str,
     *,
-    prefer_provider_id: str | None = None,
     cache: bool = False,
     timeout: float = _CATALOG_READ_TIMEOUT_S,
 ) -> dict[str, Any]:
@@ -439,12 +420,11 @@ async def async_fetch_in_process_selection(
     function reads worse than two short ones that each do the obvious thing. Both
     share one cache, so whichever runs first pays for the read.
     """
-    key = _selection_key(client, workspace_root, prefer_provider_id)
+    key = _selection_key(client, workspace_root)
     chosen = _SELECTION_CACHE.get(key) if cache else None
     if chosen is None:
         chosen = _choose_in_process(
-            await async_fetch_provider_catalog(client, workspace_root, timeout=timeout),
-            prefer_provider_id,
+            await async_fetch_provider_catalog(client, workspace_root, timeout=timeout)
         )
         if cache:
             _SELECTION_CACHE[key] = chosen
@@ -456,18 +436,13 @@ def fetch_in_process_selection_at(
     workspace_root: str,
     *,
     headers: Mapping[str, str] | None = None,
-    prefer_provider_id: str | None = None,
     cache: bool = False,
     timeout: float = _CATALOG_READ_TIMEOUT_S,
 ) -> dict[str, Any]:
     """:func:`fetch_in_process_selection` for a caller that holds only a URL."""
     with httpx.Client(base_url=base_url, headers=headers) as client:
         return fetch_in_process_selection(
-            client,
-            workspace_root,
-            prefer_provider_id=prefer_provider_id,
-            cache=cache,
-            timeout=timeout,
+            client, workspace_root, cache=cache, timeout=timeout
         )
 
 

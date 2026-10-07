@@ -87,22 +87,12 @@ def test_the_dangerous_combination_has_no_callable_form() -> None:
     assert named["provider_id"].default is inspect.Parameter.empty
 
 
-def test_the_preferred_in_process_lane_wins_when_served() -> None:
-    """A preference naming a served in-process lane selects it, not an external."""
-    selection = in_process_selection(
-        _payload(CODEX, DETERMINISTIC), prefer_provider_id="deterministic"
-    )
+def test_a_served_in_process_lane_is_selected_over_an_external_one() -> None:
+    """With both served, the in-process lane is the one selected, on its entry."""
+    selection = in_process_selection(_payload(CODEX, DETERMINISTIC))
+    assert selection["provider_id"] in {lane.provider.value for lane in LANES}
     assert selection["provider_id"] == "deterministic"
     assert selection["entry_id"] == "det-1"
-
-
-def test_an_unserved_preference_falls_back_within_the_in_process_lanes() -> None:
-    """A preference that cannot be honoured degrades, but never off-lane."""
-    selection = in_process_selection(
-        _payload(CODEX, DETERMINISTIC), prefer_provider_id="absent-lane"
-    )
-    assert selection["provider_id"] == "deterministic"
-    assert selection["provider_id"] in {lane.provider.value for lane in LANES}
 
 
 def test_an_unselectable_in_process_lane_is_not_used() -> None:

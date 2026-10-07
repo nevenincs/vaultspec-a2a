@@ -10,7 +10,7 @@ import pytest
 from httpx import ASGITransport
 
 from ...api.app import create_app
-from ..routes import PROVIDER_CATALOG_PATH
+from ..schemas.provider_catalog import PROVIDER_CATALOG_PATH
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

@@ -83,6 +83,7 @@ from ..authoring import (
 from ..graph.acp_options import narrowest_option_id
 from ..graph.enums import ServerEventType, ToolKind
 from ..streaming.sse_frames import iter_sse_events
+from ..utils import bearer_header
 from .catalog import (
     async_fetch_provider_catalog,
     in_process_lane_required,
@@ -100,7 +101,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable, Mapping
 
     from ..conftest import ExternalPrerequisiteRule
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
 
 __all__ = [
     "CODER_ROLE",
@@ -117,8 +118,10 @@ __all__ = [
     "AcceptanceHarness",
     "Materialization",
     "ResilientAuthoringClient",
+    "extract_bridge_tools",
     "is_live_lane",
     "message_content",
+    "mint_raw_token",
     "observe_bridged_authoring_run",
     "reachable_stack",
     "resolve_selection",
@@ -147,9 +150,7 @@ logger = logging.getLogger(__name__)
 # failure rather than a silently skipped assertion, which is the point.
 _GATEWAY_SERVICE_TOKEN = os.environ.get("VAULTSPEC_A2A_GATEWAY_TOKEN", "")
 GATEWAY_AUTH_HEADERS = (
-    {"Authorization": f"Bearer {_GATEWAY_SERVICE_TOKEN}"}
-    if _GATEWAY_SERVICE_TOKEN
-    else {}
+    bearer_header(_GATEWAY_SERVICE_TOKEN) if _GATEWAY_SERVICE_TOKEN else {}
 )
 
 # Per-gate verdict policies (the lane axis).
@@ -364,11 +365,12 @@ async def resolve_selection(
     )
     selection = selection_from_served_catalog(catalog)
     if case.lane_provider is not None and (selection.provider_id != case.lane_provider):
-        pytest.skip(
+        external_prerequisite.absent(
+            "provider-catalog-live-selection",
             f"the {case.label} lane certifies {case.lane_provider!r}, but the "
-            f"configured live selection names {selection.provider_id!r}. Skipped "
-            "rather than run, because a pass here would be recorded against a "
-            "provider this lane makes no claim about."
+            f"configured live selection names {selection.provider_id!r}. It is "
+            "not run, because a pass here would be recorded against a provider "
+            "this lane makes no claim about",
         )
 
     if not case.override_roles:
@@ -383,15 +385,29 @@ async def resolve_selection(
     )
     override = override_selection_from_served_catalog(catalog)
     if override.provider_id == selection.provider_id:
-        pytest.skip(
+        external_prerequisite.absent(
+            "provider-catalog-override-selection",
             f"the {case.label} lane needs two DIFFERENT providers, but both the "
             f"primary and override selections name {override.provider_id!r}. That "
-            "run would be single-provider wearing a mixed label."
+            "run would be single-provider wearing a mixed label",
         )
     override_body = override.model_dump(mode="json")
     return selection.model_dump(mode="json"), {
         role: dict(override_body) for role in case.override_roles
     }
+
+
+async def mint_raw_token(ec: AuthoringClient, actor_id: str, kind: str) -> str:
+    """Mint one actor token of *kind* for *actor_id* and return its raw value.
+
+    A denial fails the caller: every live proof that needs a token has nothing to
+    assert on without one, so a refusal is reported here, naming the denial.
+    """
+    minted = await mint_actor_token(ec, actor_id=actor_id, kind=kind)
+    assert isinstance(minted, AuthoringResponse), f"mint denied: {minted}"
+    token = json_object(minted.data, at="actor-token response").get("raw_token")
+    assert isinstance(token, str) and token
+    return token
 
 
 def _object_list_or_empty(value: object, *, at: str) -> list[JsonObject]:
@@ -628,8 +644,8 @@ class AcceptanceHarness:
     vault_root: Path
     gateway_url: str
     # The resolved run-start selection and per-role overrides. Injected by the
-    # test rather than resolved here so every "cannot honestly run" path is a
-    # pytest.skip at collection-adjacent scope, not an exception mid-run.
+    # test rather than resolved here so every "cannot honestly run" path is an
+    # absent prerequisite at collection-adjacent scope, not an exception mid-run.
     selection: JsonObject = field(default_factory=dict)
     overrides: dict[str, JsonObject] = field(default_factory=dict)
     run_id: str = field(default_factory=lambda: f"pw7-{int(time.time())}")
@@ -671,11 +687,7 @@ class AcceptanceHarness:
     @staticmethod
     async def mint(ec: AuthoringClient, actor_id: str, kind: str) -> str:
         """Mint one actor token of *kind* for *actor_id*; a denial fails the case."""
-        minted = await mint_actor_token(ec, actor_id=actor_id, kind=kind)
-        assert isinstance(minted, AuthoringResponse), f"mint denied: {minted}"
-        token = json_object(minted.data, at="actor-token response").get("raw_token")
-        assert isinstance(token, str) and token
-        return token
+        return await mint_raw_token(ec, actor_id, kind)
 
     @staticmethod
     async def mint_role_tokens(
@@ -688,7 +700,7 @@ class AcceptanceHarness:
         a principal no other run holds.
         """
         return {
-            role: await AcceptanceHarness.mint(ec, f"agent:{run_id}:{role}", "agent")
+            role: await mint_raw_token(ec, f"agent:{run_id}:{role}", "agent")
             for role in roles
         }
 
@@ -1221,7 +1233,9 @@ class AcceptanceHarness:
             # One human principal is both the reviewer AND the operation-mode
             # policy setter (mode-set requires a human/system actor; a human
             # reviewer distinct from the agent author clears the self-approval ban).
-            reviewer_human = await self.mint(ec, f"rev-human:{self.run_id}", "human")
+            reviewer_human = await mint_raw_token(
+                ec, f"rev-human:{self.run_id}", "human"
+            )
 
             async with httpx.AsyncClient(headers=GATEWAY_AUTH_HEADERS) as hc:
                 # Hardened run-start refusals (pure eligibility, no submit).
@@ -1426,7 +1440,7 @@ def message_content(payload: Mapping[str, object]) -> str | None:
     return content if isinstance(content, str) else None
 
 
-def _extract_bridge_tools(output: str) -> set[str]:
+def extract_bridge_tools(output: str) -> set[str]:
     """Return distinct ``mcp__vaultspec-authoring__<tool>`` names named in output."""
     tools: set[str] = set()
     idx = 0
@@ -1501,7 +1515,7 @@ async def observe_bridged_authoring_run(
                 if content:
                     output_parts.append(content)
                     narrated_bridge_names.update(
-                        _extract_bridge_tools("".join(output_parts))
+                        extract_bridge_tools("".join(output_parts))
                     )
                 terminal = payload.get("type") == "thread_terminal"
                 now = time.monotonic()

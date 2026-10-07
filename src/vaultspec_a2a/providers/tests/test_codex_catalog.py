@@ -34,6 +34,7 @@ from ..provider_catalog import (
 )
 
 if TYPE_CHECKING:
+    from ...conftest import ExternalPrerequisiteRule
     from .._json_contract import JsonObject
 
 _KEY = ProviderCatalogKey("codex", "app-server")
@@ -265,10 +266,13 @@ def test_stdout_and_stderr_share_one_aggregate_output_budget() -> None:
     assert str(raised.value) == "Codex discovery output exceeds one MiB"
 
 
-def _real_codex_inputs() -> tuple[tuple[str, ...], dict[str, str]]:
+@pytest.fixture
+def real_codex_inputs(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> tuple[tuple[str, ...], dict[str, str]]:
     executable = resolve_provider_cli_executable(Provider.CODEX)
     if executable is None:
-        pytest.fail("Codex CLI is not installed")
+        external_prerequisite.absent("codex-cli", "the service resolves no Codex CLI")
     workspace = Path.cwd()
     environment = resolve_env_vars(workspace)
     codex_home = settings.codex_home
@@ -279,8 +283,10 @@ def _real_codex_inputs() -> tuple[tuple[str, ...], dict[str, str]]:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_real_codex_catalog_discovery_reaps_without_prompt() -> None:
-    command, environment = _real_codex_inputs()
+async def test_real_codex_catalog_discovery_reaps_without_prompt(
+    real_codex_inputs: tuple[tuple[str, ...], dict[str, str]],
+) -> None:
+    command, environment = real_codex_inputs
     parent = psutil.Process()
     baseline = {child.pid for child in parent.children(recursive=True)}
 
@@ -307,8 +313,10 @@ async def test_real_codex_catalog_discovery_reaps_without_prompt() -> None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_real_codex_catalog_discovery_reaps_when_cancelled() -> None:
-    command, environment = _real_codex_inputs()
+async def test_real_codex_catalog_discovery_reaps_when_cancelled(
+    real_codex_inputs: tuple[tuple[str, ...], dict[str, str]],
+) -> None:
+    command, environment = real_codex_inputs
     parent = psutil.Process()
     baseline = {child.pid for child in parent.children(recursive=True)}
     task = asyncio.create_task(

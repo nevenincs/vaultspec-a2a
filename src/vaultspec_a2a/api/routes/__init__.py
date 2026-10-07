@@ -6,11 +6,11 @@ Two routers, mounted by ``register_routes``: the versioned product surface under
 
 from fastapi import FastAPI
 
-from ._gateway_action_endpoints import PROVIDER_CATALOG_PATH, route_signature
+from ._gateway_action_endpoints import route_signature
 from .admin import router as admin_router
 from .gateway import router as gateway_router
 
-__all__ = ["PROVIDER_CATALOG_PATH", "register_routes", "route_signature"]
+__all__ = ["register_routes", "route_signature"]
 
 
 def register_routes(app: FastAPI) -> None:

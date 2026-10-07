@@ -34,7 +34,7 @@ from ...testing import (
     async_run_start_body,
     serve_on_loopback,
 )
-from ..routes import PROVIDER_CATALOG_PATH
+from ..schemas.provider_catalog import PROVIDER_CATALOG_PATH
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:

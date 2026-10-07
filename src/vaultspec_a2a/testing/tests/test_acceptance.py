@@ -29,13 +29,14 @@ from ..acceptance import (
     _items,
     _poll_seconds_for,
     _retry_transient,
+    extract_bridge_tools,
     runtime_budget_for,
 )
 from ..payloads import json_object
 
 if TYPE_CHECKING:
     from ...authoring import AuthoringClient, AuthoringResponse
-    from ...providers._json_contract import JsonObject
+    from ...providers import JsonObject
 
 _GATES_AUTO = {"research": POLICY_AUTO, "adr": POLICY_AUTO}
 _GATES_HUMAN = {"research": POLICY_HUMAN, "adr": POLICY_HUMAN}
@@ -69,6 +70,19 @@ def test_deterministic_lanes_poll_fast_and_live_lanes_poll_slow() -> None:
     for gates in (_GATES_AUTO, _GATES_HUMAN, _GATES_MIXED):
         assert _poll_seconds_for(_case(PRESET_DETERMINISTIC, gates)) == 1.0
         assert _poll_seconds_for(_case(PRESET_LIVE, gates)) == 5.0
+
+
+def test_extract_bridge_tools_finds_qualified_names() -> None:
+    """The extractor pulls the exact bridged tool names, no more."""
+    text = (
+        "I called mcp__vaultspec-authoring__read_context, then "
+        "mcp__vaultspec-authoring__propose_changeset. Also Read and Bash."
+    )
+    assert extract_bridge_tools(text) == {
+        "mcp__vaultspec-authoring__read_context",
+        "mcp__vaultspec-authoring__propose_changeset",
+    }
+    assert extract_bridge_tools("no tools here") == set()
 
 
 def test_read_only_tool_kinds_are_allowlisted_and_writes_are_not() -> None:

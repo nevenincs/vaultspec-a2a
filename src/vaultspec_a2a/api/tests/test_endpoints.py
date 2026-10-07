@@ -41,6 +41,7 @@ from ...database.models import (
     ThreadExecutionStateModel,
     ThreadModel,
 )
+from ...providers import JsonObject
 from ...streaming import RelayHub
 from ...testing import (
     DEFAULT_TEAM_PRESET,
@@ -65,8 +66,6 @@ from ...thread.idempotency import (
 from .conftest import make_app
 
 type SessionFactory = async_sessionmaker[AsyncSession]
-type JsonValue = str | int | float | bool | list[JsonValue] | JsonObject | None
-type JsonObject = dict[str, JsonValue]
 
 
 def _close_on_testclient_loop(

@@ -62,7 +62,6 @@ from ..testing import (
     snapshot_vault,
     vault_write_delta,
 )
-from ..testing.acceptance import _extract_bridge_tools
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
@@ -220,16 +219,3 @@ def test_solo_coder_case_names_the_bridge_tools() -> None:
     assert case.autonomous is True
     assert _PROPOSE_TOOL in case.prompt
     assert "mcp__vaultspec-authoring__read_context" in case.prompt
-
-
-def test_extract_bridge_tools_finds_qualified_names() -> None:
-    """Stack-free guard: the extractor pulls the exact bridged tool names, no more."""
-    text = (
-        "I called mcp__vaultspec-authoring__read_context, then "
-        "mcp__vaultspec-authoring__propose_changeset. Also Read and Bash."
-    )
-    assert _extract_bridge_tools(text) == {
-        "mcp__vaultspec-authoring__read_context",
-        _PROPOSE_TOOL,
-    }
-    assert _extract_bridge_tools("no tools here") == set()

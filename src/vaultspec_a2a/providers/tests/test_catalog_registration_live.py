@@ -83,9 +83,12 @@ asyncio.run(main())
 @pytest.mark.service
 def test_installed_kimi_registration_uses_isolated_persisted_config(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     if resolve_provider_cli_executable(Provider.KIMI) is None:
-        pytest.fail("Kimi Code CLI is not installed")
+        external_prerequisite.absent(
+            "kimi-cli", "the service resolves no Kimi Code CLI"
+        )
     kimi_home = tmp_path / "kimi-home"
     kimi_home.mkdir()
     env = dict(os.environ)

@@ -49,7 +49,6 @@ from pathlib import Path
 from typing import Any
 
 from ..acceptance.tests._harness import certified_gateway
-from ..graph.enums import Provider
 from ..testing import role_tokens
 
 # A star preset, so the run crosses the supervisor's routing turns as well as its
@@ -62,11 +61,6 @@ _PRESET_PATH = (
     / "teams"
     / f"{_PRESET}.toml"
 )
-
-# The in-process lane the preset runs on. The shared selection never returns a
-# lane that bills, so a host holding a live provider session cannot turn this
-# deterministic certification into spend.
-_PRESET_LANE = Provider.DETERMINISTIC.value
 
 _WORKER_READY_BUDGET_SECONDS = "120"
 
@@ -95,9 +89,7 @@ def test_advertised_assignment_is_the_assignment_the_worker_executes(
             gateway.runs,
             team_preset=_PRESET,
             workspace_root=str(tmp_path),
-            selection=lambda workspace: gateway.served_in_process_selection(
-                workspace, prefer_provider_id=_PRESET_LANE
-            ),
+            selection=gateway.served_in_process_selection,
             tokens=role_tokens(roles),
         )
         started = verbs.start(run_id, message="Do the task and stop.")

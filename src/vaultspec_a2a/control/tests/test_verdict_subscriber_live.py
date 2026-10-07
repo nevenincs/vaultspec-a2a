@@ -53,7 +53,6 @@ from ...authoring import (
     AuthoringSession,
     EngineEndpoint,
     LifecycleEvent,
-    mint_actor_token,
     verdict_from_event,
 )
 from ...control._verdict_subscriber_config import VerdictSubscriberConfig
@@ -74,6 +73,7 @@ from ...testing import (
     DEFAULT_TEAM_PRESET,
     adopted_spawner,
     current_execution_metadata,
+    mint_raw_token,
     seed_create_action,
     served_worker,
 )
@@ -121,11 +121,7 @@ async def test_live_stream_decodes_real_lifecycle_event(
 ) -> None:
     """A real session's outbox event decodes and correlates by its aggregate id."""
     run_id = f"s08-{uuid.uuid4().hex[:8]}"
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    assert isinstance(minted.data, dict)
-    minted_data = cast("dict[str, Any]", minted.data)
-    client._actor_token = minted_data["raw_token"]
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     baseline = await _high_water(client)
     session = AuthoringSession(client, run_id)
@@ -163,11 +159,7 @@ async def test_live_non_verdict_event_does_not_resume(
     every decoded frame must yield no verdict.
     """
     run_id = f"s08-{uuid.uuid4().hex[:8]}"
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    assert isinstance(minted.data, dict)
-    minted_data = cast("dict[str, Any]", minted.data)
-    client._actor_token = minted_data["raw_token"]
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     baseline = await _high_water(client)
     session = AuthoringSession(client, run_id)
@@ -340,16 +332,12 @@ async def _prepare_verdict_round_trip(
 ) -> _VerdictRoundTrip:
     """Create the three proposals and publish their human decisions."""
     run_id = f"rt-{uuid.uuid4().hex[:8]}"
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    client._actor_token = minted.data["raw_token"]
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     baseline = await _high_water(client)
     session = AuthoringSession(client, run_id)
     await session.create_session(scope="repo", title=run_id)
-    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
-    assert isinstance(reviewer, AuthoringResponse)
-    reviewer_token = reviewer.data["raw_token"]
+    reviewer_token = await mint_raw_token(client, f"human:{run_id}", "human")
 
     approve = await _submit_proposal(session, run_id, "appr")
     reject = await _submit_proposal(session, run_id, "rej")
@@ -580,15 +568,11 @@ async def _wait_for_receipt(
 async def _prepare_missed_reject(
     client: AuthoringClient, run_id: str
 ) -> dict[str, str]:
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    client._actor_token = minted.data["raw_token"]
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     session = AuthoringSession(client, run_id)
     await session.create_session(scope="repo", title=run_id)
-    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
-    assert isinstance(reviewer, AuthoringResponse)
-    reviewer_token = reviewer.data["raw_token"]
+    reviewer_token = await mint_raw_token(client, f"human:{run_id}", "human")
 
     info = await _submit_proposal(session, run_id, "adr")
     await _decide(
@@ -733,15 +717,11 @@ async def _assert_clobbered_snapshot(
 async def _prepare_clobbered_run(client: AuthoringClient) -> _ClobberedRun:
     """Submit a request-changes proposal before seeding its clobbered run."""
     run_id = f"cl-{uuid.uuid4().hex[:8]}"
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    client._actor_token = minted.data["raw_token"]
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     session = AuthoringSession(client, run_id)
     await session.create_session(scope="repo", title=run_id)
-    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
-    assert isinstance(reviewer, AuthoringResponse)
-    reviewer_token = reviewer.data["raw_token"]
+    reviewer_token = await mint_raw_token(client, f"human:{run_id}", "human")
 
     info = await _submit_proposal(session, run_id, "adr")
     await _decide(

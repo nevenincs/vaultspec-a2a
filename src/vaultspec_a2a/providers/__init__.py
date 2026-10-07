@@ -16,6 +16,8 @@ Providers implement :mod:`vaultspec_a2a.graph.protocols` for
 import importlib
 from typing import TYPE_CHECKING
 
+from ._json_contract import JsonObject as JsonObject
+from ._json_contract import JsonValue as JsonValue
 from .acp_exceptions import AcpAuthError as AcpAuthError
 from .acp_exceptions import AcpError as AcpError
 from .acp_exceptions import AcpErrorCode as AcpErrorCode
@@ -62,6 +64,8 @@ __all__ = [
     "AcpPromptCancelledError",
     "AcpPromptError",
     "AcpSessionError",
+    "JsonObject",
+    "JsonValue",
     "LanePluginError",
     "LaneRegistration",
     "LaneRegistry",

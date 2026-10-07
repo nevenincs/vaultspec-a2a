@@ -81,7 +81,7 @@ def _declaring_modules(pattern: str) -> list[str]:
             "ACP option-id kind heuristic",
             r"def _map_acp_option_kind",
             1,
-            "streaming/types.py, private on purpose",
+            "graph/acp_options.py, private on purpose",
             "While it was public a second consumer chose it over the resolver "
             "and classified a declared denial as an approval. It is the "
             "resolver's last resort, not a peer that can be selected instead.",

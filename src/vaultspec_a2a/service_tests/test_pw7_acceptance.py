@@ -42,7 +42,7 @@ import pytest
 
 from ..authoring import AuthoringTransportError
 from ..control.run_start_policy import required_role_ids
-from ..graph.enums import PermissionOptionKind, ToolKind
+from ..graph.enums import ToolKind
 from ..team.team_config import load_team_config
 from ..testing import settings_override
 from ..testing.acceptance import (
@@ -57,7 +57,6 @@ from ..testing.acceptance import (
     ResilientAuthoringClient,
     _gateway_is_transient,
     _items,
-    _option_id_for,
     _poll_seconds_for,
     _retry_transient,
     is_live_lane,
@@ -280,6 +279,8 @@ def test_live_lane_timeout_marker_matches_runtime_budget() -> None:
 def test_live_mixed_runtime_budget_is_the_specified_value() -> None:
     """The live-mixed lane budgets to (180 + AUTO 240 + HUMAN 600) x4 = 4080s."""
     assert runtime_budget_for(CASE_LIVE_MIXED) == pytest.approx(4080.0)
+    # Same gate shape at the deterministic preset is x1 - well under 4080s.
+    assert runtime_budget_for(CASE_MIXED) == pytest.approx(1020.0)
 
 
 def test_deterministic_lanes_poll_fast_and_live_lanes_poll_slow() -> None:
@@ -302,20 +303,6 @@ def test_read_only_tool_kinds_are_allowlisted_and_writes_are_not() -> None:
         assert denied not in _READ_ONLY_TOOL_KINDS
     assert "search" in _READ_ONLY_TOOL_KINDS
     assert "edit" not in _READ_ONLY_TOOL_KINDS
-
-
-def test_option_id_for_selects_the_option_of_the_requested_kind() -> None:
-    options = [
-        {"option_id": "opt-once", "name": "Allow once", "kind": "allow_once"},
-        {"option_id": "opt-always", "name": "Allow always", "kind": "allow_always"},
-        {"option_id": "opt-deny", "name": "Deny", "kind": "reject_always"},
-    ]
-    assert _option_id_for(options, PermissionOptionKind.ALLOW_ALWAYS) == "opt-always"
-    assert _option_id_for(options, PermissionOptionKind.REJECT_ALWAYS) == "opt-deny"
-    assert _option_id_for(options, PermissionOptionKind.ALLOW_ONCE) == "opt-once"
-    assert _option_id_for([], PermissionOptionKind.ALLOW_ALWAYS) is None
-    # Same gate shape at the deterministic preset is x1 - well under 4080s.
-    assert runtime_budget_for(CASE_MIXED) == pytest.approx(1020.0)
 
 
 def test_json_reader_rejects_a_non_object_gateway_response() -> None:

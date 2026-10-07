@@ -61,9 +61,6 @@ from ._permission_response_contract import (
     action_payload_matches as _action_payload_matches,
 )
 from ._permission_response_contract import (
-    allowed_option_ids as _allowed_option_ids,
-)
-from ._permission_response_contract import (
     audited_tool_name as _audited_tool_name,
 )
 from ._permission_response_contract import (
@@ -92,6 +89,7 @@ from .dispatch import DispatchOutcome, safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .graph_definition import read_accepted_graph_definition
+from .permission_options import extract_allowed_option_ids
 from .repair_transitions import (
     apply_dispatch_failure,
     mark_permission_response_requested,
@@ -243,7 +241,9 @@ async def _deduplicate_permission_response(
             == ControlActionResultStatus.REJECTED_INVALID_STATE.value
         ):
             stored_error_detail = _existing_rejection_error(existing_action)
-            valid_option_ids = _allowed_option_ids(permission)
+            valid_option_ids = extract_allowed_option_ids(
+                permission.allowed_options_json
+            )
             error_detail, error_status_code = _rejected_permission_error(
                 permission_status=permission.request_status,
                 thread_terminal=thread_record.status in TERMINAL_STATUSES,
@@ -526,7 +526,9 @@ async def _authorize_pending_permission(
             permission_status=permission.request_status,
             thread_terminal=False,
             option_id=option_id,
-            valid_option_ids=_allowed_option_ids(permission),
+            valid_option_ids=extract_allowed_option_ids(
+                permission.allowed_options_json
+            ),
         )
         return await _journal_rejection(
             db,
@@ -576,7 +578,9 @@ async def _authorize_pending_permission(
             permission_status=PermissionRequestStatus.SUPERSEDED.value,
             thread_terminal=False,
             option_id=option_id,
-            valid_option_ids=_allowed_option_ids(permission),
+            valid_option_ids=extract_allowed_option_ids(
+                permission.allowed_options_json
+            ),
         )
         logger.warning(
             "Permission respond rejected: request %s is not the active "
@@ -628,7 +632,7 @@ async def _validate_permission_option(
     request_id = response.request_id
     option_id = response.option_id
     thread_id = thread_record.id
-    valid_option_ids = _allowed_option_ids(permission)
+    valid_option_ids = extract_allowed_option_ids(permission.allowed_options_json)
     if not valid_option_ids:
         error_detail, error_status_code = _rejected_permission_error(
             permission_status=permission.request_status,

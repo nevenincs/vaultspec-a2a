@@ -14,9 +14,9 @@ from typing import Any, ClassVar, NotRequired, TypedDict, Unpack, cast
 from uuid import uuid4
 
 from ..domain_config import domain_config
+from ..graph.acp_options import option_id_of, option_kind
 from ..graph.enums import (
     AgentLifecycleState,
-    PermissionOptionKind,
     ToolCallStatus,
     ToolKind,
 )
@@ -473,13 +473,9 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         tool_kind = kwargs.get("tool_kind")
         parsed_options: list[dict[str, str]] = [
             {
-                "option_id": opt.get("option_id", str(uuid4())),
+                "option_id": option_id_of(opt) or str(uuid4()),
                 "name": opt.get("name", ""),
-                "kind": str(
-                    PermissionOptionKind(
-                        opt.get("kind", PermissionOptionKind.ALLOW_ONCE)
-                    )
-                ),
+                "kind": str(option_kind(opt)),
             }
             for opt in options
         ]

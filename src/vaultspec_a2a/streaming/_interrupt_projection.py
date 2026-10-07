@@ -17,7 +17,7 @@ from ..graph.acp_options import (
     option_id_of,
     option_kind,
 )
-from ..graph.enums import AgentLifecycleState, PermissionOptionKind, PermissionType
+from ..graph.enums import AgentLifecycleState, PermissionType
 from ..thread import InterruptType, live_interrupts
 
 if TYPE_CHECKING:
@@ -264,12 +264,22 @@ async def _emit_tool_permission(
 
 
 def _permission_options(raw_options: object) -> list[dict[str, Any]]:
-    """Normalize ACP option identities and honor valid declared permission kinds."""
+    """Normalize the ACP options the worker offered, adding and inventing none.
+
+    The worker-offered set is the only option authority, and a request with no
+    option a human could pick is refused at the worker rather than parked. So
+    there is nothing here to substitute for: an option whose id cannot be read
+    is dropped, and an empty offer stays empty. The pair this used to invent was
+    persisted and then validated the human's pick against itself, so the worker
+    rejected that pick against the real offer and the run stalled.
+    """
     options: list[dict[str, Any]] = []
     if _is_object_list(raw_options):
         for option in raw_options:
-            options.append(_permission_option(option))
-    return options or _default_permission_options()
+            projected = _permission_option(option)
+            if projected is not None:
+                options.append(projected)
+    return options
 
 
 def _is_object_list(value: object) -> TypeGuard[list[object]]:
@@ -277,10 +287,22 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
-def _permission_option(option: object) -> dict[str, Any]:
-    """Project one ACP option, deriving a kind only for an invalid declaration."""
+def _permission_option(option: object) -> dict[str, Any] | None:
+    """Project one ACP option, or ``None`` when it names no id to answer with.
+
+    An answer is addressed to an option id, so an option carrying none could
+    only be offered under an invented one - and the id this used to invent,
+    ``allow_once``, is an APPROVAL. A malformed refusal was therefore shown and
+    persisted as a grant. It is dropped instead.
+    """
     fields: dict[str, Any] = option if _is_payload(option) else {}
     option_id = option_id_of(option)
+    if not option_id:
+        logger.warning(
+            "Dropping a permission option that names no id; it could not be "
+            "answered, and naming one for it would decide the request"
+        )
+        return None
     declared_kind = fields.get("kind")
     kind = option_kind(option)
     if declared_kind and kind != declared_kind:
@@ -292,26 +314,10 @@ def _permission_option(option: object) -> dict[str, Any]:
             kind.value,
         )
     return {
-        "option_id": option_id or "allow_once",
+        "option_id": option_id,
         "name": option_display_name(option),
         "kind": kind,
     }
-
-
-def _default_permission_options() -> list[dict[str, Any]]:
-    """Keep an omitted provider option list answerable."""
-    return [
-        {
-            "option_id": "allow_once",
-            "name": "Allow",
-            "kind": PermissionOptionKind.ALLOW_ONCE,
-        },
-        {
-            "option_id": "deny_once",
-            "name": "Deny",
-            "kind": PermissionOptionKind.REJECT_ONCE,
-        },
-    ]
 
 
 def _payload_text(payload: dict[str, Any], key: str, default: str) -> str:

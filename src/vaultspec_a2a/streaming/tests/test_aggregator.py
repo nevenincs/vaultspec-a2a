@@ -1713,10 +1713,18 @@ class TestEmitInterruptEvents:
         assert len(perm_events) == 0
 
     @pytest.mark.asyncio
-    async def test_ingest_uses_default_options_when_none_provided(
+    async def test_ingest_invents_no_option_when_none_was_offered(
         self, producer: RunEventProducer
     ) -> None:
-        """When ACP provides no options, allow_once/deny_once defaults are used."""
+        """An offer of nothing is relayed as nothing, never as a usable pair.
+
+        The ``allow_once``/``deny_once`` pair this used to invent was persisted
+        as the request's own offer and the human's pick validated against it, so
+        the worker rejected that pick against the real offer and the run
+        stalled. The worker now refuses a request with no pickable option, so
+        this frame is only reachable from a malformed payload - and inventing an
+        APPROVAL for one is the last thing a relay may do.
+        """
         queue = relayed_queue(producer, "thread-default-opts")
 
         interrupt_payload: dict[str, object] = {
@@ -1724,7 +1732,7 @@ class TestEmitInterruptEvents:
             "request_id": "perm-shell-exec",
             "tool_name": "shell_exec",
             "tool_input": {},
-            "options": [],  # Empty options — should use defaults
+            "options": [],
         }
         graph = build_error_injecting_graph()
 
@@ -1745,10 +1753,7 @@ class TestEmitInterruptEvents:
 
         perm_events = [e for e in domain_events if isinstance(e, PermissionRequest)]
         assert len(perm_events) == 1
-        perm = perm_events[0]
-        option_ids = {opt["option_id"] for opt in perm.options}
-        assert "allow_once" in option_ids
-        assert "deny_once" in option_ids
+        assert perm_events[0].options == []
 
     @pytest.mark.asyncio
     async def test_ingest_no_permission_on_empty_interrupt_tasks(

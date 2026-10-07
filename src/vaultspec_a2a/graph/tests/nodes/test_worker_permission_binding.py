@@ -26,6 +26,8 @@ from langgraph.graph import END, START
 from langgraph.types import Command
 
 from ....testing import add_test_node, compile_test_graph, new_state_graph
+from ....thread.errors import PermissionDeniedError
+from ....thread.snapshots import unanswered_interrupt_values
 from ....thread.state import merge_permission_answers
 from ...nodes._worker_permissions import (
     permission_callback_for,
@@ -224,6 +226,55 @@ async def test_a_remembered_approval_is_never_offered_or_accepted() -> None:
     final = await graph.ainvoke(_answer(parked, "allow_once"), _CONFIG)
     assert "__interrupt__" not in final
     assert granted == ["allow_once"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case", "offered"),
+    [
+        ("no-options", []),
+        ("no-id", [{"name": "Allow once", "kind": "allow_once"}]),
+        ("empty-id", [{"optionId": "", "name": "Allow once"}]),
+        ("unreadable-id", [{"optionId": 7, "name": "Allow once"}]),
+    ],
+)
+async def test_a_request_with_no_pickable_option_is_refused_and_never_parks(
+    case: str, offered: list[dict[str, Any]]
+) -> None:
+    """An unanswerable request is refused at the call, not put to a human.
+
+    An answer is addressed to an option id, so a request offering none can be
+    given no answer: parking on it suspends the run on a question with no
+    reachable reply. The layers between here and the human used to keep such a
+    request "answerable" by inventing an ``allow_once`` option - an APPROVAL -
+    and the human's pick was then validated against that invention and rejected
+    here against the real offer, which is the stall this closes.
+
+    The refusal is a typed exception, which the provider rung this callback is
+    handed to turns into its own lane's denial while the turn continues.
+    """
+    saver = InMemorySaver()
+    config = {"configurable": {"thread_id": f"unpickable-{case}"}}
+    granted: list[str] = []
+
+    async def ask(state: _Turn) -> dict[str, Any]:
+        option = await _bound_callback(state)("Bash", {"command": "ls"}, offered)
+        granted.append(option)
+        return {"granted": [option]}
+
+    builder = new_state_graph(_Turn)
+    add_test_node(builder, "ask", ask)
+    builder.add_edge(START, "ask")
+    builder.add_edge("ask", END)
+    graph: Any = compile_test_graph(builder, checkpointer=saver)
+
+    with pytest.raises(PermissionDeniedError, match="offers no option"):
+        await graph.ainvoke({"granted": []}, config)
+
+    assert granted == []
+    stored = saver.get_tuple(cast("Any", config))
+    held = () if stored is None else (stored.pending_writes or ())
+    assert unanswered_interrupt_values(held) == []
 
 
 def test_recorded_answers_drop_entries_that_name_nothing() -> None:

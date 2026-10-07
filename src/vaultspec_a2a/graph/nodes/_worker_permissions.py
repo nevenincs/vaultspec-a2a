@@ -19,6 +19,7 @@ from langgraph.errors import GraphInterrupt
 from langgraph.types import Interrupt, interrupt
 
 from ...thread import InterruptType, canonical_digest
+from ...thread.errors import PermissionDeniedError
 from ...thread.resume_values import PermissionAnswer
 from ...thread.state import read_untrusted_state_value
 from ..acp_options import is_remembering, valid_option_ids
@@ -57,7 +58,8 @@ def _offered_options(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
     and nothing here can retract it. The provider rung answers such a choice
     with the once-only option anyway, so offering it would promise a persistence
     the system deliberately never performs. A request offering nothing else
-    keeps its options, so the run is never left without an answer to give.
+    keeps its options: narrowing it to nothing would turn a question a person
+    could still answer into a refusal, which is a decision this is not making.
     """
     once = [option for option in options if not is_remembering(option)]
     return once or options
@@ -126,6 +128,17 @@ class _PermissionRequest:
     tool_name: str
     tool_input: dict[str, Any]
     offered: list[dict[str, Any]]
+
+    @property
+    def answerable(self) -> bool:
+        """Whether this request offers an option a human could pick.
+
+        An option a later layer cannot name is no option: an answer is addressed
+        to an option id, and a request offering none can be given no answer at
+        all. Parking on one suspends the run on a question with no reachable
+        reply, which is why such a request is refused here instead.
+        """
+        return bool(valid_option_ids(self.offered))
 
     def payload(self) -> dict[str, Any]:
         """The interrupt payload this request suspends the run on."""
@@ -243,6 +256,17 @@ def permission_callback_for(
             tool_input=tool_input,
             offered=_offered_options(options),
         )
+        if not request.answerable:
+            # Refused here, where the call is, rather than parked. A park would
+            # suspend the run on a question nothing downstream could answer, and
+            # the layers between here and the human used to keep it answerable by
+            # inventing an option - which decides a permission question by
+            # fabrication. The rung that called this turns the raise into its
+            # own lane's refusal and the turn continues without the tool.
+            raise PermissionDeniedError(
+                f"the {tool_name!r} call offers no option a human could pick, "
+                "so it cannot be put to one"
+            )
         already = _answered_option(
             {**answers, **learned}, request.request_id, request.offered
         )

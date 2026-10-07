@@ -26,10 +26,11 @@ from httpx import ASGITransport
 
 from ...control.config import settings
 from ...domain_config import domain_config
+from ...testing import async_catalog_run_fields
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

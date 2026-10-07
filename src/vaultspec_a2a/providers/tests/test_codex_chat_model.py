@@ -30,7 +30,7 @@ from ...database.models import ProviderRuntimeIdentityModel
 from ...database.tests._backends import migrated_session_factory
 from ...database.thread_repository import create_thread
 from ...graph.enums import Provider
-from ...service_tests._provider_catalog_live import declared_lane_model_value
+from ...testing import declared_lane_model_value
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ...worker.runtime_identity_port import SqlRuntimeIdentityPort

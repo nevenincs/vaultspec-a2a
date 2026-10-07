@@ -367,7 +367,7 @@ async def test_codex_native_turn_supplies_logical_call_identity(
     from ...providers.cli_resolution import resolve_provider_cli_executable
     from ...providers.codex_chat_model import CodexChatModel
     from ...providers.conditions import ProviderCondition
-    from ...service_tests._provider_catalog_live import declared_lane_model_value
+    from ...testing import declared_lane_model_value
 
     external_prerequisite("codex-cli")
     external_prerequisite("codex-credential")
@@ -439,7 +439,7 @@ async def test_claude_native_turn_supplies_logical_call_identity(
     from ...providers.acp_exceptions import AcpError
     from ...providers.conditions import ProviderCondition
     from ...providers.factory import claude_auth_env
-    from ...service_tests._provider_catalog_live import declared_lane_model_value
+    from ...testing import declared_lane_model_value
 
     external_prerequisite("claude-cli")
     external_prerequisite("claude-credential")

@@ -13,10 +13,11 @@ from langchain_core.messages import AIMessage, HumanMessage
 from ...control.thread_service import successor_seed_transcript
 from ...database.checkpoints import open_checkpointer
 from ...ipc.schemas import DispatchRequest
+from ...testing import async_catalog_run_fields
 from ...testing.environment import settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...worker.graph_lifecycle import GraphLifecycleManager
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import make_app
 from .test_gateway_drain import _relay_terminal, _RelayContext
 from .test_gateway_live import _live_server
 

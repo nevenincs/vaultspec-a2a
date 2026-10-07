@@ -21,8 +21,9 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from ...testing import async_catalog_run_fields
 from ...thread.idempotency import IDEMPOTENCY_KEY_MAX_LENGTH
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import make_app
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver

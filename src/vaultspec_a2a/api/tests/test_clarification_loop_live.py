@@ -68,6 +68,7 @@ from ...database import (
 from ...database.models import ControlActionModel
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import async_catalog_run_fields
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,
@@ -83,7 +84,7 @@ from .clarification_harness import (
     loopback_callback_bridge,
     park_clarification,
 )
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable

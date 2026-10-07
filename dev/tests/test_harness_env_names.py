@@ -15,7 +15,7 @@ from dev.ci_formats import REPORT_NAME_ENV, REPORTS_ENV
 from dev.exit_codes import ALLOW_EMPTY_ENV, FIX_STRICT_ENV
 from dev.init.contract import FORCE_ENV, JSON_ENV
 from vaultspec_a2a.control.settings_base import field_env_names
-from vaultspec_a2a.service_tests._provider_catalog_live import (
+from vaultspec_a2a.testing import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON,
 )

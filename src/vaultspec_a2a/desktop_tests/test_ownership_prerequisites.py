@@ -60,6 +60,7 @@ from ..lifecycle.singleton import (
     recorded_process_is_live,
     singleton_record_path,
 )
+from ..testing import fetch_in_process_selection_at
 from ..testing.ports import free_port
 from ..tests.gateway_boot import (
     READINESS_TIMEOUT,
@@ -71,7 +72,6 @@ from ..tests.gateway_boot import (
     seed_credentials,
     spawn_until_ready,
 )
-from ._catalog import catalog_selection
 from .test_run_admission import _ATTACH, _OWNERSHIP
 
 if TYPE_CHECKING:
@@ -162,7 +162,13 @@ def _prepare(base: str, run_id: str) -> tuple[int, dict[str, Any]]:
                 # The workspace anchors the selection, which run start
                 # revalidates against the catalog served for it.
                 "metadata": {"workspace_root": workspace},
-                "selection": catalog_selection(base, auth, workspace),
+                "selection": fetch_in_process_selection_at(
+                    base,
+                    workspace,
+                    headers={"Authorization": auth},
+                    prefer_provider_id="mock",
+                    cache=True,
+                ),
             },
         )
     try:

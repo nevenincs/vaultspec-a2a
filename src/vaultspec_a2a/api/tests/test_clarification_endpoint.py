@@ -20,9 +20,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...streaming.aggregator import EventAggregator
+from ...testing import catalog_run_fields
 from ...thread.clarification import MAX_ANSWER_CHARS
 from .clarification_harness import park_clarification
-from .conftest import catalog_run_fields, make_app
+from .conftest import make_app
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver

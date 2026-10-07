@@ -44,7 +44,7 @@ from ...database import (
 from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
-from ...testing.tests._support.catalog_selection import in_process_selection
+from ...testing import async_catalog_run_fields
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionType, ThreadStatus
@@ -168,44 +168,6 @@ async def _seed_live_thread(
         return thread.id, receipt
 
 
-async def _in_process_catalog_selection(
-    client: httpx.AsyncClient,
-) -> tuple[JsonObject, str]:
-    """Read one genuinely served in-process lane as a public selection reference.
-
-    In-process rather than merely selectable: these tests assert on gateway
-    verbs - replay, conflict, cancellation - and make no provider claim, so the
-    lane that answers must be one that bills nothing. The suite's catalog
-    service arms those lanes for exactly this reason.
-    """
-    workspace_root = str(Path.cwd())
-    response = await client.get(
-        "/v1/provider-catalog", params={"workspace_root": workspace_root}
-    )
-    assert response.status_code == 200, response.text
-    return in_process_selection(response.json()), workspace_root
-
-
-async def _run_fields(client: httpx.AsyncClient) -> dict[str, object]:
-    """Return the run-start fields an explicit catalog selection now requires.
-
-    Deterministic for a given served catalog, which is what makes it safe in
-    this module: several tests here post the SAME body twice to prove a replay
-    converges, or vary one field to prove a conflict is detected. A selection
-    that differed per call would turn every replay into a conflict and quietly
-    invert what those tests assert.
-    """
-    # Read the catalog on its OWN budget rather than the caller's. Every client
-    # in this module is built with a 10s timeout, which exists to assert the
-    # gateway answers its verbs promptly; the first catalog read in a process
-    # also probes each provider lane and legitimately takes longer than that.
-    # Borrowing the caller's budget made a cold probe look like an unresponsive
-    # gateway. Subsequent reads are served from the catalog's own cache.
-    async with httpx.AsyncClient(base_url=client.base_url, timeout=120.0) as probe:
-        selection, workspace_root = await _in_process_catalog_selection(probe)
-    return {"selection": selection, "metadata": {"workspace_root": workspace_root}}
-
-
 async def _seed_permission(
     session_factory: SessionFactory, *, thread_id: str, request_id: str
 ) -> None:
@@ -255,7 +217,7 @@ async def test_run_history_is_the_wide_read_that_run_status_deliberately_is_not(
                 "team_preset": _PRESET,
                 "message": "remember this",
                 "autonomous": True,
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201
@@ -306,7 +268,7 @@ async def test_archive_and_team_status_are_reachable_on_the_versioned_surface(
                 "team_preset": _PRESET,
                 "message": "work",
                 "autonomous": True,
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201
@@ -364,7 +326,7 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
                 "message": "first turn",
                 "autonomous": True,
                 "run_id": "r-followup",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201
@@ -379,7 +341,7 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
                 "message": "first turn",
                 "autonomous": True,
                 "run_id": "r-followup",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert replay.status_code == 201
@@ -449,7 +411,7 @@ async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one
                     "team_preset": _PRESET,
                     "message": message,
                     "autonomous": True,
-                    **await _run_fields(client),
+                    **await async_catalog_run_fields(client),
                 },
             )
             assert resp.status_code == 201, resp.text
@@ -767,7 +729,7 @@ async def _exercise_five_verbs(
                 "tokens": {"coder": "tok-coder"},
                 "engine_bearer": "bearer",
             },
-            **await _run_fields(client),
+            **await async_catalog_run_fields(client),
         },
     )
     assert start.status_code == 201
@@ -830,7 +792,8 @@ async def _run_nickname_insert_race(
     await barrier.exec_driver_sql("BEGIN IMMEDIATE")
     try:
         # `nickname_base` already carries the selection AND the metadata naming
-        # the shared nickname; adding `_run_fields` would dissolve the collision.
+        # the shared nickname; adding `async_catalog_run_fields` would dissolve
+        # the collision.
         left = asyncio.create_task(
             race_context.client.post(
                 "/v1/runs",
@@ -934,7 +897,7 @@ async def _run_different_body_race(
 ) -> tuple[httpx.Response, httpx.Response, httpx.Response, Mapping[str, object]]:
     """Race two bodies for one id, then replay the winner's body."""
     barrier = await race_context.engine.connect()
-    race_fields = await _run_fields(race_context.client)
+    race_fields = await async_catalog_run_fields(race_context.client)
     baseline = race_context.checked_out()
     await barrier.exec_driver_sql("BEGIN IMMEDIATE")
     try:
@@ -1382,11 +1345,11 @@ async def test_run_start_threads_feedback_batch_id_to_worker(
     dispatch the worker receives carries it verbatim - the same path active_feature
     rides. a2a never parses the id; retrieval is the worker's engine read.
 
-    Sited in the shared workspace `_run_fields` resolves against: a selection is
-    revalidated against the catalog served FOR ITS WORKSPACE, and pointing the
-    run at a fresh temporary directory forces a cold per-workspace catalog build
-    inside this request's 10s budget - a slow catalog then reads as a gateway
-    failure in a test about feedback-id threading.
+    Sited in the shared workspace `async_catalog_run_fields` resolves against: a
+    selection is revalidated against the catalog served FOR ITS WORKSPACE, and
+    pointing the run at a fresh temporary directory forces a cold per-workspace
+    catalog build inside this request's 10s budget - a slow catalog then reads as
+    a gateway failure in a test about feedback-id threading.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
@@ -1401,7 +1364,7 @@ async def test_run_start_threads_feedback_batch_id_to_worker(
                 "message": "revise the draft",
                 "autonomous": True,
                 "feedback_batch_id": "feedback-batch:deadbeefcafe",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201, start.text
@@ -1430,7 +1393,7 @@ async def test_run_start_without_feedback_batch_id_dispatches_none(
                 "team_preset": _PRESET,
                 "message": "build it",
                 "autonomous": True,
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201, start.text
@@ -1455,7 +1418,7 @@ async def test_run_start_refusals_over_live_socket(
                 "run_id": "gwlive-10",
                 "team_preset": _PRESET,
                 "message": "   ",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert empty.status_code == 422
@@ -1467,7 +1430,7 @@ async def test_run_start_refusals_over_live_socket(
                 "run_id": "gwlive-11",
                 "team_preset": "no-such-preset",
                 "message": "go",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert unknown.status_code == 422
@@ -1479,7 +1442,7 @@ async def test_run_start_refusals_over_live_socket(
                 "run_id": "gwlive-12",
                 "team_preset": "vaultspec-adr-research",
                 "message": "research it",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert no_feature.status_code == 422
@@ -1497,7 +1460,7 @@ async def test_run_start_refusals_over_live_socket(
                     "tokens": {"vaultspec-researcher": "tok-r"},
                     "engine_bearer": "bearer",
                 },
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert thin_bundle.status_code == 422
@@ -1518,7 +1481,7 @@ async def test_run_start_refusals_over_live_socket(
                     "team_preset": _PRESET,
                     "message": "go",
                     "run_id": invalid_run_id,
-                    **await _run_fields(client),
+                    **await async_catalog_run_fields(client),
                 },
             )
             assert invalid_id.status_code == 422, invalid_run_id
@@ -1537,7 +1500,7 @@ async def test_run_start_refusals_over_live_socket(
                 "team_preset": _PRESET,
                 "message": "go",
                 "run_id": "run-0123456789abcdef0123456789abcdef",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert dashboard_id.status_code == 201
@@ -1565,14 +1528,22 @@ async def test_run_start_client_id_is_dispatch_exactly_once(
         }
         first = await client.post(
             "/v1/runs",
-            json={"run_id": "gwlive-16", **payload, **await _run_fields(client)},
+            json={
+                "run_id": "gwlive-16",
+                **payload,
+                **await async_catalog_run_fields(client),
+            },
         )
         assert first.status_code == 201
         assert first.json()["run_id"] == "client-run-0001"
 
         second = await client.post(
             "/v1/runs",
-            json={"run_id": "gwlive-17", **payload, **await _run_fields(client)},
+            json={
+                "run_id": "gwlive-17",
+                **payload,
+                **await async_catalog_run_fields(client),
+            },
         )
         assert second.status_code == 201
         assert second.json()["run_id"] == "client-run-0001"
@@ -1601,7 +1572,11 @@ async def test_run_id_reservation_is_visible_before_dispatch_ack(
         first = asyncio.create_task(
             client.post(
                 "/v1/runs",
-                json={"run_id": "gwlive-18", **payload, **await _run_fields(client)},
+                json={
+                    "run_id": "gwlive-18",
+                    **payload,
+                    **await async_catalog_run_fields(client),
+                },
             )
         )
         await asyncio.wait_for(worker.dispatch_received.wait(), timeout=5.0)
@@ -1612,7 +1587,11 @@ async def test_run_id_reservation_is_visible_before_dispatch_ack(
 
         replay = await client.post(
             "/v1/runs",
-            json={"run_id": "gwlive-19", **payload, **await _run_fields(client)},
+            json={
+                "run_id": "gwlive-19",
+                **payload,
+                **await async_catalog_run_fields(client),
+            },
         )
         assert replay.status_code == 201
         assert replay.json()["run_id"] == payload["run_id"]
@@ -1897,7 +1876,7 @@ async def test_run_start_freezes_and_discloses_catalog_selection(
                 "team_preset": _PRESET,
                 "message": "go",
                 "autonomous": True,
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201, start.text
@@ -1947,7 +1926,7 @@ async def test_run_start_rejects_retired_profile_field(
                 "team_preset": _PRESET,
                 "message": "go",
                 "profile_id": "ghost",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         # `profile_id` was removed when selections became explicit. The contract
@@ -1976,7 +1955,11 @@ async def test_run_start_conflicts_on_selection_request_change_retry(
         }
         first = await client.post(
             "/v1/runs",
-            json={"run_id": "gwlive-22", **payload, **await _run_fields(client)},
+            json={
+                "run_id": "gwlive-22",
+                **payload,
+                **await async_catalog_run_fields(client),
+            },
         )
         assert first.status_code == 201
         frozen = first.json()["frozen_assignment"]
@@ -1989,7 +1972,7 @@ async def test_run_start_conflicts_on_selection_request_change_retry(
             json={
                 **payload,
                 "message": "a different intention",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert conflict.status_code == 409, conflict.text
@@ -1998,7 +1981,11 @@ async def test_run_start_conflicts_on_selection_request_change_retry(
         # Same run id and same request -> idempotent replay returns the run.
         replay = await client.post(
             "/v1/runs",
-            json={"run_id": "gwlive-24", **payload, **await _run_fields(client)},
+            json={
+                "run_id": "gwlive-24",
+                **payload,
+                **await async_catalog_run_fields(client),
+            },
         )
         assert replay.status_code == 201
         assert replay.json()["run_id"] == first.json()["run_id"]
@@ -2018,7 +2005,7 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
     carrying a different prompt is a NEW INTENTION wearing an old id and is
     refused, so it is never silently discarded as an idempotent replay.
 
-    The catalog selection is held equal throughout - `_run_fields` is
+    The catalog selection is held equal throughout - `async_catalog_run_fields` is
     deterministic for a served catalog - so the digest branch is exercised by
     the one field that varies, the prompt.
     """
@@ -2040,7 +2027,7 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
         }
         first = await client.post(
             "/v1/runs",
-            json={**payload, **await _run_fields(client)},
+            json={**payload, **await async_catalog_run_fields(client)},
         )
         assert first.status_code == 201, first.text
 
@@ -2053,7 +2040,7 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
                     "tokens": {"coder": "tok-rotated"},
                     "engine_bearer": "bearer-rotated",
                 },
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert rotated.status_code == 201, rotated.text
@@ -2070,7 +2057,7 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
                     "tokens": {"coder": "tok-rotated"},
                     "engine_bearer": "bearer-rotated",
                 },
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert conflict.status_code == 409, conflict.text
@@ -2090,7 +2077,7 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
         # proving the 409 was the changed body - not a blanket rejection.
         replay = await client.post(
             "/v1/runs",
-            json={**payload, **await _run_fields(client)},
+            json={**payload, **await async_catalog_run_fields(client)},
         )
         assert replay.status_code == 201, replay.text
         assert replay.json()["run_id"] == "rid-body-conflict"
@@ -2112,7 +2099,7 @@ async def test_run_start_idempotency_is_race_safe(
         # coroutines gather expects, and every racer must post a byte-identical
         # body for the idempotency this test is asserting to be the thing under
         # test rather than five different requests.
-        raced_body = {**payload, **await _run_fields(client)}
+        raced_body = {**payload, **await async_catalog_run_fields(client)}
         results = await asyncio.gather(
             *(client.post("/v1/runs", json=raced_body) for _ in range(5))
         )
@@ -2146,7 +2133,9 @@ async def test_modern_selection_insert_race_and_direct_replay_disclose_same_free
             _live_server(app) as base,
             httpx.AsyncClient(base_url=base, timeout=30.0) as client,
         ):
-            selection, workspace_root = await _in_process_catalog_selection(client)
+            fields = await async_catalog_run_fields(client)
+            selection = fields["selection"]
+            workspace_root = fields["metadata"]["workspace_root"]
             responses, nickname_responses = await _run_modern_selection_races(
                 _LiveRaceContext(
                     client=client,

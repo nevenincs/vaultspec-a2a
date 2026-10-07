@@ -28,7 +28,7 @@ from ..providers._acp_mcp import compose_harness_mcp_servers, harness_allowed_to
 from ..providers._harness_mcp_registry import declared_harness_tools
 from ..providers.factory import ProviderFactory
 from ..providers.lane_admission import PROVEN_TURN_LANES
-from ._provider_catalog_live import declared_lane_model_value
+from ..testing import declared_lane_model_value
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule

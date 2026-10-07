@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from ..testing import fetch_in_process_selection_at
 from ..tests.gateway_boot import (
     broker_gateway_env,
     desktop_workspace,
@@ -43,7 +44,6 @@ from ..tests.gateway_boot import (
     spawn_gateway,
     spawn_until_ready,
 )
-from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     import subprocess
@@ -158,8 +158,12 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
         # --- Concurrent first demand: exactly one real worker. ---
         # Resolve the catalog once before the race. Parallel catalog refreshes
         # would add an unrelated cold-start load to this worker-spawn proof.
-        selection: dict[str, object] = catalog_selection(
-            base, auth["Authorization"], desktop_workspace(base)
+        selection: dict[str, object] = fetch_in_process_selection_at(
+            base,
+            desktop_workspace(base),
+            headers=auth,
+            prefer_provider_id="mock",
+            cache=True,
         )
         assert _worker_state(base, auth) == "cold"
         assert _SPAWN_LINE not in log_path.read_text(encoding="utf-8", errors="replace")

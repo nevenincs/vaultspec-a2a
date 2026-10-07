@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from ...api.tests.conftest import make_app
 from ...conftest import materialize_schema
 from ...lifecycle.discovery import service_json_path, write_service_json
-from ...testing.tests._support.catalog_selection import in_process_selection
+from ...testing import fetch_in_process_selection_at
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -126,15 +126,7 @@ def _in_process_lane_arguments(base: str) -> dict[str, str]:
     reads the catalog and supplies the revision, and that resolution is part of
     what this test exercises; handing it a revision would skip it.
     """
-    import httpx
-
-    response = httpx.get(
-        f"{base}/v1/provider-catalog",
-        params={"workspace_root": str(Path.cwd())},
-        timeout=180.0,
-    )
-    assert response.status_code == 200, response.text
-    selection = in_process_selection(response.json())
+    selection = fetch_in_process_selection_at(base, str(Path.cwd()))
     return {
         key: str(selection[key])
         for key in ("provider_id", "execution_mode", "entry_id")

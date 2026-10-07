@@ -356,20 +356,28 @@ def run() -> None:
 def _selection_from_catalog_record(
     record: dict[str, Any], provider_id: str, execution_mode: str, entry_id: str
 ) -> dict[str, Any]:
+    from ..api.schemas.gateway import ProviderCatalogSelection
+    from ..providers.provider_catalog import SELECTION_SCHEMA_VERSION
+
     catalog: dict[str, Any] = record.get("catalog") or {}
     entries: list[dict[str, Any]] = catalog.get("models") or []
     for entry in entries:
         if entry.get("entry_id") == entry_id:
-            return {
-                "schema_version": 1,
-                "provider_id": provider_id,
-                "execution_mode": execution_mode,
-                "catalog_revision": cast(
-                    "dict[str, Any]", catalog.get("state") or {}
-                ).get("revision"),
-                "entry_id": entry_id,
-                "controls": {},
-            }
+            revision = cast("dict[str, Any]", catalog.get("state") or {}).get(
+                "revision"
+            )
+            if not revision:
+                raise click.ClickException(
+                    f"provider {provider_id!r} in mode {execution_mode!r} serves "
+                    "no catalog revision to select against."
+                )
+            return ProviderCatalogSelection(
+                schema_version=SELECTION_SCHEMA_VERSION,
+                provider_id=provider_id,
+                execution_mode=execution_mode,
+                catalog_revision=revision,
+                entry_id=entry_id,
+            ).model_dump(mode="json")
     offered = ", ".join(str(e.get("entry_id")) for e in entries) or "(none)"
     raise click.ClickException(
         f"provider {provider_id!r} in mode {execution_mode!r} serves no entry "

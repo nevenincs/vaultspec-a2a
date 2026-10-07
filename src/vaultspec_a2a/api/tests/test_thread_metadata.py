@@ -16,8 +16,8 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...streaming.aggregator import EventAggregator
-from ...testing import session_scratch_dir
-from .conftest import SessionFactory, catalog_run_fields
+from ...testing import catalog_run_fields, session_scratch_dir
+from .conftest import SessionFactory
 from .conftest import make_app as _make_app_4
 
 

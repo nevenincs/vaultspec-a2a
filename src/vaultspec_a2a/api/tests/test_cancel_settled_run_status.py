@@ -38,17 +38,13 @@ from ...graph.nodes.action_completion import (
     record_graph_completion,
 )
 from ...providers import ProviderCondition
+from ...testing import async_catalog_run_fields
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import ThreadStatus
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ...thread.state import TeamState
-from .conftest import (
-    SessionFactory,
-    _InProcessWorker,
-    async_catalog_run_fields,
-    make_app,
-)
+from .conftest import SessionFactory, _InProcessWorker, make_app
 from .test_gateway_live import _live_server
 
 if TYPE_CHECKING:

@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
-from ._support.catalog_selection import (
-    IN_PROCESS_PROVIDER_IDS,
+from ...providers.in_process_catalog import IN_PROCESS_EXECUTION_MODES
+from ..catalog import (
     NoSelectableLaneError,
     in_process_selection,
     named_lane_selection,
@@ -108,7 +108,9 @@ def test_an_unserved_preference_falls_back_within_the_in_process_lanes() -> None
         _payload(CODEX, DETERMINISTIC), prefer_provider_id="mock"
     )
     assert selection["provider_id"] == "deterministic"
-    assert selection["provider_id"] in IN_PROCESS_PROVIDER_IDS
+    assert selection["provider_id"] in {
+        provider.value for provider in IN_PROCESS_EXECUTION_MODES
+    }
 
 
 def test_an_unselectable_in_process_lane_is_not_used() -> None:

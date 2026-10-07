@@ -41,12 +41,9 @@ from ..service_tests._live_desktop_gateway import (
     ATTACH_CREDENTIAL,
     armed_gateway,
 )
+from ..testing import LIVE_PROVIDER_PREREQUISITES, selection_from_served_catalog
 from ..testing.ports import free_port
 from ..utils.process import ProcessContainment
-from ._provider_catalog_live import (
-    LIVE_PROVIDER_PREREQUISITES,
-    selection_from_served_catalog,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Generator

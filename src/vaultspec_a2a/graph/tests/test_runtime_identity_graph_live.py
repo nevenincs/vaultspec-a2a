@@ -13,7 +13,7 @@ from ...database.thread_repository import create_thread
 from ...providers.binary_version import probe_binary_version
 from ...providers.codex_chat_model import CodexChatModel
 from ...providers.factory import ProviderFactory
-from ...service_tests._provider_catalog_live import declared_lane_model_value
+from ...testing import declared_lane_model_value
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ...worker.runtime_identity_port import SqlRuntimeIdentityPort

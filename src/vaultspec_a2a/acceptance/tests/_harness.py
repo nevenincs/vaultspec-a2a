@@ -31,16 +31,13 @@ spread across scenario files.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
 
-from ...testing.tests._support.catalog_selection import (
-    NoSelectableLaneError,
-    in_process_selection,
-)
+from ...testing import NoSelectableLaneError, fetch_in_process_selection
 from ...tests.gateway_boot import (
     FIRST_DEMAND_TIMEOUT,
     GatewayBootError,
@@ -87,16 +84,15 @@ class CertifiedGateway:
     Run-start requires an explicit catalog selection revalidated against the
     catalog served for the run's workspace, so the run-bearing helpers resolve
     one from this stack's own served catalog and site every run in the stack's
-    dedicated workspace directory. The resolution is cached per handle: prepare
-    and release must present byte-identical bodies for the release binding to
-    match, and one stack should pay its cold catalog build once.
+    dedicated workspace directory. The resolution is cached: prepare and release
+    must present byte-identical bodies for the release binding to match, and one
+    stack should pay its cold catalog build once.
     """
 
     base_url: str
     attach_token: str
     app_home: Path
     workspace_root: Path
-    _run_fields: dict[str, Any] | None = field(default=None, init=False, repr=False)
 
     @property
     def auth_header(self) -> dict[str, str]:
@@ -117,7 +113,7 @@ class CertifiedGateway:
         serving rather than freezing whichever provider the host has installed.
         """
         return {
-            "selection": self._resolved_run_fields()["selection"],
+            "selection": self._selection(),
             "metadata": {"workspace_root": str(self.workspace_root)},
         }
 
@@ -129,41 +125,28 @@ class CertifiedGateway:
         lane the harness actually selected, rather than restating a literal that
         would keep passing if the resolution ever picked something else.
         """
-        return str(self._resolved_run_fields()["provider_id"])
+        return str(self._selection()["provider_id"])
 
-    def _resolved_run_fields(self) -> dict[str, Any]:
-        """Resolve and cache this stack's one in-process selection."""
-        if self._run_fields is not None:
-            return self._run_fields
-        # The first catalog read for a workspace builds it cold, probing every
-        # registered lane; its budget is deliberately its own rather than a
-        # verb helper's.
-        with self.client(timeout=240.0) as client:
-            response = client.get(
-                "/v1/provider-catalog",
-                params={"workspace_root": str(self.workspace_root)},
-            )
-        if response.status_code != 200:
-            raise GatewayBootError(
-                f"the certification stack could not serve its provider "
-                f"catalog: {response.status_code} {response.text}"
-            )
+    def _selection(self) -> dict[str, Any]:
+        """Resolve this stack's one in-process selection.
+
+        The first catalog read for a workspace builds it cold, probing every
+        registered lane; its budget is deliberately its own rather than a verb
+        helper's. This stack's runs all execute DEFAULT_TEAM_PRESET (see
+        run_fields' own docstring: every verb presents ONE selection) - so the
+        preference this resolves must be that preset's, not the run-start verb's
+        own default team_preset argument, which no caller overrides.
+        """
         try:
-            # This stack's runs all execute DEFAULT_TEAM_PRESET (see run_fields'
-            # own docstring: every verb presents ONE cached selection) - so the
-            # preference this resolves must be that preset's, not the run-start
-            # verb's own default team_preset argument, which no caller overrides.
-            selection = in_process_selection(
-                response.json(),
-                prefer_provider_id="mock",
-            )
+            with self.client(timeout=240.0) as client:
+                return fetch_in_process_selection(
+                    client,
+                    str(self.workspace_root),
+                    prefer_provider_id="mock",
+                    cache=True,
+                )
         except NoSelectableLaneError as exc:
             pytest.skip(f"this certification stack cannot present a selection: {exc}")
-        self._run_fields = {
-            "provider_id": selection["provider_id"],
-            "selection": selection,
-        }
-        return self._run_fields
 
     def client(self, *, timeout: float = 30.0) -> httpx.Client:
         """A synchronous authenticated client bound to the gateway base URL."""

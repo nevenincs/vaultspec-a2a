@@ -27,8 +27,9 @@ import httpx
 import pytest
 
 from ...database import get_thread
+from ...testing import async_catalog_run_fields
 from .conftest import SessionFactory, make_app
-from .test_gateway_live import _PRESET, _live_server, _run_fields
+from .test_gateway_live import _PRESET, _live_server
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -61,7 +62,7 @@ async def test_frozen_selection_survives_real_gateway_restart(
                 "team_preset": _PRESET,
                 "message": "go",
                 "autonomous": True,
-                **await _run_fields(client1),
+                **await async_catalog_run_fields(client1),
             },
         )
         assert start.status_code == 201, start.text
@@ -104,7 +105,7 @@ async def test_launch_freezes_the_served_catalog_entry(
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        fields = await _run_fields(client)
+        fields = await async_catalog_run_fields(client)
         selection = cast("dict[str, Any]", fields["selection"])
         metadata = cast("dict[str, Any]", fields["metadata"])
         catalog = await client.get(
@@ -159,7 +160,7 @@ async def test_run_start_refuses_every_retired_selection_surface_before_dispatch
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        current = await _run_fields(client)
+        current = await async_catalog_run_fields(client)
         cases: tuple[tuple[str, tuple[str, ...], str, object, str, str | None], ...] = (
             (
                 "profile-id",
@@ -283,7 +284,7 @@ async def test_validation_errors_remain_actionable_without_reflecting_input(
         _live_server(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        fields = await _run_fields(client)
+        fields = await async_catalog_run_fields(client)
         selection = cast("dict[str, Any]", fields["selection"])
         selection["schema_version"] = 2
         response = await client.post(
@@ -341,7 +342,7 @@ async def test_run_start_persists_no_secrets_in_db_row(
                     "tokens": {"coder": token_value},
                     "engine_bearer": bearer_value,
                 },
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201, start.text

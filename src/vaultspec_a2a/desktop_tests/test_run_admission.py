@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from ..testing import fetch_in_process_selection_at
 from ..testing.progress import ProgressDeadline, wait_for
 from ..tests.gateway_boot import (
     FIRST_DEMAND_TIMEOUT,
@@ -52,7 +53,6 @@ from ..tests.gateway_boot import (
     spawn_gateway,
     spawn_until_ready,
 )
-from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     import subprocess
@@ -138,7 +138,13 @@ def _admission_gateway(
         # Warming at arm time is also what the product should do - a run start
         # is not the place to discover the catalog for the first time.
         base, auth = gateway
-        catalog_selection(base, auth, desktop_workspace(base))
+        fetch_in_process_selection_at(
+            base,
+            desktop_workspace(base),
+            headers={"Authorization": auth},
+            prefer_provider_id="mock",
+            cache=True,
+        )
         if warm_first_demand:
             _warm_first_demand(base, auth)
         yield gateway
@@ -193,7 +199,13 @@ def _prepare(
                 # The workspace anchors the selection, so it rides even when the
                 # caller declared no metadata of its own.
                 "metadata": {"workspace_root": workspace, **(metadata or {})},
-                "selection": catalog_selection(base, auth, workspace),
+                "selection": fetch_in_process_selection_at(
+                    base,
+                    workspace,
+                    headers={"Authorization": auth},
+                    prefer_provider_id="mock",
+                    cache=True,
+                ),
             },
         )
     try:
@@ -237,7 +249,13 @@ def _commit(
                 # catalog - a replayed commit must be byte-identical to be
                 # recognised as a replay rather than a changed body.
                 "metadata": {"workspace_root": workspace, **(metadata or {})},
-                "selection": catalog_selection(base, auth, workspace),
+                "selection": fetch_in_process_selection_at(
+                    base,
+                    workspace,
+                    headers={"Authorization": auth},
+                    prefer_provider_id="mock",
+                    cache=True,
+                ),
                 **({"run_id": run_id} if run_id is not None else {}),
             },
         )
@@ -276,7 +294,13 @@ def _release(
                 "autonomous": True,
                 **({"run_id": run_id} if run_id is not None else {}),
                 "metadata": {"workspace_root": workspace, **(metadata or {})},
-                "selection": catalog_selection(base, auth, workspace),
+                "selection": fetch_in_process_selection_at(
+                    base,
+                    workspace,
+                    headers={"Authorization": auth},
+                    prefer_provider_id="mock",
+                    cache=True,
+                ),
             },
         )
     return resp.status_code, resp.json()

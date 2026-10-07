@@ -38,6 +38,7 @@ from ...database.thread_repository import create_thread
 from ...ipc.schemas import DispatchRequest
 from ...providers.team_selection import model_assignment_digest
 from ...team.team_config import load_team_config
+from ...testing import async_catalog_run_fields
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import (
     GraphActionReceipt,
@@ -49,7 +50,7 @@ from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_defin
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
 from .clarification_harness import new_state_graph
-from .conftest import SessionFactory, async_catalog_run_fields, make_app
+from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator

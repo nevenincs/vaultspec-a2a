@@ -32,12 +32,9 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..lifecycle.discovery import write_service_json
 from ..service_tests._live_desktop_gateway import ATTACH_CREDENTIAL, armed_gateway
+from ..testing import LIVE_PROVIDER_PREREQUISITES, selection_from_served_catalog
 from ..testing.ports import free_port
 from ..utils.process import ProcessContainment
-from ._provider_catalog_live import (
-    LIVE_PROVIDER_PREREQUISITES,
-    selection_from_served_catalog,
-)
 from .test_engine_broker_lost_ack_live import (
     _engine_command,
     _force_engine_tree_exit,

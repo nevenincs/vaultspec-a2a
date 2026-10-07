@@ -45,7 +45,7 @@ from ..desktop.credentials import (
     create_worker_ipc_credential,
 )
 from ..desktop.profile import derive_state_paths
-from ..testing import settings_override
+from ..testing import fetch_in_process_selection_at, settings_override
 from ..tests.gateway_boot import (
     broker_gateway_env,
     desktop_workspace,
@@ -57,7 +57,6 @@ from ..tests.gateway_boot import (
     spawn_until_ready,
 )
 from ..thread.enums import TERMINAL_STATUS_VALUES, TERMINAL_STATUSES, ThreadStatus
-from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     import subprocess
@@ -334,7 +333,13 @@ def _prepare_and_commit(base: str, auth: str) -> dict[str, Any]:
     workspace = desktop_workspace(base)
     # Resolved ONCE: prepare and commit describe the same run, so the commit is
     # only recognised as that run's commit while its selection matches.
-    selection = catalog_selection(base, auth, workspace)
+    selection = fetch_in_process_selection_at(
+        base,
+        workspace,
+        headers={"Authorization": auth},
+        prefer_provider_id="mock",
+        cache=True,
+    )
     run_fields = {
         "metadata": {"workspace_root": workspace},
         "selection": selection,

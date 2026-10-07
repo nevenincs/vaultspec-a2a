@@ -73,7 +73,7 @@
     "/v1/runs": {
       "post": {
         "summary": "Run Start Endpoint",
-        "description": "Start, prepare, commit, or release through the single run-start verb.\n\nThe ``stage`` selector splits one verb into four shapes without growing the\nverb set: ``prepare`` reserves bounded capacity without tokens or a durable\nrun; ``commit`` binds the exact actor-token role set to that reservation;\n``release`` frees only an uncommitted reservation; and ``start`` (the\ndefault) preserves the one-shot engine/Compose path.",
+        "description": "Start, prepare, commit, or release through the single run-start verb.\n\nThe ``stage`` selector splits one verb into four shapes without growing the\nverb set: ``prepare`` reserves bounded capacity without tokens or a durable\nrun; ``commit`` binds the exact actor-token role set to that reservation;\n``release`` frees only an uncommitted reservation; and ``start`` (the\ndefault) preserves the one-shot engine path.",
         "operationId": "run_start_endpoint_v1_runs_post",
         "security": [
           {
@@ -119,7 +119,16 @@
             "description": "Missing or invalid gateway service token."
           },
           "503": {
-            "description": "Gateway service token is not configured."
+            "description": "Gateway service token is not configured, the gateway is draining or out of admission capacity, execution or the provider catalog is not ready, or the worker is saturated or shut out by the failure breaker; retry later."
+          },
+          "404": {
+            "description": "The run was gone by the time its first dispatch settled."
+          },
+          "409": {
+            "description": "The run was not started as asked: its id already belongs to a different request, its nickname is taken, its predecessor cannot be continued, the commit does not match its prepared reservation, or the worker refused the first dispatch with the typed code every run action shares."
+          },
+          "502": {
+            "description": "The worker could not be reached, refused the dispatch outright, or failed inside itself. Reconcile from run-status."
           },
           "422": {
             "description": "Validation Error",
@@ -476,76 +485,6 @@
         }
       }
     },
-    "/v1/runs/{run_id}/cancel": {
-      "post": {
-        "summary": "Run Cancel Endpoint",
-        "description": "Cancel a run idempotently.",
-        "operationId": "run_cancel_endpoint_v1_runs__run_id__cancel_post",
-        "security": [
-          {
-            "GatewayServiceToken": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "run_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
-              "title": "Run Id"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunCancelResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid gateway service token."
-          },
-          "503": {
-            "description": "Gateway service token is not configured."
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/runs/{run_id}/history": {
       "get": {
         "summary": "Run History Endpoint",
@@ -758,6 +697,9 @@
           "503": {
             "description": "Gateway service token is not configured."
           },
+          "404": {
+            "description": "No such run."
+          },
           "409": {
             "description": "The run cannot accept a follow-up turn. Nothing was reserved and nothing was dispatched; the typed code names which condition refused it.",
             "content": {
@@ -784,7 +726,7 @@
     "/v1/runs/{run_id}/permissions/{request_id}/respond": {
       "post": {
         "summary": "Run Permission Respond Endpoint",
-        "description": "Answer a permission request the run raised on its progress stream.\n\nThe versioned surface already POSES this question - ``permission_request``\nis an enumerated frame on run-stream - and this is where the answer returns.\nWithout it the only answering channel is the transition surface, so retiring\nthat surface would strand every paused run.\n\nThe verb adds no state machine of its own: it is a versioned projection of\nthe same answer path, so at-most-once behaviour comes from there. Answering\ntwice replays the stored outcome rather than acting again, an answer arriving\nafter the request was applied reports the duplicate without re-dispatching,\nand a superseded or expired request is refused with a journaled rejection\nthat replays identically.\n\nScoping matters as much as the answer. The request is resolved and checked\nagainst the run in the path BEFORE anything acts on it, so a guessed request\nid cannot be used to answer another run's question - and because that check\nprecedes the service call, a mismatch has no effect at all rather than being\ndetected after the fact.",
+        "description": "Answer a permission request the run raised on its progress stream.\n\nThe versioned surface already POSES this question - ``permission_request``\nis an enumerated frame on run-stream - and this is where the answer returns.\nWithout it the only answering channel is the transition surface, so retiring\nthat surface would strand every paused run.\n\nThe verb adds no state machine of its own: it is a versioned projection of\nthe same answer path, so at-most-once behaviour comes from there. Answering\ntwice replays the stored outcome rather than acting again, an answer arriving\nafter the request was applied reports the duplicate without re-dispatching,\nand a superseded or expired request is refused with a journaled rejection\nthat replays identically.\n\nScoping matters as much as the answer. The service resolves the request\nagainst the run in the path, from that run's live checkpoint, BEFORE anything\nacts on it, so a guessed request id cannot be used to answer another run's\nquestion - and a mismatch has no effect at all rather than being detected\nafter the fact.",
         "operationId": "run_permission_respond_endpoint_v1_runs__run_id__permissions__request_id__respond_post",
         "security": [
           {
@@ -856,6 +798,9 @@
           },
           "503": {
             "description": "Gateway service token is not configured, or the worker is saturated or shut out by the failure breaker and the answer was retained for retry."
+          },
+          "404": {
+            "description": "No such run, or no such permission request on it."
           },
           "409": {
             "description": "The answer was not taken. A worker that refused the dispatch is reported with the typed refusal code every run action shares; a request-state conflict carries a plain sentence. Nothing was applied either way.",
@@ -941,7 +886,95 @@
             "description": "Missing or invalid gateway service token."
           },
           "503": {
-            "description": "Gateway service token is not configured."
+            "description": "Gateway service token is not configured, or the worker is saturated or shut out by the failure breaker; retry later."
+          },
+          "404": {
+            "description": "No such run, or the run is not parked on this questionnaire."
+          },
+          "409": {
+            "description": "The resolution was not taken: a different one is already accepted, the run is not active or cannot be confirmed to have applied it, or the worker refused the dispatch with the typed code every run action shares."
+          },
+          "502": {
+            "description": "The worker could not be reached, refused the dispatch outright, or failed inside itself. Reconcile from run-status."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{run_id}/cancel": {
+      "post": {
+        "summary": "Run Cancel Endpoint",
+        "description": "Cancel a run idempotently.",
+        "operationId": "run_cancel_endpoint_v1_runs__run_id__cancel_post",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCancelResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured, or the worker is saturated or shut out by the failure breaker; retry later."
+          },
+          "404": {
+            "description": "No such run."
+          },
+          "409": {
+            "description": "The run's state refuses cancellation - it settled some other way, its accepted deadline expired, or its authority changed - and no retry will change that; re-read run-status. Cancelling a run that is already cancelled is not refused."
+          },
+          "502": {
+            "description": "The worker could not be reached, refused the dispatch outright, or failed inside itself. Reconcile from run-status."
           },
           "422": {
             "description": "Validation Error",
@@ -1155,60 +1188,13 @@
         ]
       }
     },
-    "/internal/events": {
-      "post": {
-        "tags": [
-          "internal"
-        ],
-        "summary": "Receive Worker Event",
-        "description": "Receive a single event from the worker and relay to browser clients.\n\nThe ``WorkerBridge`` in the worker process POSTs here instead of\nsending a WebSocket frame.  The payload format matches\n``WorkerEventEnvelope``.",
-        "operationId": "receive_worker_event_internal_events_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Receive Worker Event Internal Events Post"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid internal IPC token."
-          },
-          "500": {
-            "description": "Internal IPC token is not configured."
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "InternalIpcToken": []
-          }
-        ]
-      }
-    },
     "/internal/events/batch": {
       "post": {
         "tags": [
           "internal"
         ],
         "summary": "Receive Worker Event Batch",
-        "description": "Receive a batch of events from the worker.\n\nThe ``WorkerBridge`` accumulates events for a short interval then\nPOSTs them as a single ``{\"events\": [...]}`` payload.  Each entry\nhas the same shape as a single-event envelope (``thread_id`` +\n``payload``).",
+        "description": "Receive a batch of events from the worker.\n\nThe ``WorkerBridge`` accumulates events for a short interval then POSTs\nthem as a single ``WorkerEventBatch``. A batch carries many events in one\nrequest, so the body-limit middleware allows it a larger body than any\nother internal write; the worker sizes its batches against the same figure.",
         "operationId": "receive_worker_event_batch_internal_events_batch_post",
         "responses": {
           "200": {
@@ -1255,7 +1241,7 @@
           "internal"
         ],
         "summary": "Receive Worker Heartbeat",
-        "description": "Receive a heartbeat from the worker.\n\nUpdates ``app.state`` so the gateway can monitor worker\nliveness without a persistent WebSocket connection.",
+        "description": "Receive a heartbeat from the worker.\n\nUpdates ``app.state`` so the gateway can monitor worker liveness.",
         "operationId": "receive_worker_heartbeat_internal_heartbeat_post",
         "responses": {
           "200": {
@@ -1299,7 +1285,7 @@
     "/health": {
       "get": {
         "summary": "Health Endpoint",
-        "description": "Top-level health check: the one probe surface for external callers.\n\nUnder the armed desktop profile the unauthenticated boundary discloses\nonly the minimal liveness fact - no process identity, product identity, or\nproduct state - while an attach-authenticated caller additionally receives\nthe readiness projection from the single readiness authority, computed\nover a live database probe. Only the authenticated branch probes: the\nunauthenticated answer stays a constant so it cannot be used to measure\nthe gateway's dependencies.\n\nBoth profiles PROBE rather than read off app state - the DB here and, on\nCompose and development, the checkpointer and worker as well - because a\nhealthcheck that only reports what the process believes about itself\ncannot notice a dependency that has gone away.",
+        "description": "Top-level health check: the one probe surface for external callers.\n\nUnder the armed desktop profile the unauthenticated boundary discloses\nonly the minimal liveness fact - no process identity, product identity, or\nproduct state - while an attach-authenticated caller additionally receives\nthe readiness projection from the single readiness authority, computed\nover a live database probe. Only the authenticated branch probes: the\nunauthenticated answer stays a constant so it cannot be used to measure\nthe gateway's dependencies.\n\nBoth profiles PROBE rather than read off app state - the DB here and, on\nthe development profile, the checkpointer and worker as well - because a\nhealthcheck that only reports what the process believes about itself\ncannot notice a dependency that has gone away.",
         "operationId": "health_endpoint_health_get",
         "responses": {
           "200": {
@@ -1512,7 +1498,7 @@
           "state"
         ],
         "title": "AgentSnapshot",
-        "description": "Wire projection of the canonical agent descriptor within a snapshot.\n\nMirrors ``thread.snapshots.AgentData``."
+        "description": "Canonical agent descriptor.\n\nSingle declaration behind every agent-shaped surface: the REST team-status\nentry, the ``team_status`` broadcast summary, and the thread snapshot all\nproject from this type rather than redeclaring the field set. ``state``,\n``provider``, and ``model`` carry the real enums so an unknown value cannot\nsurvive as an arbitrary string all the way to the wire.\n\n``model_name`` holds the exact provider-issued catalog identifier the run\nexecuted."
       },
       "ApprovalStatus": {
         "type": "string",
@@ -1645,42 +1631,6 @@
         "title": "ClarificationQuestion",
         "description": "One bounded question inside a clarification request.\n\n``options`` belongs to ``choice`` and only to ``choice``: a text question\ncarrying options would advertise a constraint the answer path does not\nenforce, and a choice without options would offer nothing to choose. Both are\nrefused at construction rather than tolerated and interpreted downstream."
       },
-      "ClarificationQuestionSnapshot": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "prompt": {
-            "type": "string",
-            "title": "Prompt"
-          },
-          "kind": {
-            "type": "string",
-            "title": "Kind"
-          },
-          "required": {
-            "type": "boolean",
-            "title": "Required",
-            "default": false
-          },
-          "options": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Options"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "prompt",
-          "kind"
-        ],
-        "title": "ClarificationQuestionSnapshot",
-        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationQuestionData``."
-      },
       "ClarificationRequest": {
         "properties": {
           "type": {
@@ -1714,27 +1664,6 @@
         ],
         "title": "ClarificationRequest",
         "description": "The bounded question set a parked run is waiting on.\n\nThis is the interrupt payload verbatim: what the node raises, what the\ncheckpoint holds while the run is parked, and what the recovery snapshot\ndiscloses. ``type`` is carried rather than implied because the checkpoint\nholds interrupts of several kinds side by side and the discriminator is how a\nreader tells a clarification from an approval."
-      },
-      "ClarificationRequestSnapshot": {
-        "properties": {
-          "request_id": {
-            "type": "string",
-            "title": "Request Id"
-          },
-          "questions": {
-            "items": {
-              "$ref": "#/components/schemas/ClarificationQuestionSnapshot"
-            },
-            "type": "array",
-            "title": "Questions"
-          }
-        },
-        "type": "object",
-        "required": [
-          "request_id"
-        ],
-        "title": "ClarificationRequestSnapshot",
-        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.\n\nA pending mid-run clarification, disclosed on ``run-status`` so a reload\nre-renders the questionnaire from authoritative state alone, never from a\nrelay frame."
       },
       "CleanupKind": {
         "type": "string",
@@ -1779,6 +1708,33 @@
         ],
         "title": "ControlKind",
         "description": "Provider-native control category without cross-provider semantics."
+      },
+      "DegradedReason": {
+        "type": "string",
+        "enum": [
+          "authoring_run_produced_no_proposal",
+          "checkpoint_history_unknown",
+          "checkpoint_missing",
+          "checkpoint_permission_without_durable_row",
+          "checkpoint_timeout",
+          "checkpoint_unavailable",
+          "execution_state_projection_missing",
+          "execution_state_projection_stale",
+          "execution_state_projection_timeout",
+          "execution_state_projection_unavailable",
+          "execution_state_projection_unreadable",
+          "incompatible_execution_authority",
+          "invalid_agent_descriptors",
+          "invalid_assignment_digest",
+          "interrupt_payload_unreadable",
+          "interrupt_payload_untyped",
+          "missing_assignment_digest",
+          "pending_permission_without_checkpoint_truth",
+          "permission_projection_unreadable",
+          "terminal_thread_pending_permission_residue"
+        ],
+        "title": "DegradedReason",
+        "description": "Why a run snapshot is less than complete, in terms a program can match.\n\nThese are the machine-readable members of a run snapshot's degradation list.\nThey are deliberately NOT the same vocabulary as the service-state\ndegradation list, which carries human-readable prose (\"worker is down\") for\nan operator to read rather than tokens for a client to branch on. The two\nshare a field name and nothing else, so they stay separate declarations.\n\nMembership follows the reader's fault lines: what could not be read\n(``*_UNAVAILABLE``, ``*_UNREADABLE``, ``*_TIMEOUT``), what was read but is\nnot current (``*_STALE``), what should have been present and was not\n(``*_MISSING``), and what was present but contradicts another store\n(the permission residue and cross-store mismatch members)."
       },
       "DesktopReadiness": {
         "properties": {
@@ -1920,7 +1876,7 @@
           "name"
         ],
         "title": "ExecutionTaskSnapshot",
-        "description": "Normalized execution task used in reconnect snapshots."
+        "description": "Normalized execution task used in reconnect snapshots.\n\nThe one declaration of an execution task: the worker emits it across the\ngateway-worker wire, the gateway persists it, and the snapshot serves it."
       },
       "FrozenExecutionSnapshotSummary": {
         "properties": {
@@ -2403,17 +2359,16 @@
           "content"
         ],
         "title": "PlanEntry",
-        "description": "A single entry in the agent's execution plan.\n\nFields use plain ``str`` so the domain layer stays free of wire-protocol\nenum imports.  Values correspond to ``PlanEntryStatus`` / ``PlanEntryPriority``\nmembers defined in ``api.schemas.enums``."
+        "description": "A single entry in the agent's execution plan.\n\nFields use plain ``str`` so the domain layer stays free of wire-protocol\nenum imports.  Values follow the ACP plan-entry vocabularies: status\n``pending`` / ``in_progress`` / ``completed``, priority ``high`` / ``medium``\n/ ``low``."
       },
       "PresetOrigin": {
         "type": "string",
         "enum": [
           "bundled",
-          "workspace",
-          "test_mock"
+          "workspace"
         ],
         "title": "PresetOrigin",
-        "description": "Which source supplied a discovered preset.\n\n``WORKSPACE`` outranks ``BUNDLED`` for the same id, because a workspace\ndefinition shadows the shipped one; the origin therefore reports where the\npreset a caller would actually get was found, not merely where a file\nexists. ``TEST_MOCK`` is a shipped preset that follows the mock naming\nconvention, kept a separate member rather than folded into ``BUNDLED`` so\nthe product layer can exclude fixtures without matching on the id."
+        "description": "Which source supplied a discovered preset.\n\n``WORKSPACE`` outranks ``BUNDLED`` for the same id, because a workspace\ndefinition shadows the shipped one; the origin therefore reports where the\npreset a caller would actually get was found, not merely where a file\nexists."
       },
       "PresetSummary": {
         "properties": {
@@ -2496,11 +2451,6 @@
               }
             ]
           },
-          "is_mock": {
-            "type": "boolean",
-            "title": "Is Mock",
-            "default": false
-          },
           "origin": {
             "anyOf": [
               {
@@ -2555,7 +2505,6 @@
           "codex",
           "deterministic",
           "kimi",
-          "mock",
           "openai",
           "zai",
           "zhipu"
@@ -3034,7 +2983,7 @@
           "operator_intervention_required"
         ],
         "title": "RepairStatus",
-        "description": "Repair and readiness classification distinct from lifecycle.\n\nTypes BOTH durable columns that carry this classification:\n``threads.repair_status`` and ``threads.execution_readiness``. The two ask\ndifferent questions — what is wrong with this run, and is it fit to resume —\nbut they answer from this one closed set, so a new member becomes available\nto both at once and neither can drift into a private vocabulary."
+        "description": "Repair and readiness classification distinct from lifecycle.\n\nTypes ``threads.repair_status``, the durable answer to what is wrong with a\nrun. A run's served ``execution_readiness`` asks whether it is fit to resume\nand answers from this same closed set, because it is derived from that repair\nposture at read time rather than judged on its own; a new member is available\nto both at once and neither can drift into a private vocabulary."
       },
       "RoleState": {
         "properties": {
@@ -3745,7 +3694,7 @@
           "option_id"
         ],
         "title": "RunPermissionRespondRequest",
-        "description": "Answer one permission request raised by a run.\n\nCarries the chosen option and, optionally, a reviewer comment. The options\nthemselves were advertised on the versioned progress stream in the\n``permission_request`` frame that raised the question, so the answer names\none rather than restating it. ``notes`` survives into the verdict resume\npayload for a locally-respondable verdict-style pause (D6); it is ignored\nfor a plain tool-permission response, which resumes on the bare option id."
+        "description": "Answer one permission request raised by a run.\n\nCarries the chosen option and, optionally, a reviewer comment. The options\nthemselves were advertised on the versioned progress stream in the\n``permission_request`` frame that raised the question, so the answer names\none rather than restating it. ``notes`` survives into the verdict resume\npayload for a locally-respondable verdict-style pause; it is ignored\nfor a plain tool-permission response, which resumes on the bare option id."
       },
       "RunPermissionRespondResponse": {
         "properties": {
@@ -4291,7 +4240,7 @@
           },
           "degraded_reasons": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/DegradedReason"
             },
             "type": "array",
             "title": "Degraded Reasons"
@@ -4948,7 +4897,7 @@
           "pending_clarification": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ClarificationRequestSnapshot"
+                "$ref": "#/components/schemas/ClarificationRequest"
               },
               {
                 "type": "null"
@@ -5113,7 +5062,7 @@
           },
           "degraded_reasons": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/DegradedReason"
             },
             "type": "array",
             "title": "Degraded Reasons"
@@ -5126,24 +5075,22 @@
           "repair_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/RepairStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Repair Status"
+            ]
           },
           "execution_readiness": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/RepairStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Execution Readiness"
+            ]
           },
           "pause_cause": {
             "anyOf": [
@@ -5159,13 +5106,12 @@
           "approval_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ApprovalStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Approval Status"
+            ]
           },
           "approval_request_id": {
             "anyOf": [
@@ -5203,7 +5149,8 @@
           "repair_reason": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 500
               },
               {
                 "type": "null"
@@ -5213,6 +5160,7 @@
           },
           "queued_messages": {
             "type": "integer",
+            "minimum": 0.0,
             "title": "Queued Messages",
             "default": 0
           }
@@ -5224,7 +5172,7 @@
           "last_sequence"
         ],
         "title": "ThreadStateSnapshot",
-        "description": "Complete thread state for reattaching to a run's event stream.\n\nThe client fetches this via REST, notes ``last_sequence``, then\ndiscards any streamed frame with ``sequence <= last_sequence``."
+        "description": "Complete thread state for reattaching to a run's event stream.\n\nThe client fetches this via REST, notes ``last_sequence``, then discards any\nstreamed frame with ``sequence <= last_sequence``.\n\nThis is the run read model's single declaration: the api edge validates and\nserves it directly, so a field added here reaches run-history with no\nsecond declaration to keep in step. Fields are keyword-only and declared in\nthe order they are served."
       },
       "ThreadStatus": {
         "type": "string",
@@ -5370,7 +5318,7 @@
           },
           "content": {
             "items": {
-              "oneOf": [
+              "anyOf": [
                 {
                   "$ref": "#/components/schemas/ToolCallContentText"
                 },
@@ -5380,15 +5328,7 @@
                 {
                   "$ref": "#/components/schemas/ToolCallContentTerminal"
                 }
-              ],
-              "discriminator": {
-                "propertyName": "content_type",
-                "mapping": {
-                  "diff": "#/components/schemas/ToolCallContentDiff",
-                  "terminal": "#/components/schemas/ToolCallContentTerminal",
-                  "text": "#/components/schemas/ToolCallContentText"
-                }
-              }
+              ]
             },
             "type": "array",
             "title": "Content"

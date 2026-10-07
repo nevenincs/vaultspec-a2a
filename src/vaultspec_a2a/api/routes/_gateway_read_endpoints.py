@@ -41,9 +41,6 @@ from ...database import (
 from ...database.checkpoints import Checkpointer
 from ...providers import ProviderCondition
 from ...streaming.aggregator import EventAggregator
-from ...thread.clarification import (
-    pending_clarification,
-)
 from ...thread.constants import (
     MAX_DISCOVERY_RESULTS,
     MAX_FEATURE_TAG_LENGTH,
@@ -345,11 +342,13 @@ async def run_status_endpoint(
             is not None
             else None
         ),
-        # Read from the SAME capture projection as every other field above, so
-        # a questionnaire cannot be reported against a position the run has since
-        # left. This is the authoritative disclosure a reloaded client recovers
-        # from; the progress relay only ever nudges it to look here.
-        pending_clarification=pending_clarification(capture.checkpoint_projection),
+        # Read from the SAME capture as every other field above - the snapshot
+        # computed it once from the capture's checkpoint projection - so a
+        # questionnaire cannot be reported against a position the run has since
+        # left, nor disagree with the one run-history serves. This is the
+        # authoritative disclosure a reloaded client recovers from; the progress
+        # relay only ever nudges it to look here.
+        pending_clarification=snapshot.pending_clarification,
     )
 
 

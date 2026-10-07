@@ -30,6 +30,11 @@ from pydantic import BaseModel
 from ....graph.enums import AgentLifecycleState, Provider
 from ....ipc.schemas import ExecutionTaskProjectionPayload
 from ....thread import snapshots as domain
+from ....thread.clarification import (
+    ClarificationKind,
+    ClarificationQuestion,
+    ClarificationRequest,
+)
 from .. import snapshots as wire
 
 if TYPE_CHECKING:
@@ -43,8 +48,6 @@ _MIRRORS: tuple[tuple[type[DataclassInstance], type[BaseModel]], ...] = (
     (domain.ArtifactData, wire.ArtifactSnapshot),
     (domain.PermissionOptionData, wire.PermissionOptionSnapshot),
     (domain.PermissionData, wire.PermissionSnapshot),
-    (domain.ClarificationQuestionData, wire.ClarificationQuestionSnapshot),
-    (domain.ClarificationRequestData, wire.ClarificationRequestSnapshot),
     (domain.AgentData, wire.AgentSnapshot),
     (domain.ExecutionTaskData, wire.ExecutionTaskSnapshot),
     (domain.ThreadStateData, wire.ThreadStateSnapshot),
@@ -113,7 +116,7 @@ def test_execution_task_shape_agrees_across_all_three_declarations() -> None:
 def test_every_declared_mirror_is_registered() -> None:
     """Each domain dataclass declaring a mirror must be covered by ``_MIRRORS``.
 
-    Without this, adding a tenth mirrored type and forgetting to register it
+    Without this, adding a new mirrored type and forgetting to register it
     would leave it unguarded while the suite still passed.
     """
     registered = {domain_cls for domain_cls, _ in _MIRRORS}
@@ -195,14 +198,13 @@ def _populated_thread_state() -> domain.ThreadStateData:
                 tool_kind="execute",
             )
         ],
-        pending_clarification=domain.ClarificationRequestData(
+        pending_clarification=ClarificationRequest(
             request_id="clarify-1",
             questions=[
-                domain.ClarificationQuestionData(
+                ClarificationQuestion(
                     id="scope",
                     prompt="Which module?",
-                    kind="choice",
-                    required=True,
+                    kind=ClarificationKind.CHOICE,
                     options=["a", "b"],
                 )
             ],
@@ -259,6 +261,8 @@ def test_production_seam_carries_every_domain_field_to_the_wire() -> None:
     assert emitted["messages"][0]["agent_id"] == "supervisor"
     assert emitted["pending_clarification"]["request_id"] == "clarify-1"
     assert emitted["pending_clarification"]["questions"][0]["options"] == ["a", "b"]
+    # History serves the producer's own model, not a looser restatement of it.
+    assert snapshot.pending_clarification == data.pending_clarification
 
 
 def test_execution_task_payload_crosses_the_ipc_seam_intact() -> None:

@@ -504,6 +504,11 @@ LINT = Verb(
             # zero stale against its adjudicated baseline from the run that
             # wrote the baseline, the same bar every other entry here met
             # before joining, not an exception to it.
+            #
+            # `anchors` (Q.3) held zero the whole time it sat outside this
+            # chain - its own DEFERRED debt list was emptied before this
+            # plan and never refilled - so it was simply never added, not a
+            # burndown still in progress.
             tuple(
                 Ref(name)
                 for name in (
@@ -523,6 +528,7 @@ LINT = Verb(
                     "workflow",
                     "shell",
                     "duplication",
+                    "anchors",
                 )
             ),
             keep_going=True,
@@ -552,6 +558,7 @@ LINT = Verb(
                     "workflow",
                     "shell",
                     "duplication",
+                    "anchors",
                 )
             ),
             keep_going=True,

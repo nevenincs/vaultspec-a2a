@@ -62,7 +62,7 @@ def _active_agent_descriptors(
 async def build_team_status(
     *,
     db: AsyncSession,
-    aggregator: RelayHub,
+    relay_hub: RelayHub,
     heartbeat_threads: list[str],
 ) -> TeamStatus:
     """Assemble the full team status from DB and the relay hub's live state."""
@@ -81,14 +81,14 @@ async def build_team_status(
     ]
     active_threads = sorted(
         set(heartbeat_threads)
-        | set(aggregator.get_active_thread_ids())
+        | set(relay_hub.get_active_thread_ids())
         | {p.request.thread_id for p in live_pending}
     )
 
     # Public pending permissions must be durable-backed; the relay hub is
     # still read for agents and active-thread liveness, not permission truth.
     return TeamStatus(
-        agents=_active_agent_descriptors(aggregator.mirror, active_threads),
+        agents=_active_agent_descriptors(relay_hub.mirror, active_threads),
         active_threads=active_threads,
         pending_permissions=public_pending,
     )

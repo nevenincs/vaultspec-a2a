@@ -40,14 +40,14 @@ async def _snapshot(
     session: AsyncSession,
     *,
     thread_id: str,
-    aggregator: RelayHub,
+    relay_hub: RelayHub,
     checkpointer: AsyncSqliteSaver,
 ) -> ThreadStateData | None:
     """Project the live capture service to the snapshot these tests inspect."""
     capture = await capture_thread_state(
         session,
         thread_id=thread_id,
-        aggregator=aggregator,
+        relay_hub=relay_hub,
         checkpointer=checkpointer,
     )
     return capture.snapshot if capture is not None else None
@@ -126,7 +126,7 @@ async def test_a_completed_doc_editor_run_with_no_artifact_is_flagged(
         snapshot = await _snapshot(
             session,
             thread_id="doc-editor-empty",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -164,7 +164,7 @@ async def test_a_completed_doc_editor_run_that_did_propose_is_not_flagged(
         snapshot = await _snapshot(
             session,
             thread_id="doc-editor-proposed",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -201,7 +201,7 @@ async def test_a_completed_coder_run_with_no_authoring_ids_is_not_flagged(
         snapshot = await _snapshot(
             session,
             thread_id="coder-empty",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -231,7 +231,7 @@ async def test_a_still_running_doc_editor_thread_is_not_flagged(
         snapshot = await _snapshot(
             session,
             thread_id="doc-editor-running",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 

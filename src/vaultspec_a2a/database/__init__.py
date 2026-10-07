@@ -30,6 +30,9 @@ from .authoring_cursor_repository import (
 from .authoring_cursor_repository import (
     set_authoring_cursor as set_authoring_cursor,
 )
+from .checkpoint_retention import (
+    prune_settled_checkpoints as prune_settled_checkpoints,
+)
 from .checkpoints import Checkpointer as Checkpointer
 from .checkpoints import CheckpointRead as CheckpointRead
 from .checkpoints import CheckpointReadStatus as CheckpointReadStatus
@@ -373,6 +376,7 @@ __all__ = [
     "path_safe_run_id_clause",
     "pending_document_approval_thread",
     "persist_graph_action_receipt",
+    "prune_settled_checkpoints",
     "read_cleanup_ledger",
     "read_latest_checkpoint",
     "read_next_queued_continuation",

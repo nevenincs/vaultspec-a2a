@@ -115,7 +115,7 @@ class ThreadStreamRequest:
     """
 
     thread_id: str
-    aggregator: RelayHub
+    relay_hub: RelayHub
     session_factory: async_sessionmaker[AsyncSession]
     resume_cursor: str | None = None
     replay_writer: RunEventWriter | None = None
@@ -291,8 +291,8 @@ class _ThreadStream:
         return self._request.thread_id
 
     @property
-    def _aggregator(self) -> RelayHub:
-        return self._request.aggregator
+    def _relay_hub(self) -> RelayHub:
+        return self._request.relay_hub
 
     async def frames(self) -> AsyncGenerator[bytes]:
         """Every frame this viewer is served, in order, from cursor to close."""
@@ -315,7 +315,7 @@ class _ThreadStream:
         refused cursor, or a registration that lost the capacity race - removes
         nothing and disturbs no other viewer.
         """
-        self._aggregator.remove_subscriber(self._client_id)
+        self._relay_hub.remove_subscriber(self._client_id)
 
     def _cursor_refusal(self) -> bytes:
         """Refuse a cursor this run cannot honour, before anything is attached.
@@ -348,7 +348,7 @@ class _ThreadStream:
         rather than a connection that dies mid-response.
         """
         try:
-            queue = self._aggregator.add_subscriber(self._client_id)
+            queue = self._relay_hub.add_subscriber(self._client_id)
         except StreamSubscriptionError:
             logger.warning(
                 "Refused SSE stream for thread %s: subscriber registry at capacity",
@@ -367,7 +367,7 @@ class _ThreadStream:
         self, resume: ResumePosition | None, queue: asyncio.Queue[Any]
     ) -> AsyncGenerator[bytes]:
         """Snapshot, replay, then either the durable terminal or the live loop."""
-        self._aggregator.subscribe(self._client_id, [self._thread_id])
+        self._relay_hub.subscribe(self._client_id, [self._thread_id])
 
         # Authority is read only now. Before, it was read first and the
         # subscription attached after, so an outcome relayed in between reached
@@ -511,7 +511,7 @@ class _ThreadStream:
         # has already subscribed and been handed its snapshot.
         sequence = (
             retained_sequence(payload)
-            if replay_is_served(self._aggregator, self._thread_id)
+            if replay_is_served(self._relay_hub, self._thread_id)
             else None
         )
         if sequence is not None:
@@ -538,7 +538,7 @@ class _ThreadStream:
 
     def _resync(self) -> Iterator[bytes]:
         """Emit one backpressure notice covering everything dropped since the last."""
-        dropped = self._aggregator.take_dropped_count(self._client_id)
+        dropped = self._relay_hub.take_dropped_count(self._client_id)
         if dropped:
             logger.warning(
                 "Stream %s lost %d events to backpressure on thread %s",
@@ -595,7 +595,7 @@ async def build_thread_stream_response(
     # once the response body starts, and the shared subscriber registry enforces
     # the same limit at the moment of registration, which is where it holds.
     limit = domain_config.max_stream_connections
-    if limit > 0 and request.aggregator.subscriber_count() >= limit:
+    if limit > 0 and request.relay_hub.subscriber_count() >= limit:
         raise HTTPException(
             status_code=503,
             detail=("Gateway is at its progress-stream connection limit; retry later"),

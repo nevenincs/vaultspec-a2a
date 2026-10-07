@@ -794,7 +794,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await _reconcile_gateway_startup(app, checkpointer)
 
         relay_hub = RelayHub(telemetry=OTelAggregatorHook())
-        app.state.aggregator = relay_hub
+        app.state.relay_hub = relay_hub
 
         app.state.db_engine = engine
 

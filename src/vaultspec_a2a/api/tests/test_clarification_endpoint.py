@@ -118,7 +118,7 @@ class TestClarificationRoundTrip:
         # TestClient lifecycle — reading the SAME durable session_factory and
         # checkpointer, simulating a reload/reconnect.
         app2, _agg2, _worker2, _cp2 = make_app(
-            session_factory, checkpointer, aggregator=RelayHub()
+            session_factory, checkpointer, relay_hub=RelayHub()
         )
         with TestClient(app2, raise_server_exceptions=True) as client2:
             status_resp = client2.get(f"/v1/runs/{thread_id}")

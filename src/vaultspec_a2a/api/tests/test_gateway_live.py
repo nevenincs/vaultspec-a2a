@@ -1131,7 +1131,7 @@ async def test_run_status_carries_reconnect_cursor(
             run_id,
             {"event_type": "thread_terminal", "status": "completed"},
             services=RelayServices(
-                aggregator=agg,
+                relay_hub=agg,
                 session_factory=session_factory,
                 checkpointer=checkpointer,
             ),

@@ -81,7 +81,7 @@ async def test_a_finished_stream_hands_its_slot_to_the_next_caller(
         async for frame in _stream_thread_events(
             ThreadStreamRequest(
                 thread_id="run-finished",
-                aggregator=aggregator,
+                relay_hub=aggregator,
                 session_factory=session_factory,
             )
         )
@@ -121,7 +121,7 @@ async def test_a_refused_cursor_takes_no_slot_and_releases_nobody_elses(
         async for frame in _stream_thread_events(
             ThreadStreamRequest(
                 thread_id="run-refused",
-                aggregator=aggregator,
+                relay_hub=aggregator,
                 session_factory=session_factory,
                 resume_cursor="some-other-run:4",
             )
@@ -162,7 +162,7 @@ async def test_a_stream_abandoned_mid_flight_hands_its_slot_to_the_next_caller(
     stream = _stream_thread_events(
         ThreadStreamRequest(
             thread_id="run-abandoned",
-            aggregator=aggregator,
+            relay_hub=aggregator,
             session_factory=session_factory,
         )
     )

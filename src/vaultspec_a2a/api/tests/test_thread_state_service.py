@@ -35,14 +35,14 @@ async def _snapshot(
     session: AsyncSession,
     *,
     thread_id: str,
-    aggregator: RelayHub,
+    relay_hub: RelayHub,
     checkpointer: AsyncSqliteSaver,
 ) -> ThreadStateData | None:
     """Project the live capture service to the snapshot these tests inspect."""
     capture = await capture_thread_state(
         session,
         thread_id=thread_id,
-        aggregator=aggregator,
+        relay_hub=relay_hub,
         checkpointer=checkpointer,
     )
     return capture.snapshot if capture is not None else None
@@ -71,7 +71,7 @@ async def test_checkpoint_failure_updates_execution_readiness_with_repair_status
         snapshot = await _snapshot(
             session,
             thread_id="thread-closed-checkpointer",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -103,7 +103,7 @@ async def test_missing_checkpoint_degrades_snapshot_readiness(
         snapshot = await _snapshot(
             session,
             thread_id="thread-missing-checkpoint",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -150,7 +150,7 @@ async def test_missing_checkpoint_hides_durable_pending_permission_state(
         snapshot = await _snapshot(
             session,
             thread_id="thread-missing-checkpoint-permission",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -201,7 +201,7 @@ async def test_submitted_thread_missing_checkpoint_clears_stale_pending_approval
         snapshot = await _snapshot(
             session,
             thread_id="thread-submitted-stale-approval",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -264,7 +264,7 @@ async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoin
         snapshot = await _snapshot(
             session,
             thread_id="thread-corrupt-state",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -324,7 +324,7 @@ async def test_stale_execution_state_degrades_snapshot_readiness(
         snapshot = await _snapshot(
             session,
             thread_id="thread-stale-state",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -386,7 +386,7 @@ async def test_unreadable_durable_permission_degrades_snapshot_without_crashing(
         snapshot = await _snapshot(
             session,
             thread_id="thread-corrupt-permission",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -445,7 +445,7 @@ async def test_unreadable_plan_approval_row_does_not_seed_pending_approval(
         snapshot = await _snapshot(
             session,
             thread_id="thread-corrupt-plan-approval",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -505,7 +505,7 @@ async def test_unreadable_plan_approval_row_clears_stale_thread_approval_state(
         snapshot = await _snapshot(
             session,
             thread_id="thread-stale-plan-approval",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -552,7 +552,7 @@ async def test_missing_plan_approval_request_clears_stale_thread_pending_approva
         snapshot = await _snapshot(
             session,
             thread_id="thread-stale-pending-approval",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -607,7 +607,7 @@ async def test_plan_approval_without_tool_call_preserves_pending_approval(
         snapshot = await _snapshot(
             session,
             thread_id="thread-plan-no-tool-call",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -663,7 +663,7 @@ async def test_rejected_thread_approval_is_replaced_by_live_pending_plan_approva
         snapshot = await _snapshot(
             session,
             thread_id="thread-rejected-stale-live-plan",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -710,7 +710,7 @@ async def test_rejected_thread_approval_residue_does_not_surface_without_live_pl
         snapshot = await _snapshot(
             session,
             thread_id="thread-rejected-residue",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -765,7 +765,7 @@ async def test_terminal_thread_excludes_durable_pending_permission_from_thread_s
         snapshot = await _snapshot(
             session,
             thread_id="thread-terminal-permission-residue",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -831,7 +831,7 @@ async def test_answered_pending_apply_permission_does_not_surface_in_thread_stat
         snapshot = await _snapshot(
             session,
             thread_id="thread-answered-pending-apply",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 
@@ -893,7 +893,7 @@ async def test_a_relayed_permission_alone_does_not_surface_in_thread_state(
         snapshot = await _snapshot(
             session,
             thread_id="thread-aggregator-only-permission",
-            aggregator=aggregator,
+            relay_hub=aggregator,
             checkpointer=checkpointer,
         )
 
@@ -963,7 +963,7 @@ async def test_checkpoint_only_pending_permission_does_not_surface_in_thread_sta
         snapshot = await _snapshot(
             session,
             thread_id="thread-checkpoint-only-permission",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=checkpointer,
         )
 

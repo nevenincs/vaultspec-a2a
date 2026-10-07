@@ -371,7 +371,7 @@ async def _read_projected_checkpoint(
 
 
 async def _served_last_sequence(
-    db: AsyncSession, thread: ThreadModel, aggregator: RelayHub
+    db: AsyncSession, thread: ThreadModel, relay_hub: RelayHub
 ) -> int:
     """Return the run's frame cursor: the highest number its stream has issued.
 
@@ -384,7 +384,7 @@ async def _served_last_sequence(
     """
     if thread.last_sequence is not None:
         return thread.last_sequence
-    issued = aggregator.issued_sequence(thread.id)
+    issued = relay_hub.issued_sequence(thread.id)
     if issued is not None:
         return issued
     return await retained_high_water_mark(db, thread.id) or 0
@@ -394,7 +394,7 @@ async def capture_thread_state(
     db: AsyncSession,
     *,
     thread_id: str,
-    aggregator: RelayHub,
+    relay_hub: RelayHub,
     checkpointer: Checkpointer,
 ) -> ThreadStateCapture | None:
     """Capture a coherent thread snapshot and its checkpoint projection.
@@ -427,7 +427,7 @@ async def capture_thread_state(
     snapshot = ThreadStateData(
         thread_id=thread_id,
         status=ThreadStatus(thread.status),
-        last_sequence=await _served_last_sequence(db, thread, aggregator),
+        last_sequence=await _served_last_sequence(db, thread, relay_hub),
         failure_reason=thread.failure_reason,
         provider_condition=thread.provider_condition,
         repair_reason=thread.repair_reason,
@@ -446,7 +446,7 @@ async def capture_thread_state(
     checkpoint_read = await _read_projected_checkpoint(
         checkpointer,
         snapshot,
-        aggregator.mirror,
+        relay_hub.mirror,
         expected_assignment_digest,
     )
     snapshot = checkpoint_read.snapshot

@@ -69,7 +69,7 @@ async def test_a_stream_is_refused_at_capacity_without_touching_the_database() -
         await build_thread_stream_response(
             ThreadStreamRequest(
                 thread_id="any-thread",
-                aggregator=aggregator,
+                relay_hub=aggregator,
                 session_factory=cast("async_sessionmaker[AsyncSession]", None),
             ),
             db=cast("AsyncSession", None),

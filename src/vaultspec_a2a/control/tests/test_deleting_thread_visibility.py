@@ -97,7 +97,7 @@ async def test_run_lookup_reports_a_deleting_thread_as_absent(
         capture = await capture_thread_state(
             session,
             thread_id="gone",
-            aggregator=RelayHub(),
+            relay_hub=RelayHub(),
             checkpointer=InMemorySaver(),
         )
 

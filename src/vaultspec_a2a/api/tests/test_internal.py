@@ -78,12 +78,12 @@ def _failed_payload(
 
 def _make_test_app(
     *,
-    with_aggregator: bool = False,
+    with_relay_hub: bool = False,
     session_factory: SessionFactory | None = None,
 ) -> FastAPI:
     """Create a minimal FastAPI app with the internal router and wired state.
 
-    When ``with_aggregator`` is True, a real ``RelayHub`` - the relay
+    When ``with_relay_hub`` is True, a real ``RelayHub`` - the relay
     target the ingest paths write to - is attached (no fakes).
     """
     app = FastAPI()
@@ -102,10 +102,10 @@ def _make_test_app(
     # durable write must be skipped, so the absence has to be DECLARED.
     app.state.db_session_factory = session_factory
 
-    app.state.aggregator = None
+    app.state.relay_hub = None
 
-    if with_aggregator:
-        app.state.aggregator = RelayHub()
+    if with_relay_hub:
+        app.state.relay_hub = RelayHub()
 
     return app
 
@@ -154,8 +154,8 @@ async def test_dispatch_application_receipt_is_not_broadcast_to_progress(
     session_factory: SessionFactory,
 ) -> None:
     """The private stable dispatch identity must stop at the gateway DB edge."""
-    app = _make_test_app(with_aggregator=True, session_factory=session_factory)
-    aggregator = app.state.aggregator
+    app = _make_test_app(with_relay_hub=True, session_factory=session_factory)
+    aggregator = app.state.relay_hub
     queue = aggregator.add_subscriber("receipt-observer")
     aggregator.subscribe("receipt-observer", ["receipt-thread"])
 
@@ -312,7 +312,7 @@ class TestInternalEvents:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_valid_event_returns_ok(self) -> None:
-        app = _make_test_app(with_aggregator=True)
+        app = _make_test_app(with_relay_hub=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -330,7 +330,7 @@ class TestInternalEvents:
     ) -> None:
         """Execution-state projection events should persist via the internal path."""
         app = _make_test_app(
-            with_aggregator=True,
+            with_relay_hub=True,
             session_factory=session_factory,
         )
 
@@ -399,7 +399,7 @@ class TestInternalEvents:
         """
         aggregator = RelayHub()
         app = _make_test_app(session_factory=session_factory)
-        app.state.aggregator = aggregator
+        app.state.relay_hub = aggregator
 
         async with session_factory() as session:
             await create_thread(
@@ -522,7 +522,7 @@ class TestInternalEvents:
     ) -> None:
         """A degraded-only update must not erase the last good execution-state row."""
         app = _make_test_app(
-            with_aggregator=True,
+            with_relay_hub=True,
             session_factory=session_factory,
         )
 
@@ -618,8 +618,8 @@ class TestInternalEvents:
         self, entry: dict[str, object]
     ) -> None:
         """One malformed entry fails the whole batch before any entry relays."""
-        app = _make_test_app(with_aggregator=True)
-        aggregator = app.state.aggregator
+        app = _make_test_app(with_relay_hub=True)
+        aggregator = app.state.relay_hub
         observer = aggregator.add_subscriber("batch-observer")
         aggregator.subscribe("batch-observer", ["t-1", "t-2"])
         async with AsyncClient(
@@ -640,7 +640,7 @@ class TestInternalEvents:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_batch_without_events_is_rejected(self) -> None:
         """A body that is not a batch is refused rather than read as empty."""
-        app = _make_test_app(with_aggregator=True)
+        app = _make_test_app(with_relay_hub=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -650,7 +650,7 @@ class TestInternalEvents:
     @pytest.mark.asyncio(loop_scope="function")
     async def test_batch_with_aggregator_only_returns_ok(self) -> None:
         """The batch HTTP path should accept events when only the aggregator exists."""
-        app = _make_test_app(with_aggregator=True)
+        app = _make_test_app(with_relay_hub=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -804,7 +804,7 @@ class TestAggregatorGCOnTerminal:
             "t-pruned",
             {"event_type": "thread_terminal", "status": "completed"},
             services=RelayServices(
-                aggregator=aggregator,
+                relay_hub=aggregator,
                 session_factory=session_factory,
                 checkpointer=checkpointer,
             ),
@@ -842,7 +842,7 @@ class TestAggregatorGCOnTerminal:
                 "t-logged",
                 {"event_type": "thread_terminal", "status": "completed"},
                 services=RelayServices(
-                    aggregator=aggregator, session_factory=session_factory
+                    relay_hub=aggregator, session_factory=session_factory
                 ),
             )
 
@@ -874,7 +874,7 @@ class TestAggregatorGCOnTerminal:
             "t-terminal-skip",
             {"event_type": "thread_terminal", "status": "completed"},
             services=RelayServices(
-                aggregator=aggregator,
+                relay_hub=aggregator,
                 session_factory=session_factory,
                 checkpointer=checkpointer,
             ),
@@ -884,7 +884,7 @@ class TestAggregatorGCOnTerminal:
             "t-terminal-skip",
             {"event_type": "thread_terminal", "status": "completed"},
             services=RelayServices(
-                aggregator=aggregator,
+                relay_hub=aggregator,
                 session_factory=session_factory,
                 checkpointer=checkpointer,
             ),

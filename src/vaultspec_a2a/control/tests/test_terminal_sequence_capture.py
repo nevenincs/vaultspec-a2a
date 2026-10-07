@@ -108,7 +108,7 @@ async def test_settle_records_the_number_the_allocator_issued(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
         services=RelayServices(
-            aggregator=aggregator,
+            relay_hub=aggregator,
             session_factory=session_factory,
             checkpointer=checkpointer,
         ),
@@ -143,7 +143,7 @@ async def test_a_reconnecting_client_reads_the_true_cursor_after_settle(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
         services=RelayServices(
-            aggregator=aggregator,
+            relay_hub=aggregator,
             session_factory=session_factory,
             checkpointer=checkpointer,
         ),
@@ -153,7 +153,7 @@ async def test_a_reconnecting_client_reads_the_true_cursor_after_settle(
         capture = await capture_thread_state(
             db,
             thread_id=thread_id,
-            aggregator=aggregator,
+            relay_hub=aggregator,
             checkpointer=checkpointer,
         )
     assert capture is not None
@@ -179,7 +179,7 @@ async def test_a_live_run_reads_the_allocators_issued_mark(
         capture = await capture_thread_state(
             db,
             thread_id=thread_id,
-            aggregator=aggregator,
+            relay_hub=aggregator,
             checkpointer=checkpointer,
         )
     assert capture is not None
@@ -217,7 +217,7 @@ async def test_a_live_run_after_a_gateway_restart_reads_the_retained_mark(
         capture = await capture_thread_state(
             db,
             thread_id=thread_id,
-            aggregator=aggregator,
+            relay_hub=aggregator,
             checkpointer=checkpointer,
         )
     assert capture is not None
@@ -241,7 +241,7 @@ async def test_a_run_no_allocator_numbers_settles_without_a_cursor(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
         services=RelayServices(
-            aggregator=aggregator,
+            relay_hub=aggregator,
             session_factory=session_factory,
             checkpointer=checkpointer,
         ),
@@ -256,7 +256,7 @@ async def test_a_run_no_allocator_numbers_settles_without_a_cursor(
         capture = await capture_thread_state(
             db,
             thread_id=thread_id,
-            aggregator=aggregator,
+            relay_hub=aggregator,
             checkpointer=checkpointer,
         )
     assert capture is not None

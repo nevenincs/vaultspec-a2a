@@ -41,7 +41,7 @@ def _app(path: str) -> FastAPI:
         return create_worker_app(lifespan=_no_lifespan)
     app = create_app(lifespan=_no_lifespan)
     app.state.internal_token = _TOKEN
-    app.state.aggregator = RelayHub()
+    app.state.relay_hub = RelayHub()
     app.state.db_session_factory = None
     return app
 

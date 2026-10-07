@@ -56,8 +56,8 @@ from ...thread.snapshots import ThreadStateData
 from .._replay_writer_seat import replay_writer_seat
 from .._stream_replay import run_stream_resumability
 from ..dependencies import (
-    get_aggregator,
     get_checkpointer,
+    get_relay_hub,
 )
 from ..schemas.gateway import (
     ActiveRunRecord,
@@ -236,12 +236,12 @@ async def run_status_endpoint(
     run_id: PathSafeRunId,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    aggregator: RelayHub = Depends(get_aggregator),
+    relay_hub: RelayHub = Depends(get_relay_hub),
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> RunStatusResponse:
     """Return the authoritative recovery snapshot for a run."""
     capture = await capture_thread_state(
-        db, thread_id=run_id, aggregator=aggregator, checkpointer=checkpointer
+        db, thread_id=run_id, relay_hub=relay_hub, checkpointer=checkpointer
     )
     if capture is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -350,7 +350,7 @@ async def run_stream_endpoint(
     # gives the connection back when this function returns, which is the last
     # moment the stream needs it.
     db: AsyncSession = Depends(get_db, scope="function"),
-    aggregator: RelayHub = Depends(get_aggregator),
+    relay_hub: RelayHub = Depends(get_relay_hub),
     last_event_id_header: Annotated[
         str | None,
         Header(
@@ -393,7 +393,7 @@ async def run_stream_endpoint(
     return await build_thread_stream_response(
         ThreadStreamRequest(
             thread_id=run_id,
-            aggregator=aggregator,
+            relay_hub=relay_hub,
             session_factory=resolve_session_factory(request.app.state),
             resume_cursor=offered_resume_cursor(last_event_id_header, last_event_id),
             replay_writer=replay_writer_seat(request.app),
@@ -418,7 +418,7 @@ _TRANSCRIPT_FAULTS: frozenset[TranscriptAvailability] = frozenset(
 async def run_history_endpoint(
     run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
-    aggregator: RelayHub = Depends(get_aggregator),
+    relay_hub: RelayHub = Depends(get_relay_hub),
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> RunHistoryResponse:
     """Read one run whole, including a terminal or archived one.
@@ -444,7 +444,7 @@ async def run_history_endpoint(
     capture = await capture_thread_state(
         db,
         thread_id=run_id,
-        aggregator=aggregator,
+        relay_hub=relay_hub,
         checkpointer=checkpointer,
     )
     if capture is None:
@@ -521,7 +521,7 @@ async def run_archive_endpoint(
 
 async def team_status_endpoint(
     request: Request,
-    aggregator: RelayHub = Depends(get_aggregator),
+    relay_hub: RelayHub = Depends(get_relay_hub),
     db: AsyncSession = Depends(get_db),
 ) -> TeamStatusV1Response:
     """Report the team's live operational projection.
@@ -533,7 +533,7 @@ async def team_status_endpoint(
     """
     status = await build_team_status(
         db=db,
-        aggregator=aggregator,
+        relay_hub=relay_hub,
         heartbeat_threads=worker_liveness(request.app.state).active_threads,
     )
     return TeamStatusV1Response(
@@ -569,7 +569,7 @@ async def team_status_endpoint(
 async def run_delete_endpoint(
     run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
-    aggregator: RelayHub = Depends(get_aggregator),
+    relay_hub: RelayHub = Depends(get_relay_hub),
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> Response:
     """Delete a run through the durable cross-store deletion saga.
@@ -594,12 +594,12 @@ async def run_delete_endpoint(
             status_code=503,
             detail="Run deletion is in progress; retry to complete cleanup.",
         )
-    aggregator.clear_thread_state(run_id)
+    relay_hub.clear_thread_state(run_id)
     # The run's thread is gone, so a progress frame still held for it can
     # never become a row: its insert would reference a thread that no longer
     # exists. Held rather than dropped, it refused this gateway's every later
     # write of that run and offered a deleted run's frames to a resume.
-    aggregator.discard_run_replay(run_id)
+    relay_hub.discard_run_replay(run_id)
     if result.abandoned_kinds:
         body = RunDeleteResponse(
             run_id=run_id,

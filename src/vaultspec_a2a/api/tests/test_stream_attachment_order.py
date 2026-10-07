@@ -90,7 +90,7 @@ async def test_a_viewer_is_subscribed_before_it_is_told_the_run_state(
     stream = _stream_thread_events(
         ThreadStreamRequest(
             thread_id=_RUN,
-            aggregator=aggregator,
+            relay_hub=aggregator,
             session_factory=session_factory,
         )
     )
@@ -134,7 +134,7 @@ async def test_no_frame_claims_an_sse_id_the_stream_cannot_resume_from(
     stream = _stream_thread_events(
         ThreadStreamRequest(
             thread_id=_RUN,
-            aggregator=aggregator,
+            relay_hub=aggregator,
             session_factory=session_factory,
         )
     )
@@ -172,7 +172,7 @@ async def test_a_run_that_settles_unheard_still_closes_the_stream(
         stream = _stream_thread_events(
             ThreadStreamRequest(
                 thread_id=_RUN,
-                aggregator=aggregator,
+                relay_hub=aggregator,
                 session_factory=session_factory,
             )
         )
@@ -227,7 +227,7 @@ async def test_a_viewer_that_overflows_its_queue_is_told_to_resynchronize(
     stream = _stream_thread_events(
         ThreadStreamRequest(
             thread_id=_RUN,
-            aggregator=aggregator,
+            relay_hub=aggregator,
             session_factory=session_factory,
         )
     )

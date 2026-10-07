@@ -1855,9 +1855,7 @@ class TestTeamStatus:
         agg.add_subscriber("team-status-reader")
         agg.subscribe("team-status-reader", ["team-status-node-metadata"])
 
-        app, _agg, _worker, _cp = make_app(
-            session_factory, checkpointer, aggregator=agg
-        )
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer, relay_hub=agg)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/v1/team/status")

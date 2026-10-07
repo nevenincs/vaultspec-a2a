@@ -61,7 +61,7 @@ from ...database import (
     create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
-    get_thread_metadata,
+    get_thread,
     thread_write_expectation,
 )
 from ...database.models import ControlActionModel
@@ -121,9 +121,10 @@ async def _cache_key_for_thread(
 ) -> GraphCompilationKey:
     """Bind the registered real graph to the run's exact durable authority."""
     async with session_factory() as db:
-        metadata_json = await get_thread_metadata(db, thread_id)
+        thread = await get_thread(db, thread_id)
         graph_definition = await read_accepted_graph_definition(db, thread_id)
-    authority = resolve_execution_authority(metadata_json)
+    assert thread is not None
+    authority = resolve_execution_authority(thread.thread_metadata)
     return (
         _BUNDLE_FREE_PRESET,
         None,

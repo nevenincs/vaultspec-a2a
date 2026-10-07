@@ -12,6 +12,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.types import interrupt
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
@@ -21,6 +22,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ...api.tests.test_internal import _elect_status, _seed_accepted_thread
 from ...conftest import SqlitePosture
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
@@ -28,6 +30,7 @@ from ...control.event_handlers import (
     _handle_permission_event,
     _handle_progress_event,
     _handle_terminal_event,
+    relay_event,
 )
 from ...control.permission_options import decode_allowed_options
 from ...database import (
@@ -42,13 +45,18 @@ from ...database import (
     record_permission_response_submission,
     set_thread_approval_state,
     thread_write_expectation,
-    update_thread_status,
 )
 from ...database.models import ControlActionModel, ThreadModel
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
 from ...streaming.sse_frames import enforce_progress_allowlist
 from ...team.team_config import load_team_config
+from ...testing import (
+    add_test_node,
+    ainvoke_test_graph,
+    compile_test_graph,
+    new_state_graph,
+)
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread import RunWriteAuthority
@@ -200,6 +208,30 @@ async def _seed_unapplied_leased_action(
     )
     assert acquired
     return action, receipt, checkpoint_id
+
+
+async def _park_on_interrupt(
+    checkpointer: AsyncSqliteSaver, *, thread_id: str, payload: dict[str, object]
+) -> None:
+    """Park a real graph on *payload*'s interrupt in the run's own checkpoint.
+
+    The pause recorder reads the checkpoint to decide whether a run is parked, so
+    a test that expects the run to read parked has to put a real interrupt where
+    that read looks.
+    """
+
+    def gate(_state: Any) -> dict[str, object]:
+        interrupt(payload)
+        return {}
+
+    builder = new_state_graph()
+    add_test_node(builder, "gate", gate)
+    builder.add_edge("__start__", "gate")
+    builder.add_edge("gate", "__end__")
+    graph = compile_test_graph(builder, checkpointer=checkpointer)
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    parked = await ainvoke_test_graph(graph, {}, config)
+    assert "__interrupt__" in parked
 
 
 @pytest.mark.asyncio
@@ -798,8 +830,8 @@ async def test_an_answer_applied_by_a_turn_that_then_failed_leaves_the_run_faile
                 request_id=request_id,
             ),
         )
-        await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
-        await update_thread_status(session, thread.id, ThreadStatus.FAILED)
+        await _elect_status(session, thread.id, ThreadStatus.RUNNING)
+        await _elect_status(session, thread.id, ThreadStatus.FAILED)
         await session.commit()
 
     await _handle_progress_event(
@@ -827,16 +859,18 @@ async def test_an_answer_applied_by_a_turn_that_then_failed_leaves_the_run_faile
 @pytest.mark.asyncio
 async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """Supervisor plan approval interrupts must become durable pending rows."""
+    """Supervisor plan approval interrupts must become durable pending rows.
+
+    The relayed request is journaled as a pending permission and nothing else:
+    the run reads parked, with its approval pending, because its checkpoint holds
+    the interrupt and the pause recorder wrote that. The park is elected under
+    the dispatch that raised it, once, however often the request is replayed.
+    """
     async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Plan approval relay",
-        )
+        thread_id, receipt = await _seed_accepted_thread(session, status="running")
         await session.commit()
-        thread_id = thread.id
 
     request_id = f"{thread_id}:plan-approval-1"
     payload: dict[str, object] = {
@@ -849,17 +883,15 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
         ],
         "tool_call": "plan_approval",
     }
+    await _park_on_interrupt(checkpointer, thread_id=thread_id, payload=payload)
 
-    await _handle_permission_event(
-        thread_id,
-        payload,
-        session_factory=session_factory,
-    )
-    await _handle_permission_event(
-        thread_id,
-        payload,
-        session_factory=session_factory,
-    )
+    for _delivery in range(2):
+        await relay_event(
+            thread_id,
+            payload,
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+        )
 
     async with session_factory() as session:
         permission = await get_permission_request(session, request_id)
@@ -874,9 +906,14 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
 
         thread = await session.get(ThreadModel, thread_id)
         assert thread is not None
+        assert thread.status == ThreadStatus.INPUT_REQUIRED.value
         assert thread.approval_status == "pending"
         assert thread.approval_request_id == request_id
+        assert thread.approval_reason == permission.description
         assert thread.run_revision == 1
+        assert thread.writer_generation == 1
+        assert thread.writer_action_type == ControlActionType.INGEST
+        assert thread.writer_action_receipt_id == receipt.dispatch_id
         actions = (
             (
                 await session.execute(
@@ -891,7 +928,6 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
             .all()
         )
         assert len(actions) == 1
-        assert thread.writer_action_receipt_id == actions[0].dispatch_id
 
 
 @pytest.mark.asyncio
@@ -1114,22 +1150,19 @@ async def test_failure_evidence_elects_only_its_current_graph_action(
 @pytest.mark.asyncio
 async def test_document_approval_request_is_persisted_as_durable_pending_permission(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Document phase-gate interrupts must become durable pending rows.
 
     The research_adr phase gate parks with a ``document_approval_request``
     interrupt; the relay must record it as a verdict-style approval so the thread
     is INPUT_REQUIRED and the out-of-run verdict subscriber can correlate an
-    engine verdict to the parked run.
+    engine verdict to the parked run. The journal holds the request; the run
+    reads parked because the pause recorder found the interrupt in its checkpoint.
     """
     async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Document approval relay",
-        )
+        thread_id, _receipt = await _seed_accepted_thread(session, status="running")
         await session.commit()
-        thread_id = thread.id
 
     request_id = f"{thread_id}:document-approval-1"
     payload: dict[str, object] = {
@@ -1143,11 +1176,13 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
             {"option_id": "reject", "name": "Reject", "kind": "reject_once"},
         ],
     }
+    await _park_on_interrupt(checkpointer, thread_id=thread_id, payload=payload)
 
-    await _handle_permission_event(
+    await relay_event(
         thread_id,
         payload,
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     async with session_factory() as session:

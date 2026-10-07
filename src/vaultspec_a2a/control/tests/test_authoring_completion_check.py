@@ -23,10 +23,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ...api.tests.test_internal import _elect_status
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.thread_state_service import capture_thread_state
-from ...database import create_control_action, create_thread, update_thread_status
+from ...database import create_control_action, create_thread
 from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
@@ -136,7 +137,7 @@ async def _seed_completed_thread(
         )
         assert receipt is not None
         if seed.status is not ThreadStatus.RUNNING:
-            await update_thread_status(session, seed.thread_id, seed.status)
+            await _elect_status(session, seed.thread_id, seed.status)
         await session.commit()
 
 

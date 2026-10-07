@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..database import get_thread, set_thread_repair_state, update_thread_status
+from ..database import (
+    ThreadModel,
+    ThreadStatusElectionOutcome,
+    elect_thread_status,
+    get_thread,
+    set_thread_repair_state,
+    thread_write_expectation,
+)
 from ..providers.conditions import ProviderCondition
 from ..thread.enums import ThreadStatus
 from ..thread.repair_policy import (
@@ -15,7 +22,6 @@ from ..thread.repair_policy import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database import ThreadModel
     from ..thread.repair_policy import RepairTransition
 
 __all__ = [
@@ -86,22 +92,39 @@ async def apply_dispatch_failure(
     provider, so there is none to report; naming one would describe the LOCAL
     worker as though it were the model vendor and send the reader after the wrong
     remedy. The dispatch layer's own failure vocabulary stays in the reason text.
+
+    The status moves by election under the run's current writer, from the row as
+    this call reads it, because a failed dispatch is a fact about the action that
+    owns the run. A run already in *failed_status* has nothing to elect, and a
+    lost election means a newer writer owns the run, so neither the status nor
+    the repair posture of a stale failure is written; ``None`` is returned.
     """
     run_actually_failed = failed_status is ThreadStatus.FAILED
-    await update_thread_status(
-        db,
-        thread_id,
-        failed_status,
-        failure_reason=reason if run_actually_failed else None,
-        # The condition rides the FAILURE, not the reason. Gating it on the
-        # reason too would let a caller that failed a run without a message
-        # persist a failed row with no classification at all - the blank
-        # terminal this campaign exists to remove, reintroduced through the
-        # back door. A reason is nice to have; a condition is the invariant.
-        provider_condition=(
-            ProviderCondition.UNKNOWN.value if run_actually_failed else None
-        ),
-    )
+    thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+    if thread is None:
+        return None
+    expectation = thread_write_expectation(thread)
+    if expectation.status is not failed_status:
+        authority = expectation.authority
+        election = await elect_thread_status(
+            db,
+            thread_id,
+            expectation=expectation,
+            status=failed_status,
+            action_type=authority.action_type,
+            action_receipt_id=authority.action_receipt_id,
+            failure_reason=reason if run_actually_failed else None,
+            # The condition rides the FAILURE, not the reason. Gating it on the
+            # reason too would let a caller that failed a run without a message
+            # persist a failed row with no classification at all - the blank
+            # terminal this campaign exists to remove, reintroduced through the
+            # back door. A reason is nice to have; a condition is the invariant.
+            provider_condition=(
+                ProviderCondition.UNKNOWN.value if run_actually_failed else None
+            ),
+        )
+        if election.outcome is not ThreadStatusElectionOutcome.WON:
+            return None
     return await apply_repair_transition(
         db, thread_id, DISPATCH_FAILED_TRANSITION, reason=reason
     )

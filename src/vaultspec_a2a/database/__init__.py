@@ -189,7 +189,6 @@ from .thread_repository import get_thread as get_thread
 from .thread_repository import (
     get_thread_execution_state as get_thread_execution_state,
 )
-from .thread_repository import get_thread_metadata as get_thread_metadata
 from .thread_repository import (
     list_active_thread_page as list_active_thread_page,
 )
@@ -214,7 +213,6 @@ from .thread_repository import thread_owned_by as thread_owned_by
 from .thread_repository import (
     thread_write_expectation as thread_write_expectation,
 )
-from .thread_repository import update_thread_status as update_thread_status
 
 __all__ = [
     "DEFAULT_SUBSCRIBER_ID",
@@ -275,7 +273,6 @@ __all__ = [
     "get_session_factory",
     "get_thread",
     "get_thread_execution_state",
-    "get_thread_metadata",
     "init_db",
     "inspect_sqlite_database",
     "list_active_thread_page",
@@ -318,7 +315,6 @@ __all__ = [
     "thread_owned_by",
     "thread_write_expectation",
     "unscheduled_recovery_actions",
-    "update_thread_status",
     "validate_desktop_schema",
     "verify_wal_mode",
 ]

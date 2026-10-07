@@ -25,13 +25,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...database.thread_repository import update_thread_status
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...testing import decode_frame, settings_override
 from ...thread.enums import ThreadStatus
 from ..thread_stream import ThreadStreamRequest, _stream_thread_events
 from .conftest import seed_run_with_status
+from .test_internal import _elect_status, _seed_accepted_thread
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -160,7 +160,9 @@ async def test_a_run_that_settles_unheard_still_closes_the_stream(
     idle beat rather than never.
     """
     aggregator = EventAggregator()
-    await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
+    async with session_factory() as session:
+        await _seed_accepted_thread(session, thread_id=_RUN, status="running")
+        await session.commit()
 
     with settings_override(stream_heartbeat_interval_seconds=0.05):
         stream = _stream_thread_events(
@@ -174,7 +176,7 @@ async def test_a_run_that_settles_unheard_still_closes_the_stream(
             assert decode_frame(await anext(stream)).data["type"] == "stream_snapshot"
 
             async with session_factory() as session:
-                await update_thread_status(
+                await _elect_status(
                     session,
                     _RUN,
                     ThreadStatus.FAILED,

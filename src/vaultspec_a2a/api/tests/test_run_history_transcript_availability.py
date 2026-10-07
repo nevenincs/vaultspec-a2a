@@ -20,12 +20,12 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...database import update_thread_status
 from ...testing import DEFAULT_TEAM_PRESET, async_catalog_run_fields, serve_on_loopback
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus, TranscriptAvailability
 from .conftest import make_app
 from .test_gateway_drain import _relay_terminal, _RelayContext
+from .test_internal import _elect_status
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -187,8 +187,8 @@ async def test_a_parked_run_without_a_checkpoint_is_a_loss_not_a_pending_transcr
     recovery state is there because something already went wrong. Only the
     dispatch-to-first-write window earns the benefit of the doubt.
 
-    The status is moved through the real durable transition guard, so this is
-    the lifecycle the production store actually permits.
+    The status is moved by the real status election, so this is the lifecycle the
+    production store actually permits.
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
@@ -197,7 +197,7 @@ async def test_a_parked_run_without_a_checkpoint_is_a_loss_not_a_pending_transcr
     ):
         run_id = await _start_run(client, "hist-parked-01")
         async with session_factory() as db:
-            await update_thread_status(db, run_id, ThreadStatus.INPUT_REQUIRED)
+            await _elect_status(db, run_id, ThreadStatus.INPUT_REQUIRED)
             await db.commit()
 
         history = await client.get(f"/v1/runs/{run_id}/history")

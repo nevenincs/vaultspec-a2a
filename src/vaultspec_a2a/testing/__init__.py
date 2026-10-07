@@ -258,7 +258,6 @@ if TYPE_CHECKING:
         forfeits_purity,
         uses_impure_fixture,
     )
-    from .reap import reap_contained
     from .resources import (
         MARKER_NAME,
         RESOURCES,
@@ -671,7 +670,6 @@ _LAZY_EXPORTS = {
     "SERVICE_MARKER": ("vaultspec_a2a.testing.purity", "SERVICE_MARKER"),
     "forfeits_purity": ("vaultspec_a2a.testing.purity", "forfeits_purity"),
     "uses_impure_fixture": ("vaultspec_a2a.testing.purity", "uses_impure_fixture"),
-    "reap_contained": ("vaultspec_a2a.testing.reap", "reap_contained"),
     "MARKER_NAME": ("vaultspec_a2a.testing.resources", "MARKER_NAME"),
     "RESOURCES": ("vaultspec_a2a.testing.resources", "RESOURCES"),
     "SCRATCH_PREFIX": ("vaultspec_a2a.testing.resources", "SCRATCH_PREFIX"),
@@ -937,7 +935,6 @@ __all__ = [
     "read_frame",
     "read_frames_until",
     "read_worker_ipc_secret",
-    "reap_contained",
     "reap_process",
     "record_completed_checkpoint",
     "register_lanes",

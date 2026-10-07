@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ..testing import inherited_environment
 from .harness import COMPOSE_FILE, REPO_ROOT, resolve_docker_executable
 
 if TYPE_CHECKING:
@@ -40,7 +41,9 @@ def test_resolved_integration_jaeger_boundary(
             "--format",
             "json",
         ],
-        env={**os.environ, "JAEGER_UI_PORT": ui_port, "JAEGER_OTLP_PORT": otlp_port},
+        env=inherited_environment(
+            {"JAEGER_UI_PORT": ui_port, "JAEGER_OTLP_PORT": otlp_port}
+        ),
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -76,12 +79,9 @@ def test_fixture_rejects_host_address_override(
             "--format",
             "json",
         ],
-        env={
-            **os.environ,
-            "JAEGER_UI_PORT": "",
-            "JAEGER_OTLP_PORT": "",
-            variable: value,
-        },
+        env=inherited_environment(
+            {"JAEGER_UI_PORT": "", "JAEGER_OTLP_PORT": "", variable: value}
+        ),
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

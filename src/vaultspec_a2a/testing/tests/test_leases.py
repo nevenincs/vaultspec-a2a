@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...utils import ProcessContainment, spawn_contained
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 from ..children import run_child
 from ..leases import (
     LEASE_TTL_MS,
@@ -23,7 +23,6 @@ from ..leases import (
     hold_lease,
     lease_home,
 )
-from ..reap import reap_contained
 
 if TYPE_CHECKING:
     import subprocess

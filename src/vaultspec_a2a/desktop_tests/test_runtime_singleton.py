@@ -28,7 +28,8 @@ from ..lifecycle.singleton import (
     SingletonState,
     classify_app_home,
 )
-from ..testing import SignalledChild, free_port, reap_contained, spawn_signalled
+from ..testing import SignalledChild, free_port, spawn_signalled
+from ..utils import reap_contained
 
 if TYPE_CHECKING:
     from pathlib import Path

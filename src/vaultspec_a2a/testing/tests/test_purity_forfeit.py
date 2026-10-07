@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ..cli import inherited_environment
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -148,18 +150,20 @@ def _collect(tmp_path: Path) -> dict[str, list[str]]:
     dump = tmp_path / "markers.json"
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    env = dict(os.environ)
-    env.pop("PYTEST_ADDOPTS", None)
-    env["PURITY_DUMP"] = str(dump)
-    env["PYTHONPATH"] = str(tmp_path) + os.pathsep + env.get("PYTHONPATH", "")
-    # The child writes its own temporary files here rather than into the shared
-    # machine temp directory, so a mini-run leaves nothing behind for the next
-    # session to walk. This is containment, NOT the flake fix - isolating the
-    # child's temp root was the first theory and it did not help, because what
-    # the child chokes on is the directory its ARGUMENT lives under, which the
-    # ini file above pins.
-    for variable in ("TMPDIR", "TEMP", "TMP"):
-        env[variable] = str(scratch)
+    env = inherited_environment(
+        {
+            "PYTEST_ADDOPTS": None,
+            "PURITY_DUMP": str(dump),
+            "PYTHONPATH": str(tmp_path) + os.pathsep + os.environ.get("PYTHONPATH", ""),
+            # The child writes its own temporary files here rather than into the
+            # shared machine temp directory, so a mini-run leaves nothing behind
+            # for the next session to walk. This is containment, NOT the flake
+            # fix - isolating the child's temp root was the first theory and it
+            # did not help, because what the child chokes on is the directory
+            # its ARGUMENT lives under, which the ini file above pins.
+            **dict.fromkeys(("TMPDIR", "TEMP", "TMP"), str(scratch)),
+        }
+    )
 
     result = subprocess.run(
         [

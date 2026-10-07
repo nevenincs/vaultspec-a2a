@@ -9,6 +9,7 @@ import os
 import shlex
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import IO, TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
 from ._process_tree import (
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ProcessContainment",
     "ProcessContainmentError",
+    "reap_contained",
     "spawn_contained",
     "spawn_contained_async",
 ]
@@ -836,3 +838,44 @@ async def _reap_unadmitted_root_async(
         transport = getattr(process, "_transport", None)
         if transport is not None:
             transport.close()
+
+
+def reap_contained(
+    process: subprocess.Popen[Any],
+    containment: ProcessContainment,
+    *,
+    term_timeout: float = 10.0,
+    kill_timeout: float = 5.0,
+) -> bool:
+    """Reap *process*'s whole tree through *containment*, from any calling context.
+
+    *process* was started inside *containment* by :func:`spawn_contained`, which
+    held every descendant from the root's first instruction, so a root that
+    already exited is no obstacle: what it left running is still reaped, and no
+    kill is ever aimed at a recycled pid. The root's handle is then waited on.
+    *term_timeout* and *kill_timeout* are the graceful and forced phases. Returns
+    ``True`` once the tree is gone and the root reaped; a repeat call after that
+    is a no-op.
+
+    Called from a thread that is itself running an event loop, ``asyncio.run``
+    would refuse and leave the tree alive, so the reap then runs on a thread
+    with a loop of its own.
+    """
+
+    def _terminate() -> bool:
+        return asyncio.run(
+            containment.terminate(term_timeout=term_timeout, kill_timeout=kill_timeout)
+        )
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        reaped = _terminate()
+    else:
+        with ThreadPoolExecutor(max_workers=1) as reaper:
+            reaped = reaper.submit(_terminate).result()
+    try:
+        process.wait(timeout=kill_timeout)
+    except subprocess.TimeoutExpired:
+        return False
+    return reaped

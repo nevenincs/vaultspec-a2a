@@ -21,6 +21,8 @@ import sys
 import textwrap
 from typing import TYPE_CHECKING, Any
 
+from ...testing import inherited_environment
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -137,12 +139,12 @@ def _run_turn_probe(
     """Run one turn against the silent agent with a given configured deadline."""
     script = tmp_path / "acp_turn_probe.py"
     script.write_text(_TURN_PROBE_SCRIPT, encoding="utf-8")
-    env = dict(os.environ)
-    env["VAULTSPEC_A2A_ACP_TURN_IDLE_TIMEOUT_SECONDS"] = idle_limit
     result = subprocess.run(
         [sys.executable, str(script), agent, str(_OBSERVE_SECONDS)],
         cwd=os.getcwd(),
-        env=env,
+        env=inherited_environment(
+            {"VAULTSPEC_A2A_ACP_TURN_IDLE_TIMEOUT_SECONDS": idle_limit}
+        ),
         capture_output=True,
         text=True,
         timeout=180,

@@ -33,10 +33,9 @@ import tempfile
 import time
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
-from ..utils import ProcessContainment, spawn_contained
+from ..utils import ProcessContainment, reap_contained, spawn_contained
 from ..utils._process_tree import tree_cpu_usage
 from .progress import ProgressDeadline, ProgressStalledError, wait_for
-from .reap import reap_contained
 from .session_root import session_scratch_dir
 
 if TYPE_CHECKING:

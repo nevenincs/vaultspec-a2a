@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...graph.enums import Provider
-from ...testing import JsonReplyHandler, serve_handler
+from ...testing import JsonReplyHandler, inherited_environment, serve_handler
 from .._claude_tool_policy import claude_rule_path, workspace_scoped_tool_rule
 from ..cli_resolution import resolve_provider_cli_executable
 
@@ -198,18 +198,19 @@ def _scripted_endpoint(read_path: Path) -> Generator[tuple[str, _Turn]]:
 
 def _child_environment(home: Path, base_url: str) -> dict[str, str]:
     """The environment the CLI runs under: this endpoint, and nobody's home."""
-    env = dict(os.environ)
-    env["HOME"] = str(home)
-    env["USERPROFILE"] = str(home)
-    env["CLAUDE_CONFIG_DIR"] = str(home / ".claude")
-    env["ANTHROPIC_BASE_URL"] = base_url
-    env["ANTHROPIC_API_KEY"] = "rule-probe"
-    env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-    # The endpoint is on this machine, so no proxy may stand between them.
-    for proxy in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
-        env.pop(proxy, None)
-    env["NO_PROXY"] = "127.0.0.1,localhost"
-    return env
+    return inherited_environment(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "CLAUDE_CONFIG_DIR": str(home / ".claude"),
+            "ANTHROPIC_BASE_URL": base_url,
+            "ANTHROPIC_API_KEY": "rule-probe",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+            # The endpoint is on this machine, so no proxy may stand between them.
+            **dict.fromkeys(("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")),
+            "NO_PROXY": "127.0.0.1,localhost",
+        }
+    )
 
 
 def _read_under_rules(

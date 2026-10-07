@@ -39,7 +39,8 @@ from ..lifecycle.singleton import (
     classify_app_home,
     recorded_process_is_live,
 )
-from ..testing import SignalledChild, free_port, reap_contained, spawn_signalled
+from ..testing import SignalledChild, free_port, spawn_signalled
+from ..utils import reap_contained
 
 if TYPE_CHECKING:
     from pathlib import Path

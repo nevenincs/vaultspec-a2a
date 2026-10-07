@@ -16,7 +16,6 @@ offloaded cases would pass for free on a fast host.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import time
@@ -26,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 import psutil
 import pytest
 
-from ...testing import armed_lane_environment
+from ...testing import armed_lane_environment, inherited_environment
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -71,7 +70,7 @@ def _probe(mode: str, workspace: Path) -> dict[str, Any]:
             mode,
             str(workspace),
         ],
-        env={**os.environ, **armed_lane_environment()},
+        env=inherited_environment(armed_lane_environment()),
         capture_output=True,
         text=True,
         timeout=300,

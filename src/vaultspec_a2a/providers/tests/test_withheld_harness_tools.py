@@ -9,12 +9,12 @@ to one before an allowlist or a human is consulted.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
+from ...testing import inherited_environment
 from ...thread.errors import ConfigError, HarnessToolContractError
 from .._codex_permission import (
     DECLINE_ACTION,
@@ -89,7 +89,7 @@ def _core_launch() -> tuple[str, list[str]]:
 def _core_env() -> dict[str, str]:
     # The server refuses to start on a target it cannot find, and a run always
     # pins one, so the probe does too.
-    return {**os.environ, "VAULTSPEC_TARGET_DIR": str(_REPO_ROOT)}
+    return inherited_environment({"VAULTSPEC_TARGET_DIR": str(_REPO_ROOT)})
 
 
 @pytest.mark.asyncio

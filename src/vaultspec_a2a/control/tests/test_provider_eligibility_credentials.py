@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+
+from ...testing import inherited_environment
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -56,14 +57,15 @@ def _run_probe(
 ) -> dict[str, Any]:
     """Run the production readiness path with the installed Kimi executable."""
     external_prerequisite("kimi-cli")
-    env = dict(os.environ)
-    for name in _KIMI_NAMES:
-        env.pop(name, None)
-    env.update(definition)
-    env["KIMI_CODE_HOME"] = str(tmp_path / "kimi-home")
     completed = subprocess.run(
         [sys.executable, "-c", _DRIVER],
-        env=env,
+        env=inherited_environment(
+            {
+                **dict.fromkeys(_KIMI_NAMES),
+                **definition,
+                "KIMI_CODE_HOME": str(tmp_path / "kimi-home"),
+            }
+        ),
         cwd=tmp_path,
         capture_output=True,
         text=True,

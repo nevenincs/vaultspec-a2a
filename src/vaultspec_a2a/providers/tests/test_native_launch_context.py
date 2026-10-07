@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
 from ...desktop.tests.test_native_isolation import _authority, _install_runtime
-from ...testing import armed_desktop_app_home
+from ...testing import armed_desktop_app_home, inherited_environment
 from ...utils import ProcessContainmentError
 from .._acp_mcp import resolve_harness_mcp_servers
 from .._acp_rpc_terminal_handlers import (
@@ -80,7 +79,7 @@ async def test_shared_spawn_and_terminals_keep_session_authority(
     )
     owner = await spawn_acp_process(
         [str(node), "-e", "setInterval(() => {}, 1000)"],
-        {**os.environ, "PYTHONPATH": str(authority.workspace.path)},
+        inherited_environment({"PYTHONPATH": str(authority.workspace.path)}),
         str(authority.workspace.path),
         native_authority=authority,
     )

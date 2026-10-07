@@ -37,13 +37,12 @@ from ..testing import (
     foreign_worker,
     free_port,
     gateway_run_verbs,
-    reap_contained,
     seat_app_home,
     status_and_json,
     unvalidated_selection,
     worker_lifecycle_gateway_script,
 )
-from ..utils import ProcessContainment, spawn_contained
+from ..utils import ProcessContainment, reap_contained, spawn_contained
 from ..utils._process_tree import pid_is_live
 
 if TYPE_CHECKING:
@@ -268,7 +267,7 @@ from vaultspec_a2a.control._worker_health import (
 )
 from vaultspec_a2a.control.config import settings
 from vaultspec_a2a.control.worker_management import _spawn_worker_owned
-from vaultspec_a2a.testing.reap import reap_contained
+from vaultspec_a2a.utils import reap_contained
 
 squatter_file, worker_port_s, squatter_log, result_file = sys.argv[1:5]
 worker_port = int(worker_port_s)

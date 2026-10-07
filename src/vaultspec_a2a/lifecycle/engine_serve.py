@@ -22,7 +22,6 @@ on cwd alone.
 from __future__ import annotations
 
 import argparse
-import asyncio
 import contextlib
 import logging
 import shlex
@@ -34,7 +33,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..utils import ProcessContainment, ProcessContainmentError, spawn_contained
+from ..utils import (
+    ProcessContainment,
+    ProcessContainmentError,
+    reap_contained,
+    spawn_contained,
+)
 from .boot import render_command
 from .procs_config import load_procs_config
 from .registration import (
@@ -232,8 +236,12 @@ def _wait_engine_child(
             return 130
     finally:
         try:
-            if process is not None:
-                asyncio.run(_reap_engine_child(process, containment))
+            if process is not None and not reap_contained(
+                process, containment, term_timeout=10.0, kill_timeout=5.0
+            ):
+                raise ProcessContainmentError(
+                    f"Engine process tree {process.pid} did not terminate"
+                )
         finally:
             containment.close()
 
@@ -247,19 +255,6 @@ def _request_engine_stop(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         logger.warning("Engine did not stop gracefully; escalating tree cleanup")
-
-
-async def _reap_engine_child(
-    process: subprocess.Popen[bytes], containment: ProcessContainment
-) -> None:
-    try:
-        reaped = await containment.terminate(term_timeout=10.0, kill_timeout=5.0)
-        if not reaped:
-            raise ProcessContainmentError(
-                f"Engine process tree {process.pid} did not terminate"
-            )
-    finally:
-        await asyncio.to_thread(process.wait, 5.0)
 
 
 def main(argv: list[str] | None = None) -> int:

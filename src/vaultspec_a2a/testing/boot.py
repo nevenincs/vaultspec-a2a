@@ -51,7 +51,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import subprocess
 import sys
 import time
@@ -69,9 +68,9 @@ from ..desktop.credentials import (
     credential_paths,
 )
 from ..desktop.profile import derive_state_paths
-from ..utils import ProcessContainment, spawn_contained
+from ..utils import ProcessContainment, reap_contained, spawn_contained
 from ..utils.runtime_exec import self_command
-from .cli import run_cli
+from .cli import inherited_environment, run_cli
 from .http import serve_on_loopback
 from .lanes import armed_lane_environment
 from .ports import (
@@ -79,7 +78,6 @@ from .ports import (
     hold_for_process_lifetime,
     reserve_scratch_ports,
 )
-from .reap import reap_contained
 
 if TYPE_CHECKING:
     from collections.abc import (
@@ -646,15 +644,16 @@ def gateway_process_env(
     gateway hands its worker the environment it was given, so one declaration
     arms both processes.
     """
-    env = os.environ.copy()
-    env["VAULTSPEC_A2A_ENVIRONMENT"] = "production"
-    env["VAULTSPEC_A2A_PORT"] = str(gateway_port)
-    env["VAULTSPEC_A2A_WORKER_PORT"] = str(worker_port)
-    env["VAULTSPEC_A2A_AUTO_SPAWN_WORKER"] = "true" if auto_spawn_worker else "false"
-    env["VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS"] = f"{_WORKER_READY_TIMEOUT:g}"
-    if serve_in_process_lanes:
-        env.update(armed_lane_environment())
-    return env
+    return inherited_environment(
+        {
+            "VAULTSPEC_A2A_ENVIRONMENT": "production",
+            "VAULTSPEC_A2A_PORT": str(gateway_port),
+            "VAULTSPEC_A2A_WORKER_PORT": str(worker_port),
+            "VAULTSPEC_A2A_AUTO_SPAWN_WORKER": "true" if auto_spawn_worker else "false",
+            "VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS": f"{_WORKER_READY_TIMEOUT:g}",
+            **(armed_lane_environment() if serve_in_process_lanes else {}),
+        }
+    )
 
 
 _DESKTOP_WORKSPACES: dict[int, Path] = {}

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...graph.enums import Provider
+from ...testing import inherited_environment
 from ..cli_resolution import resolve_provider_cli_executable
 from ..factory import ProviderCatalogRegistration, ProviderFactory
 from ..provider_catalog import AuthenticationState, CatalogStatus
@@ -91,18 +91,22 @@ def test_installed_kimi_registration_uses_isolated_persisted_config(
         )
     kimi_home = tmp_path / "kimi-home"
     kimi_home.mkdir()
-    env = dict(os.environ)
-    env["KIMI_CODE_HOME"] = str(kimi_home)
-    for name in (
-        "KIMI_API_KEY",
-        "KIMI_BASE_URL",
-        "KIMI_MODEL_API_KEY",
-        "KIMI_MODEL_BASE_URL",
-        "KIMI_MODEL_NAME",
-        "KIMI_MODEL_MAX_CONTEXT_SIZE",
-        "KIMI_MODEL_CAPABILITIES",
-    ):
-        env.pop(name, None)
+    env = inherited_environment(
+        {
+            "KIMI_CODE_HOME": str(kimi_home),
+            **dict.fromkeys(
+                (
+                    "KIMI_API_KEY",
+                    "KIMI_BASE_URL",
+                    "KIMI_MODEL_API_KEY",
+                    "KIMI_MODEL_BASE_URL",
+                    "KIMI_MODEL_NAME",
+                    "KIMI_MODEL_MAX_CONTEXT_SIZE",
+                    "KIMI_MODEL_CAPABILITIES",
+                )
+            ),
+        }
+    )
     completed = subprocess.run(
         [sys.executable, "-c", _ISOLATED_KIMI_DRIVER],
         cwd=tmp_path,

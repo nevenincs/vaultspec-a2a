@@ -456,7 +456,7 @@ def _floor_call_is_confined(
     call that is genuinely inside the project is already pre-approved against
     the workspace before it would ever reach here.
     """
-    return path_arguments_in_project(args, locations, config).confined
+    return path_arguments_in_project(args, locations, config.project_scope).confined
 
 
 def _autonomous_option_id(
@@ -503,7 +503,7 @@ def _autonomous_option_id(
             "Refused a native read tool at the autonomous rung: tool=%s named no "
             "path inside the run's bound project (bound=%s)",
             name,
-            config.bound_project_root(),
+            config.project_scope.bound_project_root(),
         )
         return _refusal_option_id(options)
     return _refusal_option_id(options)
@@ -560,12 +560,13 @@ async def on_request_permission(
     # refusal and the run's own bound project: the R7 discipline this handler
     # already follows keeps agent-supplied payload out of the log, and a
     # caller-chosen path is payload.
-    if foreign_project_argument(args, config) is not None:
+    scope = config.project_scope
+    if foreign_project_argument(args, scope) is not None:
         logger.warning(
             "Refused cross-project tool call: tool=%s named a project outside "
             "the run's bound project (bound=%s)",
             name,
-            config.bound_project_root(),
+            scope.bound_project_root(),
         )
         return _refused_outcome(rpc_id, options)
 

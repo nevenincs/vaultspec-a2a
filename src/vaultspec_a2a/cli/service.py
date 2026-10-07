@@ -54,6 +54,7 @@ from ..utils.runtime_exec import self_command
 
 if TYPE_CHECKING:
     import subprocess
+    from collections.abc import Callable
 
 __all__ = [
     "ServiceVerbError",
@@ -388,6 +389,19 @@ def _emit_status(status: ServiceStatus) -> None:
     click.echo(json.dumps(asdict(status), indent=2, sort_keys=True))
 
 
+def _launch(
+    service: Callable[[Path | None, StartOptions], ServiceStatus],
+    app_home: Path | None,
+    options: StartOptions,
+) -> None:
+    """Run one ready-gated launch verb and report the state it left."""
+    try:
+        status = service(app_home, options)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    _emit_status(status)
+
+
 _APP_HOME_OPTION = click.option(
     "--app-home",
     type=click.Path(path_type=Path),
@@ -426,16 +440,13 @@ def start_command(
     log_path: str | None,
 ) -> None:
     """Start the gateway detached; block until it is discoverably healthy."""
-    try:
-        status = start_service(
-            app_home,
-            StartOptions(
-                capsule_root=capsule_root, host=host, port=port, log_path=log_path
-            ),
-        )
-    except Exception as exc:
-        raise _service_error(exc) from exc
-    _emit_status(status)
+    _launch(
+        start_service,
+        app_home,
+        StartOptions(
+            capsule_root=capsule_root, host=host, port=port, log_path=log_path
+        ),
+    )
 
 
 @click.command("stop")
@@ -463,16 +474,13 @@ def restart_command(
     log_path: str | None,
 ) -> None:
     """Restart the gateway: confirmed stop, then a ready-gated start."""
-    try:
-        status = restart_service(
-            app_home,
-            StartOptions(
-                capsule_root=capsule_root, host=host, port=port, log_path=log_path
-            ),
-        )
-    except Exception as exc:
-        raise _service_error(exc) from exc
-    _emit_status(status)
+    _launch(
+        restart_service,
+        app_home,
+        StartOptions(
+            capsule_root=capsule_root, host=host, port=port, log_path=log_path
+        ),
+    )
 
 
 @click.command("setup")

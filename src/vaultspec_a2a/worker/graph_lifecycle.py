@@ -823,8 +823,8 @@ class GraphLifecycleManager:
                 ``_thread_to_cache_key`` before this call).
 
         Returns:
-            A ``dict`` suitable for passing directly to
-            ``RunEventProducer.ingest()`` as *graph_input*.
+            A ``dict`` suitable as the ``graph_input`` of the
+            ``GraphInvocation`` handed to ``RunEventProducer.ingest()``.
         """
         messages: list[BaseMessage] = []
         if req.context_preamble:

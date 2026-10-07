@@ -77,32 +77,23 @@ async def _run(
 
 
 @pytest.mark.asyncio
-async def test_an_earlier_failure_does_not_skip_a_later_item(
-    tmp_path: pathlib.Path,
+@pytest.mark.parametrize(
+    "failure_first",
+    [True, False],
+    ids=["failure-does-not-skip-a-later-item", "failure-does-not-undo-an-earlier-item"],
+)
+async def test_a_failed_item_leaves_its_neighbour_done(
+    tmp_path: pathlib.Path, failure_first: bool
 ) -> None:
-    """A failed checkpoint item must not stop the replay item after it."""
+    """A failed checkpoint item neither skips nor undoes the replay item beside it."""
     with settings_override(a2a_home=tmp_path / "state", workspace_root=None):
         journal, checkpoint, replay = await _captured_items()
+        order = [checkpoint, replay] if failure_first else [replay, checkpoint]
 
-        _report, recorded = await _run([checkpoint, replay])
+        _report, recorded = await _run(order)
 
         assert recorded[checkpoint.key].state is CleanupItemState.FAILED
         assert recorded[replay.key].state is CleanupItemState.DONE
-        await _assert_replay_retired(journal)
-
-
-@pytest.mark.asyncio
-async def test_a_later_failure_does_not_undo_an_earlier_item(
-    tmp_path: pathlib.Path,
-) -> None:
-    """A failed checkpoint item after a done replay item leaves the replay done."""
-    with settings_override(a2a_home=tmp_path / "state", workspace_root=None):
-        journal, checkpoint, replay = await _captured_items()
-
-        _report, recorded = await _run([replay, checkpoint])
-
-        assert recorded[replay.key].state is CleanupItemState.DONE
-        assert recorded[checkpoint.key].state is CleanupItemState.FAILED
         await _assert_replay_retired(journal)
 
 

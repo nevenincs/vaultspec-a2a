@@ -19,13 +19,13 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control.accepted_input import freeze_accepted_input
-from ...control.permission_dispatch import permission_resume_value
 from ...graph.nodes._worker_permissions import (
     permission_callback_for,
     recorded_permission_answers,
 )
 from ...providers.team_selection import model_assignment_digest
 from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...thread import permission_resume_value
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,

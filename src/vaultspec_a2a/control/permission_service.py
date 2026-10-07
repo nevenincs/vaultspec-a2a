@@ -24,6 +24,7 @@ from ..database import (
     set_thread_approval_state,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
+from ..thread import permission_resume_value
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
     TERMINAL_STATUSES,
@@ -91,7 +92,6 @@ from .dispatch import DispatchOutcome, safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .graph_definition import read_accepted_graph_definition
-from .permission_dispatch import permission_resume_value
 from .repair_transitions import (
     apply_dispatch_failure,
     mark_permission_response_requested,
@@ -171,8 +171,9 @@ async def respond_to_permission(
     session before returning — the service owns its transaction boundary.
     The caller translates errors into protocol-specific responses. ``notes``
     is an optional reviewer comment threaded into the verdict resume payload
-    for a locally-respondable verdict-style pause (D6); it is ignored for a
-    plain tool-permission response, which resumes on the bare option id.
+    for a locally-respondable verdict-style pause; it is ignored for a plain
+    tool-permission response, which resumes on the chosen option and the
+    request it answers.
     """
     request_id = response.request_id
     option_id = response.option_id

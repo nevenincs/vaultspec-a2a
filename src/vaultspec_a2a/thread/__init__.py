@@ -1,8 +1,8 @@
 """Expose thread-domain state and projection helpers.
 
 The package defines thread enums, errors, models, state, snapshots, actor
-tokens, run write authority, and projection helpers. Snapshots also use
-:mod:`vaultspec_a2a.graph.enums`.
+tokens, run write authority, resume-value contracts, and projection helpers.
+Snapshots also use :mod:`vaultspec_a2a.graph.enums`.
 
 :mod:`vaultspec_a2a.context` reads thread state.
 :mod:`vaultspec_a2a.control` coordinates thread operations.
@@ -60,6 +60,10 @@ if TYPE_CHECKING:
     from .models import PlanEntry as PlanEntry
     from .models import PlanStep as PlanStep
     from .models import TokenUsageEntry as TokenUsageEntry
+    from .resume_values import ApprovalVerdict as ApprovalVerdict
+    from .resume_values import PermissionAnswer as PermissionAnswer
+    from .resume_values import parse_approval_verdict as parse_approval_verdict
+    from .resume_values import permission_resume_value as permission_resume_value
     from .snapshots import (
         LOCALLY_RESPONDABLE_PAUSE_CAUSES as LOCALLY_RESPONDABLE_PAUSE_CAUSES,
     )
@@ -120,6 +124,10 @@ _LAZY_IMPORTS = {
     "PlanEntry": ".models",
     "PlanStep": ".models",
     "TokenUsageEntry": ".models",
+    "ApprovalVerdict": ".resume_values",
+    "PermissionAnswer": ".resume_values",
+    "parse_approval_verdict": ".resume_values",
+    "permission_resume_value": ".resume_values",
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES": ".snapshots",
     "PLAN_APPROVAL_PAUSE_CAUSES": ".snapshots",
     "CheckpointProjection": ".snapshots",
@@ -159,6 +167,7 @@ __all__ = [
     "AgentConfigNotFoundError",
     "AgentProcessError",
     "ApprovalStatus",
+    "ApprovalVerdict",
     "ArtifactRef",
     "CheckpointProjection",
     "ClarificationAnswers",
@@ -175,6 +184,7 @@ __all__ = [
     "ExecutionStateProjection",
     "InvalidTransitionError",
     "NicknameConflictError",
+    "PermissionAnswer",
     "PermissionDeniedError",
     "PermissionRequestStatus",
     "PlanEntry",
@@ -199,7 +209,9 @@ __all__ = [
     "finalize_snapshot_replay_status",
     "normalize_artifacts",
     "normalize_plan_entries",
+    "parse_approval_verdict",
     "pending_clarification",
+    "permission_resume_value",
     "project_checkpoint_tuple",
     "stamp_message_created_at",
     "validate_clarification_answers",

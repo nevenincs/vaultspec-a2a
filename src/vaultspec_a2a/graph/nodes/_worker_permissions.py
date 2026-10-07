@@ -20,7 +20,7 @@ from langgraph.config import get_config
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Interrupt, interrupt
 
-from ...control.permission_dispatch import answered_permission_request
+from ...thread import PermissionAnswer
 from ...thread.state import read_untrusted_state_value
 from ..acp_options import option_id_of, valid_option_ids
 
@@ -160,11 +160,11 @@ class _AnswerReading:
     """
 
     option: str | None = None
-    learned: tuple[str, str] | None = None
+    learned: PermissionAnswer | None = None
 
 
 def _read_permission_answer(
-    answered: tuple[str, str] | None, request: _PermissionRequest
+    answered: PermissionAnswer | None, request: _PermissionRequest
 ) -> _AnswerReading:
     """Judge one handed-back value against the call actually being made.
 
@@ -181,24 +181,23 @@ def _read_permission_answer(
             request.tool_name,
         )
         return _AnswerReading()
-    answered_request, option_id = answered
-    if answered_request != request.request_id:
+    if answered.request_id != request.request_id:
         _logger.warning(
             "Permission answer names request %r, not the %r call now being "
             "made; asking again",
-            answered_request,
+            answered.request_id,
             request.tool_name,
         )
-        return _AnswerReading(learned=(answered_request, option_id))
-    if option_id not in valid_option_ids(request.offered):
+        return _AnswerReading(learned=answered)
+    if answered.option_id not in valid_option_ids(request.offered):
         _logger.warning(
             "Permission answer for the %r call chose option %r, which it "
             "does not offer; asking again",
             request.tool_name,
-            option_id,
+            answered.option_id,
         )
         return _AnswerReading()
-    return _AnswerReading(option=option_id)
+    return _AnswerReading(option=answered.option_id)
 
 
 def permission_callback_for(
@@ -264,7 +263,7 @@ def permission_callback_for(
         payload = request.payload()
         while True:
             reading = _read_permission_answer(
-                answered_permission_request(interrupt(payload)), request
+                PermissionAnswer.from_resume_value(interrupt(payload)), request
             )
             if reading.option is not None:
                 return reading.option
@@ -274,6 +273,6 @@ def permission_callback_for(
             if answers_reach_the_node:
                 _park_on(payload)
             if reading.learned is not None:
-                learned[reading.learned[0]] = reading.learned[1]
+                learned[reading.learned.request_id] = reading.learned.option_id
 
     return permission_callback

@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, cast, override
 
 from langgraph.types import Command
 
-from ..control.permission_dispatch import answered_permission_request
 from ..domain_config import domain_config
 from ..graph.run_context import RunContext
 from ..ipc.serializers import sequenced_to_dict
@@ -27,6 +26,7 @@ from ..providers.team_selection import model_assignment_digest
 from ..streaming.ingest import INGEST_DRAINED
 from ..streaming.node_metadata import node_metadata_from_graph
 from ..telemetry import ws_span
+from ..thread import PermissionAnswer
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
 from ..utils.logging import log_context
@@ -145,11 +145,10 @@ def _answered_permission_update(resume_value: object) -> dict[str, Any]:
     answered instead of by the position its interrupts fall in. A resume that
     is not a tool-permission answer contributes nothing.
     """
-    answered = answered_permission_request(resume_value)
-    if answered is None:
+    answer = PermissionAnswer.from_resume_value(resume_value)
+    if answer is None:
         return {}
-    request_id, option_id = answered
-    return {"permission_answers": {request_id: option_id}}
+    return {"permission_answers": {answer.request_id: answer.option_id}}
 
 
 def _run_context(req: DispatchRequest, *, action: str) -> RunContext:

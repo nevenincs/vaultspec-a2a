@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.constants import TAG_NOSTREAM
-from langgraph.types import interrupt
 
 from ...context.anchoring import build_anchoring_context
 from ...context.rules import RuleManager
@@ -21,10 +20,11 @@ from ...context.stage import infer_phase_from_vault_index
 from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
+from ...thread import parse_approval_verdict
 from ...thread.enums import VERDICT_APPROVED, ApprovalStatus
 from ...thread.errors import SupervisorRoutingError
 from ...thread.state import merge_vault_index
-from .phase_gate import parse_verdict, verdict_answers_request
+from ._interrupts import await_request_scoped_resume
 from .vault_reader import refresh_vault_index
 
 if TYPE_CHECKING:
@@ -716,8 +716,9 @@ def create_plan_approval_node(
     ``{"type": "plan_approval_request", "feature", "plan_paths",
     "exec_worker", "request_id"}``; resume ``{"verdict": "approved" |
     "rejected" | "request_changes", "notes": str | None, "request_id": str}`` —
-    the same verdict vocabulary the document phase gate resumes on (D6), parsed
-    via the shared :func:`...phase_gate.parse_verdict`. An unrecognised
+    the :class:`...thread.resume_values.ApprovalVerdict` the document phase
+    gate resumes on as well, parsed by the shared
+    :func:`...thread.resume_values.parse_approval_verdict`. An unrecognised
     verdict fails closed to revision rather than silently approving. An answer
     naming another request, or none - the retired ``{"approved": bool}`` shape
     among them - is not a decision on this plan, so the gate asks again.
@@ -741,18 +742,13 @@ def create_plan_approval_node(
             "exec_worker": exec_worker,
             "request_id": request_id,
         }
-        resume_value = interrupt(payload)
         # An answer bound to another request, or to none, is not a decision on
         # this plan: the gate asks again instead of treating it as a rejection
         # that would send the plan back for revision nobody asked for.
-        while not verdict_answers_request(resume_value, request_id):
-            _logger.warning(
-                "Plan approval verdict did not name request %r; asking again",
-                request_id,
-            )
-            resume_value = interrupt(payload)
-        verdict, _notes = parse_verdict(resume_value)
-        if verdict == VERDICT_APPROVED:
+        decision = await_request_scoped_resume(
+            payload, request_id, parse_approval_verdict
+        )
+        if decision.verdict == VERDICT_APPROVED:
             _logger.info(
                 "plan approved by user — routing to exec_worker=%r", exec_worker
             )

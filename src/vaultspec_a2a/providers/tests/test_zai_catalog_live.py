@@ -1,18 +1,34 @@
-"""Live Z.ai catalog and selected-model proof through the production ACP lane.
+"""Live Z.ai catalog and selected-model proofs through the production ACP lane.
 
-This service test first performs the prompt-free catalog handshake, then sends
-one deliberately tiny real turn only after the operator identifies an
-advertised, low-cost provider value in ``VAULTSPEC_A2A_ZAI_PROOF_MODEL``.  The
-catalog is the authority for that value: no static Z.ai tier or Claude alias is
-accepted here.  The assertion after the turn reads the ACP adapter's confirmed
-``currentValue`` from the production model instance, proving that the selected
-value reached the gateway before the prompt was sent.
+Two proofs, separately authorized. The first is prompt-free: the production
+catalog registration opens a real authenticated session through the adapter the
+lane runs and enumerates the models Z.ai advertises. The second is billable: one
+deliberately tiny real turn that proves the catalog-selected value reached the
+gateway before the prompt was sent, read back from the ACP adapter's own
+confirmed ``currentValue``.
+
+The catalog is the authority for the model value - no static Z.ai tier and no
+Claude alias is accepted here - and the operator names the entry through the
+shared live-selection declaration, so neither proof can pick a paid model
+nobody chose.
+
+The billable proof builds the model directly rather than through
+``ProviderFactory.create``, because the factory refuses this lane until a
+completed turn is recorded against it and this test is what earns that record.
+The same shape as the Claude candidate proof in ``test_claude_live_turn.py``.
+
+Re-arm (one command):
+
+    uv run --no-sync pytest -m service \\
+        src/vaultspec_a2a/providers/tests/test_zai_catalog_live.py \\
+        --require-prerequisite=zai-credential
+
+Service-marked, so deselected from the default suite. An absent credential or an
+undeclared catalog selection is reported as missing, never as a pass.
 """
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -20,15 +36,25 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...control.config import settings
 from ...graph.enums import Provider
+from ...testing import declared_lane_model_value
+from .._factory_commands import _classify_acp_command, acp_launch_options
 from ..acp_chat_model import AcpChatModel
-from ..factory import ProviderFactory
+from ..execution_modes import external_execution_mode
+from ..factory import ProviderFactory, _zai_auth_env
 from ..provider_catalog import AuthenticationState, CatalogStatus, ProviderCatalogKey
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
 
     from ...conftest import ExternalPrerequisiteRule
     from .._json_contract import JsonObject
+
+
+def _zai_catalog_key() -> ProviderCatalogKey:
+    return ProviderCatalogKey(
+        Provider.ZAI.value, f"zai-claude-agent-acp:{settings.acp_backend}"
+    )
 
 
 def _selected_model_value(config_options: Sequence[JsonObject]) -> str:
@@ -47,22 +73,19 @@ def _selected_model_value(config_options: Sequence[JsonObject]) -> str:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_zai_catalog_selection_is_confirmed_by_one_minimal_turn(
+async def test_zai_catalog_enumerates_through_the_production_lane(
     tmp_path: Path,
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
-    """Prove catalog admission plus exact configured-model selection end to end."""
-    # An ABSENT credential is not a failing lane, it is an unsupplied one, and
-    # this asserted its way to red where its two siblings in test_zai_fidelity
-    # now skip on the same missing token - the same fact reported two different
-    # ways depending on which file you ran. The rule owns that decision, so
-    # `--require-prerequisite=zai-credential` can still turn it into a failure
-    # for a caller that guarantees the token.
+    """Prove the lane's own prompt-free enumeration, spending nothing.
+
+    An ABSENT credential is not a failing lane, it is an unsupplied one, so the
+    rule owns that decision: a skip naming the missing token, or a failure when
+    the caller guaranteed it with ``--require-prerequisite=zai-credential``.
+    """
     external_prerequisite("zai-credential")
-    key = ProviderCatalogKey(
-        Provider.ZAI.value, f"zai-claude-agent-acp:{settings.acp_backend}"
-    )
-    discovery = await ProviderFactory().catalog_registration(key, Path.cwd()).discover()
+    registration = ProviderFactory().catalog_registration(_zai_catalog_key(), tmp_path)
+    discovery = await registration.discover()
 
     assert discovery.authentication is AuthenticationState.AUTHENTICATED, (
         "Z.ai catalog authentication was not confirmed: "
@@ -76,21 +99,35 @@ async def test_zai_catalog_selection_is_confirmed_by_one_minimal_turn(
     advertised = {entry.provider_value for entry in discovery.catalog.models}
     assert advertised, "Z.ai ACP session advertised no model choices"
 
-    requested = os.environ.get("VAULTSPEC_A2A_ZAI_PROOF_MODEL", "").strip()
-    assert requested, (
-        "set VAULTSPEC_A2A_ZAI_PROOF_MODEL to one low-cost value from the current "
-        "Z.ai catalog before authorizing this billable proof"
-    )
-    assert requested in advertised, (
-        "VAULTSPEC_A2A_ZAI_PROOF_MODEL is not advertised by the current Z.ai catalog"
-    )
 
-    model = ProviderFactory().create(
-        Provider.ZAI, model=requested, workspace_root=tmp_path
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_zai_catalog_selection_is_confirmed_by_one_minimal_turn(
+    tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    """Earn a first completed-turn proof, on the exact value the catalog serves."""
+    external_prerequisite("zai-credential")
+    served, reason = await declared_lane_model_value(Provider.ZAI.value, tmp_path)
+    if served is None:
+        external_prerequisite.absent("provider-catalog-live-selection", reason)
+
+    command = _classify_acp_command(settings.acp_backend)
+    env_vars, auth_mode = _zai_auth_env()
+    use_exec, launch_env = acp_launch_options(settings.acp_backend)
+    model = AcpChatModel(
+        command=list(command.argv),
+        env_vars={**env_vars, **launch_env},
+        desired_model=served,
+        workspace_root=str(tmp_path),
+        use_exec=use_exec,
+        provider=Provider.ZAI.value,
+        execution_mode=external_execution_mode(Provider.ZAI, settings.acp_backend),
+        provider_command=command,
+        auth_mode=auth_mode,
     )
-    assert isinstance(model, AcpChatModel)
-    assert model.desired_model == requested
-    assert model._config.desired_model == requested
+    assert model.desired_model == served
+    assert model._config.desired_model == served
 
     messages = [
         SystemMessage(content="You are terse."),
@@ -104,7 +141,7 @@ async def test_zai_catalog_selection_is_confirmed_by_one_minimal_turn(
     assert response, "Z.ai returned no assistant content for the proof turn"
 
     selected = _selected_model_value(model._session_config_options)
-    assert selected == requested or selected.startswith(f"{requested}["), (
+    assert selected == served or selected.startswith(f"{served}["), (
         "Z.ai ACP confirmed a different model than the catalog-selected value: "
-        f"requested={requested!r}, selected={selected!r}"
+        f"requested={served!r}, selected={selected!r}"
     )

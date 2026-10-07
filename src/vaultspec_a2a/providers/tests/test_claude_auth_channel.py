@@ -29,7 +29,7 @@ from ..acp_exceptions import AcpError
 from ..cli_resolution import ProviderRuntimeUnavailableError, resolve_service_executable
 from ..codex_chat_model import CodexChatModel
 from ..factory import (
-    _discover_claude_catalog,
+    _discover_claude_family_catalog,
     claude_auth_env,
 )
 from ..provider_catalog import CatalogStatus, ProviderCatalogKey
@@ -210,7 +210,9 @@ async def test_oauth_channel_without_a_token_refuses_catalog_probe(
         claude_code_oauth_token=None,
         claude_cli_executable=cli,
     ):
-        discovery = await _discover_claude_catalog(key, tmp_path)
+        discovery = await _discover_claude_family_catalog(
+            Provider.CLAUDE, key, tmp_path
+        )
 
     assert discovery.catalog.state.status is CatalogStatus.UNAVAILABLE
     assert discovery.catalog.state.reason == "claude_oauth_token_unavailable"
@@ -249,6 +251,6 @@ async def test_oauth_catalog_probe_passes_token_to_its_real_child(
         armed_environment(CLAUDE_CODE_OAUTH_TOKEN="different-ambient-token"),
         suppress(AcpError),
     ):
-        await _discover_claude_catalog(key, tmp_path)
+        await _discover_claude_family_catalog(Provider.CLAUDE, key, tmp_path)
 
     assert report.read_text(encoding="utf-8") == "configured-test-token"

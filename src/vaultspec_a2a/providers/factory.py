@@ -353,11 +353,66 @@ def _zai_auth_env() -> tuple[dict[str, str], str]:
     return env_vars, "zai_auth_token"
 
 
-async def _discover_claude_catalog(
-    key: ProviderCatalogKey, workspace_root: Path
-) -> ProviderCatalogDiscovery:
+@dataclass(frozen=True, slots=True)
+class _AcpCatalogAuth:
+    """The credential overlay one claude-agent-acp lane's probe launches with."""
+
+    env: dict[str, str]
+    mode: str
+
+
+def _acp_catalog_auth_overlay(provider: Provider) -> _AcpCatalogAuth:
+    """Return the credential a claude-agent-acp lane's catalog probe is launched with.
+
+    The probe opens a real session, so it authenticates the way a served turn
+    authenticates: Claude through its declared channel, Z.ai by retargeting the
+    same adapter at its own gateway. One function, because the lanes differ in
+    the credential and in nothing else.
+
+    Raises:
+        ProviderRuntimeUnavailableError: The lane's credential is absent. The
+            message is the served reason: an unauthenticated probe would report
+            a lane unavailable for a reason that is the probe's own doing, so
+            the absent credential is named instead.
+    """
+    if provider is Provider.ZAI:
+        env, mode = _zai_auth_env()
+        if mode == "none_detected":
+            raise ProviderRuntimeUnavailableError(
+                probe_provider_configuration(Provider.ZAI).reason
+                or "no Z.ai auth token configured"
+            )
+        return _AcpCatalogAuth(env=env, mode=mode)
     try:
-        command = classify_provider_command(Provider.CLAUDE)
+        env, mode = claude_auth_env()
+    except ProviderRuntimeUnavailableError as exc:
+        raise ProviderRuntimeUnavailableError("claude_oauth_token_unavailable") from exc
+    return _AcpCatalogAuth(env=env, mode=mode)
+
+
+async def _discover_claude_family_catalog(
+    provider: Provider, key: ProviderCatalogKey, workspace_root: Path
+) -> ProviderCatalogDiscovery:
+    """Enumerate one claude-agent-acp lane's catalog through the shared lifecycle.
+
+    Claude and Z.ai run the SAME adapter through the same prompt-free session;
+    only the credential overlay differs. Keeping one lifecycle is what makes a
+    lane's served catalog describe the gateway its turns reach - a lane with its
+    own enumeration path, or none at all, serves an answer no credential can
+    change.
+
+    The lane's own credential is read before any launcher is resolved, matching
+    the order readiness already reports: an absent token is never served as a
+    missing adapter.
+    """
+    try:
+        auth = _acp_catalog_auth_overlay(provider)
+    except ProviderRuntimeUnavailableError as exc:
+        return unavailable_discovery(
+            key, reason=str(exc), configured=HealthState.UNAVAILABLE
+        )
+    try:
+        command = classify_provider_command(provider)
     except (ConfigError, ValueError):
         return unavailable_discovery(
             key,
@@ -376,20 +431,12 @@ async def _discover_claude_catalog(
             reason=exc.reason.value if exc.reason else str(exc),
             transport=HealthState.UNAVAILABLE,
         )
-    try:
-        auth_env, auth_mode = claude_auth_env()
-    except ProviderRuntimeUnavailableError:
-        return unavailable_discovery(
-            key,
-            reason="claude_oauth_token_unavailable",
-            configured=HealthState.UNAVAILABLE,
-        )
-    env.update(auth_env)
+    env.update(auth.env)
     use_exec, launch_env = acp_launch_options(command.acp_backend)
     env.update(launch_env)
     scope = capture_native_workspace(workspace_root)
     async with prepare_acp_role(
-        scope, environment=env, provider=Provider.CLAUDE.value
+        scope, environment=env, provider=provider.value
     ) as native:
         if native is not None:
             env.update(role_environment(native))
@@ -400,11 +447,11 @@ async def _discover_claude_catalog(
             key=key,
             use_exec=use_exec,
             metadata={
-                "provider": Provider.CLAUDE.value,
+                "provider": provider.value,
                 **command.metadata(),
                 "cli_runtime_authority": cli_resolution.authority,
                 "cli_executable": str(cli_resolution.path),
-                "auth_mode": auth_mode,
+                "auth_mode": auth.mode,
             },
             # The probe opens a real session, so it opens it under the same
             # permission posture a served turn gets. Leaving the bypass capability
@@ -414,7 +461,12 @@ async def _discover_claude_catalog(
             session_meta=claude_bypass_declined_meta(),
             native_authority=native,
         )
-    return replace(discovered, transport=_transport_evidence(discovered))
+    # The lane's own configuration axis: Claude's settings carry no answer and
+    # stay unknown, while Z.ai's token presence is the answer its probe reports.
+    normalized = replace(
+        discovered, configured=probe_provider_configuration(provider).state
+    )
+    return replace(normalized, transport=_transport_evidence(normalized))
 
 
 async def _discover_codex_catalog(
@@ -962,7 +1014,9 @@ class ProviderFactory:
             ),
             ProviderCatalogRegistration(
                 claude,
-                lambda: _discover_claude_catalog(claude, discovery_root),
+                lambda: _discover_claude_family_catalog(
+                    Provider.CLAUDE, claude, discovery_root
+                ),
                 lambda: _claude_binary_proof_reason(Provider.CLAUDE, discovery_root),
             ),
             ProviderCatalogRegistration(
@@ -978,7 +1032,9 @@ class ProviderFactory:
             ),
             ProviderCatalogRegistration(
                 zai,
-                lambda: _discover_unverified_catalog(zai),
+                lambda: _discover_claude_family_catalog(
+                    Provider.ZAI, zai, discovery_root
+                ),
                 lambda: _claude_binary_proof_reason(Provider.ZAI, discovery_root),
             ),
             ProviderCatalogRegistration(

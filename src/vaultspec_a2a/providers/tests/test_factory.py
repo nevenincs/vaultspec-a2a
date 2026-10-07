@@ -16,6 +16,7 @@ from ...testing import settings_override
 from ...thread.errors import ConfigError
 from .._factory_commands import (
     _BIN_PATH,
+    CLAUDE_OAUTH_TOKEN,
     ProviderCommand,
     _build_kimi_env,
     _classify_acp_command,
@@ -32,11 +33,17 @@ from ..cli_resolution import (
 )
 from ..codex_chat_model import CodexChatModel
 from ..execution_modes import BINARY_BACKEND, NODE_BACKEND
-from ..factory import ProviderFactory, _zai_auth_env, kimi_binary_proof_reason
+from ..factory import (
+    ProviderFactory,
+    _acp_catalog_auth_overlay,
+    _zai_auth_env,
+    kimi_binary_proof_reason,
+)
 from ..provider_catalog import (
     SELECTION_SCHEMA_VERSION,
     AuthenticationState,
     CatalogStatus,
+    HealthState,
     ProviderCatalogKey,
 )
 from ..team_selection import FrozenLaneAssignment
@@ -78,16 +85,14 @@ def test_catalog_registrations_are_execution_mode_specific() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "key",
-    (
-        ProviderCatalogKey("zai", f"zai-claude-agent-acp:{settings.acp_backend}"),
-        ProviderCatalogKey("zhipu", "zhipu-openai-compatible-api"),
-    ),
-)
-async def test_unverified_catalog_lanes_are_truthfully_unavailable(
-    key: ProviderCatalogKey,
-) -> None:
+async def test_a_lane_with_no_enumeration_surface_says_so() -> None:
+    """Zhipu has no prompt-free enumeration at all, and reports that.
+
+    The Z.ai lane is deliberately NOT in this population any more: it runs the
+    claude-agent-acp adapter, which does enumerate, so its answer now depends on
+    its credential rather than on a blanket refusal.
+    """
+    key = ProviderCatalogKey("zhipu", "zhipu-openai-compatible-api")
     discovery = await ProviderFactory().catalog_registration(key, Path.cwd()).discover()
     assert discovery.catalog.key == key
     assert discovery.catalog.state.status is CatalogStatus.UNAVAILABLE
@@ -249,6 +254,75 @@ def test_zai_auth_env_omits_blank_base_url() -> None:
         env, auth_mode = _zai_auth_env()
     assert env == {"ANTHROPIC_AUTH_TOKEN": "zai-secret"}
     assert auth_mode == "zai_auth_token"
+
+
+_ZAI_CATALOG_KEY = ProviderCatalogKey(
+    Provider.ZAI.value, f"zai-claude-agent-acp:{settings.acp_backend}"
+)
+
+
+@pytest.mark.asyncio
+async def test_zai_catalog_discovery_is_the_shared_acp_lifecycle(
+    tmp_path: Path,
+) -> None:
+    """The Z.ai lane enumerates through the adapter it runs, not a stub.
+
+    Without a token the shared lifecycle refuses at the lane's own credential
+    overlay, so the served reason is the Z.ai one. The lane previously answered
+    with a blanket "no verified prompt-free model enumeration" whatever was
+    configured, which is what made its live proof unpassable: no credential
+    could change the answer.
+    """
+    with settings_override(
+        zai_base_url="https://api.z.ai/api/anthropic", zai_auth_token=None
+    ):
+        resolved = (
+            await ProviderFactory()
+            .catalog_registration(_ZAI_CATALOG_KEY, tmp_path)
+            .discover()
+        )
+    assert resolved.catalog.state.status is CatalogStatus.UNAVAILABLE
+    assert resolved.catalog.state.reason == "no Z.ai auth token configured"
+    assert resolved.configured is HealthState.UNAVAILABLE
+    assert resolved.authentication is AuthenticationState.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_the_zai_overlay_reaches_the_probe_the_lane_launches(
+    tmp_path: Path,
+) -> None:
+    """The probe's child is handed the Z.ai credential, never Claude's.
+
+    The overlay the discovery lifecycle applies is the same one a served turn
+    applies, so a catalog built here describes the gateway a run would reach.
+    """
+    del tmp_path
+    with settings_override(
+        zai_base_url="https://api.z.ai/api/anthropic", zai_auth_token="zai-secret"
+    ):
+        overlay = _acp_catalog_auth_overlay(Provider.ZAI)
+    assert overlay.mode == "zai_auth_token"
+    assert overlay.env == {
+        "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+        "ANTHROPIC_AUTH_TOKEN": "zai-secret",
+    }
+    # Claude's own channel is never what this lane's child authenticates with.
+    assert CLAUDE_OAUTH_TOKEN.env_name not in overlay.env
+
+
+@pytest.mark.asyncio
+async def test_the_zai_overlay_refuses_before_resolving_any_launcher() -> None:
+    """A lane with no credential is refused on its own configuration first.
+
+    Readiness already refuses a missing configuration before it resolves a
+    command; discovery now reports the same order, so an absent token is never
+    reported as a missing adapter or an unpinnable CLI.
+    """
+    with (
+        settings_override(zai_auth_token=None),
+        pytest.raises(ProviderRuntimeUnavailableError, match=r"Z\.ai auth token"),
+    ):
+        _acp_catalog_auth_overlay(Provider.ZAI)
 
 
 def test_provider_factory_zai_refuses_without_current_turn_proof(

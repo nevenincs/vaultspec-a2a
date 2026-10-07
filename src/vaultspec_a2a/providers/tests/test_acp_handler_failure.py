@@ -25,8 +25,14 @@ import pytest
 
 from ...testing import REQUEST_PERMISSION_METHOD, request_permission_request
 from .._acp_protocol import ServerRpcRequest, handle_client_response, handle_server_rpc
+from .._acp_request import (
+    encode_frame,
+    jsonrpc_error,
+    jsonrpc_request,
+    jsonrpc_result,
+)
 from .._acp_types import AcpModelConfig, AcpSessionContext
-from ..acp_exceptions import AcpPromptError
+from ..acp_exceptions import AcpErrorCode, AcpPromptError
 
 
 class _CapturingStdin:
@@ -211,13 +217,42 @@ def test_a_successful_handler_reply_is_unchanged() -> None:
         ctx_: object,
         config: AcpModelConfig,
     ) -> dict[str, Any]:
-        return {"jsonrpc": "2.0", "id": rpc_id, "result": {"content": "hello"}}
+        return jsonrpc_result(rpc_id, {"content": "hello"})
 
     asyncio.run(_dispatch_permission(3, _ok, stdin))
 
     reply = _sent(stdin)
     assert reply["result"]["content"] == "hello"
     assert "error" not in reply
+
+
+def test_the_frame_builders_emit_the_jsonrpc_envelope() -> None:
+    """The envelope is wire contract, so it is pinned as literals, not rebuilt."""
+    assert jsonrpc_request(1, "fs/read_text_file", {"path": "a.txt"}) == {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "fs/read_text_file",
+        "params": {"path": "a.txt"},
+    }
+    assert jsonrpc_result("r-2", {"content": ""}) == {
+        "jsonrpc": "2.0",
+        "id": "r-2",
+        "result": {"content": ""},
+    }
+    assert jsonrpc_error(3, AcpErrorCode.INVALID_PARAMS, "bad params") == {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "error": {"code": -32602, "message": "bad params"},
+    }
+
+
+def test_an_encoded_frame_is_exactly_one_json_line() -> None:
+    """The agent reads newline-delimited JSON, so a frame may carry no inner newline."""
+    frame = jsonrpc_result(4, {"content": "two\nlines"})
+    line = encode_frame(frame)
+    assert line.endswith(b"\n")
+    assert line.count(b"\n") == 1
+    assert json.loads(line) == frame
 
 
 def test_cancellation_is_not_reported_as_a_handler_failure() -> None:

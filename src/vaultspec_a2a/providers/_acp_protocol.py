@@ -23,6 +23,7 @@ from langchain_core.outputs import ChatGenerationChunk
 from pydantic import TypeAdapter, ValidationError
 
 from ._acp_auth import runtime_log_extra
+from ._acp_request import jsonrpc_error, write_frame
 from ._acp_types import (
     AcpModelConfig,
     AcpRpcId,
@@ -367,18 +368,15 @@ async def handle_server_rpc(
             else False
         )
         if not allowed:
-            resp: JsonObject = {
-                "jsonrpc": "2.0",
-                "id": rpc_id,
-                "error": {
-                    "code": -32601,
-                    "message": f"Capability not enabled: {method}",
-                },
-            }
-            body = json.dumps(resp).encode("utf-8")
-            async with ctx.stdin_lock:
-                ctx.stdin.write(body + b"\n")
-                await ctx.stdin.drain()
+            await write_frame(
+                ctx.stdin,
+                ctx.stdin_lock,
+                jsonrpc_error(
+                    rpc_id,
+                    AcpErrorCode.METHOD_NOT_FOUND,
+                    f"Capability not enabled: {method}",
+                ),
+            )
             return
 
     handler = rpc_handler_map.get(method)
@@ -403,25 +401,17 @@ async def handle_server_rpc(
                 exc_info=exc,
                 extra=runtime_log_extra(config),
             )
-            resp = {
-                "jsonrpc": "2.0",
-                "id": rpc_id,
-                "error": {
-                    "code": -32603,
-                    "message": f"Internal error handling {method}",
-                },
-            }
+            resp = jsonrpc_error(
+                rpc_id,
+                AcpErrorCode.INTERNAL_ERROR,
+                f"Internal error handling {method}",
+            )
     else:
-        resp = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {"code": -32601, "message": f"Method not found: {method}"},
-        }
+        resp = jsonrpc_error(
+            rpc_id, AcpErrorCode.METHOD_NOT_FOUND, f"Method not found: {method}"
+        )
 
-    body = json.dumps(resp).encode("utf-8")
-    async with ctx.stdin_lock:
-        ctx.stdin.write(body + b"\n")
-        await ctx.stdin.drain()
+    await write_frame(ctx.stdin, ctx.stdin_lock, resp)
 
 
 def _enqueue_tool_call_chunk(update: JsonObject, ctx: AcpSessionContext) -> None:

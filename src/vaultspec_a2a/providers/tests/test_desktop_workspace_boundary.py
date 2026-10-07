@@ -11,6 +11,7 @@ import pytest
 
 from ...control.state_layout import state_layout
 from ...testing import settings_override
+from .._acp_request import jsonrpc_result
 from .._acp_rpc_handlers import (
     _read_workspace_text,
     _write_workspace_text,
@@ -114,11 +115,7 @@ async def test_desktop_rpc_refuses_state_content_and_reads_admitted_project(
             acp_session_context,
             _config(project),
         )
-        assert admitted == {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "result": {"content": "project-sentinel"},
-        }
+        assert admitted == jsonrpc_result(2, {"content": "project-sentinel"})
 
 
 @contextmanager

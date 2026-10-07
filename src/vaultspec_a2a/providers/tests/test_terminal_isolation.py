@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from .._acp_request import jsonrpc_error
 from .._acp_rpc_terminal_handlers import on_terminal_create
+from ..acp_exceptions import AcpErrorCode
 from .test_desktop_workspace_boundary import _config
 
 if TYPE_CHECKING:
@@ -49,14 +51,9 @@ async def test_unisolated_interpreter_cannot_read_or_write_outside_workspace(
         acp_session_context,
         _config(workspace),
     )
-    assert response == {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "error": {
-            "code": -32603,
-            "message": "ACP terminal requires workspace OS isolation",
-        },
-    }
+    assert response == jsonrpc_error(
+        1, AcpErrorCode.INTERNAL_ERROR, "ACP terminal requires workspace OS isolation"
+    )
     assert private.read_text(encoding="utf-8") == "private-control"
     assert not stolen.exists()
     assert not acp_session_context.terminals

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from ..desktop.native_isolation import NativeLaunchAuthority
     from ._cleanup import CleanupStep
 from ._acp_auth import is_auth_required_error
+from ._acp_request import encode_frame, jsonrpc_request
 from ._catalog_discovery import (
     ProviderCatalogDiscovery,
     available_catalog,
@@ -358,13 +359,7 @@ async def _request(
     output_budget = options["output_budget"]
     if process.stdin is None or process.stdout is None:
         raise AcpCatalogProtocolError("ACP discovery stdio is unavailable")
-    request: JsonObject = {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "method": method,
-        "params": params,
-    }
-    process.stdin.write(json.dumps(request).encode() + b"\n")
+    process.stdin.write(encode_frame(jsonrpc_request(request_id, method, params)))
     await process.stdin.drain()
     response = await read_response(
         process.stdout,

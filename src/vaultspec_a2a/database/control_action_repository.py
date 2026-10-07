@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 from uuid import uuid4
 
 from pydantic import ValidationError
-from sqlalchemy import exists, func, or_, select, update
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
@@ -25,9 +25,10 @@ if TYPE_CHECKING:
 
     from sqlalchemy.engine import CursorResult
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql import Select
     from sqlalchemy.sql.elements import ColumnElement
 
-    from ..thread import ThreadWriteExpectation
+    from ..thread import RunWriteAuthority, ThreadWriteExpectation
 
 from ..thread.action_receipts import GraphActionReceipt, canonical_json
 from ..thread.enums import (
@@ -35,7 +36,8 @@ from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
 )
-from ._helpers import _coerce, save_model
+from ._helpers import _coerce, _journal_row_for, save_model
+from ._leases import CONTROL_ACTION_LEASE, clear_lease, require_lease_window
 from .models import ControlActionModel, ThreadModel, utcnow
 from .thread_repository import thread_owned_by
 
@@ -52,6 +54,7 @@ __all__ = [
     "get_latest_control_action",
     "get_or_create_control_action",
     "get_unapplied_control_actions",
+    "get_writer_action",
     "has_live_queued_continuation_lease",
     "idempotency_key_admitted",
     "mark_control_action_applied",
@@ -64,6 +67,7 @@ __all__ = [
     "reject_queued_continuations",
     "release_control_action_lease",
     "reserve_control_action",
+    "select_recoverable_actions",
     "settle_control_action_lease",
 ]
 
@@ -261,21 +265,15 @@ async def acquire_control_action_lease(
     if not claim_token:
         raise ValueError("claim_token must not be empty")
     acquired_at = now or utcnow()
-    if claim_expires_at <= acquired_at:
-        raise ValueError("claim_expires_at must be later than now")
+    require_lease_window(acquired_at, claim_expires_at)
     stmt = (
         update(ControlActionModel)
         .where(
             ControlActionModel.id == action_id,
             ControlActionModel.applied_at.is_(None),
-            or_(
-                ControlActionModel.claim_token.is_(None),
-                ControlActionModel.claim_expires_at.is_(None),
-                ControlActionModel.claim_expires_at <= acquired_at,
-                ControlActionModel.claim_token == claim_token,
-            ),
+            CONTROL_ACTION_LEASE.acquirable_by(claim_token, acquired_at),
         )
-        .values(claim_token=claim_token, claim_expires_at=claim_expires_at)
+        .values(**CONTROL_ACTION_LEASE.granted(claim_token, claim_expires_at))
     )
     result = cast("CursorResult[Any]", await session.execute(stmt))
     return result.rowcount == 1
@@ -301,6 +299,17 @@ async def commit_control_action_lease(
     return action
 
 
+def _held_unapplied(
+    action_id: str, claim_token: str
+) -> tuple[ColumnElement[bool], ...]:
+    """Match the unapplied action that *claim_token* still owns."""
+    return (
+        ControlActionModel.id == action_id,
+        ControlActionModel.applied_at.is_(None),
+        CONTROL_ACTION_LEASE.held_by(claim_token),
+    )
+
+
 async def release_control_action_lease(
     session: AsyncSession,
     action_id: str,
@@ -312,12 +321,8 @@ async def release_control_action_lease(
         "CursorResult[Any]",
         await session.execute(
             update(ControlActionModel)
-            .where(
-                ControlActionModel.id == action_id,
-                ControlActionModel.applied_at.is_(None),
-                ControlActionModel.claim_token == claim_token,
-            )
-            .values(claim_token=None, claim_expires_at=None)
+            .where(*_held_unapplied(action_id, claim_token))
+            .values(**CONTROL_ACTION_LEASE.released())
         ),
     )
     return result.rowcount == 1
@@ -336,11 +341,7 @@ async def settle_control_action_lease(
         "CursorResult[Any]",
         await session.execute(
             update(ControlActionModel)
-            .where(
-                ControlActionModel.id == action_id,
-                ControlActionModel.applied_at.is_(None),
-                ControlActionModel.claim_token == claim_token,
-            )
+            .where(*_held_unapplied(action_id, claim_token))
             .values(
                 applied_at=applied_at or utcnow(),
                 result_status=_coerce(
@@ -348,8 +349,7 @@ async def settle_control_action_lease(
                     result_status,
                     label="control action result status",
                 ).value,
-                claim_token=None,
-                claim_expires_at=None,
+                **CONTROL_ACTION_LEASE.released(),
             )
         ),
     )
@@ -369,13 +369,23 @@ async def _read_action(
 
 
 async def get_control_action(
-    session: AsyncSession, action_id: str, *, refresh: bool = False
+    session: AsyncSession,
+    action_id: str,
+    *,
+    refresh: bool = False,
+    lock: bool = False,
 ) -> ControlActionModel | None:
     """Return one journal action by id.
 
     ``refresh`` re-reads the row from the database instead of the identity map,
-    for a caller whose copy may predate a write another statement made.
+    for a caller whose copy may predate a write another statement made. ``lock``
+    takes the row's write lock and reads it afresh, for a caller that decides on
+    the row and then writes it.
     """
+    if lock:
+        return await _read_action(
+            session, ControlActionModel.id == action_id, lock=True
+        )
     return await session.get(ControlActionModel, action_id, populate_existing=refresh)
 
 
@@ -479,35 +489,71 @@ async def get_unapplied_control_actions(
     )
 
 
+def select_recoverable_actions(
+    *window: ColumnElement[bool],
+) -> Select[tuple[ControlActionModel]]:
+    """Select the unapplied recoverable actions that an active run still writes.
+
+    Only an action its active run still names as the writer qualifies, since an
+    action another writer has superseded has nothing left to settle. *window*
+    bounds the recovery deadline; ordering and paging are the caller's.
+    """
+    return (
+        select(ControlActionModel)
+        .join(ThreadModel, ThreadModel.id == ControlActionModel.thread_id)
+        .where(
+            ControlActionModel.action_type.in_(
+                action.value for action in RECOVERY_ACTION_TYPES
+            ),
+            ControlActionModel.applied_at.is_(None),
+            ControlActionModel.recovery_deadline_at.is_not(None),
+            ThreadModel.is_active.is_(True),
+            thread_owned_by(
+                ControlActionModel.action_type, ControlActionModel.dispatch_id
+            ),
+            *window,
+        )
+    )
+
+
 async def overdue_recovery_actions(
     session: AsyncSession, *, observed_at: datetime, limit: int
 ) -> Sequence[ControlActionModel]:
     """Return unapplied recoverable actions whose deadline has passed.
 
-    Only actions that still own an active run qualify, since an action another
-    writer has superseded has nothing left to settle. The longest overdue come
-    first.
+    The longest overdue come first.
     """
     return (
         await session.scalars(
-            select(ControlActionModel)
-            .join(ThreadModel, ThreadModel.id == ControlActionModel.thread_id)
-            .where(
-                ControlActionModel.action_type.in_(
-                    action.value for action in RECOVERY_ACTION_TYPES
-                ),
-                ControlActionModel.applied_at.is_(None),
-                ControlActionModel.recovery_deadline_at.is_not(None),
-                ControlActionModel.recovery_deadline_at <= observed_at,
-                ThreadModel.is_active.is_(True),
-                thread_owned_by(
-                    ControlActionModel.action_type, ControlActionModel.dispatch_id
-                ),
+            select_recoverable_actions(
+                ControlActionModel.recovery_deadline_at <= observed_at
             )
             .order_by(ControlActionModel.recovery_deadline_at)
             .limit(limit)
         )
     ).all()
+
+
+async def get_writer_action(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    authority: RunWriteAuthority,
+    deadline_at: datetime,
+    unapplied_only: bool,
+) -> ControlActionModel | None:
+    """Return the journal row *authority* names as a run's writer.
+
+    The row must carry *deadline_at*, the recovery deadline its acceptance was
+    given. ``unapplied_only`` also requires it to be unapplied.
+    """
+    clauses = [
+        _journal_row_for(thread_id, authority),
+        ControlActionModel.recovery_deadline_at == deadline_at,
+    ]
+    if unapplied_only:
+        clauses.append(ControlActionModel.applied_at.is_(None))
+    return await session.scalar(select(ControlActionModel).where(*clauses))
 
 
 def _settle_applied(
@@ -520,8 +566,7 @@ def _settle_applied(
     action.result_status = _coerce(
         ControlActionResultStatus, result_status, label="control action result status"
     ).value
-    action.claim_token = None
-    action.claim_expires_at = None
+    clear_lease(action)
 
 
 async def mark_control_action_applied(
@@ -682,8 +727,7 @@ async def has_live_queued_continuation_lease(
             .where(
                 ControlActionModel.thread_id == thread_id,
                 ControlActionModel.result_status == _QUEUED,
-                ControlActionModel.claim_expires_at.is_not(None),
-                ControlActionModel.claim_expires_at > observed_at,
+                CONTROL_ACTION_LEASE.live(observed_at),
             )
             .limit(1)
         )

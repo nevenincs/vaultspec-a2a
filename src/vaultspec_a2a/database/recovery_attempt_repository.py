@@ -11,10 +11,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 from uuid import uuid4
 
-from sqlalchemy import exists, or_, select, update
+from sqlalchemy import exists, select, update
 
-from ..thread.enums import RECOVERY_ACTION_TYPES, RecoveryCondition
-from ._helpers import _journal_row_for, save_model
+from ..thread.enums import RecoveryCondition
+from ._helpers import save_model
+from ._leases import RECOVERY_ATTEMPT_LEASE, clear_lease
+from .control_action_repository import get_writer_action, select_recoverable_actions
 from .models import ControlActionModel, RecoveryAttemptModel, ThreadModel
 from .thread_repository import thread_owned_by
 
@@ -98,11 +100,7 @@ def _due_unclaimed(at: datetime) -> tuple[ColumnElement[bool], ...]:
         RecoveryAttemptModel.settled_at.is_(None),
         RecoveryAttemptModel.next_eligible_at <= at,
         RecoveryAttemptModel.deadline_at > at,
-        or_(
-            RecoveryAttemptModel.claim_token.is_(None),
-            RecoveryAttemptModel.claim_expires_at.is_(None),
-            RecoveryAttemptModel.claim_expires_at <= at,
-        ),
+        RECOVERY_ATTEMPT_LEASE.unheld(at),
     )
 
 
@@ -130,19 +128,20 @@ async def _owned_accepted_action(
             run_revision=authority.run_revision,
         ),
     ]
-    action_clauses = [
-        _journal_row_for(thread_id, authority),
-        ControlActionModel.recovery_deadline_at == deadline_at,
-    ]
     if pending_only:
         run_clauses.append(ThreadModel.is_active.is_(True))
-        action_clauses.append(ControlActionModel.applied_at.is_(None))
     owns_run = await session.scalar(
         select(ThreadModel.id).where(*run_clauses).with_for_update()
     )
     if owns_run is None:
         return None
-    return await session.scalar(select(ControlActionModel).where(*action_clauses))
+    return await get_writer_action(
+        session,
+        thread_id=thread_id,
+        authority=authority,
+        deadline_at=deadline_at,
+        unapplied_only=pending_only,
+    )
 
 
 async def _locked_attempt_for(
@@ -219,8 +218,7 @@ async def schedule_recovery_attempt(
     row.attempt_count += 1
     row.next_eligible_at = kwargs["next_eligible_at"]
     row.detail = _bounded_detail(kwargs["detail"])
-    row.claim_token = None
-    row.claim_expires_at = None
+    clear_lease(row)
     row.updated_at = observed_at
     await session.flush()
     return row
@@ -263,8 +261,7 @@ async def settle_expired_recovery_attempt(
     if row.settled_at is None:
         row.condition = RecoveryCondition.DEADLINE_EXCEEDED.value
         row.detail = _DEADLINE_DETAIL
-        row.claim_token = None
-        row.claim_expires_at = None
+        clear_lease(row)
         row.settled_at = observed_at
         row.updated_at = observed_at
     await session.flush()
@@ -290,23 +287,13 @@ async def unscheduled_recovery_actions(
         )
     )
     result = await session.execute(
-        select(ControlActionModel, ThreadModel)
-        .join(ThreadModel, ThreadModel.id == ControlActionModel.thread_id)
-        .where(
-            ControlActionModel.action_type.in_(
-                action.value for action in RECOVERY_ACTION_TYPES
-            ),
-            ControlActionModel.applied_at.is_(None),
-            ControlActionModel.recovery_deadline_at.is_not(None),
+        select_recoverable_actions(
             ControlActionModel.recovery_deadline_at > observed_at,
-            ThreadModel.is_active.is_(True),
             ThreadModel.run_revision >= 0,
             ThreadModel.writer_generation >= 1,
-            thread_owned_by(
-                ControlActionModel.action_type, ControlActionModel.dispatch_id
-            ),
             unscheduled,
         )
+        .add_columns(ThreadModel)
         .order_by(ControlActionModel.requested_at, ControlActionModel.id)
         .limit(limit)
     )
@@ -346,8 +333,7 @@ async def claim_recovery_attempt(
             update(RecoveryAttemptModel)
             .where(RecoveryAttemptModel.id == attempt_id, *_due_unclaimed(acquired_at))
             .values(
-                claim_token=claim_token,
-                claim_expires_at=claim_expires_at,
+                **RECOVERY_ATTEMPT_LEASE.granted(claim_token, claim_expires_at),
                 updated_at=acquired_at,
             )
         ),
@@ -371,11 +357,11 @@ async def _update_claimed(
             update(RecoveryAttemptModel)
             .where(
                 RecoveryAttemptModel.id == attempt_id,
-                RecoveryAttemptModel.claim_token == claim_token,
+                RECOVERY_ATTEMPT_LEASE.held_by(claim_token),
                 RecoveryAttemptModel.settled_at.is_(None),
                 *where,
             )
-            .values(claim_token=None, claim_expires_at=None, **values)
+            .values(**RECOVERY_ATTEMPT_LEASE.released(), **values)
         ),
     )
     return result.rowcount == 1

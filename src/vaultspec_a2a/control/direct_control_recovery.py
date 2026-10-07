@@ -9,16 +9,17 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
-
 from ..database import (
+    CONTROL_ACTION_LEASE_TTL,
+    RECOVERY_CLAIM_TTL,
     ControlActionModel,
-    ThreadModel,
     ThreadStatusElectionOutcome,
     begin_write_transaction,
     elect_thread_status,
     get_control_action_by_dispatch_id,
     get_thread,
+    lease_free_from,
+    lock_thread_row,
     mark_control_action_applied,
     overdue_recovery_actions,
     release_control_action_lease,
@@ -42,7 +43,6 @@ from .accepted_input import (
     restore_accepted_dispatch,
 )
 from .action_lease import (
-    CONTROL_ACTION_LEASE_TTL,
     DEFINITE_NON_DELIVERY,
     ControlActionClaim,
     ControlActionClaimRequest,
@@ -74,7 +74,6 @@ if TYPE_CHECKING:
 __all__ = ["DirectControlRecoverySummary", "redrive_direct_control_actions"]
 
 logger = logging.getLogger(__name__)
-_RECOVERY_CLAIM_TTL = timedelta(seconds=45)
 
 
 class _RecoveryOutcome(StrEnum):
@@ -263,12 +262,7 @@ async def _settle_permanent_refusal(
     deadline_observed_at: datetime | None = None,
 ) -> bool:
     """Quarantine one impossible accepted action under exact current authority."""
-    thread = await db.scalar(
-        select(ThreadModel)
-        .where(ThreadModel.id == action.thread_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
+    thread = await lock_thread_row(db, action.thread_id)
     row = await get_control_action_by_dispatch_id(
         db,
         thread_id=action.thread_id,
@@ -322,12 +316,7 @@ async def _settle_orphaned_refusal(
     refusal: DispatchRefusal,
 ) -> bool:
     """Quarantine exact authority whose accepted action row disappeared."""
-    thread = await db.scalar(
-        select(ThreadModel)
-        .where(ThreadModel.id == thread_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
+    thread = await lock_thread_row(db, thread_id)
     if thread is None or ThreadStatus(thread.status) in NON_ACTIVE_STATUSES:
         return False
     expectation = thread_write_expectation(thread)
@@ -537,10 +526,7 @@ async def _dispatch_prepared_claim(
         condition=RecoveryCondition.DISPATCH_PENDING,
         observed_at=delivered_at,
         next_eligible_at=min(
-            max(
-                delivered_at,
-                claim_started + CONTROL_ACTION_LEASE_TTL,
-            ),
+            lease_free_from(claim_started + CONTROL_ACTION_LEASE_TTL, delivered_at),
             recovery_claim.deadline_at,
         ),
         detail="worker accepted dispatch; application receipt pending",
@@ -624,7 +610,7 @@ async def _prepare_recovery_action(
                 condition=recovery_claim.condition,
                 observed_at=deferred_at,
                 next_eligible_at=min(
-                    max(deferred_at, action_claim_expires_at or deferred_at),
+                    lease_free_from(action_claim_expires_at, deferred_at),
                     recovery_claim.deadline_at,
                 ),
                 detail="accepted action lease remains owned",
@@ -692,7 +678,7 @@ async def redrive_direct_control_actions(
         recovery_claims = await acquire_due_recovery_attempts(
             db,
             acquired_at=instant,
-            claim_expires_at=instant + _RECOVERY_CLAIM_TTL,
+            claim_expires_at=instant + RECOVERY_CLAIM_TTL,
             limit=page_size,
         )
         await db.commit()

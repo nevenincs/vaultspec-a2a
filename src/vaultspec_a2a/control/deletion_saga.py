@@ -43,11 +43,12 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from ..database import (
+    DELETION_SAGA_CLAIM_LEASE,
     ThreadStatusElectionOutcome,
     claim_deletion_saga_row,
     delete_thread,
@@ -92,16 +93,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
-_CLAIM_LEASE = timedelta(minutes=5)
-"""How long a claim survives a pass that never released it.
-
-A pass that ends normally releases its claim when finalization refuses, so this
-lease only ever covers a pass killed mid-teardown. A cleanup pass deletes a
-checkpoint and unlinks a handful of files - seconds of work - so five minutes is
-a wide margin over a healthy pass while still returning a saga abandoned by a
-dead process to the next delete request.
-"""
 
 _MAX_CLEANUP_ATTEMPTS = 3
 """Recorded failures after which a cleanup item is abandoned rather than retried.
@@ -502,11 +493,12 @@ async def claim_deletion_saga(
 
     Exclusion is bounded so it cannot become its own wedge. A pass that ends
     without finalizing releases the claim there, so an ordinary retry resumes
-    immediately; :data:`_CLAIM_LEASE` covers only a pass killed before it could
-    release, which would otherwise hold the saga for the life of the deployment.
+    immediately; :data:`DELETION_SAGA_CLAIM_LEASE` covers only a pass killed
+    before it could release, which would otherwise hold the saga for the life of
+    the deployment.
     """
     claimed = await claim_deletion_saga_row(
-        session, thread_id, now=_now(), lease=_CLAIM_LEASE
+        session, thread_id, now=_now(), lease=DELETION_SAGA_CLAIM_LEASE
     )
     if claimed is None:
         return None

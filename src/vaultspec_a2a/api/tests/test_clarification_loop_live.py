@@ -41,7 +41,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...control.accepted_input import freeze_accepted_input
 from ...control.action_lease import (
-    CONTROL_ACTION_LEASE_TTL,
     ControlActionClaim,
     ControlActionClaimRequest,
     finalize_control_action_acceptance,
@@ -57,6 +56,7 @@ from ...control.execution_authority import resolve_execution_authority
 from ...control.graph_definition import read_accepted_graph_definition
 from ...control.leased_dispatch import DispatchTransport, accepted_recursion_budget
 from ...database import (
+    CONTROL_ACTION_LEASE_TTL,
     get_control_action_by_idempotency_key,
     get_thread,
     thread_write_expectation,

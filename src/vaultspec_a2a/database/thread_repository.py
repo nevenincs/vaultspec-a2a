@@ -71,6 +71,7 @@ __all__ = [
     "list_active_thread_page",
     "list_non_terminal_threads",
     "list_threads",
+    "lock_thread_row",
     "normalize_workspace_identity",
     "path_safe_run_id_clause",
     "record_thread_execution_state",
@@ -319,6 +320,27 @@ async def create_thread(
 
 async def get_thread(session: AsyncSession, thread_id: str) -> ThreadModel | None:
     return await session.get(ThreadModel, thread_id)
+
+
+async def lock_thread_row(session: AsyncSession, thread_id: str) -> ThreadModel | None:
+    """Return a run's row with its write lock held until this transaction ends.
+
+    The ordering point between transactions that decide opposite things about
+    the same run, such as admitting a continuation and settling the run. Both
+    sides read the run through this, so whichever arrives second waits and then
+    reads what the first committed. The row is re-read rather than reused from
+    the identity map, because a stale copy is exactly what the lock exists to
+    prevent.
+
+    SQLite takes no row lock and needs none: its write transaction already
+    excludes a second writer for the whole transaction.
+    """
+    return await session.scalar(
+        select(ThreadModel)
+        .where(ThreadModel.id == thread_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
 
 
 async def list_threads(

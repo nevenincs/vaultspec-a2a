@@ -14,6 +14,13 @@ operation. This package re-exports the supported persistence API.
 """
 
 from ._helpers import save_model as save_model
+from ._leases import CONTROL_ACTION_LEASE_TTL as CONTROL_ACTION_LEASE_TTL
+from ._leases import DELETION_SAGA_CLAIM_LEASE as DELETION_SAGA_CLAIM_LEASE
+from ._leases import RECOVERY_CLAIM_TTL as RECOVERY_CLAIM_TTL
+from ._leases import clear_lease as clear_lease
+from ._leases import lease_free_from as lease_free_from
+from ._leases import new_claim_token as new_claim_token
+from ._leases import require_lease_window as require_lease_window
 from .authoring_cursor_repository import (
     DEFAULT_SUBSCRIBER_ID as DEFAULT_SUBSCRIBER_ID,
 )
@@ -59,6 +66,7 @@ from .control_action_repository import (
 from .control_action_repository import (
     get_unapplied_control_actions as get_unapplied_control_actions,
 )
+from .control_action_repository import get_writer_action as get_writer_action
 from .control_action_repository import (
     has_live_queued_continuation_lease as has_live_queued_continuation_lease,
 )
@@ -91,6 +99,9 @@ from .control_action_repository import (
     release_control_action_lease as release_control_action_lease,
 )
 from .control_action_repository import reserve_control_action as reserve_control_action
+from .control_action_repository import (
+    select_recoverable_actions as select_recoverable_actions,
+)
 from .control_action_repository import (
     settle_control_action_lease as settle_control_action_lease,
 )
@@ -245,6 +256,7 @@ from .thread_repository import (
     list_non_terminal_threads as list_non_terminal_threads,
 )
 from .thread_repository import list_threads as list_threads
+from .thread_repository import lock_thread_row as lock_thread_row
 from .thread_repository import (
     normalize_workspace_identity as normalize_workspace_identity,
 )
@@ -264,7 +276,10 @@ from .thread_repository import (
 )
 
 __all__ = [
+    "CONTROL_ACTION_LEASE_TTL",
     "DEFAULT_SUBSCRIBER_ID",
+    "DELETION_SAGA_CLAIM_LEASE",
+    "RECOVERY_CLAIM_TTL",
     "ActiveThreadProjection",
     "ArtifactModel",
     "AuthoringEventCursorModel",
@@ -300,6 +315,7 @@ __all__ = [
     "build_migration_config",
     "claim_deletion_saga_row",
     "claim_recovery_attempt",
+    "clear_lease",
     "close_db",
     "commit_control_action_lease",
     "configure_sqlite_engine",
@@ -329,20 +345,24 @@ __all__ = [
     "get_thread",
     "get_thread_execution_state",
     "get_unapplied_control_actions",
+    "get_writer_action",
     "has_live_queued_continuation_lease",
     "idempotency_key_admitted",
     "init_db",
     "insert_deletion_saga_row",
     "inspect_sqlite_database",
+    "lease_free_from",
     "list_active_thread_page",
     "list_non_terminal_threads",
     "list_threads",
     "lock_deletion_saga_row",
+    "lock_thread_row",
     "mark_control_action_applied",
     "mark_control_action_duplicate",
     "mark_control_action_superseded",
     "mark_permission_request_applied",
     "migration_script_location",
+    "new_claim_token",
     "next_queue_position",
     "normalize_workspace_identity",
     "open_checkpointer",
@@ -362,6 +382,7 @@ __all__ = [
     "release_deletion_saga_claim",
     "release_recovery_claim",
     "remove_deletion_saga_row",
+    "require_lease_window",
     "reschedule_recovery_claim",
     "reserve_control_action",
     "reset_permission_response_submission",
@@ -372,6 +393,7 @@ __all__ = [
     "save_model",
     "schedule_recovery_attempt",
     "seat_sqlite_posture",
+    "select_recoverable_actions",
     "set_authoring_cursor",
     "set_thread_approval_state",
     "set_thread_repair_state",

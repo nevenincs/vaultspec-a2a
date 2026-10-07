@@ -142,14 +142,20 @@ def _current_assignment() -> dict[str, FrozenLaneAssignment]:
     ).model_assignment
 
 
-# Default cache key for test graphs.
-_TEST_CACHE_KEY = (
-    "test-preset",
-    None,
-    False,
-    model_assignment_digest(_current_assignment()),
-    stand_in_definition_digest("test-preset"),
-)
+def _test_cache_key() -> GraphCompilationKey:
+    """The default cache key for test graphs.
+
+    Built on demand rather than at import: the deterministic lane it freezes is
+    seated by a session fixture, after collection has imported this module.
+    """
+    return (
+        "test-preset",
+        None,
+        False,
+        model_assignment_digest(_current_assignment()),
+        stand_in_definition_digest("test-preset"),
+    )
+
 
 # Every dispatch names an active project, as a real one does. This package's own
 # directory is real, absolute, and present on either platform.
@@ -231,7 +237,7 @@ def _inject_graph(
     executor: Executor,
     thread_id: str,
     *,
-    cache_key: GraphCompilationKey = _TEST_CACHE_KEY,
+    cache_key: GraphCompilationKey | None = None,
 ) -> None:
     """Register a real terminal graph through the public executor seam."""
 
@@ -246,7 +252,7 @@ def _inject_graph(
     graph: RegisteredCompiledGraph = compile_test_graph(
         builder, checkpointer=executor._checkpointer
     )
-    executor.register_compiled_graph(thread_id, cache_key, graph)
+    executor.register_compiled_graph(thread_id, cache_key or _test_cache_key(), graph)
 
 
 def _terminal_graph(executor: Executor) -> RegisteredCompiledGraph:

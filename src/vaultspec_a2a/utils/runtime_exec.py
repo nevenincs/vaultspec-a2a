@@ -30,6 +30,7 @@ __all__ = [
     "CLI_MODULE",
     "DISPATCHABLE_MODULES",
     "RUN_MODULE_VERB",
+    "is_frozen",
     "is_module_invocation",
     "module_command",
     "self_command",

@@ -19,8 +19,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -30,10 +28,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from ...api.tests.conftest import SEATED_ATTACH_TOKEN, make_app
 from ...conftest import materialize_schema
 from ...lifecycle.discovery import service_json_path, write_service_json
-from ...testing import fetch_in_process_selection_at, serve_on_loopback_in_thread
+from ...testing import (
+    fetch_in_process_selection_at,
+    run_cli,
+    serve_on_loopback_in_thread,
+)
 
 _PRESET = "mock-success-single"
-_MODULE = "vaultspec_a2a.cli.main"
 
 
 class _GatewayFixture:
@@ -96,34 +97,17 @@ def _in_process_lane_arguments(base: str) -> dict[str, str]:
     }
 
 
-def _configured_environment() -> dict[str, str]:
-    """Return the ambient environment configured with the seated attach token.
+# Blank rather than absent: ``run_cli`` overlays the inherited environment and the
+# settings source ignores empty values, so the child never holds the worker
+# credential of a host that exports one.
+_NO_WORKER_CREDENTIAL = {"VAULTSPEC_A2A_INTERNAL_TOKEN": ""}
 
-    A configured token is the CLI's authoritative credential, so a child run in
-    this environment authenticates against a gateway built by ``make_app``.
-    """
-    environment = os.environ.copy()
-    environment.pop("VAULTSPEC_A2A_INTERNAL_TOKEN", None)
-    environment["VAULTSPEC_A2A_GATEWAY_TOKEN"] = SEATED_ATTACH_TOKEN
-    return environment
-
-
-def _run_cli(
-    *args: str,
-    env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess[str]:
-    """Invoke the operator CLI as a real child process.
-
-    Without an explicit *env* the child holds the seated attach token.
-    """
-    return subprocess.run(
-        [sys.executable, "-m", _MODULE, *args],
-        env=_configured_environment() if env is None else env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
+# A configured token is the CLI's authoritative credential, so a child run in
+# this environment authenticates against a gateway built by ``make_app``.
+_SEATED_TOKEN_ENV = {
+    **_NO_WORKER_CREDENTIAL,
+    "VAULTSPEC_A2A_GATEWAY_TOKEN": SEATED_ATTACH_TOKEN,
+}
 
 
 def test_cli_uses_matching_loopback_discovery_token(tmp_path: Any) -> None:
@@ -140,10 +124,12 @@ def test_cli_uses_matching_loopback_discovery_token(tmp_path: Any) -> None:
                 pid=os.getpid(),
                 service_token=token,
             )
-            environment = os.environ.copy()
-            environment.pop("VAULTSPEC_A2A_INTERNAL_TOKEN", None)
-            environment["VAULTSPEC_A2A_HOME"] = str(a2a_home)
-            result = _run_cli("presets", "--url", base, env=environment)
+            result = run_cli(
+                "presets",
+                "--url",
+                base,
+                env={**_NO_WORKER_CREDENTIAL, "VAULTSPEC_A2A_HOME": str(a2a_home)},
+            )
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["api_version"] == "v1"
@@ -163,11 +149,16 @@ def test_configured_cli_token_precedes_matching_discovery_token(tmp_path: Any) -
                 pid=os.getpid(),
                 service_token="discovery-token-must-not-win",
             )
-            environment = os.environ.copy()
-            environment.pop("VAULTSPEC_A2A_INTERNAL_TOKEN", None)
-            environment["VAULTSPEC_A2A_HOME"] = str(a2a_home)
-            environment["VAULTSPEC_A2A_GATEWAY_TOKEN"] = configured
-            result = _run_cli("presets", "--url", base, env=environment)
+            result = run_cli(
+                "presets",
+                "--url",
+                base,
+                env={
+                    **_NO_WORKER_CREDENTIAL,
+                    "VAULTSPEC_A2A_HOME": str(a2a_home),
+                    "VAULTSPEC_A2A_GATEWAY_TOKEN": configured,
+                },
+            )
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["api_version"] == "v1"
@@ -179,14 +170,14 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
         serve_on_loopback_in_thread(gw.app) as base,
     ):
         # presets-list
-        presets = _run_cli("presets", "--url", base)
+        presets = run_cli("presets", "--url", base, env=_SEATED_TOKEN_ENV)
         assert presets.returncode == 0, presets.stdout + presets.stderr
         pbody = json.loads(presets.stdout)
         assert pbody["api_version"] == "v1"
         assert any(p["id"] == _PRESET for p in pbody["presets"])
 
         # doctor (service-state)
-        doctor = _run_cli("doctor", "--url", base)
+        doctor = run_cli("doctor", "--url", base, env=_SEATED_TOKEN_ENV)
         assert doctor.returncode == 0, doctor.stdout + doctor.stderr
         assert json.loads(doctor.stdout)["api_version"] == "v1"
 
@@ -194,10 +185,10 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
         # The operator names the lane and entry; the CLI resolves only the
         # catalog revision. Read here from the same served catalog rather than
         # hardcoded, so this proves the real end-to-end path.
-        catalog = _run_cli("presets", "--url", base)
+        catalog = run_cli("presets", "--url", base, env=_SEATED_TOKEN_ENV)
         assert catalog.returncode == 0, catalog.stdout + catalog.stderr
         lane = _in_process_lane_arguments(base)
-        start = _run_cli(
+        start = run_cli(
             "run",
             "start",
             "--preset",
@@ -213,22 +204,23 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
             "--autonomous",
             "--url",
             base,
+            env=_SEATED_TOKEN_ENV,
         )
         assert start.returncode == 0, start.stdout + start.stderr
         run_id = json.loads(start.stdout)["run_id"]
         assert run_id
         assert gw.worker.dispatches, "run start must dispatch to the worker"
 
-        status = _run_cli("run", "status", run_id, "--url", base)
+        status = run_cli("run", "status", run_id, "--url", base, env=_SEATED_TOKEN_ENV)
         assert status.returncode == 0, status.stdout + status.stderr
         assert json.loads(status.stdout)["run_id"] == run_id
 
-        cancel = _run_cli("run", "cancel", run_id, "--url", base)
+        cancel = run_cli("run", "cancel", run_id, "--url", base, env=_SEATED_TOKEN_ENV)
         assert cancel.returncode == 0, cancel.stdout + cancel.stderr
         assert json.loads(cancel.stdout)["api_version"] == "v1"
 
         # unknown run -> non-zero exit with the error body printed
-        missing = _run_cli("run", "status", "nope", "--url", base)
+        missing = run_cli("run", "status", "nope", "--url", base, env=_SEATED_TOKEN_ENV)
         assert missing.returncode == 1
 
 
@@ -259,7 +251,7 @@ def test_doctor_flags_a_resident_missing_a_route(tmp_path: Any) -> None:
         stale_route = gateway_router.routes.pop(stale_index)
         try:
             with serve_on_loopback_in_thread(gw.app) as base:
-                doctor = _run_cli("doctor", "--url", base)
+                doctor = run_cli("doctor", "--url", base, env=_SEATED_TOKEN_ENV)
                 # A distinct non-zero exit (not the generic transport-error 1)
                 # so automation catches a stale resident without parsing JSON.
                 assert doctor.returncode == 3, doctor.stderr
@@ -273,7 +265,7 @@ def test_doctor_flags_a_resident_missing_a_route(tmp_path: Any) -> None:
 def test_cli_reports_unreachable_gateway_cleanly() -> None:
     """A dead gateway yields a clean error and a non-zero exit, not a traceback."""
     # Port 1 is not listening; the transport error must be handled, not raised.
-    result = _run_cli("presets", "--url", "http://127.0.0.1:1")
+    result = run_cli("presets", "--url", "http://127.0.0.1:1", env=_SEATED_TOKEN_ENV)
     assert result.returncode != 0
     assert "could not reach the gateway" in (result.stdout + result.stderr)
 
@@ -287,6 +279,6 @@ def test_cli_reports_installed_package_version() -> None:
     """
     from ...utils import package_version
 
-    result = _run_cli("--version")
+    result = run_cli("--version")
     assert result.returncode == 0, result.stdout + result.stderr
     assert package_version() in result.stdout

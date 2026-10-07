@@ -59,6 +59,20 @@ IMPURE_FIXTURES: Final = frozenset(
         "live_engine",
         # Opens a pool against the live PostgreSQL server.
         "pooled_postgres_saver",
+        # Copy a schema template onto a per-test SQLite file.
+        "database_file",
+        "migrated_database_file",
+        # Runs the Alembic chain against a real SQLite file once per session.
+        "migrated_template",
+        # Real async engines and sessions over those per-test SQLite files.
+        "engine",
+        "session_factory",
+        "session",
+        "migrated_engine",
+        "migrated_session_factory",
+        # A per-test checkpoint directory and the real saver opened over it.
+        "checkpoint_file",
+        "checkpointer",
     }
 )
 

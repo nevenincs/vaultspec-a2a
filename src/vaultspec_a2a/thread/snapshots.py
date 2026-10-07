@@ -396,18 +396,20 @@ class PermissionSnapshot:
     tool_kind: ToolKind | None = None
 
 
+# The single declaration behind every agent-shaped surface: the REST team-status
+# entry, the ``team_status`` broadcast summary and the thread snapshot all project
+# from this type rather than redeclaring the field set.
 @dataclass(slots=True)
 class AgentSnapshot:
-    """Canonical agent descriptor.
+    """One agent of a run, and what it is doing.
 
-    Single declaration behind every agent-shaped surface: the REST team-status
-    entry, the ``team_status`` broadcast summary, and the thread snapshot all
-    project from this type rather than redeclaring the field set. ``state``,
-    ``provider``, and ``model`` carry the real enums so an unknown value cannot
-    survive as an arbitrary string all the way to the wire.
+    ``state`` and ``provider`` are served as their enumerations, so an
+    unrecognised value never reaches the wire as an arbitrary string.
 
-    ``model_name`` holds the exact provider-issued catalog identifier the run
-    executed.
+    ``model_name`` is free-form by contrast, and deliberately so: it is the exact
+    provider-issued catalog identifier the run executed, and a served catalog
+    names its own models, so no closed vocabulary could cover them. ``None`` for
+    an agent whose model was never resolved.
     """
 
     thread_id: str
@@ -451,17 +453,16 @@ class ExecutionStateProjection:
     degraded_reasons: list[DegradedReason] = field(default_factory=list)
 
 
+# The run read model's single declaration: the api edge validates and serves this
+# type directly, so a field added here reaches run-history with no second
+# declaration to keep in step. Fields are keyword-only and declared in the order
+# they are served.
 @dataclass(slots=True, kw_only=True)
 class ThreadStateSnapshot:
     """Complete thread state for reattaching to a run's event stream.
 
     The client fetches this via REST, notes ``last_sequence``, then discards any
     streamed frame with ``sequence <= last_sequence``.
-
-    This is the run read model's single declaration: the api edge validates and
-    serves it directly, so a field added here reaches run-history with no
-    second declaration to keep in step. Fields are keyword-only and declared in
-    the order they are served.
     """
 
     thread_id: str

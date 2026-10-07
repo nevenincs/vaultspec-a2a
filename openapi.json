@@ -1498,7 +1498,7 @@
           "state"
         ],
         "title": "AgentSnapshot",
-        "description": "Canonical agent descriptor.\n\nSingle declaration behind every agent-shaped surface: the REST team-status\nentry, the ``team_status`` broadcast summary, and the thread snapshot all\nproject from this type rather than redeclaring the field set. ``state``,\n``provider``, and ``model`` carry the real enums so an unknown value cannot\nsurvive as an arbitrary string all the way to the wire.\n\n``model_name`` holds the exact provider-issued catalog identifier the run\nexecuted."
+        "description": "One agent of a run, and what it is doing.\n\n``state`` and ``provider`` are served as their enumerations, so an\nunrecognised value never reaches the wire as an arbitrary string.\n\n``model_name`` is free-form by contrast, and deliberately so: it is the exact\nprovider-issued catalog identifier the run executed, and a served catalog\nnames its own models, so no closed vocabulary could cover them. ``None`` for\nan agent whose model was never resolved."
       },
       "ApprovalStatus": {
         "type": "string",
@@ -5171,7 +5171,7 @@
           "last_sequence"
         ],
         "title": "ThreadStateSnapshot",
-        "description": "Complete thread state for reattaching to a run's event stream.\n\nThe client fetches this via REST, notes ``last_sequence``, then discards any\nstreamed frame with ``sequence <= last_sequence``.\n\nThis is the run read model's single declaration: the api edge validates and\nserves it directly, so a field added here reaches run-history with no\nsecond declaration to keep in step. Fields are keyword-only and declared in\nthe order they are served."
+        "description": "Complete thread state for reattaching to a run's event stream.\n\nThe client fetches this via REST, notes ``last_sequence``, then discards any\nstreamed frame with ``sequence <= last_sequence``."
       },
       "ThreadStatus": {
         "type": "string",

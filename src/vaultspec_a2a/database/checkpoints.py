@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 from ..control.config import settings
 from ..domain_config import domain_config
 from ..utils.coercion import coerce_object_mapping
-from .checkpoint_retention import prune_settled_checkpoints
 from .checkpoint_schema import checkpoint_pragmas
 
 logger = logging.getLogger(__name__)
@@ -35,7 +34,6 @@ __all__ = [
     "Checkpointer",
     "concurrent_checkpointer",
     "open_checkpointer",
-    "prune_settled_thread",
     "read_latest_checkpoint",
     "surviving_transcript",
 ]
@@ -184,16 +182,6 @@ async def concurrent_checkpointer(checkpointer: Checkpointer) -> Checkpointer:
     nothing and the checkpointer itself is returned.
     """
     return checkpointer
-
-
-async def prune_settled_thread(checkpointer: Checkpointer, thread_id: str) -> bool:
-    """Drop a settled thread's superseded checkpoints from the saver backing it.
-
-    Returns:
-        ``True`` when the history was pruned, ``False`` when the saver is one
-        the retention statements do not cover and was left untouched.
-    """
-    return await prune_settled_checkpoints(checkpointer, thread_id)
 
 
 @asynccontextmanager

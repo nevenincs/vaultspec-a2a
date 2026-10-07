@@ -16,7 +16,7 @@ import pytest
 from langgraph.graph import END, START
 
 from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ..checkpoints import prune_settled_thread
+from ..checkpoint_retention import prune_settled_checkpoints
 from ._checkpoint_history import config_for, stored_history
 
 if TYPE_CHECKING:
@@ -92,7 +92,7 @@ async def _prove_a_settled_thread_keeps_only_its_latest(saver: Checkpointer) -> 
         assert len(before) == 3
         assert all(len(ids) > 1 for ids in before.values())
 
-        assert await prune_settled_thread(saver, thread_id) is True
+        assert await prune_settled_checkpoints(saver, thread_id) is True
 
         assert await stored_history(saver, thread_id) == {
             namespace: [max(ids)] for namespace, ids in before.items()
@@ -131,7 +131,7 @@ async def _prove_a_failed_thread_keeps_its_error_writes(saver: Checkpointer) -> 
         assert {"__error__", "log"} <= channels
         assert len((await stored_history(saver, thread_id))[""]) > 1
 
-        assert await prune_settled_thread(saver, thread_id) is True
+        assert await prune_settled_checkpoints(saver, thread_id) is True
 
         kept = await saver.aget_tuple(cast("Any", config_for(thread_id)))
         assert kept is not None
@@ -189,7 +189,7 @@ async def test_a_failed_sqlite_prune_leaves_nothing_for_the_next_write_to_commit
     await checkpointer.conn.commit()
 
     with pytest.raises(sqlite3.DatabaseError, match="prune refused"):
-        await prune_settled_thread(checkpointer, thread_id)
+        await prune_settled_checkpoints(checkpointer, thread_id)
 
     await checkpointer.conn.execute("DROP TRIGGER refuse_prune")
     await graph.ainvoke(
@@ -211,5 +211,5 @@ async def test_an_unrecognised_saver_is_left_untouched() -> None:
     )
     before = await stored_history(saver, "memory")
 
-    assert await prune_settled_thread(saver, "memory") is False
+    assert await prune_settled_checkpoints(saver, "memory") is False
     assert await stored_history(saver, "memory") == before

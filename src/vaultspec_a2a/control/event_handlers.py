@@ -602,12 +602,12 @@ async def _prune_settled_history(
     """
     if checkpointer is None:
         return
-    from ..database.checkpoints import prune_settled_thread
+    from ..database.checkpoint_retention import prune_settled_checkpoints
     from ..domain_config import domain_config
 
     try:
         await asyncio.wait_for(
-            prune_settled_thread(checkpointer, thread_id),
+            prune_settled_checkpoints(checkpointer, thread_id),
             timeout=domain_config.aget_state_timeout_seconds,
         )
     except Exception:

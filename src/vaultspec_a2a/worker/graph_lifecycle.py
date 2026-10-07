@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from langgraph.types import Command, Interrupt
 
     from ..authoring import DocumentProposalSubmitter, FeedbackContextReader
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from ..streaming import RunEventProducer
     from ._graph_lifecycle_options import GraphLifecycleOptions

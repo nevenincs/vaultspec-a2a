@@ -67,7 +67,7 @@ if TYPE_CHECKING:
 
     from opentelemetry.trace import Span
 
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from ..streaming import RunEventProducer
     from ..streaming.types import SequencedEvent, StreamableGraph

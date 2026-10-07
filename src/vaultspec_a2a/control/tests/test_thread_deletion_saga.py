@@ -38,9 +38,9 @@ from ...control.deletion_saga import (
 )
 from ...control.thread_service import DeleteResult, delete_thread_service
 from ...database import (
+    ThreadDeletionSagaModel,
     get_thread,
 )
-from ...database.models import ThreadDeletionSagaModel
 from ...thread.enums import CleanupKind, ThreadStatus
 
 

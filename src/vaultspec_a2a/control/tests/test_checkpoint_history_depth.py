@@ -23,7 +23,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START
 
 from ...control.snapshot import checkpoint_history_depth
-from ...database.checkpoint_retention import prune_settled_checkpoints
+from ...database import prune_settled_checkpoints
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 
 if TYPE_CHECKING:

@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi.testclient import TestClient
 
-from ...database.thread_repository import create_thread
+from ...database import create_thread
 from ...providers.conditions import ProviderCondition
 from ...streaming.sse_frames import decode_sse_text
 from ...testing import SseFrame, elect_status, seed_accepted_thread

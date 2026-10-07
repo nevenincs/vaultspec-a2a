@@ -93,8 +93,7 @@ from .repair_transitions import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database import ThreadModel
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer, ThreadModel
     from ..thread import ProjectedInterrupt
     from .leased_dispatch import DispatchTransport, SettledDispatchFailure
 

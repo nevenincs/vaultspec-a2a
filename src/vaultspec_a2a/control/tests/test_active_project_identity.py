@@ -26,7 +26,7 @@ from pydantic import ValidationError
 
 from ...context.metadata import ThreadMetadata
 from ...control._thread_metadata import dispatchable_workspace_root
-from ...database.thread_repository import normalize_workspace_identity
+from ...database import normalize_workspace_identity
 from ...ipc.schemas import DispatchRequest, canonical_project_root
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...streaming import RunEventProducer

@@ -20,8 +20,7 @@ import httpx
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database import get_db
-from ..database.checkpoints import Checkpointer
+from ..database import Checkpointer, get_db
 from ..streaming import RelayHub
 
 # The header carrying the receipt-bound lifecycle ownership capability. Distinct

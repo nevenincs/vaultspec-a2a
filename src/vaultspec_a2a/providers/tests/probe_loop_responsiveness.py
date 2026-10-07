@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 TICK_SECONDS = 0.01
 
 if TYPE_CHECKING:
-    from ...database.checkpoints import Checkpointer
+    from ...database import Checkpointer
     from ...worker.ipc import WorkerBridge
 
 
@@ -143,7 +143,7 @@ async def _run_compile(
     """
     from uuid import uuid4
 
-    from ...database.checkpoints import open_checkpointer
+    from ...database import open_checkpointer
     from ...worker.ipc import WorkerBridge
 
     checkpointer_context = open_checkpointer()

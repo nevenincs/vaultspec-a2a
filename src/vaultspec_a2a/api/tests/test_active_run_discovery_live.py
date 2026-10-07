@@ -15,8 +15,7 @@ from sqlalchemy import String
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...control.state_layout import StateLayout
-from ...database.models import ThreadModel
-from ...database.thread_repository import create_thread
+from ...database import ThreadModel, create_thread
 from ...testing import DEFAULT_TEAM_PRESET, booted_gateway
 from ...tests._write_authority import (
     make_test_thread_authority_columns,

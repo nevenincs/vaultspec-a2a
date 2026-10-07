@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...database.checkpoint_schema import (
+from ...database import (
     CHECKPOINT_SCHEMA_DIGEST,
     CHECKPOINT_SCHEMA_VERSION,
 )

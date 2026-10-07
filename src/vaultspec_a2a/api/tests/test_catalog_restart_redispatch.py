@@ -18,11 +18,11 @@ from ...control.dispatch import redispatch_reconciling_threads
 from ...database import (
     close_db,
     create_control_action,
+    create_thread,
     get_session_factory,
     get_thread,
     init_db,
 )
-from ...database.thread_repository import create_thread
 from ...providers.provider_catalog import (
     AdmissionState,
     AuthenticationState,

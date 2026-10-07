@@ -58,7 +58,7 @@ from .repair_transitions import record_undelivered_dispatch
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from .leased_dispatch import DispatchTransport
 

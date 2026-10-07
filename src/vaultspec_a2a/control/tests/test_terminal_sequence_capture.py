@@ -22,9 +22,9 @@ import pytest
 from ...database import (
     RunEventRecord,
     RunEventStore,
+    ThreadModel,
     create_thread,
 )
-from ...database.models import ThreadModel
 from ...graph.enums import AgentLifecycleState
 from ...streaming import RelayHub, RunSequenceAllocator
 from ...testing import seed_completed_authority

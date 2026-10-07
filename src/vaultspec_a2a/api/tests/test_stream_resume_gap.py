@@ -18,7 +18,7 @@ import httpx
 import pytest
 from sqlalchemy import text
 
-from ...database.run_event_repository import RunEventStore
+from ...database import RunEventStore
 from ...streaming import RelayHub
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import SequenceAllocation

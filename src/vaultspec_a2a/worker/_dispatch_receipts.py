@@ -17,7 +17,7 @@ from ._run_registry import RunScopedRegistry
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from .ipc import WorkerBridge
 

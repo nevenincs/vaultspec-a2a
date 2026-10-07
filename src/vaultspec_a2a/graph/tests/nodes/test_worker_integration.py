@@ -69,8 +69,7 @@ async def test_acp_worker_records_initialized_subprocess_identity(
     migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A real ACP subprocess records initialize and session/new before its prompt."""
-    from ....database.models import ProviderRuntimeIdentityModel
-    from ....database.thread_repository import create_thread
+    from ....database import ProviderRuntimeIdentityModel, create_thread
     from ....providers._factory_commands import ProviderCommand
     from ....providers.acp_chat_model import AcpChatModel
     from ....providers.binary_version import probe_binary_version

@@ -29,8 +29,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database import ActiveThreadProjection
-    from ..database.checkpoints import Checkpointer
+    from ..database import ActiveThreadProjection, Checkpointer
 
 __all__ = ["ActiveRunDiscoveryResult", "discover_active_runs"]
 

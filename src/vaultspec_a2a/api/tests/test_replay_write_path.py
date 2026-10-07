@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 
-from ...database.run_event_repository import RunEventStore
+from ...database import RunEventStore
 from ...streaming import RelayHub
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import RunSequenceAllocator

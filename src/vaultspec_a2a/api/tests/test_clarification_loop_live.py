@@ -57,11 +57,11 @@ from ...control.graph_definition import read_accepted_graph_definition
 from ...control.leased_dispatch import DispatchTransport, accepted_recursion_budget
 from ...database import (
     CONTROL_ACTION_LEASE_TTL,
+    ControlActionModel,
     get_control_action_by_idempotency_key,
     get_thread,
     thread_write_expectation,
 )
-from ...database.models import ControlActionModel
 from ...ipc.schemas import DispatchRequest
 from ...testing import (
     DEFAULT_TEAM_PRESET,
@@ -93,7 +93,7 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from ...database.models import ThreadModel
+    from ...database import ThreadModel
     from ...testing import ParkedClarification
     from ...worker.graph_lifecycle import (
         GraphCompilationKey,

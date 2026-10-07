@@ -33,8 +33,7 @@ from ...control.tests._continuation import (
     queue_continuation,
     seed_busy_run,
 )
-from ...database import get_thread
-from ...database.run_event_repository import RunEventStore
+from ...database import RunEventStore, get_thread
 from ...streaming import RelayHub
 from ...testing import SseFrame, SseReader, serve_on_loopback
 from ...thread.action_receipts import GraphActionReceipt

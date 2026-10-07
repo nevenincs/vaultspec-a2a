@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import select
 
-from ...database.models import ProviderRuntimeIdentityModel
-from ...database.runtime_identity_repository import RuntimeIdentityConflictError
-from ...database.thread_repository import create_thread
+from ...database import (
+    ProviderRuntimeIdentityModel,
+    RuntimeIdentityConflictError,
+    create_thread,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..runtime_identity_port import SqlRuntimeIdentityPort

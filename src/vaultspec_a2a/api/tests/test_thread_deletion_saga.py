@@ -31,9 +31,9 @@ from ...control.deletion_saga import (
     create_deletion_saga,
 )
 from ...database import (
+    ThreadDeletionSagaModel,
     get_thread,
 )
-from ...database.models import ThreadDeletionSagaModel
 from ...testing import seed_journaled_thread, settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import CleanupKind

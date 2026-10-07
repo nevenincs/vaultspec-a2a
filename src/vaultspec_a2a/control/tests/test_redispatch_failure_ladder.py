@@ -31,7 +31,7 @@ from ...tests._write_authority import make_test_write_authority
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ...database.models import ThreadModel
+    from ...database import ThreadModel
 
 from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
@@ -44,8 +44,14 @@ from ...control.execution_authority import (
     ExecutionAuthorityError,
     resolve_execution_authority,
 )
-from ...database import create_control_action, create_thread, get_thread
-from ...database.session import close_db, get_session_factory, init_db
+from ...database import (
+    close_db,
+    create_control_action,
+    create_thread,
+    get_session_factory,
+    get_thread,
+    init_db,
+)
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...thread.enums import ThreadStatus

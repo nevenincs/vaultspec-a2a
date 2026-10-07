@@ -12,18 +12,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from ..control.accepted_input import freeze_accepted_input
-from ..control.action_lease import (
-    ControlActionClaim,
-    ControlActionClaimRequest,
-    ControlActionOutcome,
-    DispatchFailureDisposition,
-    prepare_control_action_claim,
-)
-from ..control.repair_transitions import (
-    apply_repair_transition,
-    record_undelivered_dispatch,
-)
 from ..database import (
     ThreadModel,
     ThreadStatusElectionOutcome,
@@ -44,7 +32,19 @@ from ..thread.enums import (
 )
 from ..thread.idempotency import default_cancel_key
 from ..thread.repair_policy import RepairPhase, repair_state_for_action
+from .accepted_input import freeze_accepted_input
+from .action_lease import (
+    ControlActionClaim,
+    ControlActionClaimRequest,
+    ControlActionOutcome,
+    DispatchFailureDisposition,
+    prepare_control_action_claim,
+)
 from .leased_dispatch import dispatch_leased
+from .repair_transitions import (
+    apply_repair_transition,
+    record_undelivered_dispatch,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

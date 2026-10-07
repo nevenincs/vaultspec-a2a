@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...database.run_event_repository import RunEventRecord, RunEventStore
+from ...database import RunEventRecord, RunEventStore
 from ...streaming import RelayHub
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import SequenceAllocation

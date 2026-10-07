@@ -28,6 +28,9 @@ from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...database import (
+    PermissionRequestModel,
+    ThreadExecutionStateModel,
+    ThreadModel,
     append_permission_log,
     create_control_action,
     create_thread,
@@ -35,11 +38,6 @@ from ...database import (
     get_thread,
     record_permission_request,
     record_permission_response_submission,
-)
-from ...database.models import (
-    PermissionRequestModel,
-    ThreadExecutionStateModel,
-    ThreadModel,
 )
 from ...providers import JsonObject
 from ...streaming import RelayHub
@@ -2235,7 +2233,7 @@ class TestPermissionRespond:
         assert worker.dispatches == []
 
         async def _assert_state() -> None:
-            from ...database.models import PermissionRequestModel
+            from ...database import PermissionRequestModel
 
             async with session_factory() as session:
                 permission = await session.get(PermissionRequestModel, request_id)
@@ -2293,7 +2291,7 @@ class TestPermissionRespond:
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_rejected_action() -> None:
-            from ...database.models import ControlActionModel
+            from ...database import ControlActionModel
 
             async with session_factory() as session:
                 action = await create_control_action(

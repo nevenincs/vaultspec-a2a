@@ -24,13 +24,13 @@ from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
 from ...database import (
+    ControlActionModel,
     create_thread,
     get_control_action_by_idempotency_key,
     get_permission_request,
     record_permission_request,
     supersede_permission_requests,
 )
-from ...database.models import ControlActionModel
 from ...testing import (
     adopted_spawner,
     current_execution_metadata,

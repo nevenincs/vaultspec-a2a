@@ -50,7 +50,7 @@ from .terminal_settlement import TerminalEvidence, lock_terminal_run, settle_ter
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..thread import ThreadWriteExpectation
     from ..thread.action_receipts import GraphActionReceipt
     from ..thread.checkpoint_evidence import CheckpointEvidence

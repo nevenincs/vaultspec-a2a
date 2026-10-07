@@ -311,7 +311,7 @@ async def _read_checkpointed_state(run_id: str) -> JsonObject:
     it. The gateway's wire snapshot deliberately does not carry the finding channel,
     which is why the evidence is read here rather than over HTTP.
     """
-    from ..database.checkpoints import open_checkpointer
+    from ..database import open_checkpointer
 
     async with open_checkpointer() as checkpointer:
         tuple_ = await checkpointer.aget_tuple({"configurable": {"thread_id": run_id}})

@@ -47,6 +47,7 @@ from ...providers.provider_catalog import (
     SelectionReference,
     StructuredProviderHealth,
 )
+from ...providers.provider_catalog_service import stamp_catalog_expiry
 from ...providers.team_selection import (
     FrozenTeamSelection,
     freeze_team_selection,
@@ -82,9 +83,8 @@ def _current_metadata(
     model_value: str = "deterministic",
 ) -> tuple[dict[str, object], FrozenTeamSelection]:
     key = ProviderCatalogKey("deterministic", "in-process-deterministic")
-    discovered = discover_in_process_catalog(key)
     now = datetime.now(UTC)
-    catalog = discovered.catalog
+    catalog = stamp_catalog_expiry(discover_in_process_catalog(key).catalog)
     if model_value != catalog.models[0].provider_value:
         catalog = replace(
             catalog,
@@ -98,12 +98,7 @@ def _current_metadata(
         )
     if catalog_revision is not None:
         catalog = replace(
-            catalog,
-            state=replace(
-                catalog.state,
-                revision=catalog_revision,
-                expires_at=datetime.now(UTC) + timedelta(minutes=5),
-            ),
+            catalog, state=replace(catalog.state, revision=catalog_revision)
         )
     record = ProviderRecord(
         provider_id=key.provider_id,
@@ -138,37 +133,38 @@ def _current_metadata(
             ),
             checked_at=now,
         ),
-        catalog=ProviderCatalog(
-            key=codex_key,
-            state=CatalogState(
-                status=CatalogStatus.AVAILABLE,
-                checked_at=now,
-                revision=codex_revision,
-                expires_at=now + timedelta(minutes=5),
-            ),
-            models=(
-                ModelCatalogEntry(
-                    entry_id="unused-codex-entry",
-                    provider_value="unused-codex-model",
-                    display_name="Unused Codex fallback",
-                    native_control_ids=("reasoning_effort",),
+        catalog=stamp_catalog_expiry(
+            ProviderCatalog(
+                key=codex_key,
+                state=CatalogState(
+                    status=CatalogStatus.AVAILABLE,
+                    checked_at=now,
+                    revision=codex_revision,
                 ),
-            ),
-            native_controls=(
-                NativeControl(
-                    control_id="reasoning_effort",
-                    kind=ControlKind.THOUGHT_LEVEL,
-                    display_name="Reasoning effort",
-                    options=(
-                        NativeControlOption(
-                            option_id="medium",
-                            provider_value="medium",
-                            display_name="Medium",
-                        ),
+                models=(
+                    ModelCatalogEntry(
+                        entry_id="unused-codex-entry",
+                        provider_value="unused-codex-model",
+                        display_name="Unused Codex fallback",
+                        native_control_ids=("reasoning_effort",),
                     ),
-                    default_option_id="medium",
                 ),
-            ),
+                native_controls=(
+                    NativeControl(
+                        control_id="reasoning_effort",
+                        kind=ControlKind.THOUGHT_LEVEL,
+                        display_name="Reasoning effort",
+                        options=(
+                            NativeControlOption(
+                                option_id="medium",
+                                provider_value="medium",
+                                display_name="Medium",
+                            ),
+                        ),
+                        default_option_id="medium",
+                    ),
+                ),
+            )
         ),
     )
     primary = SelectionReference(

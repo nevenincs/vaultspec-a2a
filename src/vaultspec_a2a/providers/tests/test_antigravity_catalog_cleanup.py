@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...utils._process_tree import kill_pid_tree_async, pid_is_live
+from .._catalog_fields import MAX_DISCOVERY_READ_BYTES
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..antigravity_catalog import _read_listing, discover_antigravity_catalog
 from ..provider_catalog import AuthenticationState, ProviderCatalogKey
@@ -53,9 +54,11 @@ async def test_catalog_discovery_reaps_descendants(
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(task, timeout=15)
         else:
-            catalog, authentication = await asyncio.wait_for(task, timeout=15)
-            assert authentication is AuthenticationState.AUTHENTICATED
-            assert [model.provider_value for model in catalog.models] == ["model-id"]
+            discovery = await asyncio.wait_for(task, timeout=15)
+            assert discovery.authentication is AuthenticationState.AUTHENTICATED
+            assert [model.provider_value for model in discovery.catalog.models] == [
+                "model-id"
+            ]
         assert not any(pid_is_live(pid) for pid in pids)
     finally:
         if not task.done():
@@ -68,12 +71,13 @@ async def test_catalog_discovery_reaps_descendants(
 
 @pytest.mark.asyncio
 async def test_catalog_drains_both_pipes_with_bounded_retention(tmp_path: Path) -> None:
+    overflow = 2 * MAX_DISCOVERY_READ_BYTES
     process = await spawn_acp_process(
         [
             sys.executable,
             "-c",
-            "import sys; sys.stdout.buffer.write(b'a' * (2 << 20)); "
-            "sys.stderr.buffer.write(b'b' * (2 << 20))",
+            f"import sys; sys.stdout.buffer.write(b'a' * {overflow}); "
+            f"sys.stderr.buffer.write(b'b' * {overflow})",
         ],
         os.environ.copy(),
         str(tmp_path),
@@ -81,7 +85,7 @@ async def test_catalog_drains_both_pipes_with_bounded_retention(tmp_path: Path) 
     )
     try:
         output = await _read_listing(process, timeout=10)
-        assert len(output) == 1 << 20
+        assert len(output) == MAX_DISCOVERY_READ_BYTES
         assert process.returncode == 0
     finally:
         await kill_process_tree(process)

@@ -339,6 +339,20 @@ def _health_for(
     )
 
 
+def stamp_catalog_expiry(catalog: ProviderCatalog) -> ProviderCatalog:
+    """Return *catalog* expiring one service TTL after it was checked.
+
+    The service stamps every record it serves from its refresh cache. A catalog
+    taken straight from a lane never passed through it, so it carries no expiry,
+    and selection freezing refuses a catalog that cannot expire.
+    """
+    state = catalog.state
+    return replace(
+        catalog,
+        state=replace(state, expires_at=state.checked_at + PROVIDER_CATALOG_CACHE_TTL),
+    )
+
+
 def _valid_public_id(value: str, *, max_length: int) -> bool:
     # Discovery is the producer of every public id, so it refuses more than the
     # published pattern does: ``isprintable`` also rejects C1 controls, bidi
@@ -392,5 +406,6 @@ __all__ = [
     "PROVIDER_CATALOG_CACHE_TTL",
     "ProviderCatalogScopeCapacityError",
     "ProviderCatalogService",
+    "stamp_catalog_expiry",
     "validate_public_catalog_bounds",
 ]

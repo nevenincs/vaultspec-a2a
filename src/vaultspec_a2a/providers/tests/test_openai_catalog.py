@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 
+from .._catalog_fields import MAX_DISCOVERY_READ_BYTES
 from ..openai_catalog import (
     OpenAICompatibleCatalogError,
     catalog_from_model_list,
@@ -404,7 +405,7 @@ async def test_real_http_multi_value_next_link_refuses_partial_catalog() -> None
 async def test_real_http_response_bound_is_enforced_without_diagnostic_leak() -> None:
     response = _HttpResponse(
         status=200,
-        body=b"{" + _SECRET.encode() + b"x" * 1_048_576,
+        body=b"{" + _SECRET.encode() + b"x" * MAX_DISCOVERY_READ_BYTES,
     )
     with (
         _serve(response) as (base_url, _),

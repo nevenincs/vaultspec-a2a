@@ -23,9 +23,9 @@ from vaultspec_a2a.desktop.native_isolation import (
     NativeLaunchAuthority,
     NativeWorkspaceAuthority,
 )
-from vaultspec_a2a.providers._provider_catalog_cache import DEFAULT_FAILURE_TTL
 from vaultspec_a2a.providers.codex_chat_model import CodexChatModel
 from vaultspec_a2a.providers.provider_catalog import (
+    DEFAULT_FAILURE_TTL,
     AuthenticationState,
     CatalogStatus,
     HealthState,

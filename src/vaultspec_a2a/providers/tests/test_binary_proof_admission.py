@@ -14,6 +14,7 @@ from langchain_core.messages import HumanMessage
 from ...graph.enums import Provider
 from ...testing import settings_override
 from .. import factory as factory_module
+from .._catalog_discovery import ProviderCatalogDiscovery
 from ..acp_chat_model import AcpChatModel
 from ..binary_version import probe_binary_version
 from ..cli_resolution import (
@@ -22,7 +23,6 @@ from ..cli_resolution import (
 )
 from ..codex_chat_model import CodexChatModel
 from ..factory import (
-    ProviderCatalogDiscovery,
     ProviderCatalogRegistration,
     ProviderFactory,
     binary_proof_reason,

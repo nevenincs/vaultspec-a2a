@@ -18,7 +18,7 @@ Two populations are asserted:
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -40,9 +40,10 @@ from dev.exit_codes import (
     advisory_result,
     selection_result,
 )
+from dev.paths import REPO_ROOT
 
-#: Repository root: this file is `<root>/dev/guards/<name>.py`.
-ROOT = Path(__file__).resolve().parents[2]
+if TYPE_CHECKING:
+    from pathlib import Path
 
 #: A line carrying this marker is exempt, and must say why on the same line.
 ALLOW = "exit-code-contract: allow"
@@ -82,12 +83,12 @@ def justfiles() -> list[Path]:
             derives the corpus, rather than in each caller, because a caller
             that forgot would be the hole this closes.
     """
-    found = [p for p in ROOT.rglob("*.just") if not PRUNED & set(p.parts)]
-    root_file = ROOT / "Justfile"
+    found = [p for p in REPO_ROOT.rglob("*.just") if not PRUNED & set(p.parts)]
+    root_file = REPO_ROOT / "Justfile"
     if root_file.exists():
         found.append(root_file)
     assert found, (
-        f"no justfile found under {ROOT}. Every repository in this fleet has "
+        f"no justfile found under {REPO_ROOT}. Every repository in this fleet has "
         "at least a root `justfile`; finding none means this guard is looking "
         "in the wrong place, not that the tree is clean."
     )
@@ -212,7 +213,7 @@ def test_no_recipe_swallows_a_failure_by_hand() -> None:
                 continue
             for pattern, why in SWALLOWS:
                 if pattern.search(line):
-                    rel = path.relative_to(ROOT).as_posix()
+                    rel = path.relative_to(REPO_ROOT).as_posix()
                     offences.append(f"{rel}:{number}: {why}\n    {line.strip()}")
     assert not offences, (
         "Express advisory intent structurally with `advisory=True` in the "
@@ -230,7 +231,7 @@ def test_no_dead_lastexitcode_guard() -> None:
             if joined or ALLOW in line:
                 continue
             if LASTEXITCODE.search(line):
-                rel = path.relative_to(ROOT).as_posix()
+                rel = path.relative_to(REPO_ROOT).as_posix()
                 offences.append(f"{rel}:{number}: {line.strip()}")
     assert not offences, (
         "`just` runs each standalone recipe line in its own shell process, so "
@@ -241,7 +242,7 @@ def test_no_dead_lastexitcode_guard() -> None:
 
 
 def test_the_contract_is_documented_beside_its_implementation() -> None:
-    doc = ROOT / "dev" / "EXIT-CODES.md"
+    doc = REPO_ROOT / "dev" / "EXIT-CODES.md"
     assert doc.exists(), "dev/EXIT-CODES.md is the canonical statement"
     body = doc.read_text(encoding="utf-8")
     for token in ("ADVISORY_BROKEN", "NOTHING_SELECTED", "TOOL_MISSING"):

@@ -14,9 +14,11 @@ import sys
 from pathlib import Path
 
 from dev.guards import storage_anchors
+from dev.paths import PACKAGE_PATH, PACKAGE_ROOT, REPO_ROOT, is_test_code
 from dev.process import run_captured
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+#: The gate as the harness runs it: a module of the ``dev`` package.
+GATE = (sys.executable, "-m", "dev.guards.storage_anchors")
 
 
 def _parse(source: str) -> ast.Module:
@@ -155,15 +157,15 @@ def test_the_spellings_that_slipped_past_the_first_rules_are_reported() -> None:
 
 def test_test_modules_are_out_of_the_production_rules() -> None:
     """Tests legitimately build paths against the checkout they run in."""
-    assert storage_anchors._is_test_module(Path("control/tests/test_config.py"))
-    assert storage_anchors._is_test_module(Path("testing/plugin.py"))
-    assert storage_anchors._is_test_module(Path("conftest.py"))
-    assert not storage_anchors._is_test_module(Path("control/config.py"))
+    assert is_test_code(Path("control/tests/test_config.py"))
+    assert is_test_code(Path("testing/plugin.py"))
+    assert is_test_code(Path("conftest.py"))
+    assert not is_test_code(Path("control/config.py"))
 
 
 def test_tests_and_tooling_are_held_to_the_tempfile_rule_alone(tmp_path: Path) -> None:
     """Test and dev modules may read the checkout, but never write to system temp."""
-    tests_dir = tmp_path / storage_anchors.ROOT / "control" / "tests"
+    tests_dir = tmp_path / PACKAGE_PATH / "control" / "tests"
     tests_dir.mkdir(parents=True)
     (tests_dir / "test_probe.py").write_text(
         "import tempfile\n"
@@ -183,11 +185,7 @@ def test_tests_and_tooling_are_held_to_the_tempfile_rule_alone(tmp_path: Path) -
         encoding="utf-8",
     )
 
-    result = run_captured(
-        [sys.executable, str(REPO_ROOT / "dev" / "guards" / "storage_anchors.py")],
-        cwd=tmp_path,
-        timeout=None,
-    )
+    result = run_captured([*GATE, "--root", str(tmp_path)], timeout=None)
 
     assert result.returncode == 1, result.stdout + result.stderr
     reported = [line.strip() for line in result.stderr.splitlines() if ".py:" in line]
@@ -202,11 +200,7 @@ def test_the_gate_passes_against_this_repository() -> None:
     Exit 0 means every remaining violation is one of the explicitly deferred
     modules. A new anchor in production code fails this test.
     """
-    result = run_captured(
-        [sys.executable, "dev/guards/storage_anchors.py"],
-        cwd=REPO_ROOT,
-        timeout=None,
-    )
+    result = run_captured(GATE, timeout=None)
     assert result.returncode == 0, (
         f"the storage-anchor gate failed:\n{result.stderr}\n{result.stdout}"
     )
@@ -214,18 +208,15 @@ def test_the_gate_passes_against_this_repository() -> None:
 
 def test_every_deferred_module_still_exists() -> None:
     """A deferred entry naming a module that is gone is stale debt bookkeeping."""
-    package = REPO_ROOT / storage_anchors.ROOT
-    missing = [key for key in storage_anchors.DEFERRED if not (package / key).is_file()]
+    missing = [
+        key for key in storage_anchors.DEFERRED if not (PACKAGE_ROOT / key).is_file()
+    ]
     assert missing == [], (
         f"deferred entries name modules that no longer exist: {missing}"
     )
 
 
-def test_the_gate_refuses_to_pass_from_the_wrong_directory() -> None:
+def test_the_gate_refuses_to_pass_over_a_tree_without_the_package() -> None:
     """A gate that silently passes when it scanned nothing is worse than none."""
-    result = run_captured(
-        [sys.executable, str(REPO_ROOT / "dev" / "guards" / "storage_anchors.py")],
-        cwd=REPO_ROOT / "dev",
-        timeout=None,
-    )
+    result = run_captured([*GATE, "--root", str(REPO_ROOT / "dev")], timeout=None)
     assert result.returncode == 2, result.stdout + result.stderr

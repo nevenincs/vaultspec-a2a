@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dev.paths import REPO_ROOT
 from dev.process import run_captured
 
 __all__ = ["CLAUDE_CLI_VERSION", "main"]
@@ -15,7 +16,7 @@ CLAUDE_CLI_VERSION = "2.1.286"
 def main() -> None:
     """Put the installed platform binary on the next CI step's PATH."""
     github_path = Path(os.environ["GITHUB_PATH"])
-    packages = Path(__file__).resolve().parents[1] / "node_modules" / "@anthropic-ai"
+    packages = REPO_ROOT / "node_modules" / "@anthropic-ai"
     candidates = sorted(
         binary
         for package in packages.glob("claude-agent-sdk-*")

@@ -67,6 +67,7 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 from dev.ci_formats import REPORTS_ENV
+from dev.paths import REPO_ROOT
 
 #: See the module docstring: these mirror ``dev/exit_codes.py`` (lane L9).
 EXIT_OK = 0
@@ -78,7 +79,6 @@ _OSV_VULN = "https://api.osv.dev/v1/vulns/"
 _OSV_BATCH_LIMIT = 1000
 _TIMEOUT = 60.0
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST_PATH = REPO_ROOT / "dependency-audit-allowlist.toml"
 BINARIES_PATH = REPO_ROOT / "dependency-audit-binaries.toml"
 

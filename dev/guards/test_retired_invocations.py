@@ -15,15 +15,16 @@ four citations survived it.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-pytestmark = pytest.mark.unit
+from dev.paths import REPO_ROOT
 
-#: This repository has no shared `repo_root` fixture, so the sweep derives the
-#: root from this file's own location: `dev/guards/<this file>`.
-REPO_ROOT = Path(__file__).resolve().parents[2]
+if TYPE_CHECKING:
+    from pathlib import Path
+
+pytestmark = pytest.mark.unit
 
 #: Invocation prefixes that no longer exist.
 #:

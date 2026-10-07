@@ -4,20 +4,19 @@ from __future__ import annotations
 
 import sys
 import tomllib
-from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dev.paths import REPO_ROOT
 from dev.process import run_captured
 
 if TYPE_CHECKING:
     import subprocess
-
-ROOT = Path(__file__).resolve().parents[2]
+    from pathlib import Path
 
 
 def _hooks() -> list[dict[str, object]]:
     """Load every hook from the real repository-owned prek configuration."""
-    config = tomllib.loads((ROOT / "prek.toml").read_text(encoding="utf-8"))
+    config = tomllib.loads((REPO_ROOT / "prek.toml").read_text(encoding="utf-8"))
     return [
         hook for repository in config["repos"] for hook in repository.get("hooks", [])
     ]
@@ -41,7 +40,7 @@ def test_vaultspec_validation_hooks_are_read_only() -> None:
         vaultspec_entries[hook_id] = entry
 
     assert vaultspec_entries["vault-sanitize-annotations"] == (
-        "uv run --no-sync python dev/vault_annotations_gate.py"
+        "uv run --no-sync python -m dev.vault_annotations_gate"
     )
     assert vaultspec_entries["vaultspec-commit-gate"] == (
         "uv run --no-sync vaultspec-core commit-gate"
@@ -52,13 +51,13 @@ def test_vaultspec_validation_hooks_are_read_only() -> None:
         for marker in ("sanitize", "--fix", "spec sync --execute")
     )
 
-    justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
+    justfile = (REPO_ROOT / "Justfile").read_text(encoding="utf-8")
     assert "vault-sanitize:\n    {{core}} vault sanitize annotations" in justfile
 
 
 def test_the_repository_annotation_gate_survives_a_core_sync() -> None:
     """Core re-renders its managed block on sync and drops anything inside it."""
-    config = (ROOT / "prek.toml").read_text(encoding="utf-8")
+    config = (REPO_ROOT / "prek.toml").read_text(encoding="utf-8")
     managed_start = config.index(">>> vaultspec-managed hooks")
 
     assert config.index('id = "vault-sanitize-annotations"') < managed_start
@@ -102,11 +101,11 @@ def _run_gate(target: Path) -> subprocess.CompletedProcess[str]:
     return run_captured(
         [
             sys.executable,
-            str(ROOT / "dev" / "vault_annotations_gate.py"),
+            "-m",
+            "dev.vault_annotations_gate",
             "--target",
             str(target),
         ],
-        cwd=ROOT,
         timeout=60,
     )
 

@@ -11,10 +11,12 @@ three constraints the rest of ``dev/`` is not:
 It runs BEFORE the virtual environment exists.
     So it is invoked on an ephemeral interpreter
     (``uv run --no-project --python <pin> -- python -m dev.init``) and imports
-    only the standard library plus :mod:`dev.exit_codes`, which is itself
-    stdlib-only. It must never import :mod:`dev.toolchain`, :mod:`dev.runner`,
-    or anything reached through ``uv run --no-sync python -m dev``: those
-    presume the environment this package is responsible for creating.
+    only the standard library plus the harness modules that are themselves
+    stdlib-only: :mod:`dev.exit_codes`, :mod:`dev.paths`, and the subprocess
+    helpers :mod:`dev.process` and :mod:`dev.runner`. It must never import
+    :mod:`dev.toolchain` or anything reached through
+    ``uv run --no-sync python -m dev``: those presume the environment this
+    package is responsible for creating.
 
 Its phase selection follows this repository's needs.
     The default creates a Python development environment. Full setup also

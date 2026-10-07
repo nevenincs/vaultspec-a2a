@@ -2,23 +2,11 @@
 
 from __future__ import annotations
 
-import sys
-from importlib import import_module
-from pathlib import Path
-
 import yaml
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
-
-runner = import_module("dev.runner")
-toolchain = import_module("dev.toolchain")
-Cmd = runner.Cmd
-Ref = runner.Ref
-AUDIT = toolchain.AUDIT
-CI = toolchain.CI
-LINT = toolchain.LINT
-find_verb = toolchain.find_verb
+from dev.paths import REPO_ROOT
+from dev.runner import Cmd, Ref
+from dev.toolchain import AUDIT, CI, LINT, find_verb
 
 # The dimensions still carried as advisory sentinels. A dimension leaves this
 # tuple when it graduates into `lint all` and its sentinel step goes with it -
@@ -34,7 +22,7 @@ STRICT_SENTINELS = (
 
 def _recipe_lines(name: str) -> list[str]:
     """Return one tracked root recipe body exactly as written."""
-    lines = (ROOT / "Justfile").read_text(encoding="utf-8").splitlines()
+    lines = (REPO_ROOT / "Justfile").read_text(encoding="utf-8").splitlines()
     start = lines.index(f"{name}:") + 1
     body: list[str] = []
     for line in lines[start:]:
@@ -47,7 +35,7 @@ def _recipe_lines(name: str) -> list[str]:
 def _test_job_steps() -> list[dict[str, object]]:
     """Read the tracked test-job steps through the production YAML parser."""
     workflow = yaml.safe_load(
-        (ROOT / ".github" / "workflows" / "test.yml").read_text(encoding="utf-8")
+        (REPO_ROOT / ".github" / "workflows" / "test.yml").read_text(encoding="utf-8")
     )
     return workflow["jobs"]["test"]["steps"]
 
@@ -87,7 +75,7 @@ def test_ci_contract() -> None:
 
     just_test_commands = "\n".join(
         path.read_text(encoding="utf-8")
-        for path in (ROOT / "dev" / "just").glob("*.just")
+        for path in (REPO_ROOT / "dev" / "just").glob("*.just")
     )
     assert " python -m pytest " not in just_test_commands
     assert " pytest " not in just_test_commands

@@ -43,6 +43,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from dev.paths import is_test_path
+
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from typing import Protocol
@@ -167,10 +169,9 @@ def _python_files(root: Path) -> Iterator[Path]:
     pointed at debt someone can actually pay down.
     """
     for path in sorted(root.rglob("*.py")):
-        # Matches `tests`, `service_tests`, `desktop_tests`, and any future
-        # tier named the same way. Listing the directories individually is how
-        # `desktop_tests` leaked into the production ranking the first time.
-        if any(part == "tests" or part.endswith("_tests") for part in path.parts):
+        # Classified below the root, so a checkout that happens to sit under a
+        # directory named like a tier is not mistaken for test code.
+        if is_test_path(path.relative_to(root)):
             continue
         yield path
 

@@ -47,17 +47,19 @@ import argparse
 import os
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from dev import runner
 from dev.exit_codes import FAILED, OK
+from dev.paths import REPO_ROOT
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 __all__ = [
     "ENV_FILE",
     "ENV_FILE_VARIABLE",
     "MISSING_CREDENTIAL",
-    "REPO_ROOT",
     "SCOPES",
     "Scope",
     "describe",
@@ -68,11 +70,8 @@ __all__ = [
     "run",
 ]
 
-#: The repository root, which is where `.env` lives.
-REPO_ROOT: Final = Path(__file__).resolve().parents[1]
-
-#: The environment file. Never read for anything but the names a scope
-#: declares, and never echoed.
+#: The environment file, at the repository root. Never read for anything but
+#: the names a scope declares, and never echoed.
 ENV_FILE: Final = REPO_ROOT / ".env"
 
 #: The variable the service reads its operator settings file from. Spelled out

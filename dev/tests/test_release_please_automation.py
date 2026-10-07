@@ -12,13 +12,13 @@ from __future__ import annotations
 import json
 import re
 import tomllib
-from pathlib import Path
 from typing import Any, cast
 
 import yaml
 
-ROOT = Path(__file__).resolve().parents[2]
-WORKFLOWS = ROOT / ".github" / "workflows"
+from dev.paths import REPO_ROOT
+
+WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 RELEASE_PLEASE_ACTION = (
     "googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7"
 )
@@ -36,18 +36,18 @@ def _workflow(name: str) -> dict[str, Any]:
 def test_release_please_config_tracks_the_python_package_version() -> None:
     """The release PR advances its package and manifest; the lock follows."""
     config = json.loads(
-        (ROOT / "release-please-config.json").read_text(encoding="utf-8")
+        (REPO_ROOT / "release-please-config.json").read_text(encoding="utf-8")
     )
     manifest = json.loads(
-        (ROOT / ".release-please-manifest.json").read_text(encoding="utf-8")
+        (REPO_ROOT / ".release-please-manifest.json").read_text(encoding="utf-8")
     )
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     package = config["packages"]["."]
     lock_package = next(
         package
-        for package in tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))[
-            "package"
-        ]
+        for package in tomllib.loads(
+            (REPO_ROOT / "uv.lock").read_text(encoding="utf-8")
+        )["package"]
         if package["name"] == project["project"]["name"]
     )
 
@@ -75,7 +75,7 @@ def test_release_please_config_tracks_the_python_package_version() -> None:
 
 def test_release_please_can_insert_the_first_pr_above_bootstrapped_history() -> None:
     """Historical headings match release-please's version-header insertion point."""
-    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     headings = re.findall(r"^## \[[0-9]+\.[0-9]+\.[0-9]+\].*$", changelog, re.MULTILINE)
 
     assert headings[-3:] == [
@@ -86,7 +86,7 @@ def test_release_please_can_insert_the_first_pr_above_bootstrapped_history() -> 
         "## [0.1.0](https://github.com/nevenincs/vaultspec-a2a/releases/tag/"
         "v0.1.0) (2026-07-24)",
     ]
-    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+    version = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
         "project"
     ]["version"]
     assert headings[0].startswith(f"## [{version}](")
@@ -107,7 +107,7 @@ def test_the_release_is_held_as_a_draft_until_the_lane_publishes_it() -> None:
     on the draft requirement; restoring it makes this pass.
     """
     package = json.loads(
-        (ROOT / "release-please-config.json").read_text(encoding="utf-8")
+        (REPO_ROOT / "release-please-config.json").read_text(encoding="utf-8")
     )["packages"]["."]
 
     assert package.get("draft") is True, (
@@ -149,7 +149,7 @@ def test_the_proposal_keeps_up_and_never_releases() -> None:
     fail on that setting; restoring it makes this pass.
     """
     config = json.loads(
-        (ROOT / "release-please-config.json").read_text(encoding="utf-8")
+        (REPO_ROOT / "release-please-config.json").read_text(encoding="utf-8")
     )
     assert config.get("always-update") is True, (
         "without `always-update` the proposal branch lags main, and the cut "
@@ -294,7 +294,7 @@ def test_a_release_this_token_cannot_tag_is_named() -> None:
     makes this pass.
     """
     package = json.loads(
-        (ROOT / "release-please-config.json").read_text(encoding="utf-8")
+        (REPO_ROOT / "release-please-config.json").read_text(encoding="utf-8")
     )["packages"]["."]
     assert package["include-component-in-tag"] is False, (
         "the diagnosis and the recovery runbook both derive a bare `v<version>`"

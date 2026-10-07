@@ -19,13 +19,16 @@ expression evaluator can decide it.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 
-ROOT = Path(__file__).resolve().parents[2]
-WORKFLOWS = ROOT / ".github" / "workflows"
+from dev.paths import REPO_ROOT
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
 #: The pull request authors whose code may reach the fleet unreviewed. This is a
 #: personal account, so there are no organisation members: MEMBER is not here,

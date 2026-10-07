@@ -17,11 +17,19 @@ from __future__ import annotations
 
 __all__ = ["main"]
 
+import argparse
 import contextlib
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from dev import runner
+from dev.paths import REPO_ROOT
+from dev.process import run_captured
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _OWNED_PATHS = (
     ".vaultspec",
@@ -43,27 +51,18 @@ _RUNTIME_SEEDS = (
 )
 
 
-def _run(
-    root: Path, *args: str, capture: bool = False
-) -> subprocess.CompletedProcess[str]:
-    # Both tools driven through here - git and vaultspec-core - emit UTF-8 on
-    # every platform, so the encoding is stated rather than left to the locale
-    # (cp1252 on a stock Windows), which would mangle a non-ASCII repository path
-    # in ``git status`` output or raise on a byte that code page leaves
-    # undefined.
-    return subprocess.run(
-        args,
-        cwd=root,
-        check=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=capture,
-    )
+def _capture(root: Path, *args: str) -> str:
+    return run_captured(args, cwd=root, timeout=None, check=True).stdout
+
+
+def _stream(root: Path, *args: str) -> None:
+    code = runner.run(args, cwd=root)
+    if code:
+        raise SystemExit(code)
 
 
 def _require_clean_owned_paths(root: Path) -> None:
-    result = _run(
+    status = _capture(
         root,
         "git",
         "status",
@@ -71,26 +70,17 @@ def _require_clean_owned_paths(root: Path) -> None:
         "--untracked-files=all",
         "--",
         *_OWNED_PATHS,
-        capture=True,
     )
-    if result.stdout.strip():
+    if status.strip():
         raise SystemExit(
             "Core-owned surfaces contain tracked or untracked changes; "
-            "commit, remove, or reconcile them before enrollment:\n" + result.stdout
+            "commit, remove, or reconcile them before enrollment:\n" + status
         )
 
 
 def _tracked_files(root: Path) -> tuple[Path, ...]:
-    result = _run(
-        root,
-        "git",
-        "ls-files",
-        "-z",
-        "--",
-        *_OWNED_PATHS,
-        capture=True,
-    )
-    return tuple(Path(value) for value in result.stdout.split("\0") if value)
+    listing = _capture(root, "git", "ls-files", "-z", "--", *_OWNED_PATHS)
+    return tuple(Path(value) for value in listing.split("\0") if value)
 
 
 def _assert_tracked_projection(root: Path, staged: Path) -> None:
@@ -127,16 +117,26 @@ def _seed_runtime_without_overwrite(root: Path, staged: Path) -> None:
 def _core(root: Path, *args: str) -> None:
     # The harness never runs frozen, so Core is reached as a plain module of the
     # interpreter running this script - the locked tooling environment's own.
-    _run(root, sys.executable, "-m", "vaultspec_core", *args)
+    _stream(root, sys.executable, "-m", "vaultspec_core", *args)
 
 
-def main() -> None:
-    """Enroll the checkout the harness was invoked from."""
-    root = Path(
-        _run(
-            Path.cwd(), "git", "rev-parse", "--show-toplevel", capture=True
-        ).stdout.strip()
-    ).resolve()
+def main(argv: Sequence[str] | None = None) -> None:
+    """Enroll this checkout, or the one ``--root`` names.
+
+    Args:
+        argv: The argument vector, or ``None`` to read :data:`sys.argv`.
+    """
+    parser = argparse.ArgumentParser(
+        prog="python -m dev.vault.enroll",
+        description="Adopt tracked Vaultspec surfaces without forcing the workspace.",
+    )
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=REPO_ROOT,
+        help="the checkout to enroll (default: this repository)",
+    )
+    root: Path = parser.parse_args(argv).root.resolve()
     manifest = root / ".vaultspec/providers.json"
 
     if manifest.is_file():
@@ -153,7 +153,7 @@ def main() -> None:
             prefix="vaultspec-core-adopt-", dir=scratch
         ) as temporary:
             staged = Path(temporary) / "workspace"
-            _run(
+            _stream(
                 root,
                 "git",
                 "clone",

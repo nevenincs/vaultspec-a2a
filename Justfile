@@ -94,7 +94,7 @@ procs := creds + " service -- uv run --no-sync --frozen --no-default-groups vaul
 # The vaultspec-core and vaultspec-rag CLIs this checkout runs on ITSELF.
 core := "uv run --no-sync --frozen --no-default-groups --group tooling vaultspec-core"
 rag := "uv run --no-sync --frozen --no-default-groups --extra rag vaultspec-rag"
-safe_enroll := "uv run --no-sync --frozen --no-default-groups --group tooling python dev/vault/enroll.py"
+safe_enroll := "uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.vault.enroll"
 
 # The bounded Docker Compose projects. Each is pinned to its own project name
 # so one stack can never tear another's containers down.

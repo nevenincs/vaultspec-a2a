@@ -16,21 +16,16 @@ a class attribute are all evaluated while the module is imported.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 from typing import TYPE_CHECKING
+
+from dev.paths import PACKAGE_ROOT, REPO_ROOT, is_test_code
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-PACKAGE = REPO_ROOT / "src" / "vaultspec_a2a"
+    from pathlib import Path
 
 #: The singletons. Reading one of these at module scope builds it there.
 _SINGLETONS = frozenset({"settings", "domain_config"})
-
-#: Test trees are not production import chains: a test module is imported by
-#: a session that has already declared the environment it runs in.
-_EXCLUDED = ("/tests/", "/service_tests/", "/desktop_tests/", "/testing/")
 
 
 def _import_time_nodes(node: ast.AST) -> list[ast.AST]:
@@ -63,8 +58,10 @@ def _reads_in(body: list[ast.stmt]) -> Iterator[tuple[int, str]]:
 
 
 def _production_modules() -> Iterator[Path]:
-    for path in sorted(PACKAGE.rglob("*.py")):
-        if not any(part in path.as_posix() for part in _EXCLUDED):
+    # Test code is not a production import chain: a test module is imported by
+    # a session that has already declared the environment it runs in.
+    for path in sorted(PACKAGE_ROOT.rglob("*.py")):
+        if not is_test_code(path.relative_to(PACKAGE_ROOT)):
             yield path
 
 

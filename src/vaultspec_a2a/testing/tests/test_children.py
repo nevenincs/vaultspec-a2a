@@ -12,12 +12,12 @@ import contextlib
 import sys
 from typing import TYPE_CHECKING
 
-import psutil
 import pytest
 
 from ...utils import ProcessContainment, spawn_contained
-from ..children import await_child, reap_contained, run_child
+from ..children import await_child, run_child
 from ..progress import ProgressStalledError
+from ..reap import reap_contained
 
 if TYPE_CHECKING:
     import subprocess
@@ -52,7 +52,7 @@ def test_a_child_that_stops_making_progress_is_reaped() -> None:
         with pytest.raises(ProgressStalledError, match="an idle child"):
             await_child(idle, containment, what="an idle child", idle_window_s=2.0)
 
-        assert not psutil.pid_exists(idle.pid) or idle.poll() is not None
+        assert idle.poll() is not None
 
 
 def test_a_spinning_child_is_caught_by_its_ceiling() -> None:

@@ -8,13 +8,14 @@ killed for real - no mocks, no patched clocks.
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import time
 from typing import TYPE_CHECKING
 
 import pytest
 
+from ...utils import ProcessContainment, spawn_contained
+from ..children import run_child
 from ..leases import (
     LEASE_TTL_MS,
     LeaseAcquisitionTimeoutError,
@@ -22,8 +23,10 @@ from ..leases import (
     hold_lease,
     lease_home,
 )
+from ..reap import reap_contained
 
 if TYPE_CHECKING:
+    import subprocess
     from pathlib import Path
 
 
@@ -51,13 +54,11 @@ def test_dead_holder_is_reclaimed_by_pid_liveness(tmp_path: Path) -> None:
         "acquire(sys.argv[2], home=Path(sys.argv[1]))\n"
         "print('held', flush=True)\n"
     )
-    completed = subprocess.run(
+    completed = run_child(
         [sys.executable, "-c", script, str(tmp_path), "scratch-crash"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=True,
+        what="the crashed lease holder",
     )
+    assert completed.returncode == 0, completed.stderr
     assert "held" in completed.stdout
     marker = lease_home(tmp_path) / "scratch-crash.lease"
     assert marker.exists(), "the crashed holder left its marker behind"
@@ -149,8 +150,9 @@ def test_two_processes_serialize_on_one_exclusive_key(tmp_path: Path) -> None:
         "out.write_text(json.dumps({'start': start, 'end': end}))\n"
     )
 
-    def _spawn(tag: str) -> subprocess.Popen[bytes]:
-        return subprocess.Popen(
+    def _spawn(tag: str) -> tuple[subprocess.Popen[bytes], ProcessContainment]:
+        containment = ProcessContainment.create()
+        process = spawn_contained(
             [
                 sys.executable,
                 "-c",
@@ -158,12 +160,19 @@ def test_two_processes_serialize_on_one_exclusive_key(tmp_path: Path) -> None:
                 str(tmp_path),
                 "scratch-serial",
                 str(tmp_path / f"{tag}.json"),
-            ]
+            ],
+            containment,
         )
+        return process, containment
 
-    first, second = _spawn("one"), _spawn("two")
-    assert first.wait(timeout=120) == 0
-    assert second.wait(timeout=120) == 0
+    contenders: list[tuple[subprocess.Popen[bytes], ProcessContainment]] = []
+    try:
+        contenders.extend(_spawn(tag) for tag in ("one", "two"))
+        for process, _containment in contenders:
+            assert process.wait(timeout=120) == 0
+    finally:
+        for process, containment in contenders:
+            reap_contained(process, containment)
     one = json.loads((tmp_path / "one.json").read_text())
     two = json.loads((tmp_path / "two.json").read_text())
     assert one["end"] <= two["start"] or two["end"] <= one["start"], (

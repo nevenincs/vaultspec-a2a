@@ -193,7 +193,6 @@ class ProcessContainment:
         self._pid: int | None = None
         self._pgid: int | None = None
         self._job: Any | None = None  # Windows job HANDLE (ctypes c_void_p)
-        self._assigned = False
         self._termination_task: asyncio.Task[bool] | None = None
 
     @classmethod
@@ -273,7 +272,6 @@ class ProcessContainment:
                 )
             self._pid = pid
             self._pgid = pid
-            self._assigned = True
             return
         handle = getattr(process, "_handle", None)
         if handle is None:
@@ -378,12 +376,6 @@ class ProcessContainment:
                 f"{ctypes.WinError(ctypes.get_last_error())}"
             )
         self._pid = pid
-        self._assigned = True
-
-    @property
-    def assigned(self) -> bool:
-        """Whether a root pid is bound to this containment."""
-        return self._assigned
 
     def is_quiescent(self) -> bool | None:
         """Return whether the owned tree is empty, or ``None`` if unknowable.
@@ -394,8 +386,6 @@ class ProcessContainment:
         """
         if self._pid is None:
             return True
-        if not self._assigned:
-            return None
         if sys.platform == "win32":
             if self._job is None:
                 return None
@@ -439,7 +429,6 @@ class ProcessContainment:
         if result:
             # A successfully emptied group can later reuse its numeric identity.
             self._pid = self._pgid = None
-            self._assigned = False
         return result
 
     async def _terminate_owned(
@@ -447,10 +436,6 @@ class ProcessContainment:
     ) -> bool:
         if self._pid is None:
             return True
-        if not self._assigned:
-            raise ProcessContainmentError(
-                f"Process {self._pid} is not assigned to this containment"
-            )
         if sys.platform == "win32":
             return await self._terminate_win_job(kill_timeout=kill_timeout)
         return await self._terminate_posix_group(
@@ -540,7 +525,7 @@ class ProcessContainment:
         Job Object membership; POSIX names the isolated process group, whose
         members are the owned tree by construction.
         """
-        if self._pid is None or not self._assigned:
+        if self._pid is None:
             return "owned_pids=unassigned"
         if sys.platform == "win32":
             pids = self._win_job_process_ids(win_kernel32())
@@ -560,7 +545,7 @@ class ProcessContainment:
         and a descendant of the retained launcher root. POSIX has no launcher
         hop here, so only the exact spawned root is valid.
         """
-        if self._pid is None or not self._assigned or pid <= 1:
+        if self._pid is None or pid <= 1:
             return False
         if sys.platform != "win32":
             return pid == self._pid

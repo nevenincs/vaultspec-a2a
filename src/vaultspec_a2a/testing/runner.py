@@ -9,7 +9,6 @@ reaps the complete contained process tree after a short teardown deadline.
 from __future__ import annotations
 
 import argparse
-import asyncio
 import hmac
 import os
 import secrets
@@ -18,10 +17,12 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
 from ..utils import ProcessContainment, ProcessContainmentError, spawn_contained
 from .harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
+from .reap import reap_contained
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -39,6 +40,7 @@ RUN_TIMEOUT_EXIT = 125
 DESCENDANT_TIMEOUT_EXIT = 126
 _POLL_SECONDS = 0.05
 _DEFAULT_PROGRESS_INTERVAL_SECONDS = 30.0
+_reap = partial(reap_contained, term_timeout=2.0, kill_timeout=5.0)
 
 
 @dataclass(frozen=True)
@@ -197,17 +199,6 @@ def _completion_received(
     return _handle_completion_complete(sender_pid, exitstatus, designated_pid)
 
 
-def _terminate(
-    containment: ProcessContainment, process: subprocess.Popen[bytes]
-) -> bool:
-    tree_reaped = asyncio.run(containment.terminate(term_timeout=2.0, kill_timeout=5.0))
-    try:
-        process.wait(timeout=5.0)
-    except subprocess.TimeoutExpired:
-        return False
-    return tree_reaped
-
-
 def _timeout_context(
     process: subprocess.Popen[bytes], containment: ProcessContainment
 ) -> str:
@@ -255,7 +246,7 @@ def _root_exit_status(
     first_seen = now if first_seen is None else first_seen
     if now - first_seen >= timeout_s:
         context = _timeout_context(process, containment)
-        reaped = _terminate(containment, process)
+        reaped = _reap(process, containment)
         print(
             "pytest exited but its contained descendants did not "
             f"exit within {timeout_s:g}s; tree_reaped={str(reaped).lower()} "
@@ -283,7 +274,7 @@ def _teardown_timeout_status(
     # orders of magnitude with host load and say nothing about ownership.
     result_to_exit = now - completion_seen
     context = _timeout_context(process, containment)
-    reaped = _terminate(containment, process)
+    reaped = _reap(process, containment)
     print(
         "pytest produced a session result but its owned process tree "
         f"did not exit within {timeout_s:g}s; tree_reaped={str(reaped).lower()} "
@@ -304,7 +295,7 @@ def _run_timeout_status(
     if timeout_s is None or now - started < timeout_s:
         return None
     context = _timeout_context(process, containment)
-    reaped = _terminate(containment, process)
+    reaped = _reap(process, containment)
     print(
         "pytest did not produce a session result within "
         f"{timeout_s:g}s; tree_reaped={str(reaped).lower()} {context}",
@@ -385,7 +376,7 @@ def _await_pytest_exit(
             time.sleep(_POLL_SECONDS)
     finally:
         if process.poll() is None:
-            _terminate(containment, process)
+            _reap(process, containment)
         else:
             containment.close()
 

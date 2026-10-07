@@ -1,9 +1,10 @@
 """Process introspection, loopback port probes and detached process-tree kills.
 
 Every "is this pid alive", "wait until these pids are gone", "which processes
-descend from this one", "when did this process start" and "is something
-listening on this loopback port, and is it ours" question in the package is
-answered here, each in a blocking and an event-loop form where callers need both.
+descend from this one", "how much CPU has this tree used", "when did this
+process start" and "is something listening on this loopback port, and is it
+ours" question in the package is answered here, each in a blocking and an
+event-loop form where callers need both.
 This is the only module that inspects processes, and psutil is its one backend:
 it covers every supported host, reads a zombie as the exited process it is, and
 walks descendants with a guard against a reused parent pid. The start identity is
@@ -56,6 +57,7 @@ __all__ = [
     "port_has_listener_async",
     "process_group_members",
     "process_start_identity",
+    "tree_cpu_usage",
     "wait_pid_gone",
     "wait_pid_gone_async",
     "win_kernel32",
@@ -180,6 +182,32 @@ def descendant_pids(pid: int) -> list[int]:
         return [member.pid for member in _tree_members(pid)[1:]]
     except (psutil.Error, OSError):
         return []
+
+
+def tree_cpu_usage(pid: int) -> tuple[float, int] | None:
+    """Cumulative CPU seconds and live member count of *pid*'s process tree.
+
+    Both halves are progress signals for a caller watching a child: CPU time
+    advances while the tree computes, and the member count changes when it
+    spawns or reaps. ``None`` when the root is gone or cannot be read; a member
+    that exits or cannot be read mid-walk is left out of both figures.
+    """
+    if pid <= 0:
+        return None
+    try:
+        members = _tree_members(pid)
+    except (psutil.Error, OSError):
+        return None
+    total = 0.0
+    live = 0
+    for member in members:
+        try:
+            times = member.cpu_times()
+        except (psutil.Error, OSError):
+            continue
+        total += times.user + times.system
+        live += 1
+    return total, live
 
 
 def process_group_members(pgid: int) -> tuple[int, ...] | None:

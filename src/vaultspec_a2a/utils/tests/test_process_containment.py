@@ -38,6 +38,7 @@ print(child.pid, flush=True)
 print(os.getpid(), flush=True)
 time.sleep(120)
 """
+_UNASSIGNED = "owned_pids=unassigned"
 _CHILD = "import time; print('ready', flush=True); time.sleep(120)"
 _STUBBORN_CHILD = (
     "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
@@ -87,7 +88,7 @@ async def test_terminate_fells_the_contained_tree(
             [sys.executable, "-c", "import time; time.sleep(120)"]
         )
         try:
-            assert containment.assigned
+            assert containment.is_quiescent() is False
             assert pid_is_live(child_pid)
             if root_exited:
                 parent.kill()
@@ -99,7 +100,7 @@ async def test_terminate_fells_the_contained_tree(
 
             assert not pid_is_live(child_pid)
             assert foreign.poll() is None
-            assert not containment.assigned
+            assert containment.diagnostic_snapshot() == _UNASSIGNED
             assert containment._pid is None
             assert containment._pgid is None
             # Repetition cannot send another signal to a numeric group that may
@@ -125,7 +126,7 @@ async def test_cancellation_joins_contained_tree_cleanup() -> None:
             await task
         parent.wait(timeout=10)
         assert not pid_is_live(child_pid)
-        assert not containment.assigned
+        assert containment.diagnostic_snapshot() == _UNASSIGNED
         assert containment._job is None
 
 
@@ -163,9 +164,9 @@ async def test_terminate_of_already_exited_root_is_success() -> None:
     try:
         proc = spawn_contained([sys.executable, "-c", "pass"], containment)
         proc.wait(timeout=10)
-        assert containment.assigned
+        assert containment.diagnostic_snapshot() != _UNASSIGNED
         assert await containment.terminate(term_timeout=0.2, kill_timeout=2.0)
-        assert not containment.assigned
+        assert containment.diagnostic_snapshot() == _UNASSIGNED
     finally:
         containment.close()
 
@@ -180,7 +181,7 @@ async def test_repeated_unassigned_termination_releases_native_handles() -> None
     for _ in range(100):
         containment = ProcessContainment.create()
         try:
-            assert not containment.assigned
+            assert containment.diagnostic_snapshot() == _UNASSIGNED
             assert await containment.terminate()
             assert await containment.terminate()
             assert containment._job is None

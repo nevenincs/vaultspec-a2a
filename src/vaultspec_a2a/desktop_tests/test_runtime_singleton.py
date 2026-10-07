@@ -28,7 +28,7 @@ from ..lifecycle.singleton import (
     SingletonState,
     classify_app_home,
 )
-from ..testing import SignalledChild, free_port, spawn_signalled
+from ..testing import SignalledChild, free_port, reap_contained, spawn_signalled
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -108,7 +108,7 @@ def test_second_gateway_cannot_own_or_overwrite_the_home(tmp_path: Path) -> None
         second, second_outcome = _spawn_gateway(
             tmp_path, app_home, "owner-b", free_port(), "second"
         )
-        second_code = second.process.wait(timeout=25)
+        second_code = second.request_stop()
         assert second_code == 3
         outcome = cast("dict[str, str]", json.loads(second_outcome.read_text()))
         assert outcome["result"] == "conflict"
@@ -131,8 +131,9 @@ def test_owner_restart_after_real_kill_reclaims_via_stale(tmp_path: Path) -> Non
     try:
         first_pid = cast("_ReadyPayload", json.loads(first.payload()))["pid"]
     finally:
-        first.process.terminate()
-        first.process.wait(timeout=25)
+        # A stop request would release the singleton cleanly; the kill is what
+        # leaves it stale, and the containment reaps whatever else the child ran.
+        reap_contained(first.process, first.containment)
 
     # The killed gateway's runtime singleton is now stale (recorded process dead).
     state, record = classify_app_home(app_home, owner="owner-a")

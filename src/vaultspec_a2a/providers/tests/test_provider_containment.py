@@ -83,10 +83,10 @@ async def test_provider_tree_contained_and_reaped_whole(use_exec: bool) -> None:
         use_exec=use_exec,
     )
     assert process.stdout is not None
-    # The provider root is seated in its own containment before descendant work.
+    # The provider root is seated in its own containment before descendant work;
+    # the reap below felling the grandchild is what proves it holds the tree.
     containment = getattr(process, "_vaultspec_containment", None)
     assert isinstance(containment, ProcessContainment)
-    assert containment.assigned is True
 
     line = await asyncio.wait_for(process.stdout.readline(), timeout=10.0)
     grandchild_pid = int(line.strip())

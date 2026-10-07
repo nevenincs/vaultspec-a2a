@@ -1,10 +1,11 @@
-"""Permission repository — the permission request lifecycle."""
+"""Permission repository — permission requests and the permission decision log."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict, Unpack
+from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -23,14 +24,16 @@ from ..thread.enums import (
     ThreadStatus,
 )
 from ._helpers import _coerce, save_model
-from .models import PermissionRequestModel, ThreadModel, utcnow
+from .models import PermissionLogModel, PermissionRequestModel, ThreadModel, utcnow
 from .thread_repository import path_safe_run_id_clause
 
 __all__ = [
     "PendingPermission",
     "actionable_pending_permissions",
+    "append_permission_log",
     "expire_pending_permission_requests",
     "get_pending_permission_requests",
+    "get_permission_logs_by_thread",
     "get_permission_request",
     "mark_permission_request_applied",
     "outstanding_permission_pause",
@@ -388,3 +391,51 @@ async def expire_pending_permission_requests(
         permission.applied_at = permission.applied_at or utcnow()
     await session.flush()
     return len(permissions)
+
+
+class _PermissionLogOptional(TypedDict, total=False):
+    option_id: str | None
+
+
+class _PermissionLogArgs(_PermissionLogOptional):
+    thread_id: str
+    agent_id: str | None
+    tool_name: str
+    action: str
+
+
+async def append_permission_log(
+    session: AsyncSession,
+    **kwargs: Unpack[_PermissionLogArgs],
+) -> PermissionLogModel:
+    """Append one permission decision to the durable audit log.
+
+    ``action`` is the verdict (approved or rejected) and ``option_id`` the
+    concrete option that produced it. The two are recorded together because the
+    verdict alone cannot distinguish which of several rejecting options a
+    reviewer chose, and the option id alone is only interpretable against the
+    request's option list, which this row does not carry.
+
+    ``agent_id`` is keyword-required despite being nullable: a caller that has no
+    attribution must say so, rather than inherit an absence it never considered.
+    """
+    log_entry = PermissionLogModel(
+        id=uuid4().hex,
+        thread_id=kwargs["thread_id"],
+        agent_id=kwargs["agent_id"],
+        tool_name=kwargs["tool_name"],
+        action=kwargs["action"],
+        option_id=kwargs.get("option_id"),
+    )
+    return await save_model(session, log_entry)
+
+
+async def get_permission_logs_by_thread(
+    session: AsyncSession, thread_id: str
+) -> Sequence[PermissionLogModel]:
+    stmt = (
+        select(PermissionLogModel)
+        .where(PermissionLogModel.thread_id == thread_id)
+        .order_by(PermissionLogModel.responded_at)
+    )
+    return (await session.execute(stmt)).scalars().all()

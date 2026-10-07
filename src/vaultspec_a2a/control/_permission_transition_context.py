@@ -56,10 +56,6 @@ class PermissionTransitionContext:
         return self.decision.is_locally_respondable
 
     @property
-    def permission_description(self) -> str:
-        return self.decision.permission_description
-
-    @property
     def replay_approval_status(self) -> str | None:
         return self.decision.replay_approval_status
 
@@ -77,7 +73,6 @@ class PermissionDecision:
     """Decision derived from the current permission and selected option."""
 
     is_locally_respondable: bool
-    permission_description: str
     replay_approval_status: str | None
     verdict: str
     submitted_approval_status: str | None
@@ -104,7 +99,6 @@ def permission_transition_context(
         write_expectation=write_expectation,
         decision=PermissionDecision(
             is_locally_respondable=is_locally_respondable,
-            permission_description=permission.description,
             replay_approval_status=replay_approval_status,
             verdict=decision_verdict,
             submitted_approval_status=submitted_approval_status,

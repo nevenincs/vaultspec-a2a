@@ -310,6 +310,7 @@ __all__ = [
     "PendingPermission",
     "PermissionLogModel",
     "PermissionRequestModel",
+    "ProviderRuntimeIdentityModel",
     "RecoveryAttemptModel",
     "RecoveryFailureArgs",
     "RecoveryRescheduleArgs",

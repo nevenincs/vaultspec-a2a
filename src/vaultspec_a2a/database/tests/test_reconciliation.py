@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ...control.reconciliation import reconcile_threads_on_startup
 from ...database import (
     create_thread,
     get_thread,
     record_permission_request,
     record_permission_response_submission,
 )
-from ...database.reconciliation import reconcile_threads_on_startup
 from ...testing import current_execution_metadata, seed_create_action
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority

@@ -21,11 +21,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from ...database import RecoveryAttemptModel, get_thread
-from ...database.reconciliation import reconcile_threads_on_startup
 from ...testing import adopted_spawner
 from ...thread.enums import ControlActionType, RepairStatus, ThreadStatus
 from ..circuit_breaker import WorkerCircuitBreaker
 from ..direct_control_recovery import redrive_direct_control_actions
+from ..reconciliation import reconcile_threads_on_startup
 from ..recovery_authority import (
     CONTINUATION_PROMOTED,
     RecoveryRequest,

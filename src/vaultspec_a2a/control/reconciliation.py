@@ -5,20 +5,20 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from ..control.recovery_authority import (
+from ..database import list_non_terminal_threads
+from ..domain_config import domain_config
+from ..thread.enums import ThreadStatus
+from .recovery_authority import (
     PROMOTION_OWNED_CONDITIONS,
     RecoveryRequest,
     RecoveryTrigger,
     reconcile_run_checkpoint,
 )
-from ..domain_config import domain_config
-from ..thread.enums import ThreadStatus
-from .thread_repository import list_non_terminal_threads
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from .checkpoints import Checkpointer
+    from ..database import Checkpointer
 
 __all__ = ["reconcile_threads_on_startup"]
 

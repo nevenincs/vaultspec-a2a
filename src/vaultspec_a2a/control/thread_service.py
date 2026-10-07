@@ -28,15 +28,15 @@ from ..control.repair_transitions import (
     apply_repair_transition,
 )
 from ..database import (
+    ThreadModel,
     ThreadStatusElectionOutcome,
     begin_write_transaction,
     create_thread,
     elect_thread_status,
     get_thread,
+    surviving_transcript,
     thread_write_expectation,
 )
-from ..database.checkpoints import surviving_transcript
-from ..database.models import ThreadModel
 from ..graph.nodes.vault_reader import build_initial_vault_index
 from ..ipc.schemas import (
     DispatchRequest,
@@ -71,7 +71,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..providers.team_selection import FrozenLaneAssignment
     from ..team import TeamConfig
     from ..thread.actor_tokens import ActorTokenBundle

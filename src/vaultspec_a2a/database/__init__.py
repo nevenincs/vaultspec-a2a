@@ -23,9 +23,12 @@ from .authoring_cursor_repository import (
 from .authoring_cursor_repository import (
     set_authoring_cursor as set_authoring_cursor,
 )
+from .checkpoints import Checkpointer as Checkpointer
 from .checkpoints import CheckpointRead as CheckpointRead
 from .checkpoints import CheckpointReadStatus as CheckpointReadStatus
+from .checkpoints import open_checkpointer as open_checkpointer
 from .checkpoints import read_latest_checkpoint as read_latest_checkpoint
+from .checkpoints import surviving_transcript as surviving_transcript
 from .compatibility import SchemaCompatibilityError as SchemaCompatibilityError
 from .compatibility import supported_migration_head as supported_migration_head
 from .compatibility import validate_desktop_schema as validate_desktop_schema
@@ -194,6 +197,10 @@ from .recovery_attempt_repository import (
 )
 from .run_event_repository import RunEventRecord as RunEventRecord
 from .run_event_repository import RunEventStore as RunEventStore
+from .run_event_repository import retained_high_water_mark as retained_high_water_mark
+from .run_event_retention import (
+    sweep_replay_log_periodically as sweep_replay_log_periodically,
+)
 from .runtime_identity_repository import (
     RuntimeIdentityConflictError as RuntimeIdentityConflictError,
 )
@@ -264,6 +271,7 @@ __all__ = [
     "Base",
     "CheckpointRead",
     "CheckpointReadStatus",
+    "Checkpointer",
     "ControlActionModel",
     "ControlActionReservation",
     "CostTrackingModel",
@@ -337,6 +345,7 @@ __all__ = [
     "migration_script_location",
     "next_queue_position",
     "normalize_workspace_identity",
+    "open_checkpointer",
     "outstanding_permission_pause",
     "overdue_recovery_actions",
     "path_safe_run_id_clause",
@@ -357,6 +366,7 @@ __all__ = [
     "reserve_control_action",
     "reset_permission_response_submission",
     "resolve_session_factory",
+    "retained_high_water_mark",
     "retry_write_contention",
     "run_migrations",
     "save_model",
@@ -372,7 +382,9 @@ __all__ = [
     "sum_cost_by_thread",
     "supersede_permission_requests",
     "supported_migration_head",
+    "surviving_transcript",
     "swap_cleanup_ledger",
+    "sweep_replay_log_periodically",
     "thread_owned_by",
     "thread_write_expectation",
     "unscheduled_recovery_actions",

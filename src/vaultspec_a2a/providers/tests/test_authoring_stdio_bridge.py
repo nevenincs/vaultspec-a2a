@@ -13,7 +13,6 @@ Set ``VAULTSPEC_A2A_ENGINE_SERVICE_JSON`` to the engine's discovery file.
 
 from __future__ import annotations
 
-import os
 import sys
 from typing import TYPE_CHECKING
 
@@ -31,7 +30,7 @@ from ...protocols.mcp.authoring_stdio import (
     ENV_RUN_ID,
     ENV_SERVER_NAME,
 )
-from ...testing import mint_raw_token
+from ...testing import inherited_environment, mint_raw_token
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 
 if TYPE_CHECKING:
@@ -62,8 +61,7 @@ async def run_context(live_engine: EngineEndpoint) -> AsyncGenerator[RunContext]
 def _bridge_params(
     base_url: str, bearer: str, actor_token: str, run_id: str
 ) -> StdioServerParameters:
-    env = dict(os.environ)
-    env.update(
+    env = inherited_environment(
         {
             ENV_BASE_URL: base_url,
             ENV_BEARER: bearer,

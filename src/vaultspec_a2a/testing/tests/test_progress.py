@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...lifecycle import ProcRecord, now_ms, write_record
-from ...utils import ProcessContainment, spawn_contained
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 from ..progress import (
     ProgressDeadline,
     ProgressStalledError,
@@ -19,7 +19,6 @@ from ..progress import (
     registry_watch,
     wait_for,
 )
-from ..reap import reap_contained
 
 if TYPE_CHECKING:
     from pathlib import Path

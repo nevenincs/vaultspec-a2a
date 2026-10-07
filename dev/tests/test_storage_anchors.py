@@ -16,7 +16,7 @@ from pathlib import Path
 from dev.exit_codes import TOOL_BROKEN
 from dev.guards import storage_anchors
 from dev.paths import PACKAGE_PATH, PACKAGE_ROOT, REPO_ROOT, is_test_code
-from dev.process import run_captured
+from dev.process import combined_output, run_captured
 
 #: The gate as the harness runs it: a module of the ``dev`` package.
 GATE = (sys.executable, "-m", "dev.guards.storage_anchors")
@@ -188,7 +188,7 @@ def test_tests_and_tooling_are_held_to_the_tempfile_rule_alone(tmp_path: Path) -
 
     result = run_captured([*GATE, "--root", str(tmp_path)], timeout=None)
 
-    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.returncode == 1, combined_output(result)
     reported = [line.strip() for line in result.stderr.splitlines() if ".py:" in line]
     assert len(reported) == 2, reported
     assert any("test_probe.py:4: tempfile.mkdtemp()" in line for line in reported)
@@ -220,4 +220,4 @@ def test_every_deferred_module_still_exists() -> None:
 def test_the_gate_refuses_to_pass_over_a_tree_without_the_package() -> None:
     """A gate that silently passes when it scanned nothing is worse than none."""
     result = run_captured([*GATE, "--root", str(REPO_ROOT / "dev")], timeout=None)
-    assert result.returncode == TOOL_BROKEN, result.stdout + result.stderr
+    assert result.returncode == TOOL_BROKEN, combined_output(result)

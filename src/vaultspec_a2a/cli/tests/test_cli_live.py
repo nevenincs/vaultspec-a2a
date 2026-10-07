@@ -61,10 +61,9 @@ def _in_process_lane_arguments(base: str) -> dict[str, str]:
     }
 
 
-# Blank rather than absent: ``run_cli`` overlays the inherited environment and the
-# settings source ignores empty values, so the child never holds the worker
-# credential of a host that exports one.
-_NO_WORKER_CREDENTIAL = {"VAULTSPEC_A2A_INTERNAL_TOKEN": ""}
+# ``run_cli`` overlays the inherited environment and a ``None`` value removes the
+# name, so the child never holds the worker credential of a host that exports one.
+_NO_WORKER_CREDENTIAL = {"VAULTSPEC_A2A_INTERNAL_TOKEN": None}
 
 # A configured token is the CLI's authoritative credential, so a child run in
 # this environment authenticates against a gateway built by ``make_app``.

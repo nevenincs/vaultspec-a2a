@@ -27,6 +27,8 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from ...testing import inherited_environment
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
@@ -104,14 +106,15 @@ def _run_telemetry_probe(
     """
     script = tmp_path / "telemetry_probe.py"
     script.write_text(_TELEMETRY_PROBE_SCRIPT, encoding="utf-8")
-    env = dict(os.environ)
-    for key in ("OTEL_SDK_DISABLED", *_LANGSMITH_TRACING_ENV):
-        env.pop(key, None)
-    env.update(env_overrides)
     result = subprocess.run(
         [sys.executable, str(script)],
         cwd=str(tmp_path),
-        env=env,
+        env=inherited_environment(
+            {
+                **dict.fromkeys(("OTEL_SDK_DISABLED", *_LANGSMITH_TRACING_ENV)),
+                **env_overrides,
+            }
+        ),
         capture_output=True,
         text=True,
         timeout=120,
@@ -687,14 +690,21 @@ def _run_exporter_selection_probe(
     """Configure telemetry in a child with a controlled exporter selection."""
     script = tmp_path / "exporter_selection_probe.py"
     script.write_text(_EXPORTER_SELECTION_PROBE_SCRIPT, encoding="utf-8")
-    env = dict(os.environ)
-    for key in ("OTEL_TRACES_EXPORTER", "OTEL_METRICS_EXPORTER", "OTEL_SDK_DISABLED"):
-        env.pop(key, None)
-    env.update(env_overrides)
     result = subprocess.run(
         [sys.executable, str(script)],
         cwd=str(tmp_path),
-        env=env,
+        env=inherited_environment(
+            {
+                **dict.fromkeys(
+                    (
+                        "OTEL_TRACES_EXPORTER",
+                        "OTEL_METRICS_EXPORTER",
+                        "OTEL_SDK_DISABLED",
+                    )
+                ),
+                **env_overrides,
+            }
+        ),
         capture_output=True,
         text=True,
         timeout=120,

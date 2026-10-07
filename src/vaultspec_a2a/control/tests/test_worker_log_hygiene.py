@@ -24,11 +24,10 @@ from ...control._worker_health import (
 from ...lifecycle.registry import ProcRecord, now_ms, write_record
 from ...testing import (
     JsonReplyHandler,
-    reap_contained,
     serve_handler,
     settings_override,
 )
-from ...utils import ProcessContainment, spawn_contained
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 
 if TYPE_CHECKING:
     from collections.abc import Generator

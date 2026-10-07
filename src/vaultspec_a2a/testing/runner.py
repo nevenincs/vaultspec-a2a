@@ -20,9 +20,13 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
-from ..utils import ProcessContainment, ProcessContainmentError, spawn_contained
+from ..utils import (
+    ProcessContainment,
+    ProcessContainmentError,
+    reap_contained,
+    spawn_contained,
+)
 from .harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
-from .reap import reap_contained
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

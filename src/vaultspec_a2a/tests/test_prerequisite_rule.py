@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ..conftest import EXTERNAL_PREREQUISITES
-from ..testing import combined_output
+from ..testing import combined_output, inherited_environment
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -42,13 +42,10 @@ def _pytest(
     with_env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a real nested pytest, optionally with env vars stripped."""
-    env = {k: v for k, v in os.environ.items() if k not in without}
-    if with_env is not None:
-        env.update(with_env)
     return subprocess.run(
         [sys.executable, "-m", "pytest", *args],
         cwd=REPO_ROOT,
-        env=env,
+        env=inherited_environment({**dict.fromkeys(without), **(with_env or {})}),
         capture_output=True,
         text=True,
         timeout=600,
@@ -290,9 +287,12 @@ def test_a_gate_that_skips_despite_its_declaration_fails_the_session(
     else:
         fake_codex.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         fake_codex.chmod(0o755)
-    env = dict(os.environ)
-    env["PATH"] = os.pathsep.join(
-        part for part in (str(tmp_path), env.get("PATH", "")) if part
+    env = inherited_environment(
+        {
+            "PATH": os.pathsep.join(
+                part for part in (str(tmp_path), os.environ.get("PATH", "")) if part
+            )
+        }
     )
     result = _nested_session(
         tmp_path,
@@ -328,7 +328,7 @@ def test_a_suite_probed_absence_skips_unless_the_caller_guaranteed_it(
     )
     # A skip's summary line is cut to the terminal width, which would clip the
     # runbook line this test exists to read.
-    wide = {**os.environ, "COLUMNS": "400"}
+    wide = inherited_environment({"COLUMNS": "400"})
 
     undeclared = _nested_session(tmp_path / "undeclared", source, env=wide)
     skipped = combined_output(undeclared)

@@ -14,10 +14,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...utils import ProcessContainment, spawn_contained
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 from ..children import await_child, run_child
 from ..progress import ProgressStalledError
-from ..reap import reap_contained
 
 if TYPE_CHECKING:
     import subprocess

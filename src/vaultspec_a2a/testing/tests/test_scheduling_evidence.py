@@ -10,12 +10,11 @@ isolated machine-global home, real sleeps.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-from ..cli import combined_output
+from ..cli import combined_output, inherited_environment
 from ..harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
 
 if TYPE_CHECKING:
@@ -66,15 +65,18 @@ def _run_pytest(
     *extra_args: str,
     env_overrides: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
-    env.pop("PYTEST_ADDOPTS", None)
-    # This nested controller exercises scheduling, not the outer runner's
-    # lifecycle.  Completion credentials are strictly parent-scoped; passing
-    # them through would let an accidental child rebind its PID and compete for
-    # the outer receipt channel.
-    env.pop(COMPLETION_ENDPOINT_ENV, None)
-    env.pop(COMPLETION_OWNER_PID_ENV, None)
-    env.update(env_overrides or {})
+    env = inherited_environment(
+        {
+            "PYTEST_ADDOPTS": None,
+            # This nested controller exercises scheduling, not the outer runner's
+            # lifecycle.  Completion credentials are strictly parent-scoped;
+            # passing them through would let an accidental child rebind its PID
+            # and compete for the outer receipt channel.
+            COMPLETION_ENDPOINT_ENV: None,
+            COMPLETION_OWNER_PID_ENV: None,
+            **(env_overrides or {}),
+        }
+    )
     return subprocess.run(
         [
             sys.executable,

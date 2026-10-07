@@ -17,10 +17,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...lifecycle import ProcRecord, now_ms, write_record
-from ...utils import ProcessContainment, spawn_contained
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 from ..children import run_child
+from ..cli import inherited_environment
 from ..endpoints import resolve_service
-from ..reap import reap_contained
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -156,9 +156,12 @@ def test_environment_override_keeps_the_last_word(tmp_path: Path) -> None:
         "assert resolved is not None and resolved.record is None\n"
         "print(resolved.url, flush=True)\n"
     )
-    env = dict(os.environ)
-    env["VAULTSPEC_A2A_GATEWAY_URL"] = "http://127.0.0.1:59999/"
-    env["VAULTSPEC_A2A_PROCS_HOME"] = str(tmp_path)
+    env = inherited_environment(
+        {
+            "VAULTSPEC_A2A_GATEWAY_URL": "http://127.0.0.1:59999/",
+            "VAULTSPEC_A2A_PROCS_HOME": str(tmp_path),
+        }
+    )
     completed = run_child(
         [sys.executable, "-c", script], what="the endpoint override probe", env=env
     )

@@ -24,7 +24,7 @@ from pydantic import SecretStr
 from ...authoring import AgentTool, CatalogSnapshot
 from ...control.config import Settings
 from ...graph.enums import Provider
-from ...testing import run_child, settings_override
+from ...testing import inherited_environment, run_child, settings_override
 from ...utils.enums import CodexWebSearchMode
 from .._acp_authoring import AuthoringToolBinding, attach_authoring_tools
 from .._acp_mcp import codex_mcp_server_specs
@@ -82,8 +82,9 @@ def private_home_root(tmp_path: Path) -> Iterator[Path]:
 
 
 def _settings_from_child(web_search_mode: str) -> subprocess.CompletedProcess[str]:
-    environment = dict(os.environ)
-    environment["VAULTSPEC_A2A_CODEX_WEB_SEARCH_MODE"] = web_search_mode
+    environment = inherited_environment(
+        {"VAULTSPEC_A2A_CODEX_WEB_SEARCH_MODE": web_search_mode}
+    )
     return run_child(
         [
             sys.executable,
@@ -101,13 +102,14 @@ def _settings_from_child(web_search_mode: str) -> subprocess.CompletedProcess[st
 def _config_home_parent_from_child(
     base: Path, app_home: Path | None, *, state_home: Path | None = None
 ) -> Path:
-    environment = dict(os.environ)
-    if state_home is not None:
-        environment["VAULTSPEC_A2A_HOME"] = str(state_home)
-    if app_home is None:
-        environment.pop("VAULTSPEC_A2A_DESKTOP_APP_HOME", None)
-    else:
-        environment["VAULTSPEC_A2A_DESKTOP_APP_HOME"] = str(app_home)
+    environment = inherited_environment(
+        {
+            **({} if state_home is None else {"VAULTSPEC_A2A_HOME": str(state_home)}),
+            "VAULTSPEC_A2A_DESKTOP_APP_HOME": (
+                None if app_home is None else str(app_home)
+            ),
+        }
+    )
     # Awaited on the child's own progress, not on a wall clock: this child is a
     # real interpreter importing the provider stack, and what that costs is a
     # property of the host's current load rather than of the resolution under
@@ -980,11 +982,7 @@ def _override_config_from_child(base: Path, base_url: str | None) -> dict[str, A
     renderer works, which the tests above already cover; what is in question
     here is whether a deployment's variable reaches the file Codex reads.
     """
-    environment = dict(os.environ)
-    if base_url is None:
-        environment.pop("VAULTSPEC_A2A_CODEX_BASE_URL", None)
-    else:
-        environment["VAULTSPEC_A2A_CODEX_BASE_URL"] = base_url
+    environment = inherited_environment({"VAULTSPEC_A2A_CODEX_BASE_URL": base_url})
     proc = run_child(
         [
             sys.executable,

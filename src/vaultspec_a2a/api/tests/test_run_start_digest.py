@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import subprocess
 import sys
 from typing import Any
@@ -40,6 +39,7 @@ from ...api.run_admission import (
     stamped_replay_digest,
 )
 from ...api.schemas.gateway import ProviderCatalogSelection, RunStartRequest
+from ...testing import inherited_environment
 from ...thread.actor_tokens import ActorTokenBundle
 
 
@@ -146,7 +146,7 @@ def test_the_fingerprint_is_stable_across_processes() -> None:
         text=True,
         encoding="utf-8",
         check=True,
-        env={**os.environ, "PYTHONHASHSEED": "1"},
+        env=inherited_environment({"PYTHONHASHSEED": "1"}),
     )
 
     assert completed.stdout.strip() == _current(body), (

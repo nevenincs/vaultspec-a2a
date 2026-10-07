@@ -4,7 +4,6 @@ Every test uses real files and real subprocesses — no mocks, no monkeypatching
 """
 
 import json
-import os
 import subprocess
 import sys
 import textwrap
@@ -13,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from ...control.env_registry import CREDENTIAL_ENV_NAMES, FOREIGN_PROVIDER_ENV_NAMES
+from ...testing import inherited_environment
 from ..environment import resolve_env_vars, resolve_venv
 
 
@@ -164,14 +164,16 @@ def resolved_env(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
     script = tmp_path / "scrub_probe.py"
     script.write_text(_SCRUB_PROBE_SCRIPT, encoding="utf-8")
 
-    env = dict(os.environ)
-    for key in _SCRUB_SECRET_KEYS:
-        env[key] = "super-secret-value"
-    env.update(_SCRUB_VAULTSPEC_KEYS)
-    env.update(_SCRUB_NON_ALLOWLISTED_CLAUDE_CODE)
-    env.update(_SCRUB_ALLOWLISTED_CLAUDE_CODE)
-    env.update(_SCRUB_ZAI_KEYS)
-    env.update(_SCRUB_SAFE_KEYS)
+    env = inherited_environment(
+        {
+            **dict.fromkeys(_SCRUB_SECRET_KEYS, "super-secret-value"),
+            **_SCRUB_VAULTSPEC_KEYS,
+            **_SCRUB_NON_ALLOWLISTED_CLAUDE_CODE,
+            **_SCRUB_ALLOWLISTED_CLAUDE_CODE,
+            **_SCRUB_ZAI_KEYS,
+            **_SCRUB_SAFE_KEYS,
+        }
+    )
 
     result = subprocess.run(
         [sys.executable, str(script), str(tmp_path)],

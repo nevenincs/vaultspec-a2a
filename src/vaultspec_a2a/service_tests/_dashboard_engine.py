@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING
 import httpx
 
 from ..lifecycle.discovery import write_service_json
-from ..testing import DEFAULT_ATTACH_CREDENTIAL, json_object, reap_contained
-from ..utils import ProcessContainment, bearer_header, spawn_contained
+from ..testing import DEFAULT_ATTACH_CREDENTIAL, inherited_environment, json_object
+from ..utils import ProcessContainment, bearer_header, reap_contained, spawn_contained
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -66,13 +66,14 @@ def provision_workspace(workspace: Path) -> None:
     )
     git = shutil.which("git")
     assert git is not None, "git executable is required"
-    env = {
-        **os.environ,
-        "GIT_AUTHOR_NAME": "cross-repo-proof",
-        "GIT_AUTHOR_EMAIL": "proof@vaultspec.test",
-        "GIT_COMMITTER_NAME": "cross-repo-proof",
-        "GIT_COMMITTER_EMAIL": "proof@vaultspec.test",
-    }
+    env = inherited_environment(
+        {
+            "GIT_AUTHOR_NAME": "cross-repo-proof",
+            "GIT_AUTHOR_EMAIL": "proof@vaultspec.test",
+            "GIT_COMMITTER_NAME": "cross-repo-proof",
+            "GIT_COMMITTER_EMAIL": "proof@vaultspec.test",
+        }
+    )
     for args in (
         ["init", "-q", "-b", "main"],
         ["add", "-A"],
@@ -192,15 +193,13 @@ def dashboard_engine(
         pid=os.getpid(),
         service_token=DEFAULT_ATTACH_CREDENTIAL,
     )
-    environment = {
-        **{
-            key: value
-            for key, value in os.environ.items()
-            if key not in {"VAULTSPEC_APP_HOME", "VAULTSPEC_A2A_DESKTOP_APP_HOME"}
-        },
-        "VAULTSPEC_A2A_HOME": str(discovery_home),
-        "VAULTSPEC_APP_HOME": str(tmp_path / "dashboard-product-home"),
-    }
+    environment = inherited_environment(
+        {
+            "VAULTSPEC_A2A_DESKTOP_APP_HOME": None,
+            "VAULTSPEC_A2A_HOME": str(discovery_home),
+            "VAULTSPEC_APP_HOME": str(tmp_path / "dashboard-product-home"),
+        }
+    )
     with engine_log.open("wb") as output:
         containment = ProcessContainment.create()
         process: subprocess.Popen[bytes] | None = None

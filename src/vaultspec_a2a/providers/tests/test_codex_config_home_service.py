@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
 
 from ...graph.enums import Provider
-from ...testing import combined_output
+from ...testing import combined_output, inherited_environment
 from ...utils.enums import CodexWebSearchMode
 from .._acp_mcp import codex_mcp_server_specs
 from .._codex_config_home import (
@@ -38,11 +37,9 @@ def codex_cli(external_prerequisite: ExternalPrerequisiteRule) -> str:
 
 
 def _run_mcp_list(codex: str, home: Path) -> subprocess.CompletedProcess[str]:
-    environment = dict(os.environ)
-    environment["CODEX_HOME"] = str(home)
     return subprocess.run(
         [codex, "mcp", "list"],
-        env=environment,
+        env=inherited_environment({"CODEX_HOME": str(home)}),
         capture_output=True,
         text=True,
         check=False,

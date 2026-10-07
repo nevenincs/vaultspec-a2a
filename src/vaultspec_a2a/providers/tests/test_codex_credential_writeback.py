@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ...testing import inherited_environment
 from ...utils.enums import CodexWebSearchMode
 from .._codex_auth import (
     _MAX_RETURNED_AUTH_BYTES,
@@ -352,7 +353,7 @@ with _credential_lock(pathlib.Path({str(source)!r})):
 """
     child = subprocess.Popen(
         [sys.executable, "-c", holder],
-        env={**os.environ, "PYTHONPATH": str(_SOURCE_ROOT)},
+        env=inherited_environment({"PYTHONPATH": str(_SOURCE_ROOT)}),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

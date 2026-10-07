@@ -16,15 +16,14 @@ import sys
 from typing import TYPE_CHECKING
 
 from ...lifecycle import load_procs_config
-from ...utils import ProcessContainment, spawn_contained
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 from ..children import (
     await_child,
     child_tree_progress,
     measured_child_startup_s,
 )
-from ..cli import combined_output
+from ..cli import combined_output, inherited_environment
 from ..ports import free_port
-from ..reap import reap_contained
 from ..sessions import SESSION_LEASE_KEY, effective_worker_count
 
 if TYPE_CHECKING:
@@ -84,8 +83,7 @@ def test_two_concurrent_processes_never_share_free_ports(tmp_path: Path) -> None
         "        sys.exit('the test that started this peer is gone')\n"
         "    time.sleep(0.05)\n"
     )
-    env = dict(os.environ)
-    env["VAULTSPEC_A2A_PROCS_HOME"] = str(tmp_path / "procs")
+    env = inherited_environment({"VAULTSPEC_A2A_PROCS_HOME": str(tmp_path / "procs")})
 
     def _spawn(
         tag: str, peer: str
@@ -189,10 +187,13 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
         "        time.sleep(0.1)\n"
     )
     (suite / "test_quick.py").write_text("def test_quick() -> None:\n    pass\n")
-    env = dict(os.environ)
-    env.pop("PYTEST_ADDOPTS", None)
-    env["VAULTSPEC_A2A_PROCS_HOME"] = str(home)
-    env["VAULTSPEC_A2A_TEST_CPU_BUDGET"] = "4"
+    env = inherited_environment(
+        {
+            "PYTEST_ADDOPTS": None,
+            "VAULTSPEC_A2A_PROCS_HOME": str(home),
+            "VAULTSPEC_A2A_TEST_CPU_BUDGET": "4",
+        }
+    )
     holder_containment = ProcessContainment.create()
     holder = spawn_contained(
         [
@@ -294,7 +295,6 @@ def test_held_reservations_are_heartbeated_past_the_ttl() -> None:
     on disk; one refresh pass must bring it back to LIVE as the allocator
     judges it.
     """
-    import os
     import time
 
     from ...lifecycle import now_ms

@@ -142,7 +142,7 @@ init:
 init-full:
     uv run --no-project --python 3.13 -- python -m dev.init full
 
-# Resolve the locked tooling and server dependency profiles into .venv.
+# Resolve the locked tooling, OTLP and development profiles into .venv.
 [group('setup')]
 init-python:
     uv run --no-project --python 3.13 -- python -m dev.init python
@@ -172,10 +172,10 @@ init-full-check:
 deps-base:
     {{dev}} deps base
 
-# Resolve the server runtime profile from the project lock.
+# Resolve the base runtime plus the optional OTLP exporter from the project lock.
 [group('setup')]
-deps-server:
-    {{dev}} deps server
+deps-otlp:
+    {{dev}} deps otlp
 
 # Resolve the RAG runtime profile without provisioning models.
 [group('setup')]
@@ -261,7 +261,7 @@ doctor-docker:
 # Resolve the locked development environment used by the git hooks.
 [group('setup')]
 hooks-bootstrap:
-    uv sync --locked --no-default-groups --extra server --group all
+    uv sync --locked --no-default-groups --extra otlp --group all
 
 # Install the repository-managed, path-agnostic prek hook.
 [group('setup')]

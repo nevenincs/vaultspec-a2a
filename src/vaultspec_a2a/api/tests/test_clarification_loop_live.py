@@ -55,6 +55,7 @@ from ...control.clarification_service import (
 from ...control.execution_authority import resolve_execution_authority
 from ...control.graph_definition import read_accepted_graph_definition
 from ...control.leased_dispatch import DispatchTransport, accepted_recursion_budget
+from ...control.reconciliation import reconcile_threads_on_startup
 from ...database import (
     CONTROL_ACTION_LEASE_TTL,
     ControlActionModel,
@@ -582,6 +583,122 @@ async def _read_run_status(client: httpx.AsyncClient, run_id: str) -> dict[str, 
     response = await client.get(f"/v1/runs/{run_id}")
     assert response.status_code == 200, response.text
     return response.json()
+
+
+async def _parked_request_id(client: httpx.AsyncClient, run_id: str) -> str:
+    """Wait until the run reads parked and name the request it is parked on."""
+    parked = await wait_for_run_status_async(
+        lambda: _read_run_status(client, run_id),
+        lambda body: body["status"] == ThreadStatus.INPUT_REQUIRED.value,
+        timeout=15.0,
+        interval=0.05,
+        label=f"run {run_id}",
+    )
+    pending = cast("dict[str, object]", parked["pending_clarification"])
+    request_id = pending["request_id"]
+    assert isinstance(request_id, str)
+    return request_id
+
+
+async def _start_clarifying_run(client: httpx.AsyncClient, run_id: str) -> None:
+    """Start one run over the real gateway under a chosen run id."""
+    created = await client.post(
+        "/v1/runs",
+        json={
+            "team_preset": DEFAULT_TEAM_PRESET,
+            "message": "plan it",
+            "run_id": run_id,
+            **await async_catalog_run_fields(client),
+        },
+    )
+    assert created.status_code == 201, created.text
+
+
+@pytest.mark.asyncio
+async def test_a_clarification_park_survives_a_gateway_restart(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """A real park outlives the gateway that observed it and stays answerable.
+
+    The pause is durable state, not process state: the run row says
+    ``input_required`` because its checkpoint holds the questionnaire, so a
+    gateway that never saw the park must read the same thing and must be able
+    to answer it. The restart is real - the first gateway app, its client and
+    its worker are all gone before the second one runs the production startup
+    reconciliation pass over the same two stores - and the answer is then
+    submitted through the SECOND gateway and proven on the real graph's own
+    terminal state.
+    """
+    first_app, _first_hub, first_stub, _cp = make_app(session_factory, checkpointer)
+    run_id = f"clarify-restart-{next(_RUN_SEQ):02d}"
+    cache_key = None
+    request_id = ""
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=first_app), base_url="http://gateway"
+    ) as first_client:
+        await _start_clarifying_run(first_client, run_id)
+        ingest = first_stub.dispatches[-1]
+        cache_key = await _cache_key_for_thread(session_factory, run_id)
+        async with _real_worker(
+            first_app,
+            _WorkerTarget(run_id, cache_key, clarification_graph(checkpointer)),
+            checkpointer,
+            relay_to_gateway=True,
+        ) as first_worker:
+            delivered = await first_worker.post("/dispatch", json=ingest)
+            assert delivered.is_success, delivered.text
+            request_id = await _parked_request_id(first_client, run_id)
+
+    # --- the restart: nothing of the first gateway survives it ---
+    async with session_factory() as db:
+        summary = await reconcile_threads_on_startup(db, checkpointer)
+        await db.commit()
+    # A run a human is answering is not repair backlog, and the pass must not
+    # settle or re-dispatch it.
+    assert summary["paused_resumable"] == 1, summary
+    assert summary["checkpoint_unavailable"] == 0, summary
+
+    second_app, _hub2, _stub2, _cp2 = make_app(session_factory, checkpointer)
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=second_app), base_url="http://gateway"
+    ) as second_client:
+        after = await _read_run_status(second_client, run_id)
+        assert after["status"] == ThreadStatus.INPUT_REQUIRED.value, after
+        disclosed = cast("dict[str, object]", after["pending_clarification"])
+        assert disclosed["request_id"] == request_id
+
+        # A follow-up turn is still refused toward the respond verb, so the
+        # restart did not turn the pause into an idle run.
+        refused = await second_client.post(
+            f"/v1/runs/{run_id}/messages",
+            json={"content": "go on"},
+            headers={"Idempotency-Key": f"{run_id}-after-restart"},
+        )
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["detail"]["code"] == FailureType.INPUT_REQUIRED.value
+
+        async with _real_worker(
+            second_app,
+            _WorkerTarget(run_id, cache_key, clarification_graph(checkpointer)),
+            checkpointer,
+            relay_to_gateway=True,
+        ):
+            answered = await second_client.post(
+                f"/v1/runs/{run_id}/clarifications/{request_id}/respond",
+                json={"answers": {"provider": "codex"}},
+            )
+            assert answered.status_code == 200, answered.text
+            assert answered.json()["accepted"] is True
+
+            resumed = await wait_for_run_status_async(
+                lambda: _read_run_status(second_client, run_id),
+                lambda body: body["status"] != ThreadStatus.INPUT_REQUIRED.value,
+                timeout=15.0,
+                interval=0.05,
+                label=f"run {run_id}",
+            )
+    assert resumed["pending_clarification"] is None
 
 
 @pytest.mark.asyncio

@@ -25,14 +25,14 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from ...database import (
-    ControlActionModel,
-    create_thread,
-    get_thread,
-    record_permission_request,
+from ...control.pause import reconcile_run_pause
+from ...database import ControlActionModel, get_thread
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    async_catalog_run_fields,
+    park_clarification,
+    park_journaled_permission,
 )
-from ...testing import DEFAULT_TEAM_PRESET, async_catalog_run_fields
-from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from .conftest import make_app
@@ -191,35 +191,21 @@ async def test_a_cancelling_run_still_refuses_as_busy(
     assert await _waiting_rows(session_factory, run_id) == []
 
 
-async def _park_run(
-    sessions: SessionFactory, run_id: str, *, request_id: str | None
+async def _record_the_pause(
+    sessions: SessionFactory, checkpointer: AsyncSqliteSaver, run_id: str
 ) -> None:
-    """Seed a run parked for input, with or without a permission request.
+    """Let production's own pause recorder read the park off the checkpoint.
 
-    The two shapes of one status: a run waiting on a permission request the
-    journal holds, and a run waiting at a clarification interrupt it does not.
+    The run row is never written by hand: the parked checkpoint is the premise,
+    and the status the route refuses on is the one ``reconcile_run_pause``
+    elects from it.
     """
     async with sessions() as db:
-        await create_thread(
-            db,
-            write_authority=make_test_write_authority(),
-            thread_id=run_id,
-            status=ThreadStatus.INPUT_REQUIRED,
-            team_preset=DEFAULT_TEAM_PRESET,
-        )
-        if request_id is not None:
-            await record_permission_request(
-                db,
-                request_id=request_id,
-                thread_id=run_id,
-                pause_reason_type="tool_permission",
-                description="May I write the file?",
-                allowed_options=[
-                    {"option_id": "allow", "name": "Allow", "kind": "allow_once"}
-                ],
-                tool_call="write_file",
-            )
-        await db.commit()
+        await reconcile_run_pause(db, thread_id=run_id, checkpointer=checkpointer)
+    async with sessions() as db:
+        parked = await get_thread(db, run_id)
+    assert parked is not None
+    assert parked.status == ThreadStatus.INPUT_REQUIRED.value, parked.status
 
 
 @pytest.mark.asyncio
@@ -229,17 +215,24 @@ async def test_a_permission_pause_refuses_by_naming_its_own_respond_verb(
     """The served refusal carries the exact address of the waiting request."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     run_id = "parked-permission-04"
-    await _park_run(session_factory, run_id, request_id="perm-req-1")
-
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://gateway", timeout=30.0
     ) as client:
+        await _start_run(client, run_id)
+        worker.clear()
+        request_id = await park_journaled_permission(
+            checkpointer, session_factory, thread_id=run_id, tool_name="write_file"
+        )
+        await _record_the_pause(session_factory, checkpointer, run_id)
+
         refused = await _followup(client, run_id, key="parked-04", content="go on")
 
     assert refused.status_code == 409, refused.text
     detail = refused.json()["detail"]
     assert detail["code"] == FailureType.INPUT_REQUIRED.value
-    assert f"POST /v1/runs/{run_id}/permissions/perm-req-1/respond" in detail["message"]
+    assert (
+        f"POST /v1/runs/{run_id}/permissions/{request_id}/respond" in detail["message"]
+    )
     assert worker.dispatches == []
     assert await _waiting_rows(session_factory, run_id) == []
 
@@ -248,14 +241,23 @@ async def test_a_permission_pause_refuses_by_naming_its_own_respond_verb(
 async def test_a_clarification_pause_refuses_by_naming_the_other_verb(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """No permission row in the journal is itself the answer about the pause."""
+    """No permission row in the journal is itself the answer about the pause.
+
+    The park is real: the shared clarification graph raises its own
+    ``interrupt()`` over the real checkpointer, so the journal holds no
+    permission row because the producer wrote none - not because the fixture
+    chose to omit one.
+    """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     run_id = "parked-clarification-05"
-    await _park_run(session_factory, run_id, request_id=None)
-
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://gateway", timeout=30.0
     ) as client:
+        await _start_run(client, run_id)
+        worker.clear()
+        await park_clarification(checkpointer, thread_id=run_id)
+        await _record_the_pause(session_factory, checkpointer, run_id)
+
         refused = await _followup(client, run_id, key="parked-05", content="go on")
 
     assert refused.status_code == 409, refused.text

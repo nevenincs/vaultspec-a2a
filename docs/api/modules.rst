@@ -152,7 +152,7 @@ API application
 .. py:module:: vaultspec_a2a.api.schemas.gateway
    :synopsis: Bounded gateway lifecycle and lease-status wire models.
 
-.. py:module:: vaultspec_a2a.api.body_limit
+.. py:module:: vaultspec_a2a.ipc.body_limit
    :synopsis: Pre-parser memory bound for authenticated v1 write bodies.
 
 .. py:module:: vaultspec_a2a.api.websocket

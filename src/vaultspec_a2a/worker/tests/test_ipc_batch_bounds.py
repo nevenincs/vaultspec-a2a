@@ -43,7 +43,9 @@ def _gateway_app() -> FastAPI:
     all these events are.
     """
     app = FastAPI()
-    app.add_middleware(cast("Any", BoundedHttpBodyMiddleware), limit=gateway_body_limit)
+    app.add_middleware(
+        cast("Any", BoundedHttpBodyMiddleware), limit=gateway_body_limit(settings)
+    )
     app.include_router(internal_router)
     app.state.aggregator = EventAggregator()
     app.state.db_session_factory = None

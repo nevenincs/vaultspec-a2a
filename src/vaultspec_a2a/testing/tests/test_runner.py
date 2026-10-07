@@ -13,11 +13,11 @@ from ..children import (
     await_child,
     file_size_fingerprint,
     measured_child_startup_s,
-    reap_contained,
     run_child,
 )
 from ..completion import send_completion_receipt
 from ..harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
+from ..reap import reap_contained
 from ..runner import (
     DESCENDANT_TIMEOUT_EXIT,
     RUN_TIMEOUT_EXIT,
@@ -342,8 +342,9 @@ def test_runner_rejects_a_rebound_nested_xdist_receipt(tmp_path: Path) -> None:
         "import subprocess\n"
         "import sys\n"
         "import time\n"
-        "from vaultspec_a2a.testing.children import await_child, reap_contained\n"
+        "from vaultspec_a2a.testing.children import await_child\n"
         "from vaultspec_a2a.testing.harness_names import COMPLETION_ENDPOINT_ENV\n"
+        "from vaultspec_a2a.testing.reap import reap_contained\n"
         "from vaultspec_a2a.utils import ProcessContainment, spawn_contained\n"
         "\n"
         "def test_nested_xdist_cannot_finish_outer(tmp_path):\n"

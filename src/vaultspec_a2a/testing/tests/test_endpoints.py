@@ -17,7 +17,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...lifecycle import ProcRecord, now_ms, write_record
+from ...utils import ProcessContainment, spawn_contained
+from ..children import run_child
 from ..endpoints import resolve_service
+from ..reap import reap_contained
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -38,20 +41,22 @@ _SERVER_SCRIPT = (
 
 
 @pytest.fixture
-def health_server() -> Iterator[subprocess.Popen[str]]:
-    process = subprocess.Popen(
-        [sys.executable, "-c", _SERVER_SCRIPT],
-        stdout=subprocess.PIPE,
-        text=True,
+def health_server() -> Iterator[subprocess.Popen[bytes]]:
+    containment = ProcessContainment.create()
+    process = spawn_contained(
+        [sys.executable, "-c", _SERVER_SCRIPT], containment, stdout=subprocess.PIPE
     )
-    yield process
-    process.kill()
-    process.wait(timeout=60)
+    try:
+        yield process
+    finally:
+        reap_contained(process, containment)
+        if process.stdout is not None:
+            process.stdout.close()
 
 
-def _server_port(process: subprocess.Popen[str]) -> int:
+def _server_port(process: subprocess.Popen[bytes]) -> int:
     assert process.stdout is not None
-    line = process.stdout.readline().strip()
+    line = process.stdout.readline().decode("ascii").strip()
     assert line.isdigit(), f"server did not report a port: {line!r}"
     return int(line)
 
@@ -65,7 +70,7 @@ def _record(
 
 
 def test_live_record_with_answering_health_resolves(
-    tmp_path: Path, health_server: subprocess.Popen[str]
+    tmp_path: Path, health_server: subprocess.Popen[bytes]
 ) -> None:
     port = _server_port(health_server)
     write_record(
@@ -79,7 +84,7 @@ def test_live_record_with_answering_health_resolves(
 
 
 def test_stale_heartbeat_is_refused_despite_an_answering_server(
-    tmp_path: Path, health_server: subprocess.Popen[str]
+    tmp_path: Path, health_server: subprocess.Popen[bytes]
 ) -> None:
     """A frozen heartbeat disqualifies a record even while its port answers.
 
@@ -100,8 +105,12 @@ def test_stale_heartbeat_is_refused_despite_an_answering_server(
 
 
 def test_dead_pid_is_refused(tmp_path: Path) -> None:
-    corpse = subprocess.Popen([sys.executable, "-c", "pass"])
-    corpse.wait(timeout=60)
+    containment = ProcessContainment.create()
+    corpse = spawn_contained([sys.executable, "-c", "pass"], containment)
+    try:
+        corpse.wait(timeout=60)
+    finally:
+        reap_contained(corpse, containment)
     write_record(
         _record("g1", pid=corpse.pid, port=1, last_seen_ms=now_ms()), home=tmp_path
     )
@@ -109,7 +118,7 @@ def test_dead_pid_is_refused(tmp_path: Path) -> None:
 
 
 def test_unanswering_port_is_passed_over_for_a_healthy_sibling(
-    tmp_path: Path, health_server: subprocess.Popen[str]
+    tmp_path: Path, health_server: subprocess.Popen[bytes]
 ) -> None:
     """The freshest record does not win by freshness alone; health decides.
 
@@ -150,14 +159,10 @@ def test_environment_override_keeps_the_last_word(tmp_path: Path) -> None:
     env = dict(os.environ)
     env["VAULTSPEC_A2A_GATEWAY_URL"] = "http://127.0.0.1:59999/"
     env["VAULTSPEC_A2A_PROCS_HOME"] = str(tmp_path)
-    completed = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=env,
-        check=True,
+    completed = run_child(
+        [sys.executable, "-c", script], what="the endpoint override probe", env=env
     )
+    assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == "http://127.0.0.1:59999"
 
 

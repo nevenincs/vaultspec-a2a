@@ -39,7 +39,7 @@ from ..lifecycle.singleton import (
     classify_app_home,
     recorded_process_is_live,
 )
-from ..testing import SignalledChild, free_port, spawn_signalled
+from ..testing import SignalledChild, free_port, reap_contained, spawn_signalled
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -165,8 +165,9 @@ def test_stale_discovery_quarantined_only_by_owner(tmp_path: Path) -> None:
     try:
         dead_pid = cast("dict[str, int]", json.loads(resident.payload()))["pid"]
     finally:
-        resident.process.terminate()
-        resident.process.wait(timeout=25)
+        # A stop request would release the singleton cleanly; the kill is what
+        # leaves it stale, and the containment reaps whatever else the child ran.
+        reap_contained(resident.process, resident.containment)
 
     # The heartbeat is still recent, so the filesystem-only classifier reads
     # FRESH — but the recorded process is provably dead, which the ownership

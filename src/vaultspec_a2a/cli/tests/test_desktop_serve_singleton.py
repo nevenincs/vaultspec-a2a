@@ -9,10 +9,6 @@ monkeypatch, stub, skip, or expected failure is used.
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-import time
 from typing import TYPE_CHECKING
 
 import click
@@ -24,6 +20,7 @@ from ...lifecycle.singleton import (
     clear_active_singleton,
     default_owner,
 )
+from ...testing import spawn_signalled
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -44,15 +41,6 @@ finally:
 """
 
 
-def _await(path: Path, *, timeout: float = 20.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if path.exists() and path.read_text():
-            return
-        time.sleep(0.05)
-    raise AssertionError(f"timed out waiting for {path}")
-
-
 def test_serve_acquisition_registers_and_releases(tmp_path: Path) -> None:
     """A free home is acquired, registered active, and cleared on release."""
     app_home = tmp_path / "app"
@@ -69,30 +57,14 @@ def test_serve_acquisition_registers_and_releases(tmp_path: Path) -> None:
 def test_serve_fails_loud_when_a_live_gateway_owns_the_home(tmp_path: Path) -> None:
     """A held application home makes the serve acquisition fail loud, not compete."""
     app_home = tmp_path / "app"
-    ready = tmp_path / "ready"
-    stop = tmp_path / "stop"
-    holder = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            _CHILD,
-            str(app_home),
-            "foreign-owner",
-            str(ready),
-            str(stop),
-        ],
-        env=os.environ.copy(),
+    holder = spawn_signalled(
+        _CHILD, str(app_home), "foreign-owner", signal_dir=tmp_path, tag="holder"
     )
     try:
-        _await(ready)
+        holder.payload()
         with pytest.raises(click.ClickException) as conflict:
             _acquire_singleton_for_serve(app_home)
         assert "immutable conflict" in str(conflict.value)
         assert active_singleton() is None
     finally:
-        stop.touch()
-        try:
-            holder.wait(timeout=20)
-        except subprocess.TimeoutExpired:  # pragma: no cover - defensive teardown
-            holder.kill()
-            holder.wait(timeout=10)
+        holder.request_stop()

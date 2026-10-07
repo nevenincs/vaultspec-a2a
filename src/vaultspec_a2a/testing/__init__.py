@@ -136,7 +136,6 @@ if TYPE_CHECKING:
         child_tree_progress,
         file_size_fingerprint,
         measured_child_startup_s,
-        reap_contained,
         run_child,
     )
     from .cli import run_cli
@@ -236,6 +235,7 @@ if TYPE_CHECKING:
         forfeits_purity,
         uses_impure_fixture,
     )
+    from .reap import reap_contained
     from .resources import (
         MARKER_NAME,
         RESOURCES,
@@ -474,7 +474,6 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.children",
         "measured_child_startup_s",
     ),
-    "reap_contained": ("vaultspec_a2a.testing.children", "reap_contained"),
     "run_child": ("vaultspec_a2a.testing.children", "run_child"),
     "run_cli": ("vaultspec_a2a.testing.cli", "run_cli"),
     "ResolvedService": ("vaultspec_a2a.testing.endpoints", "ResolvedService"),
@@ -599,6 +598,7 @@ _LAZY_EXPORTS = {
     "SERVICE_MARKER": ("vaultspec_a2a.testing.purity", "SERVICE_MARKER"),
     "forfeits_purity": ("vaultspec_a2a.testing.purity", "forfeits_purity"),
     "uses_impure_fixture": ("vaultspec_a2a.testing.purity", "uses_impure_fixture"),
+    "reap_contained": ("vaultspec_a2a.testing.reap", "reap_contained"),
     "MARKER_NAME": ("vaultspec_a2a.testing.resources", "MARKER_NAME"),
     "RESOURCES": ("vaultspec_a2a.testing.resources", "RESOURCES"),
     "SCRATCH_PREFIX": ("vaultspec_a2a.testing.resources", "SCRATCH_PREFIX"),

@@ -25,20 +25,18 @@ under rather than from a number typed on an idle machine.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import os
 import subprocess
 import sys
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack
-
-import psutil
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from ..utils import ProcessContainment, spawn_contained
-from .progress import ProgressDeadline, ProgressStalledError
+from ..utils._process_tree import tree_cpu_usage
+from .progress import ProgressDeadline, ProgressStalledError, wait_for
+from .reap import reap_contained
 from .session_root import session_scratch_dir
 
 if TYPE_CHECKING:
@@ -51,7 +49,6 @@ __all__ = [
     "child_tree_progress",
     "file_size_fingerprint",
     "measured_child_startup_s",
-    "reap_contained",
     "run_child",
 ]
 
@@ -83,21 +80,11 @@ def child_tree_progress(pid: int) -> tuple[float, int]:
     vanished process reports ``(0.0, 0)`` rather than raising: the caller's own
     exit observation, not this, decides that a wait is over.
     """
-    try:
-        root = psutil.Process(pid)
-        members = [root, *root.children(recursive=True)]
-    except (psutil.Error, OSError):
+    usage = tree_cpu_usage(pid)
+    if usage is None:
         return (0.0, 0)
-    total = 0.0
-    live = 0
-    for member in members:
-        try:
-            times = member.cpu_times()
-        except (psutil.Error, OSError):
-            continue
-        total += times.user + times.system
-        live += 1
-    return (round(total, 2), live)
+    cpu_s, live = usage
+    return (round(cpu_s, 2), live)
 
 
 def measured_child_startup_s() -> float:
@@ -174,73 +161,38 @@ def await_child(
         idle_window_s=watch.get("idle_window_s", DEFAULT_IDLE_WINDOW_S)
     )
     started = time.monotonic()
-    observed: object = None
-    while True:
+
+    def _exit_status() -> int | None:
         returncode = process.poll()
-        if returncode is not None:
-            return returncode
-        current = (
+        if (
+            returncode is None
+            and ceiling_s is not None
+            and time.monotonic() - started > ceiling_s
+        ):
+            msg = f"still running after its {ceiling_s:.0f}s ceiling"
+            raise ProgressStalledError(msg)
+        return returncode
+
+    def _observed() -> object:
+        return (
             child_tree_progress(process.pid),
             None if fingerprint is None else fingerprint(),
         )
-        if current != observed:
-            observed = current
-            deadline.touch()
-        try:
-            deadline.check()
-            if ceiling_s is not None and time.monotonic() - started > ceiling_s:
-                msg = f"still running after its {ceiling_s:.0f}s ceiling"
-                raise ProgressStalledError(msg)
-        except ProgressStalledError as stalled:
-            reaped = reap_contained(process, containment)
-            context = "" if diagnostic is None else f"\n{diagnostic()}"
-            unreaped = "" if reaped else " (its contained tree was not reaped)"
-            raise ProgressStalledError(
-                f"{what} (pid {process.pid}) made no progress: "
-                f"{stalled}{unreaped}{context}"
-            ) from stalled
-        time.sleep(_POLL_INTERVAL_S)
 
-
-def reap_contained(
-    process: subprocess.Popen[Any],
-    containment: ProcessContainment,
-    *,
-    term_timeout: float = 10.0,
-    kill_timeout: float = 5.0,
-) -> bool:
-    """Reap *process*'s whole tree through *containment*, from any calling context.
-
-    *process* was started inside *containment* by
-    :func:`~vaultspec_a2a.utils.spawn_contained`, which held every descendant
-    from the root's first instruction, so a root that already exited is no
-    obstacle: what it left running is still reaped, and no kill is ever aimed at
-    a recycled pid. The root's handle is then waited on. *term_timeout* and
-    *kill_timeout* are the graceful and forced phases. Returns ``True`` once the
-    tree is gone and the root reaped; a repeat call after that is a no-op.
-
-    Called from a test that is itself running an event loop, ``asyncio.run``
-    would refuse and leave the tree alive, so the reap then runs on a thread
-    with a loop of its own.
-    """
-
-    def _terminate() -> bool:
-        return asyncio.run(
-            containment.terminate(term_timeout=term_timeout, kill_timeout=kill_timeout)
+    try:
+        return wait_for(
+            _exit_status,
+            deadline=deadline,
+            fingerprint=_observed,
+            interval_s=_POLL_INTERVAL_S,
         )
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        reaped = _terminate()
-    else:
-        with ThreadPoolExecutor(max_workers=1) as reaper:
-            reaped = reaper.submit(_terminate).result()
-    try:
-        process.wait(timeout=kill_timeout)
-    except subprocess.TimeoutExpired:
-        return False
-    return reaped
+    except ProgressStalledError as stalled:
+        reaped = reap_contained(process, containment)
+        context = "" if diagnostic is None else f"\n{diagnostic()}"
+        unreaped = "" if reaped else " (its contained tree was not reaped)"
+        raise ProgressStalledError(
+            f"{what} (pid {process.pid}) made no progress: {stalled}{unreaped}{context}"
+        ) from stalled
 
 
 def file_size_fingerprint(*paths: os.PathLike[str] | str) -> Callable[[], object]:

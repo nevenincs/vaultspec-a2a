@@ -26,10 +26,8 @@ ask different questions of the same occupant:
 from __future__ import annotations
 
 import contextlib
-import socket
 import subprocess
 import sys
-import time
 from typing import TYPE_CHECKING
 
 import httpx
@@ -37,10 +35,12 @@ import pytest
 
 from ..control._worker_health import WorkerHealthProbe, probe_worker_health
 from ..control.worker_management import LazyWorkerSpawner
-from ..testing import free_port
+from ..testing import WatchedProcess, await_ready, free_port, reap_process
+from ..utils import ProcessContainment, spawn_contained
+from ..utils._process_tree import port_has_listener
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
 # A real server that answers 200 with a body that is emphatically not JSON.
@@ -93,32 +93,36 @@ while time.monotonic() < deadline:
 
 
 @contextlib.contextmanager
-def _stalled_worker() -> Generator[str]:
-    """Run a real server that accepts /health and never sends a response."""
-    port = free_port()
-    proc = subprocess.Popen(
-        [sys.executable, "-c", _STALLED_WORKER, str(port)],
+def _running_worker(
+    command: list[str], *, name: str, ready: Callable[[], bool]
+) -> Generator[None]:
+    """Run *command* contained until *ready* passes, and reap its tree after."""
+    containment = ProcessContainment.create()
+    process = spawn_contained(
+        command,
+        containment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    url = f"http://127.0.0.1:{port}"
+    worker = WatchedProcess(name, process, containment)
     try:
-        deadline = time.monotonic() + 15.0
-        while time.monotonic() < deadline:
-            with (
-                contextlib.suppress(OSError),
-                socket.create_connection(("127.0.0.1", port), timeout=1.0),
-            ):
-                break
-            time.sleep(0.05)
-        else:
-            raise AssertionError("the stalled worker never bound its port")
-        yield url
+        await_ready(ready, what=name, watch=[worker], timeout=15.0, interval=0.05)
+        yield
     finally:
-        with contextlib.suppress(Exception):
-            proc.kill()
-            proc.wait(timeout=10)
+        reap_process(worker)
+
+
+@contextlib.contextmanager
+def _stalled_worker() -> Generator[str]:
+    """Run a real server that accepts /health and never sends a response."""
+    port = free_port()
+    with _running_worker(
+        [sys.executable, "-c", _STALLED_WORKER, str(port)],
+        name="stalled worker",
+        ready=lambda: port_has_listener(port, timeout=1.0),
+    ):
+        yield f"http://127.0.0.1:{port}"
 
 
 @contextlib.contextmanager
@@ -127,30 +131,13 @@ def _malformed_worker(tmp_path: Path) -> Generator[tuple[str, int]]:
     port = free_port()
     script = tmp_path / "malformed_worker.py"
     script.write_text(_MALFORMED_WORKER, encoding="utf-8")
-    proc = subprocess.Popen(
-        [sys.executable, str(script), str(port)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
     url = f"http://127.0.0.1:{port}"
-    try:
-        deadline = time.monotonic() + 15.0
-        while time.monotonic() < deadline:
-            try:
-                with httpx.Client(timeout=1.0) as client:
-                    resp = client.get(f"{url}/health")
-                if resp.status_code == 200:
-                    break
-            except httpx.HTTPError:
-                time.sleep(0.05)
-        else:
-            raise AssertionError("the malformed worker never came up")
+    with _running_worker(
+        [sys.executable, str(script), str(port)],
+        name="malformed worker",
+        ready=lambda: httpx.get(f"{url}/health", timeout=1.0).status_code == 200,
+    ):
         yield url, port
-    finally:
-        with contextlib.suppress(Exception):
-            proc.kill()
-            proc.wait(timeout=10)
 
 
 @pytest.mark.asyncio(loop_scope="function")

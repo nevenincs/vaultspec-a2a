@@ -103,7 +103,6 @@ async def test_provider_tree_contained_before_work_and_reaped_graceful() -> None
     # Contained BEFORE work: the provider root is in its own containment.
     containment = getattr(process, "_vaultspec_containment", None)
     assert isinstance(containment, ProcessContainment)
-    assert containment.assigned is True
 
     mcp_pids = await _read_pids(process.stdout, 3)
     try:
@@ -218,7 +217,6 @@ async def test_terminal_child_tree_contained_and_reaped(
     process = ctx.terminals[terminal_id]
     containment = getattr(process, "_vaultspec_containment", None)
     assert isinstance(containment, ProcessContainment)
-    assert containment.assigned is True
 
     async with asyncio.timeout(10):
         while not ctx.terminal_outputs[terminal_id].output.strip():

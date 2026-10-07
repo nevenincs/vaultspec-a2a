@@ -9,7 +9,6 @@ instances must not leave permanent orphans under the runtime dir.
 
 from __future__ import annotations
 
-import asyncio
 import http.server
 import sys
 from contextlib import contextmanager
@@ -23,7 +22,12 @@ from ...control._worker_health import (
     sweep_orphan_worker_logs,
 )
 from ...lifecycle.registry import ProcRecord, now_ms, write_record
-from ...testing import JsonReplyHandler, serve_handler, settings_override
+from ...testing import (
+    JsonReplyHandler,
+    reap_contained,
+    serve_handler,
+    settings_override,
+)
 from ...utils import ProcessContainment, spawn_contained
 
 if TYPE_CHECKING:
@@ -136,8 +140,7 @@ def test_sweep_orphan_worker_logs_removes_dead_keeps_live_and_current(
             assert live_log.exists()
             assert current_log.exists()
     finally:
-        asyncio.run(containment.terminate(term_timeout=2.0, kill_timeout=5.0))
-        live_proc.wait(timeout=30)
+        reap_contained(live_proc, containment, term_timeout=2.0, kill_timeout=5.0)
 
 
 def test_sweep_orphan_worker_logs_ignores_non_matching_files(tmp_path: Path) -> None:

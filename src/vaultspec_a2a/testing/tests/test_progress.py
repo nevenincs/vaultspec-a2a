@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 import time
 from itertools import count
@@ -12,6 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...lifecycle import ProcRecord, now_ms, write_record
+from ...utils import ProcessContainment, spawn_contained
 from ..progress import (
     ProgressDeadline,
     ProgressStalledError,
@@ -19,6 +19,7 @@ from ..progress import (
     registry_watch,
     wait_for,
 )
+from ..reap import reap_contained
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,22 +42,26 @@ def test_touch_defers_the_stall() -> None:
 
 def test_dead_owner_pid_trips_immediately(tmp_path: Path) -> None:
     """A watched record whose pid dies fails the wait at the next check."""
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
-    record = ProcRecord(
-        name="watched",
-        role="scratch",
-        pid=child.pid,
-        port=0,
-        last_seen_ms=now_ms(),
+    containment = ProcessContainment.create()
+    child = spawn_contained(
+        [sys.executable, "-c", "import time; time.sleep(600)"], containment
     )
-    write_record(record, home=tmp_path)
-    deadline = ProgressDeadline(
-        idle_window_s=600.0,
-        watches=(registry_watch("scratch", "watched", home=tmp_path),),
-    )
-    deadline.check()
-    child.kill()
-    child.wait(timeout=60)
+    try:
+        record = ProcRecord(
+            name="watched",
+            role="scratch",
+            pid=child.pid,
+            port=0,
+            last_seen_ms=now_ms(),
+        )
+        write_record(record, home=tmp_path)
+        deadline = ProgressDeadline(
+            idle_window_s=600.0,
+            watches=(registry_watch("scratch", "watched", home=tmp_path),),
+        )
+        deadline.check()
+    finally:
+        reap_contained(child, containment)
     with pytest.raises(ResourceDiedError, match="dead"):
         deadline.check()
 

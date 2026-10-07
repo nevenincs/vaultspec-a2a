@@ -13,7 +13,6 @@ from .enums import (
     ApprovalStatus,
     ControlActionType,
     PermissionRequestStatus,
-    ThreadStatus,
 )
 from .snapshots import PLAN_APPROVAL_PAUSE_CAUSES
 
@@ -27,22 +26,17 @@ __all__ = [
 class PermissionRequestEffects:
     """Descriptor for DB mutations after a permission_request event."""
 
-    thread_status: ThreadStatus
     last_applied_action: ControlActionType
     is_plan_approval: bool
-    approval_status: ApprovalStatus | None
 
 
 def compute_permission_request_effects(
     pause_reason_type: str,
 ) -> PermissionRequestEffects:
     """Compute state-machine effects of a new permission request."""
-    is_plan = pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
     return PermissionRequestEffects(
-        thread_status=ThreadStatus.INPUT_REQUIRED,
         last_applied_action=ControlActionType.PERMISSION_REQUEST_CREATED,
-        is_plan_approval=is_plan,
-        approval_status=ApprovalStatus.PENDING if is_plan else None,
+        is_plan_approval=pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES,
     )
 
 

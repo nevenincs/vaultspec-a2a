@@ -1,30 +1,29 @@
-"""FastAPI and WebSocket trace context injection middleware.
+"""HTTP request tracing, operation spans and outbound trace propagation.
 
 OpenTelemetry instrumentation from day one. This module provides:
 
 - ``TelemetryMiddleware``: Starlette/FastAPI middleware that starts an OTel span
-  for every HTTP request, propagates W3C ``traceparent`` / ``tracestate`` headers,
-  and records ``http.method``, ``http.route``, ``http.status_code`` attributes.
+  for every HTTP request, continues the W3C ``traceparent`` / ``tracestate``
+  context the caller sent, and records the request method, route and response
+  status.
 
-- ``ws_span``: Async context manager that opens a span for a WebSocket operation.
-  HTTP header propagation does not apply to sustained WS frames, so each distinct
-  WS operation (subscribe, message, permission) is instrumented via manually
-  started child spans using this helper.
+- ``operation_span``: Async context manager that opens a span around one named
+  operation the request span does not delimit, such as a worker dispatch or a
+  graph compilation.
 
-- ``inject_trace_context``: Injects the current trace context into a dict (e.g.
-  a WebSocket JSON frame) so downstream consumers can reconstruct the trace.
-  Context propagation over WebSockets requires manual injection.
+- ``trace_headers``: Returns the current trace context as W3C headers for an
+  outbound HTTP call, so the receiving process continues the same trace.
 
 HTTP URL attributes mask user information and omit query strings and
 fragments. Request headers and bodies are not recorded. Paths and
-caller-supplied WebSocket attributes remain diagnostic data.
+caller-supplied operation attributes remain diagnostic data.
 """
 
 from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, override
 
 from opentelemetry import context as otel_context
 from opentelemetry import propagate, trace
@@ -43,8 +42,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "TelemetryMiddleware",
-    "inject_trace_context",
-    "ws_span",
+    "operation_span",
+    "trace_headers",
 ]
 
 logger = logging.getLogger(__name__)
@@ -162,19 +161,21 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
 
 
 @asynccontextmanager
-async def ws_span(
+async def operation_span(
     operation: str,
     thread_id: str | None = None,
     **attributes: str,
 ) -> AsyncGenerator[trace.Span]:
-    """Async context manager that opens a child span for a WebSocket operation.
+    """Open a span around one named operation of this process.
 
-    HTTP header propagation does not flow through individual WebSocket frames,
-    so distinct WS operations (subscribe, unsubscribe, send_message, permission
-    response) each get their own span via this helper.
+    ``TelemetryMiddleware`` spans each inbound HTTP request, but much of the
+    work a request starts outlives it or runs where no request is in scope: a
+    worker's dispatch, ingest, resume and graph compilation. Each gets its own
+    span from this helper. An exception leaving the block is recorded on the
+    span and marks it as an error before it propagates.
 
     Args:
-        operation: Human-readable operation name (e.g. ``"ws.subscribe"``).
+        operation: Span name (e.g. ``"executor.ingest"``).
         thread_id: Optional LangGraph thread_id to attach as a span attribute.
         **attributes: Additional string span attributes.
 
@@ -183,11 +184,11 @@ async def ws_span(
 
     Example:
         ```python
-        from vaultspec_a2a.telemetry import ws_span
+        from vaultspec_a2a.telemetry import operation_span
 
-        async with ws_span("ws.subscribe", thread_id=tid) as span:
-            span.set_attribute("client_id", client_id)
-            aggregator.subscribe(tid, send_fn)
+        async with operation_span("executor.ingest", thread_id=tid) as span:
+            span.set_attribute("is_first_ingest", first)
+            await run_turn()
         ```
     """
     # when the OTel SDK is explicitly disabled, skip real span creation
@@ -204,39 +205,24 @@ async def ws_span(
             span.set_attribute("thread_id", thread_id)
         for key, value in attributes.items():
             span.set_attribute(key, value)
-        try:
-            yield span
-        except Exception as exc:
-            span.set_status(StatusCode.ERROR, str(exc))
-            span.record_exception(exc)
-            raise
+        yield span
 
 
-def inject_trace_context(carrier: dict[str, Any]) -> None:
-    """Inject the current W3C trace context into a mutable dict.
+def trace_headers() -> dict[str, str]:
+    """Return the current trace context as headers for an outbound HTTP call.
 
-    Use this to embed trace context into outgoing WebSocket JSON frames so
-    that downstream consumers (frontend, external services) can continue the
-    trace. The injected keys follow the W3C TraceContext format
-    (``traceparent``, ``tracestate``).
-
-    Injecting OTel Trace IDs into WebSocket frames requires
-    careful manual context propagation.
-
-    Args:
-        carrier: The mutable dict to inject into (e.g. a WS event payload's
-            ``_trace`` sub-dict).
+    Injects the active span's W3C ``traceparent`` / ``tracestate`` into a fresh
+    carrier so the process receiving the call continues this trace. The carrier
+    is empty when no span is active, and is a new dict on every call, so a
+    caller may add its own headers to it.
 
     Example:
         ```python
-        from vaultspec_a2a.telemetry import inject_trace_context
+        from vaultspec_a2a.telemetry import trace_headers
 
-        payload: dict[str, Any] = {"type": "message_chunk", "content": chunk}
-        trace_meta: dict[str, str] = {}
-        inject_trace_context(trace_meta)
-        if trace_meta:
-            payload["_trace"] = trace_meta
-        await ws.send_json(payload)
+        response = await client.post("/dispatch", json=body, headers=trace_headers())
         ```
     """
+    carrier: dict[str, str] = {}
     propagate.inject(carrier)
+    return carrier

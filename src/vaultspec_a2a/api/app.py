@@ -79,11 +79,10 @@ from ..lifecycle.registration import (
 from ..lifecycle.registry import ProcRecord
 from ..lifecycle.shutdown import ShutdownDeadline, ShutdownServer, finish_before
 from ..streaming.aggregator import EventAggregator
-from ..telemetry import TelemetryMiddleware, configure_telemetry
+from ..telemetry import TelemetryMiddleware, configure_telemetry, trace_headers
 from ..telemetry.aggregator_hook import OTelAggregatorHook
 from ..utils import configure_logging, package_version, reconfigure_console_utf8
 from ..utils.ipc_auth import BearerVerdict
-from ._utils import trace_headers
 from .auth import verify_attach_bearer
 from .internal import internal_router
 from .routes import register_routes

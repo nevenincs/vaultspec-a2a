@@ -51,6 +51,7 @@ from ...providers.team_selection import (
     FrozenTeamSelection,
 )
 from ...streaming.aggregator import EventAggregator
+from ...telemetry import trace_headers
 from ...thread.enums import (
     ThreadStatus,
 )
@@ -60,7 +61,6 @@ from .._dispatch_refusals import (
     refusal_responses,
     refused_dispatch,
 )
-from .._utils import trace_headers
 from ..dependencies import (
     get_circuit_breaker,
     get_services,

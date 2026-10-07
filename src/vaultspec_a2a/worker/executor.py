@@ -25,7 +25,7 @@ from ..providers.team_selection import model_assignment_digest
 # FAILED instead wrote a terminal for a run nothing had failed.
 from ..streaming.ingest import INGEST_DRAINED
 from ..streaming.node_metadata import node_metadata_from_graph
-from ..telemetry import ws_span
+from ..telemetry import operation_span
 from ..thread import PermissionAnswer
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
@@ -549,7 +549,7 @@ class Executor(SettlementMixin):
                 dispatch_id=req.dispatch_id,
                 action=str(req.action),
             ):
-                async with ws_span(
+                async with operation_span(
                     f"executor.{req.action}",
                     thread_id=req.thread_id,
                     agent_id=req.agent_id or "supervisor",
@@ -636,7 +636,7 @@ class Executor(SettlementMixin):
 
     async def _handle_ingest(self, req: DispatchRequest) -> None:
         """Compile graph on first use and execute a new user turn."""
-        async with ws_span("executor.ingest", thread_id=req.thread_id) as span:
+        async with operation_span("executor.ingest", thread_id=req.thread_id) as span:
             try:
                 receipt = req.require_graph_action_receipt()
             except ValueError as exc:
@@ -826,7 +826,7 @@ class Executor(SettlementMixin):
 
     async def _handle_resume(self, req: DispatchRequest) -> None:
         """Resume a graph from a LangGraph interrupt via ``Command(resume=...)``."""
-        async with ws_span("executor.resume", thread_id=req.thread_id) as span:
+        async with operation_span("executor.resume", thread_id=req.thread_id) as span:
             try:
                 receipt = req.require_graph_action_receipt()
             except ValueError as exc:

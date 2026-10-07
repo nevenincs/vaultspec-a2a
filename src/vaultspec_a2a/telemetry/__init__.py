@@ -3,9 +3,9 @@
 Public configuration controls OpenTelemetry and LangSmith integration. Tracer
 and meter accessors support instrumentation without duplicating provider setup.
 
-:mod:`vaultspec_a2a.telemetry.middleware` instruments
-:mod:`vaultspec_a2a.api` and provides trace injection across outbound
-inter-process communication (IPC) and WebSocket boundaries.
+:mod:`vaultspec_a2a.telemetry.middleware` instruments the gateway and worker
+HTTP applications, spans named operations, and supplies the trace headers that
+outbound inter-process communication (IPC) carries.
 :mod:`vaultspec_a2a.telemetry.instrumentation` configures tracing and metrics
 providers.
 
@@ -29,10 +29,10 @@ from .middleware import (
     TelemetryMiddleware as TelemetryMiddleware,
 )
 from .middleware import (
-    inject_trace_context as inject_trace_context,
+    operation_span as operation_span,
 )
 from .middleware import (
-    ws_span as ws_span,
+    trace_headers as trace_headers,
 )
 
 __all__ = [
@@ -41,6 +41,6 @@ __all__ = [
     "configure_telemetry",
     "get_meter",
     "get_tracer",
-    "inject_trace_context",
-    "ws_span",
+    "operation_span",
+    "trace_headers",
 ]

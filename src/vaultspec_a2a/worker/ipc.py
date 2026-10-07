@@ -23,7 +23,7 @@ from ..domain_config import domain_config
 from ..graph.enums import ServerEventType
 from ..ipc.schemas import WorkerEventBatch, WorkerEventEnvelope
 from ..streaming.fanout import is_protected_payload, pop_oldest_droppable
-from ..telemetry import inject_trace_context
+from ..telemetry import trace_headers
 from ..thread.snapshots import wire_event_type
 
 __all__ = ["WorkerBridge", "event_client_timeout"]
@@ -287,13 +287,6 @@ class WorkerBridge:
     # Event relay (batched)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _trace_headers() -> dict[str, str] | None:
-        """Inject the current trace context into outbound IPC requests."""
-        headers: dict[str, str] = {}
-        inject_trace_context(headers)
-        return headers or None
-
     async def send_event(self, thread_id: str, payload: dict[str, Any]) -> None:
         """Buffer an event for batched relay to the gateway.
 
@@ -368,7 +361,7 @@ class WorkerBridge:
         attempt: int,
         request_timeout: httpx.Timeout | float | None,
     ) -> bool:
-        headers = self._trace_headers() or {}
+        headers = trace_headers()
         headers["content-type"] = _BATCH_CONTENT_TYPE
         try:
             resp = await self._client.post(
@@ -606,7 +599,7 @@ class WorkerBridge:
                     "active_threads": sorted(self._active_threads),
                     "uptime_seconds": round(time.monotonic() - self._start_time),
                 },
-                headers=self._trace_headers(),
+                headers=trace_headers(),
             )
             if resp.status_code == 200:
                 return True

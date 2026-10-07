@@ -48,6 +48,7 @@ from ...providers.provider_catalog_service import (
 )
 from ...streaming.aggregator import EventAggregator
 from ...team.preset_origin import PresetOrigin
+from ...telemetry import trace_headers
 from ...thread.clarification import (
     ClarificationAnswers,
     ClarificationContinuation,
@@ -71,7 +72,6 @@ from .._dispatch_refusals import (
     refused_cancel,
     refused_dispatch,
 )
-from .._utils import trace_headers
 from ..dependencies import (
     get_checkpointer,
     get_circuit_breaker,

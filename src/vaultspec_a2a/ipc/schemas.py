@@ -154,7 +154,10 @@ class DispatchRequest(BaseModel):
     seed_transcript: list[SeedTranscriptMessage] = Field(
         default_factory=list, max_length=MAX_SEED_TRANSCRIPT_MESSAGES
     )
-    recursion_limit: int = Field(ge=1, le=500)
+    # The budget one graph invocation runs under. A cancel enters no graph and
+    # the worker never reads it there, so only the actions that run the graph
+    # must carry it; that is refused below.
+    recursion_limit: int | None = Field(default=None, ge=1, le=500)
     # SDD blackboard fields
     active_feature: str | None = None
     # feedback-loop: the OPAQUE engine feedback-batch id for a revision run,
@@ -225,6 +228,22 @@ class DispatchRequest(BaseModel):
             msg = (
                 "an ingest dispatch must name the run's active project: "
                 "workspace_root is missing"
+            )
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _graph_run_names_its_budget(self) -> DispatchRequest:
+        """Refuse a graph-running dispatch that carries no recursion budget.
+
+        The budget is decided once at acceptance and frozen into the accepted
+        input, so a dispatch that reaches the worker without one has no number
+        to run the graph under and would silently take the engine's default.
+        """
+        if self.requires_graph_receipt and self.recursion_limit is None:
+            msg = (
+                f"a {self.action} dispatch runs the graph and must carry its "
+                "recursion_limit"
             )
             raise ValueError(msg)
         return self

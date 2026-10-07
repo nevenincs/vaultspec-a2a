@@ -198,7 +198,15 @@ async def run_start_endpoint(
     default) preserves the one-shot engine/Compose path.
     """
     db, _aggregator, checkpointer, worker_client = services
-    runtime = _RunRuntime(circuit_breaker, worker_spawner, worker_client, checkpointer)
+    runtime = _RunRuntime(
+        DispatchTransport(
+            worker_client=worker_client,
+            circuit_breaker=circuit_breaker,
+            worker_spawner=worker_spawner,
+            trace_headers=trace_headers(),
+        ),
+        checkpointer,
+    )
     if body.stage == RunStage.PREPARE:
         return await _run_prepare(request, body, worker_spawner, worker_client)
     if body.stage == RunStage.COMMIT:
@@ -228,9 +236,7 @@ class _RunLeaseBinding:
 
 @dataclass(frozen=True, slots=True)
 class _RunRuntime:
-    circuit_breaker: Any
-    worker_spawner: Any
-    worker_client: httpx.AsyncClient
+    transport: DispatchTransport
     checkpointer: Checkpointer
 
 
@@ -399,12 +405,7 @@ async def _attempt_thread_creation(
         return await create_and_dispatch_thread(
             db,
             request,
-            transport=DispatchTransport(
-                worker_client=runtime.worker_client,
-                circuit_breaker=runtime.circuit_breaker,
-                worker_spawner=runtime.worker_spawner,
-                trace_headers=trace_headers(),
-            ),
+            transport=runtime.transport,
         )
 
     async def durable_winner() -> _RunWinner | None:
@@ -742,7 +743,7 @@ async def _require_commit_execution_ready(
     """
     logger.info("commit step: probe_worker")
     readiness = await _probe_admission_readiness(
-        request.app.state, runtime.worker_client
+        request.app.state, runtime.transport.worker_client
     )
     reason = readiness.not_ready_reason
     if reason is None:

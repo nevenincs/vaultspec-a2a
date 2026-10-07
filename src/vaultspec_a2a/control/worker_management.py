@@ -24,8 +24,8 @@ if TYPE_CHECKING:
     from ..lifecycle.shutdown import ShutdownDeadline
     from .circuit_breaker import WorkerCircuitBreaker
 
+from ..utils import ProcessContainment, spawn_contained
 from ..utils.async_cleanup import complete_cleanup
-from ..utils.process import ProcessContainment
 from ..utils.runtime_exec import module_command
 from ._worker_health import (
     GATEWAY_LIFETIME_ID,
@@ -71,10 +71,11 @@ async def _spawn_worker(
     became ready is reaped tree-and-all before returning, so a failed spawn
     never leaves an orphan holding the worker port.
 
-    The worker is seated in *containment*: a new POSIX session/process group or
-    Windows Job Object assigned before descendant work can begin. A failed
-    assignment reaps the exact retained process tree and fails the spawn; the
-    worker is never admitted without that authority.
+    The worker is started inside *containment* - a new POSIX session/process
+    group or a Windows Job Object - before its first instruction, so every
+    descendant it launches is in the tree shutdown reaps. A refused admission
+    kills the exact retained root and fails the spawn; the worker is never run
+    without that authority.
 
     Ownership contract - the caller allocates *containment* and the caller
     releases it. This function never releases it on the caller's behalf, on any
@@ -86,9 +87,10 @@ async def _spawn_worker(
     What this function does guarantee is that nothing it spawned outlives a spawn
     it did not report as successful: any process started here is reaped, tree and
     all, before a ``None`` return or a propagating exception leaves the frame.
-    Reaping through a containment closes the handle as a side effect, which is
-    harmless - :meth:`ProcessContainment.close` is idempotent - but it is the
-    caller's release, not that side effect, that makes the release total.
+    Reaping through a containment, or a refused spawn, closes the handle as a
+    side effect, which is harmless - :meth:`ProcessContainment.close` is
+    idempotent - but it is the caller's release, not that side effect, that
+    makes the release total.
 
     Use :func:`_spawn_worker_owned` rather than calling this directly; it is the
     single seam that honours the contract for both spawn paths.
@@ -123,7 +125,7 @@ async def _spawn_worker(
     )
 
     # Explicitly propagate critical config to the worker subprocess.
-    # While Python's subprocess.Popen() inherits the parent env by default,
+    # While a spawned child inherits the parent env by default,
     # the gateway may have auto-derived gateway_url from host+port.  That
     # computed value is NOT in os.environ, so the child would re-derive it
     # and potentially get a different result (e.g. 0.0.0.0 vs 127.0.0.1).
@@ -141,23 +143,18 @@ async def _spawn_worker(
 
     stderr_log_path = _worker_stderr_log_path(worker_port)
     settings.prepare_state_dir(stderr_log_path.parent)
-    # POSIX containment seats the worker in a new session/process group at fork;
-    # passed explicitly (rather than via ``**kwargs``) so the ``Popen[bytes]``
-    # overload is preserved. Windows contributes no spawn-time flag - it assigns
-    # the job after spawn.
-    new_session = bool(containment.spawn_kwargs().get("start_new_session"))
     # Freeze-safe worker re-exec: rendered by the runtime's command authority
     # (``python -m vaultspec_a2a.worker`` from source; the binary's own
     # ``run-module`` dispatch when frozen), never assembled interpreter flags.
     worker_command = module_command("vaultspec_a2a.worker")
     with stderr_log_path.open("wb") as stderr_handle:
-        process = subprocess.Popen(
+        process = spawn_contained(
             worker_command,
+            containment,
             stdout=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
             stderr=stderr_handle,
             env=spawn_env,
-            start_new_session=new_session,
         )
     return await _await_worker_ready(
         process,

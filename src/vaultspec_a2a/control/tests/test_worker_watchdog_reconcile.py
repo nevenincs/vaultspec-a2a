@@ -10,7 +10,6 @@ climbing every tick and the breaker flapping open; post-fix it stays 0 and close
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -23,7 +22,7 @@ from ...control.health import assemble_health_status
 from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
 from ...testing import health_listener
 from ...testing.ports import free_port
-from ...utils.process import ProcessContainment
+from ...utils import ProcessContainment, spawn_contained
 
 
 def _stale_app_state(**singletons: object) -> SimpleNamespace:
@@ -54,18 +53,22 @@ def test_owns_worker_requires_a_process_and_auto_spawn() -> None:
             spawner, WorkerCircuitBreaker(3, 30.0), WorkerState(), SimpleNamespace()
         )
 
-    # A real (already-exited) process handle stands in for an owned worker process,
-    # held with real containment as every owned worker is.
-    proc = subprocess.Popen([sys.executable, "-c", "pass"])
-    proc.wait()
+    # Real (already-exited) process handles stand in for owned worker processes,
+    # each started inside its own real containment as every owned worker is.
     external_containment = ProcessContainment.create()
     owned_containment = ProcessContainment.create()
+    external_proc = spawn_contained(
+        [sys.executable, "-c", "pass"], external_containment
+    )
+    owned_proc = spawn_contained([sys.executable, "-c", "pass"], owned_containment)
+    external_proc.wait()
+    owned_proc.wait()
     try:
         external = LazyWorkerSpawner("http://127.0.0.1:1", 1, auto_spawn=False)
         # has a handle but is not auto-spawn
-        external.replace_process(proc, external_containment)
+        external.replace_process(external_proc, external_containment)
         owned = LazyWorkerSpawner("http://127.0.0.1:1", 1, auto_spawn=True)
-        owned.replace_process(proc, owned_containment)
+        owned.replace_process(owned_proc, owned_containment)
         adopted = LazyWorkerSpawner("http://127.0.0.1:1", 1, auto_spawn=True)
         adopted.adopt_worker()  # auto-spawn but no owned process
 
@@ -75,8 +78,6 @@ def test_owns_worker_requires_a_process_and_auto_spawn() -> None:
     finally:
         external_containment.close()
         owned_containment.close()
-        if proc.poll() is None:
-            proc.kill()
 
 
 def test_restart_cooldown_gate() -> None:

@@ -8,15 +8,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import subprocess
 import sys
 from contextlib import suppress
-from typing import TYPE_CHECKING, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from ..desktop.native_isolation import NativeLaunchAuthority
-from ..utils import kill_pid_tree_async, redact_text
+from ..utils import (
+    ProcessContainment,
+    ProcessContainmentError,
+    redact_text,
+    spawn_contained_async,
+)
 from ..utils.async_cleanup import complete_cleanup
-from ..utils.process import ProcessContainment, ProcessContainmentError
 from ._provider_execution import provider_execution_launch
 
 if TYPE_CHECKING:
@@ -107,23 +110,6 @@ def process_containment(
     return attached if isinstance(attached, ProcessContainment) else None
 
 
-def _retained_popen(
-    process: asyncio.subprocess.Process,
-) -> subprocess.Popen[bytes]:
-    """Return the exact ``Popen`` retained by asyncio's subprocess transport."""
-    transport = getattr(process, "_transport", None)
-    popen = (
-        transport.get_extra_info("subprocess")
-        if transport is not None and hasattr(transport, "get_extra_info")
-        else None
-    )
-    if not isinstance(popen, subprocess.Popen):
-        raise ProcessContainmentError(
-            f"Provider process {process.pid} has no retained subprocess handle"
-        )
-    return cast("subprocess.Popen[bytes]", popen)
-
-
 def _metadata_extra(metadata: Mapping[str, object] | None) -> dict[str, object]:
     """Return bounded subprocess metadata for structured logging."""
     if not metadata:
@@ -202,24 +188,25 @@ async def _spawn_acp_process(
 ) -> asyncio.subprocess.Process:
     """Spawn an ACP subprocess with platform-appropriate isolation.
 
-    Windows (default): ``create_subprocess_shell`` with ``CREATE_NEW_PROCESS_GROUP``
-    so that ``.cmd`` shims (for example ``kimi.cmd``) work; the whole tree (cmd.exe +
-    node.exe + any grandchildren) is reaped as one via the Job Object the process
-    is assigned to below, terminated in ``kill_process_tree``.
+    Windows (default): through the shell, in a new console process group, so
+    that ``.cmd`` shims (for example ``kimi.cmd``) work; the whole tree (cmd.exe +
+    node.exe + any grandchildren) is reaped as one through its Job Object in
+    ``kill_process_tree``.
 
-    Windows (use_exec=True): ``create_subprocess_exec`` -- bypasses the cmd.exe
-    shell intermediary for native PE32+ executables (e.g. the precompiled Bun
-    binary) that do not need a .cmd shim.
+    Windows (use_exec=True): exec -- bypasses the cmd.exe shell intermediary for
+    native PE32+ executables (e.g. the precompiled Bun binary) that do not need a
+    .cmd shim.
 
-    Unix/Linux/macOS: ``create_subprocess_exec`` -- no shell intermediary;
-    POSIX signals (SIGTERM/SIGKILL) deliver directly to the target process.
-    ``use_exec`` has no effect on non-Windows platforms.
+    Unix/Linux/macOS: exec -- no shell intermediary; POSIX signals
+    (SIGTERM/SIGKILL) deliver directly to the target process group. ``use_exec``
+    has no effect on non-Windows platforms.
     """
     # Every run-owned provider root is spawned inside its own OS containment (a
-    # POSIX new session/process group or a Windows Job Object) so its whole tree -
-    # the CLI, its node/grandchildren, and the MCP bridges it launches - is reaped
-    # as one on run terminal, without a parent-pid walk. The containment rides on
-    # the returned Process for the shared reaper to reach.
+    # POSIX new session/process group or a Windows Job Object) before its first
+    # instruction, so its whole tree - the CLI, its node/grandchildren, and the
+    # MCP bridges it launches - is reaped as one on run terminal, without a
+    # parent-pid walk. The containment rides on the returned Process for the
+    # shared reaper to reach.
     use_exec = options["use_exec"]
     metadata = options["metadata"]
     # Refuse native execution before acquiring even a lifetime containment.
@@ -232,77 +219,35 @@ async def _spawn_acp_process(
     env = dict(launch.environment)
     assert launch.cwd is not None
     cwd = launch.cwd
-    containment = options.get("containment") or ProcessContainment.create()
-    spawn_mode = "exec" if sys.platform != "win32" or use_exec else "shell"
+    env = _confined_search_env(env)
+    shell = sys.platform == "win32" and not use_exec
     log_extra = _metadata_extra(metadata)
     log_extra.update(
         {
             "cwd": cwd,
             "use_exec": use_exec,
-            "spawn_mode": spawn_mode,
+            "spawn_mode": "shell" if shell else "exec",
         }
     )
     logger.info("ACP subprocess spawn starting", extra=log_extra)
-    process: asyncio.subprocess.Process
-    # The containment is allocated above, before anything it contains exists, so
-    # a spawn that never produces a process must release it - on Windows it is a
-    # job handle, and a provider that fails to start is retried, so a leak here
-    # is per-attempt rather than one-off. One guard covers all three spawn
-    # branches: releasing in each branch's own handler is the split duty that let
-    # the equivalent leak survive elsewhere in this codebase.
     try:
-        env = _confined_search_env(env)
-        if sys.platform == "win32":
-            if use_exec:
-                process = await asyncio.create_subprocess_exec(
-                    command[0],
-                    *command[1:],
-                    creationflags=(
-                        subprocess.CREATE_NEW_PROCESS_GROUP
-                        | containment.suspended_creation_flag()
-                    ),
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    env=env,
-                    cwd=cwd,
-                    limit=_STREAM_LIMIT_BYTES,
-                )
-            else:
-                process = await asyncio.create_subprocess_shell(
-                    subprocess.list2cmdline(command),
-                    creationflags=(
-                        subprocess.CREATE_NEW_PROCESS_GROUP
-                        | containment.suspended_creation_flag()
-                    ),
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    env=env,
-                    cwd=cwd,
-                    limit=_STREAM_LIMIT_BYTES,
-                )
-        else:
-            process = await asyncio.create_subprocess_exec(
-                command[0],
-                *command[1:],
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                cwd=cwd,
-                limit=_STREAM_LIMIT_BYTES,
-                start_new_session=True,
-            )
+        # Allocated last, so the contained spawn is its only owner on failure.
+        containment = options.get("containment") or ProcessContainment.create()
+        process = await spawn_contained_async(
+            command,
+            containment,
+            shell=shell,
+            new_process_group=True,
+            limit=_STREAM_LIMIT_BYTES,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+            cwd=cwd,
+        )
     except BaseException as exc:
-        containment.close()
         logger.error("ACP subprocess spawn failed: %s", exc, extra=log_extra)
         raise
-    # Windows creates the provider suspended, binds its retained process handle
-    # to the Job, then resumes its one initial thread. No provider instruction or
-    # descendant launch can precede containment. POSIX start_new_session performs
-    # the equivalent seating as part of exec.
-    await _admit_provider_process(process, containment, log_extra=log_extra)
     attach_process_containment(process, containment)
     if native_authority is not None:
         setattr(process, _NATIVE_AUTHORITY_ATTR, native_authority)
@@ -311,66 +256,6 @@ async def _spawn_acp_process(
         extra={**log_extra, "process_pid": process.pid},
     )
     return process
-
-
-async def _admit_provider_process(
-    process: asyncio.subprocess.Process,
-    containment: ProcessContainment,
-    *,
-    log_extra: Mapping[str, object] | None = None,
-) -> None:
-    """Seat a retained provider root, failing only after its exact tree is gone."""
-    try:
-        containment.assign_suspended_process(_retained_popen(process))
-    except BaseException as admission_error:
-        cleanup_error: BaseException | None = None
-        try:
-            await _reap_provider_admission_failure(process, containment)
-        except BaseException as exc:
-            cleanup_error = exc
-            logger.error(
-                "ACP subprocess containment admission cleanup failed: %s",
-                exc,
-                extra={**_metadata_extra(log_extra), "process_pid": process.pid},
-                exc_info=True,
-            )
-        if cleanup_error is not None:
-            raise admission_error from cleanup_error
-        raise
-
-
-async def _reap_provider_admission_failure(
-    process: asyncio.subprocess.Process,
-    containment: ProcessContainment,
-) -> None:
-    """Reap a provider whose containment handoff failed before returning it."""
-    try:
-        if containment.assigned:
-            stopped = await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
-        else:
-            # Windows provider roots are created suspended and reach this branch
-            # only when Job assignment failed. The provider has executed zero
-            # instructions, so the exact retained root is the complete tree.
-            popen = _retained_popen(process)
-            popen.kill()
-            try:
-                await asyncio.wait_for(process.wait(), timeout=5.0)
-            except TimeoutError:
-                stopped = False
-            else:
-                stopped = process.returncode is not None
-        if not stopped:
-            raise ProcessContainmentError(
-                f"Provider process tree {process.pid} could not be reaped after "
-                "containment admission failed"
-            )
-    finally:
-        containment.close()
-        with suppress(Exception):
-            await asyncio.wait_for(process.wait(), timeout=0.1)
-        transport = getattr(process, "_transport", None)
-        if transport is not None:
-            transport.close()
 
 
 async def kill_process_tree(
@@ -387,37 +272,30 @@ async def _kill_process_tree(
 ) -> None:
     """Terminate an ACP subprocess and its entire process tree.
 
-    A provider spawned by :func:`spawn_acp_process` carries an assigned OS
+    Every provider spawned by :func:`spawn_acp_process` carries its OS
     containment, so its whole tree (Windows: the Job Object; POSIX: the process
-    group) is reaped at once with no parent-pid discovery. A directly created
-    process uses the explicit per-pid tree cleanup contract; failed provider
-    admission never reaches that path.
+    group) is reaped at once with no parent-pid discovery. The containment, not
+    its current assignment, is the authority: a repeat call after a completed
+    reap is a no-op rather than a kill aimed at a numeric pid.
 
     The asyncio transport handle is closed last to prevent OS handle leaks
     when the event loop finalizer runs (cpython#114177).
     """
     containment = process_containment(process)
-    has_containment = containment is not None and containment.assigned
-    kill_strategy = "os_containment" if has_containment else "per_pid_tree_kill"
     log_extra = _metadata_extra(metadata)
     log_extra.update(
         {
             "process_pid": process.pid,
-            "kill_strategy": kill_strategy,
             "returncode": process.returncode,
         }
     )
     logger.info("ACP subprocess termination starting", extra=log_extra)
-    # Returned providers use the authority acquired before admission. Direct
-    # subprocess owners use the explicit per-pid cleanup contract.
     try:
-        if containment is not None and containment.assigned:
-            stopped = await containment.terminate(term_timeout=5.0, kill_timeout=5.0)
-        else:
-            stopped = await kill_pid_tree_async(
-                process.pid, term_timeout=5.0, kill_timeout=5.0
+        if containment is None:
+            raise ProcessContainmentError(
+                f"Provider process {process.pid} carries no containment"
             )
-        if not stopped:
+        if not await containment.terminate(term_timeout=5.0, kill_timeout=5.0):
             raise ProcessContainmentError(
                 f"Provider process tree {process.pid} could not be fully reaped"
             )

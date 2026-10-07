@@ -34,8 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..utils._process_tree import detached_spawn_kwargs
-from ..utils.process import ProcessContainment, ProcessContainmentError
+from ..utils import ProcessContainment, ProcessContainmentError, spawn_contained
 from .boot import render_command
 from .procs_config import load_procs_config
 from .registration import (
@@ -61,6 +60,7 @@ __all__ = [
 _ROLE = "engine-dev"
 _DEFAULT_SERVE_CMD = "vaultspec serve --no-seat --port {port}"
 _HEARTBEAT_SECONDS = 15.0
+_CONTAINMENT_REFUSED_EXIT = 126
 logger = logging.getLogger(__name__)
 
 
@@ -120,9 +120,11 @@ def serve(*, port: int, name: str | None, workspace: str) -> int:
     """Validate the data seat, register, launch the engine in the seat, and serve.
 
     Returns the engine's exit code, ``2`` when the data seat is ambiguous (refused
-    before any registration or launch), or ``127`` when the engine binary cannot be
-    launched. The engine is spawned with ``cwd`` set to the validated seat, so its
-    cwd-relative data store can never land in the wrapper's inherited cwd.
+    before any registration or launch), ``126`` when the engine cannot be admitted
+    to its OS containment (it is killed rather than served), or ``127`` when the
+    engine binary cannot be launched. The engine is spawned with ``cwd`` set to the
+    validated seat, so its cwd-relative data store can never land in the wrapper's
+    inherited cwd.
     """
     try:
         seat = resolve_data_seat(workspace)
@@ -203,18 +205,20 @@ def _wait_engine_child(
 ) -> int:
     containment = ProcessContainment.create()
     process: subprocess.Popen[bytes] | None = None
-    flags = detached_spawn_kwargs()
     try:
-        process = subprocess.Popen(
-            command,
-            cwd=seat,
-            creationflags=flags.creationflags,
-            start_new_session=flags.start_new_session,
-        )
         try:
-            containment.assign(process.pid)
-        except ProcessContainmentError:
-            logger.warning("Engine containment assignment failed", exc_info=True)
+            # The new console process group is what lets a stop request reach
+            # the engine as ``CTRL_BREAK_EVENT``.
+            process = spawn_contained(
+                command, containment, cwd=seat, new_process_group=True
+            )
+        except ProcessContainmentError as exc:
+            print(
+                "engine-serve: refusing to run the engine outside its "
+                f"containment: {exc}",
+                file=sys.stderr,
+            )
+            return _CONTAINMENT_REFUSED_EXIT
         try:
             while request.signum is None:
                 try:

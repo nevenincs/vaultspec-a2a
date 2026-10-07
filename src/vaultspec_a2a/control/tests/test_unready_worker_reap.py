@@ -8,9 +8,8 @@ merely leaking a process.
 
 These drive the production reap seam with REAL process trees: a parent that
 spawns real grandchildren, reaped through the same function the readiness
-timeout calls. Gateway-owned workers retain OS containment in every profile;
-the fallback case is a containment whose assignment never took, which leaves
-the exact retained ``Popen`` identity as the only authority for the tree.
+timeout calls. Every stand-in is started through the same contained spawn as a
+gateway-owned worker, so its containment is the only authority for the tree.
 
 The grandchildren are what make these tests discriminating. A bare
 ``Popen.terminate`` fells the parent and passes any parent-only assertion, so a
@@ -21,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import socket
 import subprocess
 import sys
@@ -33,16 +33,16 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from ...control._worker_process_stop import _shutdown_worker_process
-from ...control._worker_readiness import (
-    WorkerReadySpec,
-    _await_worker_ready,
-    _reap_unready_worker,
-)
+from ...control._worker_readiness import _reap_unready_worker
 from ...control.worker_management import LazyWorkerSpawner
 from ...lifecycle.shutdown import ShutdownDeadline
-from ...utils import kill_pid_tree_async
+from ...utils import (
+    ProcessContainment,
+    ProcessContainmentError,
+    kill_pid_tree_async,
+    spawn_contained,
+)
 from ...utils._process_tree import pid_is_live, port_has_listener_async, wait_pid_gone
-from ...utils.process import ProcessContainment, ProcessContainmentError
 
 # A stand-in for the half-started worker: spawns real grandchildren, prints their
 # pids so the test can watch them independently of the parent, then sleeps well
@@ -104,25 +104,23 @@ def _late_child_worker_script(port: int, marker: Path) -> str:
     )
 
 
-def _spawn_tree(
-    containment: ProcessContainment | None,
-) -> tuple[subprocess.Popen[bytes], list[int]]:
-    """Spawn the stand-in worker and return it with its real grandchild pids."""
+def _base_interpreter() -> str:
     # A uv-managed Windows venv executable is a redirector process.  Use the
     # retained base interpreter so the returned Popen is the actual worker root
     # whose identity and descendants production cleanup must own.
-    interpreter = getattr(sys, "_base_executable", sys.executable)
-    new_session = containment is not None and bool(
-        containment.spawn_kwargs().get("start_new_session")
-    )
-    process = subprocess.Popen(
-        [interpreter, "-c", _WORKER_WITH_CHILDREN],
+    return getattr(sys, "_base_executable", sys.executable)
+
+
+def _spawn_tree(
+    containment: ProcessContainment,
+) -> tuple[subprocess.Popen[bytes], list[int]]:
+    """Spawn the stand-in worker and return it with its real grandchild pids."""
+    process = spawn_contained(
+        [_base_interpreter(), "-c", _WORKER_WITH_CHILDREN],
+        containment,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
-        start_new_session=new_session,
     )
-    if containment is not None:
-        containment.assign(process.pid)
     assert process.stdout is not None
     line = process.stdout.readline().decode("utf-8").strip()
     child_pids = [int(p) for p in line.split()]
@@ -135,15 +133,13 @@ async def _serving_contained_worker(
 ) -> tuple[subprocess.Popen[bytes], ProcessContainment, LazyWorkerSpawner]:
     """Run *script* in real containment, owned by a spawner, once it serves *port*."""
     containment = ProcessContainment.create()
-    base_interpreter = getattr(sys, "_base_executable", sys.executable)
-    process = subprocess.Popen(
-        [base_interpreter, "-c", script],
+    process = spawn_contained(
+        [_base_interpreter(), "-c", script],
+        containment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=sys.platform != "win32",
     )
-    containment.assign_process(process)
     spawner = LazyWorkerSpawner(
         worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
     )
@@ -153,8 +149,7 @@ async def _serving_contained_worker(
         if await port_has_listener_async(port, timeout=0.5):
             return process, containment, spawner
         await asyncio.sleep(0.02)
-    await _force_cleanup([process.pid])
-    containment.close()
+    await containment.terminate(term_timeout=2.0, kill_timeout=2.0)
     raise AssertionError("contained worker socket did not become ready")
 
 
@@ -172,56 +167,24 @@ async def _force_cleanup(pids: list[int]) -> None:
                 await kill_pid_tree_async(pid, term_timeout=2.0, kill_timeout=2.0)
 
 
-@pytest.mark.asyncio
-async def test_unready_worker_tree_is_reaped_with_unassigned_containment() -> None:
-    """The unassigned fallback reaps the whole tree, not just the root.
-
-    The containment was never assigned, so it holds no authority over the tree,
-    which is exactly where a bare ``Popen.terminate`` used to leave both
-    grandchildren running.
-    """
-    containment = ProcessContainment.create()
-    process, child_pids = _spawn_tree(None)
-    try:
-        await _reap_unready_worker(process, containment)
-
-        assert process.poll() is not None, "the worker root survived the reap"
-        survivors = _await_gone(child_pids)
-        assert not survivors, f"worker descendants survived the reap: {survivors}"
-    finally:
-        await _force_cleanup([process.pid, *child_pids])
-        containment.close()
-
-
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows Job assignment proof")
-@pytest.mark.asyncio
-async def test_failed_containment_assignment_reaps_exact_tree_and_propagates(
+def test_refused_admission_kills_the_root_before_its_first_instruction(
     tmp_path: Path,
 ) -> None:
-    """A real closed Job authority cannot admit or strand its live process."""
-    process, child_pids = _spawn_tree(None)
+    """A real closed Job cannot admit the worker root, and the root never runs."""
+    marker = tmp_path / "worker-first-instruction"
+    script = f"from pathlib import Path; Path({str(marker)!r}).touch()"
     containment = ProcessContainment.create()
     containment.close()
-    started = asyncio.get_running_loop().time()
-    try:
-        with pytest.raises(ProcessContainmentError):
-            await _await_worker_ready(
-                process,
-                containment,
-                WorkerReadySpec(
-                    "http://127.0.0.1:9",
-                    9,
-                    1,
-                    ["assignment-failure-worker"],
-                    tmp_path / "assignment-failure.log",
-                ),
-            )
-        elapsed = asyncio.get_running_loop().time() - started
-        assert elapsed < 15.2, f"assignment-failure reap took {elapsed:.4f}s"
-        assert process.poll() is not None, "failed assignment left root live"
-        assert not _await_gone(child_pids), "failed assignment left descendants live"
-    finally:
-        await _force_cleanup([process.pid, *child_pids])
+    started = time.monotonic()
+    with pytest.raises(ProcessContainmentError, match="no job object") as caught:
+        spawn_contained([_base_interpreter(), "-c", script], containment)
+    elapsed = time.monotonic() - started
+    assert elapsed < 10.5, f"refused-admission reap took {elapsed:.4f}s"
+    pid_match = re.search(r"process (\d+)", str(caught.value))
+    assert pid_match is not None
+    assert not marker.exists(), "the worker root ran before its admission failed"
+    assert not pid_is_live(int(pid_match.group(1))), "refused root left live"
 
 
 @pytest.mark.asyncio

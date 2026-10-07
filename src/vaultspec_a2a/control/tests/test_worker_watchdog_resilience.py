@@ -22,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import subprocess
 import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, override
@@ -34,7 +33,7 @@ from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
 from ...testing.ports import free_port
-from ...utils.process import ProcessContainment
+from ...utils import ProcessContainment, spawn_contained
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -115,12 +114,14 @@ def _crashed_owned_watchdog() -> Generator[
     The shape that sends a tick down the recovery path: the gateway holds the
     process handle and may restart it, and the handle's process is really dead,
     so ``_process_crashed`` is true from the first tick without any simulation.
-    An owned worker is always held with its containment; this one exited before
-    it could be seated, so the containment is real but unassigned.
+    An owned worker is always started inside its containment, so this one is
+    too; the containment outlives the root it reaps around.
     """
-    crashed = subprocess.Popen([sys.executable, "-c", "raise SystemExit(3)"])
-    crashed.wait(timeout=30)
     containment = ProcessContainment.create()
+    crashed = spawn_contained(
+        [sys.executable, "-c", "raise SystemExit(3)"], containment
+    )
+    crashed.wait(timeout=30)
     port = free_port()
     spawner = LazyWorkerSpawner(
         worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=True

@@ -33,15 +33,16 @@ import sys
 import tempfile
 import threading
 import time
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 import psutil
 
+from ..utils import ProcessContainment, kill_pid_tree_async, spawn_contained
 from .progress import ProgressDeadline, ProgressStalledError
 from .session_root import session_scratch_dir
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Mapping
+    from collections.abc import Callable, Coroutine, Generator, Mapping
     from pathlib import Path
 
 __all__ = [
@@ -140,17 +141,20 @@ class ChildWatch(TypedDict, total=False):
 
 def await_child(
     process: subprocess.Popen[bytes],
+    containment: ProcessContainment,
     *,
     what: str,
     **watch: Unpack[ChildWatch],
 ) -> int:
     """Wait for *process* to exit, failing on a stall and never on slowness.
 
-    *what* names the child in a failure; :class:`ChildWatch` documents what
-    else the wait can be told to watch. A wedged child is REAPED as a tree
-    before :class:`~.progress.ProgressStalledError` is raised, so a failed
-    wait never leaves a process holding its ports, its handles, and its share
-    of the machine.
+    *process* was started inside *containment* by
+    :func:`~vaultspec_a2a.utils.spawn_contained`. *what* names the child in a
+    failure; :class:`ChildWatch` documents what else the wait can be told to
+    watch. A wedged child is REAPED through its containment, tree and all,
+    before :class:`~.progress.ProgressStalledError` is raised, so a failed wait
+    never leaves a process holding its ports, its handles, and its share of the
+    machine.
     """
     fingerprint = watch.get("fingerprint")
     diagnostic = watch.get("diagnostic")
@@ -177,7 +181,9 @@ def await_child(
                 msg = f"still running after its {ceiling_s:.0f}s ceiling"
                 raise ProgressStalledError(msg)
         except ProgressStalledError as stalled:
-            reap_tree(process.pid)
+            _run_reap(
+                lambda: containment.terminate(term_timeout=10.0, kill_timeout=5.0)
+            )
             with contextlib.suppress(subprocess.TimeoutExpired):
                 process.wait(timeout=5.0)
             context = "" if diagnostic is None else f"\n{diagnostic()}"
@@ -187,24 +193,16 @@ def await_child(
         time.sleep(_POLL_INTERVAL_S)
 
 
-def reap_tree(
-    pid: int, *, term_timeout: float = 10.0, kill_timeout: float = 5.0
-) -> None:
-    """Kill *pid*'s tree through the shared primitive, from any calling context.
+def _run_reap(reap: Callable[[], Coroutine[Any, Any, object]]) -> None:
+    """Run an asynchronous reap to completion from any calling context.
 
-    The primitive is asynchronous. Called from a test that is itself running an
-    event loop, ``asyncio.run`` would refuse and leave the tree alive, so the
-    reap then runs on a thread with a loop of its own. *term_timeout* and
-    *kill_timeout* are the primitive's graceful and forced phases.
+    Called from a test that is itself running an event loop, ``asyncio.run``
+    would refuse and leave the tree alive, so the reap then runs on a thread
+    with a loop of its own.
     """
-    from ..utils import kill_pid_tree_async
 
     def _reap() -> None:
-        asyncio.run(
-            kill_pid_tree_async(
-                pid, term_timeout=term_timeout, kill_timeout=kill_timeout
-            )
-        )
+        asyncio.run(reap())
 
     try:
         asyncio.get_running_loop()
@@ -214,6 +212,23 @@ def reap_tree(
     reaper = threading.Thread(target=_reap)
     reaper.start()
     reaper.join()
+
+
+def reap_tree(
+    pid: int, *, term_timeout: float = 10.0, kill_timeout: float = 5.0
+) -> None:
+    """Kill *pid*'s tree by pid, from any calling context.
+
+    Only for a process the kit did not start inside a containment, such as a
+    detached service or a process one of its children started; a child the kit
+    starts is reaped through its containment instead. *term_timeout* and
+    *kill_timeout* are the graceful and forced phases.
+    """
+    _run_reap(
+        lambda: kill_pid_tree_async(
+            pid, term_timeout=term_timeout, kill_timeout=kill_timeout
+        )
+    )
 
 
 def file_size_fingerprint(*paths: os.PathLike[str] | str) -> Callable[[], object]:
@@ -259,32 +274,45 @@ def run_child(
     child that fills a pipe buffer would wedge behind a reader this wait does
     not run, and a file's growing size is the caller-observable progress signal
     the wait reads. The files land in this session's own scratch seat inside the
-    worktree, never in the system temporary directory.
+    worktree, never in the system temporary directory. The child runs inside its
+    own containment, released once it exits.
     """
-    with (
-        _capture_dir() as capture,
-        tempfile.TemporaryFile(dir=capture) as out,
-        tempfile.TemporaryFile(dir=capture) as err,
-    ):
-        process = subprocess.Popen(
-            command,
-            stdout=out,
-            stderr=err,
-            env=None if env is None else dict(env),
-            cwd=cwd,
-        )
+    containment = ProcessContainment.create()
+    try:
+        with (
+            _capture_dir() as capture,
+            tempfile.TemporaryFile(dir=capture) as out,
+            tempfile.TemporaryFile(dir=capture) as err,
+        ):
+            process = spawn_contained(
+                command,
+                containment,
+                stdout=out,
+                stderr=err,
+                env=None if env is None else dict(env),
+                cwd=cwd,
+            )
 
-        def _written() -> object:
-            return (os.fstat(out.fileno()).st_size, os.fstat(err.fileno()).st_size)
+            def _written() -> object:
+                return (
+                    os.fstat(out.fileno()).st_size,
+                    os.fstat(err.fileno()).st_size,
+                )
 
-        returncode = await_child(
-            process, what=what, idle_window_s=idle_window_s, fingerprint=_written
-        )
-        out.seek(0)
-        err.seek(0)
-        return subprocess.CompletedProcess(
-            command,
-            returncode,
-            out.read().decode("utf-8", errors="replace"),
-            err.read().decode("utf-8", errors="replace"),
-        )
+            returncode = await_child(
+                process,
+                containment,
+                what=what,
+                idle_window_s=idle_window_s,
+                fingerprint=_written,
+            )
+            out.seek(0)
+            err.seek(0)
+            return subprocess.CompletedProcess(
+                command,
+                returncode,
+                out.read().decode("utf-8", errors="replace"),
+                err.read().decode("utf-8", errors="replace"),
+            )
+    finally:
+        containment.close()

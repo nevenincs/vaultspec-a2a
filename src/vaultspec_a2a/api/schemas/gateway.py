@@ -509,6 +509,16 @@ class RoleState(BaseModel):
     display_name: str = ""
 
 
+# Two kinds of field below, and the split is the point. The ones carrying a
+# comment are run-status's OWN: the api envelope, the product projections of a
+# position, and the staged-admission identities. Every other field belongs to the
+# Layer-1 run read model (``thread/snapshots.ThreadStateSnapshot``) and is carried
+# here under that type with no second bound, default or vocabulary - a second
+# declaration drifts, and these did: the provider condition reached one surface as
+# its enum and the other as a bare string, and the frame cursor was required on
+# one and defaulted on the other. Why each read-model field exists is documented
+# once, on the read model, and `test_run_status_derives_from_read_model.py` holds
+# the two surfaces to one published shape per shared field.
 class RunStatusResponse(BaseModel):
     """The authoritative recovery snapshot for a run.
 
@@ -516,6 +526,10 @@ class RunStatusResponse(BaseModel):
     position, per-role state, and the engine proposal/changeset ids the run has
     produced, plus the checkpoint cursor and repair posture. Non-authoritative
     SSE progress frames may be lost freely; this snapshot is the source of truth.
+
+    Every relay frame is droppable, so this response is where a reloading client
+    with no live stream recovers the run's failure condition, its queue depth and
+    the question it is parked on.
     """
 
     api_version: Literal["v1"] = _API_VERSION
@@ -536,7 +550,7 @@ class RunStatusResponse(BaseModel):
     approval_status: ApprovalStatus | None = None
     approval_request_id: str | None = None
     checkpoint_id: str | None = None
-    last_sequence: int = 0
+    last_sequence: int
     # Whether this run's progress stream can be RESUMED from the id its frames
     # carry, as opposed to merely re-attached. The two postures are otherwise
     # indistinguishable without probing: a stream that serves no replay emits
@@ -548,50 +562,12 @@ class RunStatusResponse(BaseModel):
     # resumable stream and an authoritative one are different things, and this
     # response remains the authority either way.
     stream_resumable: bool = False
-    # How many follow-up turns this run is holding behind the one it is
-    # running. Read from the control-action journal, which is the authority a
-    # reloading client has to recover from: the progress stream says nothing
-    # about a turn that has not started, and the quiet boundary between two
-    # turns is indistinguishable from a run that has gone idle. Bounded by the
-    # configured per-run continuation depth, so it is a small count and never
-    # a list. Zero for every run that holds nothing, which is most of them.
     queued_messages: QueuedMessageCount = 0
     repair_status: RepairStatus | None = None
     execution_readiness: RepairStatus | None = None
     degraded_reasons: list[DegradedReason] = Field(default_factory=list)
-    # The capped, single-line reason this run last transitioned to FAILED,
-    # sourced from the durable threads.failure_reason column (never a live SSE
-    # frame), so a reloaded panel recovers the SAME reason a connected client
-    # already saw over the relay rather than a bare "failed". Additive; None for
-    # a run that never failed, or one whose failure predates this field.
     failure_reason: str | None = None
-    # The machine-readable counterpart to the reason above: which member of the
-    # closed provider-condition vocabulary the failure resolved to. The reason
-    # says what happened, this says what the reader should do about it - wait,
-    # re-authenticate, top up, raise a ceiling, or change the request - and a
-    # client that had to derive that from the reason text would be matching
-    # vendor prose, which breaks the moment a vendor rewords a message. Served
-    # as the owning enumeration, which is what makes that promise checkable.
-    #
-    # Authoritative here rather than on the relay, following the same discipline
-    # the pending clarification below follows: the error frame carrying this
-    # value is droppable, so a reloading client with no live stream recovers it
-    # only from this response. Additive; None for a run that never failed, or
-    # one whose failure predates the durable column. The value is a wire
-    # contract shared with the consuming repository and is additive-only.
     provider_condition: ProviderCondition | None = None
-    # Why an OPERATION did not take on a run that is STILL ALIVE - a follow-up
-    # or a resume the worker never received - as opposed to why a run FAILED.
-    # The distinction is not cosmetic and a client must not collapse it: a run
-    # reported here is still parked on its question and may yet complete, so
-    # rendering this as a failure tells a user their run died when it did not.
-    # The two never both describe the same event; a failed run carries
-    # failure_reason and a live one carries this.
-    #
-    # Projected because the paths that write it - an undelivered follow-up, an
-    # undelivered clarification resume - deliberately decline to stamp
-    # failure_reason precisely BECAUSE the run survives. Without this field that
-    # account reached no client at all: durable, and readable by nobody.
     repair_reason: RepairReason | None = None
     frozen_assignment: FrozenTeamAssignmentSummary | None = None
     # Non-secret staged-admission lease identity. It lets the dashboard repair
@@ -601,11 +577,6 @@ class RunStatusResponse(BaseModel):
     # The persisted prepare reservation paired with ``lease_id``. This lets a
     # dashboard reconcile only the exact local reservation after a lost reply.
     reservation_id: PathSafeRunId | None = None
-    # The bounded questionnaire this run is currently parked on, read from the
-    # run's own checkpoint. This is the AUTHORITATIVE disclosure of a pending
-    # question: a client that reloaded, or that never saw the progress frame
-    # announcing it, re-renders the questionnaire from here. ``None`` whenever the
-    # run is not waiting on one, which is the overwhelmingly common case.
     pending_clarification: ClarificationRequest | None = None
 
 

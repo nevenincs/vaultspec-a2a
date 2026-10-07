@@ -112,6 +112,9 @@ def test_narrowed_run_status_accepts_every_captured_combination() -> None:
                 status=ThreadStatus.COMPLETED,
                 semantic_phase=cast("SemanticPhase", phase),
                 topology=TopologyPosition(),
+                # Supplied because the cursor is required, as the read model
+                # declares it: the capture always computes one.
+                last_sequence=0,
                 repair_status=cast("RepairStatus", repair),
                 execution_readiness=cast("RepairStatus", repair),
                 provider_condition=cast("ProviderCondition", "unknown"),

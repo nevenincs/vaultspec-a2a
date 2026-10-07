@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from ...control.config import Settings
 from ._env_example import (
     DOCUMENTED_BUT_NOT_READ,
     INTEGRATION_EXAMPLE,
@@ -41,6 +40,7 @@ from ._env_example import (
     declared_names,
     documented,
     harness_section,
+    service_fields,
     service_section,
     setting_field_by_name,
 )
@@ -139,7 +139,7 @@ def _names_read_by_the_code() -> set[str]:
 def test_every_setting_is_read_by_the_code() -> None:
     """A declared setting nothing reads is a knob that turns nothing."""
     read = _names_read_by_the_code()
-    unread = sorted(field for field in Settings.model_fields if field not in read)
+    unread = sorted(field for field in service_fields() if field not in read)
 
     assert not unread, (
         f"settings no shipped code reads: {unread}. Remove each, or wire the "

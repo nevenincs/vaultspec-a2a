@@ -39,6 +39,7 @@ class WorkerReadySpec:
     generation: int
     worker_command: Sequence[str]
     stderr_log_path: Path
+    internal_token: str | None
 
 
 async def _await_worker_ready(
@@ -123,7 +124,11 @@ async def _await_worker_ready_inner(
         # requires the responding worker to declare THIS gateway as its target.
         if await port_has_listener_async(
             worker_port, timeout=0.5
-        ) and await worker_ready_and_ours(worker_url, current_generation=generation):
+        ) and await worker_ready_and_ours(
+            worker_url,
+            current_generation=generation,
+            internal_token=spec.internal_token,
+        ):
             elapsed = asyncio.get_event_loop().time() - started
             logger.info(
                 "Worker ready at %s (PID %d) in %.1fs",

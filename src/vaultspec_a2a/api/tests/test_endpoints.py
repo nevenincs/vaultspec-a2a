@@ -27,7 +27,6 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...control.config import settings
 from ...database import (
     append_permission_log,
     create_control_action,
@@ -44,7 +43,7 @@ from ...database.models import (
     ThreadModel,
 )
 from ...streaming.aggregator import EventAggregator
-from ...testing import DEFAULT_TEAM_PRESET, catalog_run_fields
+from ...testing import DEFAULT_TEAM_PRESET, catalog_run_fields, settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
@@ -201,11 +200,15 @@ class TestCreateThread:
     def test_dispatch_includes_internal_token_when_configured(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Gateway dispatch should keep working when worker auth is enabled."""
-        original_token = settings.internal_token
-        settings.internal_token = "test-internal-token"
-        try:
+        """Gateway dispatch should keep working when worker auth is enabled.
+
+        The configured token is the one the worker verifies and the one the app
+        seats at creation, so the in-process worker only accepts the dispatch when
+        the gateway presents the seated secret.
+        """
+        with settings_override(internal_token="test-internal-token"):
             app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+            assert app.state.internal_token == "test-internal-token"
             with TestClient(app, raise_server_exceptions=True) as client:
                 resp = client.post(
                     "/v1/runs",
@@ -219,8 +222,6 @@ class TestCreateThread:
             assert resp.status_code == 201
             assert len(worker.dispatches) == 1
             assert worker.dispatches[0]["action"] == "ingest"
-        finally:
-            settings.internal_token = original_token
 
     def test_initial_message_length_limit(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver

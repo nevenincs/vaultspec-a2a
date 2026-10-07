@@ -72,10 +72,11 @@ def _app_session_factory(app: Any) -> Any:
 #: Declares the internal-IPC bearer in the generated OpenAPI document.
 #:
 #: A SEPARATE scheme from the gateway's ``GatewayServiceToken``, because it is a
-#: separate credential: this plane verifies ``settings.internal_token``, the
-#: gateway<->worker IPC secret, not the attach credential that lifecycle discovery
-#: publishes for external callers. Declaring both under one scheme would tell a
-#: reader the two surfaces accept the same token, which they do not.
+#: separate credential: this plane verifies ``app.state.internal_token``, the
+#: gateway<->worker IPC secret the gateway seated, not the attach credential that
+#: lifecycle discovery publishes for external callers. Declaring both under one
+#: scheme would tell a reader the two surfaces accept the same token, which they
+#: do not.
 #:
 #: Declared here rather than beside :func:`verify_internal_bearer`: that module is
 #: framework-free by design and leaves transport mapping to each caller, so a
@@ -99,20 +100,28 @@ _declare_internal_bearer = Depends(internal_bearer_scheme)
 
 
 async def _verify_internal_token(
+    request: Request,
     authorization: str | None = Header(None, include_in_schema=False),
 ) -> None:
     """Verify bearer token for internal IPC endpoints.
 
-    Skipped when settings.internal_token is None **and** the environment
-    is DEVELOPMENT.  In production/staging/testing, a missing token is a
-    configuration error. Delegates the rule to the shared IPC bearer verifier.
+    The token is the one the gateway seated on ``app.state.internal_token``: the
+    secret it minted for this boot under the armed desktop profile, otherwise the
+    configured one. It is read off the app that serves the request, so a token
+    minted at runtime never has to be written back onto the settings. An app that
+    seated nothing raises rather than reading as an unconfigured token, which
+    would open the development bypass on state nobody chose.
+
+    Skipped when the seated token is None **and** the environment is DEVELOPMENT.
+    In production/staging/testing, a missing token is a configuration error.
+    Delegates the rule to the shared IPC bearer verifier.
 
     Reads the raw header rather than a security object; see
     :data:`internal_bearer_scheme`.
     """
     verdict, detail = verify_internal_bearer(
         authorization,
-        token=settings.internal_token,
+        token=request.app.state.internal_token,
         environment=settings.environment,
         environment_declared=settings.environment_declared,
     )

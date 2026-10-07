@@ -40,6 +40,7 @@ def _app(path: str) -> FastAPI:
     if path == "/dispatch":
         return create_worker_app(lifespan=_no_lifespan)
     app = create_app(lifespan=_no_lifespan)
+    app.state.internal_token = _TOKEN
     app.state.aggregator = EventAggregator()
     app.state.db_session_factory = None
     return app
@@ -148,7 +149,7 @@ async def test_internal_exact_limit_body_is_accepted(path: str) -> None:
         yield body[128:]
 
     app = _app(path)
-    with settings_override(internal_token=_TOKEN, internal_max_http_body_bytes=256):
+    with settings_override(internal_max_http_body_bytes=256):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -176,7 +177,7 @@ async def test_dispatch_small_body_retains_authentication_and_validation() -> No
 async def test_body_limit_counts_utf8_bytes() -> None:
     body = json.dumps({"active_threads": ["é" * 128]}, ensure_ascii=False).encode()
     assert len(body.decode()) < 256 < len(body)
-    with settings_override(internal_token=_TOKEN, internal_max_http_body_bytes=256):
+    with settings_override(internal_max_http_body_bytes=256):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=_app("/internal/heartbeat")),
             base_url="http://test",
@@ -218,13 +219,12 @@ async def test_heartbeat_schema_bounds_preserve_liveness_on_refusal(
 ) -> None:
     app = _app("/internal/heartbeat")
     before = worker_liveness(app.state).last_contact_ts
-    with settings_override(internal_token=_TOKEN):
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            response = await client.post(
-                "/internal/heartbeat", json={"active_threads": threads}, headers=_AUTH
-            )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/heartbeat", json={"active_threads": threads}, headers=_AUTH
+        )
     assert response.status_code == 422
     assert worker_liveness(app.state).last_contact_ts == before
 

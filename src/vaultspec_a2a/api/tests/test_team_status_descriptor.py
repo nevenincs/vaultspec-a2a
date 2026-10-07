@@ -21,7 +21,6 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from ...control.config import settings
 from ...control.team_service import build_team_status
 from ...database import create_thread
 from ...graph.compiler import compile_team_graph
@@ -191,7 +190,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
         bridge = WorkerBridge(
             api_url=base,
             worker_id="descriptor-worker",
-            internal_token=settings.internal_token,
+            internal_token=app.state.internal_token,
         )
         executor = Executor(checkpointer=checkpointer, bridge=bridge)
         try:

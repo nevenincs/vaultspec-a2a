@@ -265,10 +265,11 @@ def _load_desktop_credentials(app: FastAPI) -> None:
 
     The attach-control credential and the receipt-bound ownership capability are
     read from their dashboard-created owner-restricted files; the worker
-    interprocess-communication secret is minted per boot and seated on the shared
-    internal-token setting so gateway-worker traffic authenticates with it. A
-    missing or malformed dashboard file fails the gateway closed rather than
-    booting an unauthenticated desktop surface.
+    interprocess-communication secret is minted per boot and seated on the
+    application state, replacing the configured internal token there, so
+    gateway-worker traffic authenticates with it. A missing or malformed dashboard
+    file fails the gateway closed rather than booting an unauthenticated desktop
+    surface.
     """
     from ..desktop.credentials import (
         create_worker_ipc_credential,
@@ -282,7 +283,7 @@ def _load_desktop_credentials(app: FastAPI) -> None:
     credentials_dir = settings.prepare_state_dir(references.credentials_dir)
     app.state.v1_service_token = load_attach_credential(credentials_dir)
     app.state.lifecycle_capability = load_ownership_capability(credentials_dir)
-    settings.internal_token = create_worker_ipc_credential(credentials_dir)
+    app.state.internal_token = create_worker_ipc_credential(credentials_dir)
 
 
 def _http_attach_authorized(request: Request, app: FastAPI) -> bool:
@@ -597,10 +598,11 @@ def _start_worker_runtime(
     WorkerLiveness,
     asyncio.Task[None],
 ]:
+    internal_token = app.state.internal_token
     worker_client = httpx.AsyncClient(
         base_url=settings.worker_url,
         timeout=httpx.Timeout(30.0, connect=5.0),
-        headers=_internal_auth_headers(),
+        headers=_internal_auth_headers(internal_token),
     )
     app.state.worker_client = worker_client
     logger.info("Worker client configured: %s", settings.worker_url)
@@ -609,6 +611,7 @@ def _start_worker_runtime(
         worker_url=settings.worker_url,
         worker_port=settings.worker_port,
         auto_spawn=settings.auto_spawn_worker,
+        internal_token=internal_token,
     )
     app.state.worker_spawner = worker_spawner
 
@@ -909,6 +912,10 @@ def create_app(lifespan: Any | None = None) -> FastAPI:
     # immutable for this app generation, published only through the owner-restricted
     # handoff file, and never logged.
     app.state.v1_service_token = settings.gateway_service_token or secrets.token_hex(32)
+    # The worker-IPC secret every internal request is verified against and every
+    # worker-bound request presents. Seated here, never written onto the settings,
+    # so the one value the gateway holds is the one it authenticates with.
+    app.state.internal_token = settings.internal_token
     app.add_exception_handler(RequestValidationError, _bounded_request_validation_error)
     # The receipt-bound lifecycle ownership capability is only present under the
     # armed desktop profile; unarmed profiles never carry one.
@@ -916,7 +923,8 @@ def create_app(lifespan: Any | None = None) -> FastAPI:
     if settings.desktop_profile_armed:
         # Armed desktop: replace the generated attach token with the
         # dashboard-created attach credential, load the ownership capability, and
-        # mint the worker IPC secret. Fails closed if a dashboard file is absent.
+        # replace the configured worker IPC secret with one minted for this boot.
+        # Fails closed if a dashboard file is absent.
         _load_desktop_credentials(app)
 
     app.add_middleware(

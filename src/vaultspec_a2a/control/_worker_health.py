@@ -354,16 +354,17 @@ def _build_worker_restart_detail(
     return detail
 
 
-def _internal_auth_headers() -> dict[str, str] | None:
-    """Return the worker-IPC bearer header when the internal token is configured.
+def _internal_auth_headers(token: str | None) -> dict[str, str] | None:
+    """Return the worker-IPC bearer header for *token*, or none when it is unset.
 
     The gateway-worker pair authenticates every probe and command with the shared
-    worker interprocess-communication credential; a DEVELOPMENT gateway with no
-    token sends none, matching the bearer rule the worker enforces.
+    worker interprocess-communication credential the gateway seated on its
+    application state; a DEVELOPMENT gateway with no token sends none, matching
+    the bearer rule the worker enforces.
     """
-    if settings.internal_token is None:
+    if token is None:
         return None
-    return bearer_header(settings.internal_token)
+    return bearer_header(token)
 
 
 async def probe_worker_health(
@@ -371,6 +372,7 @@ async def probe_worker_health(
     timeout: float = 2.0,
     *,
     client: httpx.AsyncClient | None = None,
+    internal_token: str | None = None,
 ) -> WorkerHealthProbe:
     """Probe the worker's ``GET /health`` once.
 
@@ -378,8 +380,9 @@ async def probe_worker_health(
     the watchdog's authoritative crash check, and ``/health``. Request-path
     callers pass the app-pooled *client* to reuse its connection pool (already
     carrying the worker IPC bearer); the watchdog and boot paths pass none and get
-    a self-contained one-shot client that presents the same bearer, so a worker
-    that enforces the credential on ``/health`` still answers its owner.
+    a self-contained one-shot client that presents *internal_token* as the same
+    bearer, so a worker that enforces the credential on ``/health`` still answers
+    its owner. *internal_token* is not read when a *client* is supplied.
 
     The health verdict is an exact ``200`` and nothing else, so every caller
     agrees and ``/health`` can never silently diverge from the watchdog's
@@ -403,7 +406,9 @@ async def probe_worker_health(
     try:
         if client is not None:
             return await _probe(client)
-        async with httpx.AsyncClient(headers=_internal_auth_headers()) as owned:
+        async with httpx.AsyncClient(
+            headers=_internal_auth_headers(internal_token)
+        ) as owned:
             return await _probe(owned)
     except Exception as exc:
         # An unreachable verdict decides run admission, so a silent swallow here
@@ -469,7 +474,10 @@ def _classify_worker_body(
 
 
 async def worker_ready_and_ours(
-    worker_url: str, *, current_generation: int = 0
+    worker_url: str,
+    *,
+    current_generation: int = 0,
+    internal_token: str | None,
 ) -> bool:
     """Whether a healthy worker at *worker_url* is provably THIS gateway's.
 
@@ -491,7 +499,7 @@ async def worker_ready_and_ours(
     questions, and the safe answer to the first is the unsafe answer to the
     second. Missing, blank and unreadable targets are all absence of evidence.
     """
-    probe = await probe_worker_health(worker_url)
+    probe = await probe_worker_health(worker_url, internal_token=internal_token)
     body = probe.body
     if not probe.healthy or body is None:
         return False
@@ -513,6 +521,7 @@ async def _evict_stale_worker(
     worker_url: str,
     worker_port: int,
     *,
+    internal_token: str | None,
     timeout: float = 10.0,
 ) -> bool:
     """Terminate a stale worker and wait for the port to free.
@@ -523,7 +532,7 @@ async def _evict_stale_worker(
     connections. Only ever aimed at a foreign-gateway orphan, never at a worker
     serving this gateway's runs, so the abrupt stop cannot drop live work of ours.
     Returns ``True`` once the port is free, ``False`` if it is still bound after
-    *timeout* seconds. The internal token is presented so the shutdown is accepted
+    *timeout* seconds. *internal_token* is presented so the shutdown is accepted
     only when this gateway is the worker's paired owner.
     """
     import httpx
@@ -532,7 +541,7 @@ async def _evict_stale_worker(
         async with httpx.AsyncClient() as client:
             await client.post(
                 f"{worker_url}/admin/shutdown",
-                headers=_internal_auth_headers(),
+                headers=_internal_auth_headers(internal_token),
                 timeout=2.0,
             )
 
@@ -561,10 +570,14 @@ async def _evict_stale_worker(
 
 
 async def _desktop_worker_port_clear(
-    worker_url: str, worker_port: int, generation: int
+    worker_url: str,
+    worker_port: int,
+    generation: int,
+    *,
+    internal_token: str | None,
 ) -> bool:
     """Adopt or evict only a proven desktop worker occupying this port."""
-    occupant = await probe_worker_health(worker_url)
+    occupant = await probe_worker_health(worker_url, internal_token=internal_token)
     if occupant.healthy:
         verdict = _classify_worker_body(
             occupant.body or {}, current_generation=generation
@@ -585,7 +598,9 @@ async def _desktop_worker_port_clear(
                 worker_url,
                 verdict.value,
             )
-            if not await _evict_stale_worker(worker_url, worker_port):
+            if not await _evict_stale_worker(
+                worker_url, worker_port, internal_token=internal_token
+            ):
                 logger.error(
                     "Prior-generation worker at %s did not release port %d "
                     "after an authorized eviction — refusing to spawn onto "
@@ -606,9 +621,11 @@ async def _desktop_worker_port_clear(
     return True
 
 
-async def _shared_worker_port_clear(worker_url: str, worker_port: int) -> bool:
+async def _shared_worker_port_clear(
+    worker_url: str, worker_port: int, *, internal_token: str | None
+) -> bool:
     """Handle a same-gateway worker or a stale foreign development worker."""
-    existing = await probe_worker_health(worker_url)
+    existing = await probe_worker_health(worker_url, internal_token=internal_token)
     if existing.healthy:
         if existing.body is None:
             logger.error(
@@ -647,7 +664,9 @@ async def _shared_worker_port_clear(worker_url: str, worker_port: int) -> bool:
             declared_target,
             settings.gateway_url,
         )
-        if not await _evict_stale_worker(worker_url, worker_port):
+        if not await _evict_stale_worker(
+            worker_url, worker_port, internal_token=internal_token
+        ):
             # The foreign orphan would not release the port. Spawning anyway is
             # the adoption hazard this guard exists to close: our new worker
             # cannot bind the held port, and the readiness probe would find the

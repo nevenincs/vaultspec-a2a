@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from vaultspec_core.config import ConfigurationError
 
+from ...domain_config import DomainSettingsConfig
 from ...testing import armed_environment
 from ..config import Settings, settings
 from ..settings_base import ENV_FILE_ENV, PROJECT_ROOT_ENV, read_configuration
@@ -80,7 +81,7 @@ def test_a_size_named_tokens_still_shows_the_value_it_refused(tmp_path: Path) ->
         ),
         pytest.raises(ConfigurationError) as refusal,
     ):
-        read_configuration(Settings)
+        read_configuration(DomainSettingsConfig)
 
     assert "VAULTSPEC_A2A_CONTEXT_LIMIT_TOKENS must be int, got 'loads'" in str(
         refusal.value

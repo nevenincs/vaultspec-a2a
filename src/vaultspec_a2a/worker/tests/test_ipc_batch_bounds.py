@@ -47,6 +47,7 @@ def _gateway_app() -> FastAPI:
         cast("Any", BoundedHttpBodyMiddleware), limit=gateway_body_limit(settings)
     )
     app.include_router(internal_router)
+    app.state.internal_token = None
     app.state.aggregator = EventAggregator()
     app.state.db_session_factory = None
     app.state.checkpointer = None

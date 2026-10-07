@@ -62,6 +62,7 @@ async def _spawn_worker(
     *,
     containment: ProcessContainment,
     generation: int = 0,
+    internal_token: str | None,
 ) -> subprocess.Popen[bytes] | None:
     """Spawn the worker as a child process if not already running.
 
@@ -106,9 +107,13 @@ async def _spawn_worker(
     # spawn loudly with no eviction - it may be serving someone else's runs,
     # and silence is not evidence of ownership.
     if settings.desktop_profile_armed:
-        if not await _desktop_worker_port_clear(worker_url, worker_port, generation):
+        if not await _desktop_worker_port_clear(
+            worker_url, worker_port, generation, internal_token=internal_token
+        ):
             return None
-    elif not await _shared_worker_port_clear(worker_url, worker_port):
+    elif not await _shared_worker_port_clear(
+        worker_url, worker_port, internal_token=internal_token
+    ):
         return None
 
     logger.info(
@@ -136,8 +141,8 @@ async def _spawn_worker(
     spawn_env[setting_env("port")] = str(settings.port)
     spawn_env[setting_env("worker_port")] = str(settings.worker_port)
     spawn_env[setting_env("worker_host")] = settings.worker_host
-    if settings.internal_token is not None:
-        spawn_env[setting_env("internal_token")] = settings.internal_token
+    if internal_token is not None:
+        spawn_env[setting_env("internal_token")] = internal_token
     spawn_env[setting_env("gateway_lifetime_id")] = GATEWAY_LIFETIME_ID
     spawn_env[setting_env("worker_generation")] = str(generation)
 
@@ -160,7 +165,12 @@ async def _spawn_worker(
         process,
         containment,
         WorkerReadySpec(
-            worker_url, worker_port, generation, worker_command, stderr_log_path
+            worker_url,
+            worker_port,
+            generation,
+            worker_command,
+            stderr_log_path,
+            internal_token,
         ),
     )
 
@@ -170,6 +180,7 @@ async def _spawn_worker_owned(
     worker_port: int,
     *,
     generation: int,
+    internal_token: str | None,
 ) -> tuple[subprocess.Popen[bytes], ProcessContainment] | None:
     """Spawn a worker, holding its OS containment only while it owns a live tree.
 
@@ -194,6 +205,7 @@ async def _spawn_worker_owned(
             worker_port,
             containment=containment,
             generation=generation,
+            internal_token=internal_token,
         )
         if process is None:
             return None
@@ -220,6 +232,7 @@ class _WorkerSpawnConfig:
     port: int
     auto_spawn: bool
     stderr_log_path: Path | None
+    internal_token: str | None
 
 
 @dataclass(slots=True)
@@ -256,8 +269,14 @@ class LazyWorkerSpawner:
         worker_url: str,
         worker_port: int,
         auto_spawn: bool,
+        internal_token: str | None = None,
     ) -> None:
-        """Initialise with worker connection details and spawn policy."""
+        """Initialise with worker connection details and spawn policy.
+
+        *internal_token* is the worker-IPC secret the gateway seated: every probe
+        and command this spawner sends presents it, and a worker it spawns is
+        handed it. ``None`` presents none.
+        """
         self._config = _WorkerSpawnConfig(
             url=worker_url,
             port=worker_port,
@@ -265,6 +284,7 @@ class LazyWorkerSpawner:
             stderr_log_path=(
                 _worker_stderr_log_path(worker_port) if auto_spawn else None
             ),
+            internal_token=internal_token,
         )
         # Every worker spawned by this gateway carries OS containment, so the
         # process and containment handles are set together and cleared together.
@@ -329,6 +349,7 @@ class LazyWorkerSpawner:
                 self._process_state.spawned = await worker_ready_and_ours(
                     self._config.url,
                     current_generation=self._synchronization.generation,
+                    internal_token=self._config.internal_token,
                 )
                 if not self._process_state.spawned:
                     logger.warning(
@@ -349,6 +370,7 @@ class LazyWorkerSpawner:
                 self._config.url,
                 self._config.port,
                 generation=generation,
+                internal_token=self._config.internal_token,
             )
             if owned is not None:
                 self._process_state.process, self._process_state.containment = owned
@@ -361,6 +383,7 @@ class LazyWorkerSpawner:
                 await worker_ready_and_ours(
                     self._config.url,
                     current_generation=self._synchronization.generation,
+                    internal_token=self._config.internal_token,
                 )
             )
             if self._process_state.spawned:
@@ -390,6 +413,11 @@ class LazyWorkerSpawner:
     def worker_port(self) -> int:
         """The worker's port number."""
         return self._config.port
+
+    @property
+    def internal_token(self) -> str | None:
+        """The worker-IPC secret this spawner presents, or ``None`` when unset."""
+        return self._config.internal_token
 
     def next_generation(self) -> int:
         """Advance and return the spawn generation for a replacement worker.
@@ -465,7 +493,7 @@ class LazyWorkerSpawner:
 
             try:
                 async with httpx.AsyncClient(
-                    headers=_internal_auth_headers(),
+                    headers=_internal_auth_headers(self._config.internal_token),
                     timeout=cooperative_budget,
                 ) as client:
                     response = await client.post(f"{self._config.url}/admin/shutdown")
@@ -585,7 +613,10 @@ class WorkerWatchdog:
 
     async def _probe_worker_ready(self) -> bool:
         """Probe the worker HTTP health endpoint for status promotion checks."""
-        return (await probe_worker_health(self._spawner.worker_url)).healthy
+        probe = await probe_worker_health(
+            self._spawner.worker_url, internal_token=self._spawner.internal_token
+        )
+        return probe.healthy
 
     @staticmethod
     def _needs_recovery(*, crashed: bool, stale: bool, http_ready: bool) -> bool:
@@ -803,6 +834,7 @@ class WorkerWatchdog:
                 self._spawner.worker_url,
                 self._spawner.worker_port,
                 generation=self._spawner.next_generation(),
+                internal_token=self._spawner.internal_token,
             )
             if replacement is not None:
                 self._spawner.replace_process(*replacement)
@@ -816,6 +848,7 @@ class WorkerWatchdog:
             if await worker_ready_and_ours(
                 self._spawner.worker_url,
                 current_generation=self._spawner.generation,
+                internal_token=self._spawner.internal_token,
             ):
                 self._spawner.adopt_worker()
                 return True, attempt + 1

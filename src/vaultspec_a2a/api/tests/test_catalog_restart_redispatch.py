@@ -464,7 +464,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
     """All retired durable authority shapes fail closed during startup recovery."""
     await close_db()
     await init_db(str(tmp_path / "retired-restart.db"))
-    worker = _InProcessWorker()
+    worker = _InProcessWorker(None)
     retired_cases: tuple[tuple[str, tuple[str, ...], str, object], ...] = (
         ("root-profile-id", (), "profile_id", "retired"),
         ("root-default-profile", (), "default_profile_id", "retired"),

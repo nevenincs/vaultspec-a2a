@@ -65,7 +65,10 @@ async def test_evict_stale_worker_deletes_its_stderr_log_once_freed(
         still_up_log.write_text("stale orphan output\n", encoding="utf-8")
 
         freed = await _evict_stale_worker(
-            f"http://127.0.0.1:{still_up_port}", still_up_port, timeout=0.5
+            f"http://127.0.0.1:{still_up_port}",
+            still_up_port,
+            internal_token=None,
+            timeout=0.5,
         )
         assert freed is False
         assert still_up_log.exists()
@@ -79,7 +82,10 @@ async def test_evict_stale_worker_deletes_its_stderr_log_once_freed(
     # captured from it remain valid identifiers to probe against.
     with _a2a_home(tmp_path):
         freed = await _evict_stale_worker(
-            f"http://127.0.0.1:{torn_down_port}", torn_down_port, timeout=1.0
+            f"http://127.0.0.1:{torn_down_port}",
+            torn_down_port,
+            internal_token=None,
+            timeout=1.0,
         )
         assert freed is True
         assert not torn_down_log.exists()

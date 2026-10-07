@@ -120,7 +120,7 @@ async def test_an_adopted_worker_hands_back_no_containment_to_own(
     remember to drop, and did, while the handle behind it stayed open.
     """
     with _worker_like(_owned_body(1)) as (url, port, _flag), _armed_desktop(tmp_path):
-        owned = await _spawn_worker_owned(url, port, generation=1)
+        owned = await _spawn_worker_owned(url, port, generation=1, internal_token=None)
 
     assert owned is None
 
@@ -137,7 +137,7 @@ async def test_an_unevictable_occupant_hands_back_no_containment_to_own(
     standing condition, retried on every dispatch.
     """
     with _worker_like(_foreign_body()) as (url, port, _flag), _armed_desktop(tmp_path):
-        owned = await _spawn_worker_owned(url, port, generation=1)
+        owned = await _spawn_worker_owned(url, port, generation=1, internal_token=None)
 
     assert owned is None
 
@@ -183,11 +183,11 @@ async def test_repeated_adoption_does_not_accumulate_job_handles(
         # Warm up first: the first calls through httpx and the loopback server
         # legitimately open connections and threads that persist.
         for _ in range(5):
-            await _spawn_worker_owned(url, port, generation=1)
+            await _spawn_worker_owned(url, port, generation=1, internal_token=None)
 
         before = _open_handle_count()
         for _ in range(_LEAK_ITERATIONS):
-            await _spawn_worker_owned(url, port, generation=1)
+            await _spawn_worker_owned(url, port, generation=1, internal_token=None)
         growth = _open_handle_count() - before
 
     assert growth <= _LEAK_TOLERANCE, (
@@ -266,6 +266,7 @@ async def test_a_cancelled_readiness_wait_reaps_the_worker_tree(
                     1,
                     ["python", "-c", "<stand-in worker>"],
                     tmp_path / "worker.stderr.log",
+                    internal_token=None,
                 ),
             )
         )

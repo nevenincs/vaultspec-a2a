@@ -18,8 +18,6 @@ Domain configuration
 
 .. automoduledoc:: vaultspec_a2a.domain_config
 
-.. py:class:: DomainConfig
-
 .. py:class:: DomainSettingsConfig
 
 .. py:data:: domain_config

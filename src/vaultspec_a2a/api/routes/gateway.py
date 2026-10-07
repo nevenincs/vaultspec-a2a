@@ -257,7 +257,9 @@ async def _probe_admission_readiness(
         adoptable = None
     else:
         adoptable = reachable and await worker_ready_and_ours(
-            settings.worker_url, current_generation=generation
+            settings.worker_url,
+            current_generation=generation,
+            internal_token=getattr(app_state, "internal_token", None),
         )
     return _admission_readiness(
         app_state, worker_probe_ready=probe_verdict, worker_adoptable=adoptable

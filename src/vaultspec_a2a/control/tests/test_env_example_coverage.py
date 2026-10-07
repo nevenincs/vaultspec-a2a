@@ -30,7 +30,9 @@ from ._env_example import (
     ENV_EXAMPLE,
     INTEGRATION_EXAMPLE,
     assignments,
+    declaring_class,
     documented,
+    service_fields,
     service_section,
 )
 
@@ -55,15 +57,16 @@ def _declared_env_names(field_name: str) -> Iterator[str]:
     Delegates to the settings module's own extraction, so the names this test
     checks are exactly the names the service reads: explicit aliases, every
     string choice of an ``AliasChoices``, and the prefix-derived name of an
-    un-aliased field.
+    un-aliased field. The field is looked up on whichever of the service's two
+    settings classes declares it.
     """
-    yield from field_env_names(Settings, field_name)
+    yield from field_env_names(declaring_class(field_name), field_name)
 
 
 def _all_declared_env_names() -> set[str]:
     return {
         name
-        for field_name in Settings.model_fields
+        for field_name in service_fields()
         for name in _declared_env_names(field_name)
     }
 
@@ -84,6 +87,10 @@ def test_the_extraction_reads_past_the_plain_alias() -> None:
     """
     # prefix-derived name of an un-aliased field
     assert set(_declared_env_names("worker_port")) == {"VAULTSPEC_A2A_WORKER_PORT"}
+    # the same, declared by the behavioural settings class
+    assert set(_declared_env_names("max_stream_connections")) == {
+        "VAULTSPEC_A2A_MAX_STREAM_CONNECTIONS"
+    }
     # plain alias
     assert set(_declared_env_names("a2a_home")) == {"VAULTSPEC_A2A_HOME"}
     # every name of an AliasChoices, the a2a name first
@@ -115,9 +122,10 @@ def test_every_setting_has_a_line_an_operator_can_edit() -> None:
     """
     assigned = _assigned_names(documented())
     missing = sorted(
-        field_env_names(Settings, field)[0]
-        for field in Settings.model_fields
-        if not set(field_env_names(Settings, field)) & (assigned | _DESKTOP_ONLY)
+        field_env_names(declaring_class(field), field)[0]
+        for field in service_fields()
+        if not set(field_env_names(declaring_class(field), field))
+        & (assigned | _DESKTOP_ONLY)
     )
 
     assert not missing, f"settings with no editable line in .env.example: {missing}"

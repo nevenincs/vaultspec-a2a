@@ -32,7 +32,6 @@ __all__ = [
     "CheckpointRead",
     "CheckpointReadStatus",
     "Checkpointer",
-    "concurrent_checkpointer",
     "open_checkpointer",
     "read_latest_checkpoint",
     "surviving_transcript",
@@ -173,15 +172,6 @@ def strict_checkpoint_serde() -> SerializerProtocol:
 # BaseCheckpointSaver subclass.  Using the concrete base rather than a Protocol
 # lets ty verify structural compatibility without manual casting.
 Checkpointer = BaseCheckpointSaver[Any]
-
-
-async def concurrent_checkpointer(checkpointer: Checkpointer) -> Checkpointer:
-    """Return the saver a concurrent caller should use over *checkpointer*'s store.
-
-    SQLite has one connection to serialize on, so a sibling saver would gain
-    nothing and the checkpointer itself is returned.
-    """
-    return checkpointer
 
 
 @asynccontextmanager

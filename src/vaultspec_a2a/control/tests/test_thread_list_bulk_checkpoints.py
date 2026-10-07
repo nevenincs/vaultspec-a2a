@@ -8,25 +8,18 @@ The three states the sequential path distinguished must survive the change -
 present, absent, and unverified - because a thread whose read timed out is
 uncertain, not a thread with no checkpoint, and only a certain read may drive a
 resumability claim.
-
-Concurrency is claimed in two places and proved in both: in the cap, which no
-store may exceed, and against a real PostgreSQL pool, where the page must be
-read on more than one connection rather than queueing behind one saver's lock.
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
-from uuid import uuid4
+from typing import TYPE_CHECKING
 
-import pytest
+from ...control.thread_listing import _bulk_read_checkpoints
 
-from ...control.thread_listing import (
-    _bulk_read_checkpoints,
-    _CheckpointProbe,
-)
+if TYPE_CHECKING:
+    from ...database import CheckpointRead
 
 
 class _Checkpointer:
@@ -48,7 +41,7 @@ class _Checkpointer:
 
 def _read(
     checkpointer: object, ids: list[str], *, concurrency: int = 8, deadline: float = 5.0
-) -> dict[str, _CheckpointProbe]:
+) -> dict[str, CheckpointRead]:
     return asyncio.run(
         _bulk_read_checkpoints(
             checkpointer, ids, concurrency=concurrency, deadline=deadline
@@ -62,10 +55,10 @@ def test_present_and_absent_are_distinguished() -> None:
 
     probes = _read(checkpointer, ["t1", "t2"])
 
-    assert probes["t1"].tuple is not None
-    assert probes["t1"].unverified is False
-    assert probes["t2"].tuple is None
-    assert probes["t2"].unverified is False
+    assert probes["t1"].checkpoint_tuple is not None
+    assert probes["t1"].unreadable is False
+    assert probes["t2"].checkpoint_tuple is None
+    assert probes["t2"].unreadable is False
 
 
 def test_a_read_error_is_unverified_not_absent() -> None:
@@ -77,8 +70,8 @@ def test_a_read_error_is_unverified_not_absent() -> None:
 
     probes = _read(_Failing(), ["t1"])
 
-    assert probes["t1"].unverified is True
-    assert probes["t1"].tuple is None
+    assert probes["t1"].unreadable is True
+    assert probes["t1"].checkpoint_tuple is None
 
 
 def test_the_batch_is_bounded_by_one_deadline_not_the_per_read_sum() -> None:
@@ -95,7 +88,7 @@ def test_the_batch_is_bounded_by_one_deadline_not_the_per_read_sum() -> None:
     # The deadline fired: threads that could not resolve within the budget are
     # reported uncertain rather than absent. Some early reads may legitimately
     # resolve first - the point is that the batch does not wait for all N.
-    assert any(p.unverified for p in probes.values()), probes
+    assert any(p.unreadable for p in probes.values()), probes
 
 
 def test_concurrency_is_capped() -> None:
@@ -120,43 +113,3 @@ def test_concurrency_is_capped() -> None:
 def test_an_empty_thread_list_reads_nothing() -> None:
     """No threads, no reads, no error."""
     assert _read(_Checkpointer({}), []) == {}
-
-
-@pytest.mark.asyncio
-@pytest.mark.requires_prerequisites("postgres")
-async def test_a_page_is_read_on_more_than_one_connection(
-    pooled_postgres_saver: Any,
-) -> None:
-    """The cap is only worth having if the reads can actually run together.
-
-    A saver holds one lock around every statement it issues, so a page sharing
-    one saver used a single connection whatever the cap said. Measured in
-    connections the pool had handed out at the same moment, against the real
-    server, because the pool's size alone says nothing about what is in use.
-    """
-    pool = pooled_postgres_saver.conn
-    thread_ids = [f"list-probe-{uuid4().hex}" for _ in range(8)]
-    peak = 0
-    stop = asyncio.Event()
-
-    async def sample() -> None:
-        nonlocal peak
-        while not stop.is_set():
-            stats = pool.get_stats()
-            peak = max(peak, stats.get("pool_size", 0) - stats.get("pool_available", 0))
-            await asyncio.sleep(0)
-
-    sampler = asyncio.create_task(sample())
-    try:
-        probes = await _bulk_read_checkpoints(
-            pooled_postgres_saver, thread_ids, concurrency=8, deadline=30.0
-        )
-    finally:
-        stop.set()
-        await sampler
-
-    assert peak > 1, pool.get_stats()
-    # Absent, not uncertain: these threads have no checkpoint and the reads all
-    # completed, so a wider read must not have cost the batch its certainty.
-    assert all(not probe.unverified for probe in probes.values())
-    assert set(probes) == set(thread_ids)

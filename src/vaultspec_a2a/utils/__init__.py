@@ -1,8 +1,9 @@
 """Collect narrow utilities shared across runtime packages.
 
 Utilities cover enum handling, bearer-token headers and verification, logging,
-secret redaction, and process termination. Some helpers support public
-integration points, while others remain internal implementation tools.
+secret redaction, contained process spawn, and process termination. Some
+helpers support public integration points, while others remain internal
+implementation tools.
 
 Prefer the owning utility module over broad facade imports. Primary consumers
 include :mod:`vaultspec_a2a.api`, :mod:`vaultspec_a2a.control`,
@@ -19,6 +20,10 @@ from .ipc_auth import bearer_matches as bearer_matches
 from .ipc_auth import verify_internal_bearer as verify_internal_bearer
 from .logging import configure_logging as configure_logging
 from .logging import reconfigure_console_utf8 as reconfigure_console_utf8
+from .process import ProcessContainment as ProcessContainment
+from .process import ProcessContainmentError as ProcessContainmentError
+from .process import spawn_contained as spawn_contained
+from .process import spawn_contained_async as spawn_contained_async
 from .redaction import is_secret_name as is_secret_name
 from .redaction import redact_text as redact_text
 from .redaction import redact_url as redact_url
@@ -29,6 +34,8 @@ __all__ = [
     "BearerVerdict",
     "Environment",
     "LogLevel",
+    "ProcessContainment",
+    "ProcessContainmentError",
     "bearer_header",
     "bearer_matches",
     "configure_logging",
@@ -38,5 +45,7 @@ __all__ = [
     "reconfigure_console_utf8",
     "redact_text",
     "redact_url",
+    "spawn_contained",
+    "spawn_contained_async",
     "verify_internal_bearer",
 ]

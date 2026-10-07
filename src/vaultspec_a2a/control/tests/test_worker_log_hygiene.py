@@ -9,8 +9,8 @@ instances must not leave permanent orphans under the runtime dir.
 
 from __future__ import annotations
 
+import asyncio
 import http.server
-import subprocess
 import sys
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
@@ -24,6 +24,7 @@ from ...control._worker_health import (
 )
 from ...lifecycle.registry import ProcRecord, now_ms, write_record
 from ...testing import JsonReplyHandler, serve_handler, settings_override
+from ...utils import ProcessContainment, spawn_contained
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -90,7 +91,10 @@ def test_sweep_orphan_worker_logs_removes_dead_keeps_live_and_current(
     registry_home = tmp_path / "registry"
     a2a_home = tmp_path / "a2a-home"
 
-    live_proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    containment = ProcessContainment.create()
+    live_proc = spawn_contained(
+        [sys.executable, "-c", "import time; time.sleep(30)"], containment
+    )
     try:
         with _a2a_home(a2a_home):
             orphan_log = _worker_stderr_log_path(18801)
@@ -126,8 +130,8 @@ def test_sweep_orphan_worker_logs_removes_dead_keeps_live_and_current(
             assert live_log.exists()
             assert current_log.exists()
     finally:
-        live_proc.kill()
-        live_proc.wait()
+        asyncio.run(containment.terminate(term_timeout=2.0, kill_timeout=5.0))
+        live_proc.wait(timeout=30)
 
 
 def test_sweep_orphan_worker_logs_ignores_non_matching_files(tmp_path: Path) -> None:

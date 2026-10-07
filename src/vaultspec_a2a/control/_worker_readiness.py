@@ -1,4 +1,4 @@
-"""Admission and cleanup for a newly spawned worker process."""
+"""Readiness and cleanup for a newly spawned worker process."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from ..utils.process import ProcessContainment
+    from ..utils import ProcessContainment
 
 __all__ = [
     "WorkerReadySpec",
@@ -46,7 +46,7 @@ async def _await_worker_ready(
     containment: ProcessContainment,
     spec: WorkerReadySpec,
 ) -> subprocess.Popen[bytes] | None:
-    """Seat the spawned worker in its containment and wait for it to be ours.
+    """Wait for the contained worker to answer as ours, reaping it on failure.
 
     Returns the handle once the worker at *worker_url* answers as this gateway's,
     or ``None`` when it exited early or never became ready - reaping the tree in
@@ -73,17 +73,12 @@ async def _await_worker_ready_inner(
     containment: ProcessContainment,
     spec: WorkerReadySpec,
 ) -> subprocess.Popen[bytes] | None:
-    """Seat and poll the worker; see :func:`_await_worker_ready` for the guard."""
+    """Poll the worker; see :func:`_await_worker_ready` for the guard."""
     worker_url = spec.worker_url
     worker_port = spec.worker_port
     generation = spec.generation
     worker_command = spec.worker_command
     stderr_log_path = spec.stderr_log_path
-    # Assign the worker to its containment before it boots far enough to spawn
-    # any descendant (provider roots, MCP bridges). A worker this gateway owns is
-    # not admitted without durable tree authority: otherwise a descendant created
-    # during cooperative exit can outlive a root that exits first.
-    containment.assign_process(process)
     logger.info(
         "Worker process spawned (PID %d) via `%s` with stderr at %s",
         process.pid,
@@ -171,11 +166,7 @@ async def _reap_unready_worker(
     unidentified occupant, so an incomplete reap here wedges the band rather
     than merely leaking a process.
 
-    An assigned Job Object or process group is authoritative for the tree. If
-    assignment failed before authority was recorded, cleanup suspends the exact
-    retained ``Popen`` identity, retains its descendants with creation guards,
-    and terminates only those identities before waiting the root handle.
-
-    Either way the handle is waited afterwards so no zombie is left on POSIX.
+    The worker's Job Object or process group is authoritative for the tree, and
+    the handle is waited afterwards so no zombie is left on POSIX.
     """
     await complete_cleanup(_stop_worker_tree(process, containment, term_timeout=5.0))

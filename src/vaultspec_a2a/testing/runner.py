@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import hmac
 import os
 import secrets
@@ -21,12 +20,19 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from ..utils.process import ProcessContainment, ProcessContainmentError
+from ..utils import ProcessContainment, ProcessContainmentError, spawn_contained
 from .harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+__all__ = [
+    "DESCENDANT_TIMEOUT_EXIT",
+    "RUN_TIMEOUT_EXIT",
+    "TEARDOWN_TIMEOUT_EXIT",
+    "main",
+    "run_pytest",
+]
 
 TEARDOWN_TIMEOUT_EXIT = 124
 RUN_TIMEOUT_EXIT = 125
@@ -233,43 +239,7 @@ def _spawn_pytest_process(
         "vaultspec_a2a.testing.runner_child",
         *pytest_args,
     ]
-    spawn_kwargs = containment.spawn_kwargs()
-    start_new_session = bool(spawn_kwargs.get("start_new_session", False))
-    try:
-        return subprocess.Popen(
-            command,
-            stdin=None,
-            stdout=None,
-            stderr=None,
-            env=env,
-            creationflags=containment.suspended_creation_flag(),
-            start_new_session=start_new_session,
-            text=False,
-            encoding=None,
-            errors=None,
-        )
-    except BaseException:
-        containment.close()
-        raise
-
-
-def _assign_pytest_process(
-    process: subprocess.Popen[bytes], containment: ProcessContainment
-) -> None:
-    try:
-        containment.assign_suspended_process(process)
-    except BaseException:
-        # Assignment may leave either an owned tree or an unassigned root.
-        try:
-            if containment.assigned:
-                _terminate(containment, process)
-            elif process.poll() is None:
-                process.kill()
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                process.wait(timeout=5.0)
-        finally:
-            containment.close()
-        raise
+    return spawn_contained(command, containment, env=env)
 
 
 def _root_exit_status(
@@ -444,7 +414,6 @@ def run_pytest(
         token = secrets.token_hex(32)
         endpoint = f"127.0.0.1:{port}:{token}"
         process = _spawn_pytest_process(pytest_args, containment, endpoint)
-        _assign_pytest_process(process, containment)
 
         return _await_pytest_exit(
             process,

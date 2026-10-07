@@ -746,8 +746,6 @@ class _RepairOptional(TypedDict, total=False):
     execution_readiness: RepairStatus | str | None
     last_requested_action: ControlActionType | str | None
     last_applied_action: ControlActionType | str | None
-    increment_generation: bool
-    increment_recovery_epoch: bool
 
 
 class _RepairArgs(_RepairOptional):
@@ -763,8 +761,6 @@ async def set_thread_repair_state(
     execution_readiness = kwargs.get("execution_readiness")
     last_requested_action = kwargs.get("last_requested_action")
     last_applied_action = kwargs.get("last_applied_action")
-    increment_generation = kwargs.get("increment_generation", False)
-    increment_recovery_epoch = kwargs.get("increment_recovery_epoch", False)
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return None
@@ -781,10 +777,6 @@ async def set_thread_repair_state(
         thread.last_applied_action = _coerce_control_action_type(
             last_applied_action
         ).value
-    if increment_generation:
-        thread.repair_generation += 1
-    if increment_recovery_epoch:
-        thread.recovery_epoch += 1
     thread.updated_at = _utcnow()
     await session.flush()
     return thread
@@ -899,7 +891,6 @@ async def record_thread_execution_state(
             existing.next_nodes_json = next_nodes_json
             existing.interrupt_types_json = interrupt_types_json
             existing.tasks_json = tasks_json
-            existing.recovery_epoch = thread.recovery_epoch
         existing.recorded_at = _utcnow()
         existing.degraded_reasons_json = degraded_reasons_json
         await session.flush()
@@ -911,7 +902,6 @@ async def record_thread_execution_state(
         parent_checkpoint_id=kwargs["parent_checkpoint_id"],
         snapshot_created_at=kwargs["snapshot_created_at"],
         recorded_at=_utcnow(),
-        recovery_epoch=thread.recovery_epoch,
         task_count=kwargs["task_count"],
         interrupt_count=kwargs["interrupt_count"],
         next_nodes_json=next_nodes_json,

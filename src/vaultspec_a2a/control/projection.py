@@ -605,18 +605,16 @@ async def enrich_snapshot_from_durable_state(
 
 def execution_state_is_stale(
     row: ThreadExecutionStateModel,
-    thread: ThreadModel,
     *,
     checkpoint_present: bool,
     checkpoint_id: str | None,
 ) -> bool:
     """Return whether a durable execution-state row has lost its lineage.
 
-    The row is stale when no checkpoint backs it, when it was recorded in an
-    earlier recovery epoch, or when it describes a checkpoint other than the
-    run's current one.
+    The row is stale when no checkpoint backs it, or when it describes a
+    checkpoint other than the run's current one.
     """
-    if not checkpoint_present or row.recovery_epoch != thread.recovery_epoch:
+    if not checkpoint_present:
         return True
     return checkpoint_id is not None and row.checkpoint_id != checkpoint_id
 
@@ -654,7 +652,6 @@ async def enrich_snapshot_from_execution_state(
 
     if execution_state_is_stale(
         row,
-        thread,
         checkpoint_present=checkpoint_present,
         checkpoint_id=checkpoint_id,
     ):

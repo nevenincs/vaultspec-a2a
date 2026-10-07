@@ -2,7 +2,7 @@
 
 :mod:`vaultspec_a2a.database.models` defines SQLAlchemy models, and
 :mod:`vaultspec_a2a.database.session` owns asynchronous sessions. Repository
-modules manage artifacts, authoring cursors, permissions, and threads.
+modules manage audit logs, authoring cursors, permissions, and threads.
 
 Migration support belongs to :mod:`vaultspec_a2a.database.migrations`.
 Persistence stores :mod:`vaultspec_a2a.thread` state for
@@ -15,9 +15,6 @@ operation. This package re-exports the supported persistence API.
 from ._helpers import save_model as save_model
 from .artifact_repository import append_cost_record as append_cost_record
 from .artifact_repository import append_permission_log as append_permission_log
-from .artifact_repository import create_artifact as create_artifact
-from .artifact_repository import get_artifact as get_artifact
-from .artifact_repository import get_artifacts_by_thread as get_artifacts_by_thread
 from .artifact_repository import (
     get_permission_logs_by_thread as get_permission_logs_by_thread,
 )
@@ -218,15 +215,12 @@ __all__ = [
     "configure_sqlite_engine",
     "configure_sqlite_transactions",
     "count_pending_sdd_backfill",
-    "create_artifact",
     "create_control_action",
     "create_thread",
     "delete_thread",
     "elect_thread_deleting",
     "elect_thread_status",
     "expire_pending_permission_requests",
-    "get_artifact",
-    "get_artifacts_by_thread",
     "get_authoring_cursor",
     "get_control_action_by_dispatch_id",
     "get_control_action_by_idempotency_key",

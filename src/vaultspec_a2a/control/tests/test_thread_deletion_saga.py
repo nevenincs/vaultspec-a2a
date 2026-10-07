@@ -4,14 +4,13 @@ The deletion saga's promise is narrow and load-bearing: control state stays
 authoritative until every store is clean, so an interrupted delete resumes one
 durable saga, a replayed delete does not delete twice, a thread under teardown
 stays hidden, and control rows are removed only after the checkpoint and
-artifact cleanup finish. These drive the real coordinator against a real SQLite
+replay-store cleanup finish. These drive the real coordinator against a real SQLite
 control database and a real AsyncSqliteSaver checkpoint store - no mocks - and
 assert on the rows and checkpoints that survive.
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -44,7 +43,6 @@ from ...control.repositories import (
 )
 from ...control.thread_service import DeleteResult, delete_thread_service
 from ...database import (
-    create_artifact,
     create_control_action,
     create_thread,
     get_thread,
@@ -99,16 +97,13 @@ async def _checkpoint_present(checkpointer: AsyncSqliteSaver, thread_id: str) ->
     return await checkpointer.aget_tuple(_config(thread_id)) is not None
 
 
-async def _create_terminal_thread(
-    session: AsyncSession, thread_id: str, *, metadata: str | None = None
-) -> None:
+async def _create_terminal_thread(session: AsyncSession, thread_id: str) -> None:
     authority = make_test_write_authority()
     await create_thread(
         session,
         write_authority=authority,
         thread_id=thread_id,
         status=ThreadStatus.COMPLETED,
-        metadata=metadata,
     )
     await create_control_action(
         session,
@@ -121,30 +116,14 @@ async def _create_terminal_thread(
 
 
 @pytest.mark.asyncio
-async def test_delete_removes_checkpoint_and_artifact_end_to_end(
+async def test_delete_removes_checkpoint_and_rows_end_to_end(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
-    tmp_path: Path,
 ) -> None:
-    """A terminal thread's checkpoint, artifact file, and rows are all removed."""
-    workspace = tmp_path / "workspace"
-    (workspace / "outputs").mkdir(parents=True)
-    artifact_file = workspace / "outputs" / "report.md"
-    artifact_file.write_text("body", encoding="utf-8")
-
+    """A terminal thread's checkpoint and rows are all removed."""
     await _write_checkpoint(checkpointer, "t-e2e", "cp-e2e")
     async with session_factory() as session:
-        await _create_terminal_thread(
-            session,
-            "t-e2e",
-            metadata=json.dumps({"workspace_root": workspace.as_posix()}),
-        )
-        await create_artifact(
-            session,
-            thread_id="t-e2e",
-            artifact_type="file",
-            path="outputs/report.md",
-        )
+        await _create_terminal_thread(session, "t-e2e")
         await session.commit()
 
     async with session_factory() as session:
@@ -153,7 +132,6 @@ async def test_delete_removes_checkpoint_and_artifact_end_to_end(
         )
 
     assert result.deleted is True
-    assert not artifact_file.exists()
     assert await _checkpoint_present(checkpointer, "t-e2e") is False
     async with session_factory() as session:
         assert await get_thread(session, "t-e2e") is None

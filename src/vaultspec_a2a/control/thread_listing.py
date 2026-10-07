@@ -199,7 +199,6 @@ def _summary_checkpoint_state(
         and thread.status not in TERMINAL_STATUS_VALUES
         and execution_state_is_stale(
             execution_state,
-            thread,
             checkpoint_present=probe.tuple is not None,
             checkpoint_id=checkpoint_id,
         )

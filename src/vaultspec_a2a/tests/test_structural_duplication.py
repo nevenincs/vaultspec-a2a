@@ -99,14 +99,6 @@ _ACCEPTED: Final[tuple[frozenset[str], ...]] = (
             "database/artifact_repository.py::sum_cost_by_thread",
         }
     ),
-    # Same repository, different tables and different row models. The shape is
-    # shared because the access pattern is, not because the query is.
-    frozenset(
-        {
-            "database/artifact_repository.py::get_artifacts_by_thread",
-            "database/artifact_repository.py::get_permission_logs_by_thread",
-        }
-    ),
     # Same repository, two lookup keys onto one table. Merging them would take
     # the key as a column name, which is how a typo becomes a runtime error
     # instead of a name error.

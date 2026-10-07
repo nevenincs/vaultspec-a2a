@@ -39,7 +39,6 @@ from ..database import (
     begin_write_transaction,
     create_thread,
     elect_thread_status,
-    get_artifacts_by_thread,
     get_thread,
     thread_write_expectation,
 )
@@ -525,8 +524,8 @@ async def delete_thread_service(
     captures the cleanup manifest and marks the thread ``deleting`` in one
     durable commit before any external effect; a replayed or resumed request on
     an already-``deleting`` thread rejoins the same saga. Cleanup then removes
-    the checkpoint and artifact files from the durable manifest, and the control
-    rows are removed only once every item is done.
+    the checkpoint and run-owned replay state from the durable manifest, and the
+    control rows are removed only once every item is done.
 
     Commits the session at each durable boundary — the service owns its
     transaction boundaries. Does **not** raise ``HTTPException``.
@@ -543,9 +542,7 @@ async def delete_thread_service(
             await db.rollback()
             return DeleteResult(deleted=False, error_detail=eligibility.reason)
         manifest = build_cleanup_manifest(
-            thread,
-            await get_artifacts_by_thread(db, thread_id),
-            include_checkpoint=checkpointer is not None,
+            thread, include_checkpoint=checkpointer is not None
         )
         saga = await create_deletion_saga(
             db,

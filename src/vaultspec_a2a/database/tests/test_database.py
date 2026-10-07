@@ -36,11 +36,8 @@ from ...thread.errors import NicknameConflictError
 from .. import (
     append_cost_record,
     append_permission_log,
-    create_artifact,
     create_thread,
     delete_thread,
-    get_artifact,
-    get_artifacts_by_thread,
     get_permission_logs_by_thread,
     get_permission_request,
     get_thread,
@@ -648,26 +645,7 @@ class TestThreadCRUD:
 
 
 class TestArtifactCRUD:
-    """Tests for artifact create and query operations."""
-
-    @pytest.mark.asyncio
-    async def test_create_artifact(self, session: AsyncSession) -> None:
-        """Creating an artifact should link it to the parent thread."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Artifact Thread",
-        )
-        artifact = await create_artifact(
-            session,
-            thread_id=thread.id,
-            artifact_type="file",
-            path="src/main.py",
-        )
-        assert artifact.id is not None
-        assert artifact.thread_id == thread.id
-        assert artifact.type == "file"
-        assert artifact.path == "src/main.py"
+    """Tests for artifact model persistence."""
 
     @pytest.mark.asyncio
     async def test_save_artifact_with_extra_fields(self, session: AsyncSession) -> None:
@@ -687,56 +665,6 @@ class TestArtifactCRUD:
         assert isinstance(saved, ArtifactModel)
         assert saved.content_hash == "abc123"
         assert saved.agent_id == "coder-1"
-
-    @pytest.mark.asyncio
-    async def test_get_artifact_by_id(self, session: AsyncSession) -> None:
-        """get_artifact should return the artifact by its primary key."""
-        thread = await create_thread(
-            session, write_authority=make_test_write_authority(), title="Parent"
-        )
-        created = await create_artifact(
-            session,
-            thread_id=thread.id,
-            artifact_type="diff",
-            path="src/lib.py",
-        )
-        found = await get_artifact(session, created.id)
-        assert found is not None
-        assert found.path == "src/lib.py"
-
-    @pytest.mark.asyncio
-    async def test_get_artifact_not_found(self, session: AsyncSession) -> None:
-        """get_artifact should return None for nonexistent ID."""
-        result = await get_artifact(session, "no-such-id")
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_get_artifacts_by_thread(self, session: AsyncSession) -> None:
-        """get_artifacts_by_thread should return all artifacts for a thread."""
-        thread = await create_thread(
-            session, write_authority=make_test_write_authority(), title="Multi-Artifact"
-        )
-        expected_paths = {"a.py", "b.py"}
-        for path in expected_paths:
-            await create_artifact(
-                session,
-                thread_id=thread.id,
-                artifact_type="file",
-                path=path,
-            )
-
-        artifacts = await get_artifacts_by_thread(session, thread.id)
-        assert len(artifacts) == len(expected_paths)
-        assert {a.path for a in artifacts} == expected_paths
-
-    @pytest.mark.asyncio
-    async def test_get_artifacts_by_thread_empty(self, session: AsyncSession) -> None:
-        """get_artifacts_by_thread returns empty for thread with no artifacts."""
-        thread = await create_thread(
-            session, write_authority=make_test_write_authority(), title="No Artifacts"
-        )
-        artifacts = await get_artifacts_by_thread(session, thread.id)
-        assert len(artifacts) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1060,33 +988,6 @@ class TestCascadeDelete:
     """Verify that cascade="all, delete-orphan" removes child records."""
 
     @pytest.mark.asyncio
-    async def test_delete_thread_cascades_to_artifacts(
-        self, session: AsyncSession
-    ) -> None:
-        """Deleting a thread removes all associated artifact records."""
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Cascade Artifacts",
-        )
-        artifact = await create_artifact(
-            session,
-            thread_id=thread.id,
-            artifact_type="file",
-            path="src/main.py",
-        )
-        artifact_id = artifact.id
-        await session.commit()
-
-        # Reload and delete the thread
-        t = await get_thread(session, thread.id)
-        await session.delete(t)
-        await session.commit()
-
-        found = await get_artifact(session, artifact_id)
-        assert found is None, "Artifact should be deleted with its parent thread"
-
-    @pytest.mark.asyncio
     async def test_delete_thread_cascades_to_permission_logs(
         self, session: AsyncSession
     ) -> None:
@@ -1278,19 +1179,3 @@ class TestDeleteThread:
         """delete_thread() returns False for a thread ID that does not exist."""
         result = await delete_thread(session, "completely-nonexistent-id")
         assert result is False
-
-    @pytest.mark.asyncio
-    async def test_delete_thread_cascades_artifacts(
-        self, session: AsyncSession
-    ) -> None:
-        """delete_thread() removes cascading artifact records via CRUD function."""
-        thread = await create_thread(
-            session, write_authority=make_test_write_authority(), title="With Artifacts"
-        )
-        artifact = await create_artifact(
-            session, thread_id=thread.id, artifact_type="file", path="x.py"
-        )
-        artifact_id = artifact.id
-        await delete_thread(session, thread.id)
-        await session.commit()
-        assert await get_artifact(session, artifact_id) is None

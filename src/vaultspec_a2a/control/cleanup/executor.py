@@ -2,16 +2,15 @@
 
 The deletion saga captures a durable manifest of cleanup work; this module
 turns that manifest into real store effects. It builds the manifest from a
-thread and its artifacts, and executes each item against the store it targets -
-the LangGraph checkpoint store, workspace files, or authoring replay journals.
+thread, and executes each item against the store it targets - the LangGraph
+checkpoint store, workspace files, or authoring replay journals.
 
 Two properties matter here and are enforced by construction:
 
-- **Containment.** An artifact file is only ever a cleanup target when it
-  resolves inside the thread's workspace root. Escaping paths (absolute paths,
-  parent traversals, symlinks pointing outside) are refused at manifest build
-  and re-checked before any unlink, so a delete can never remove a file the
-  thread does not own.
+- **Containment.** An artifact file item is unlinked only when it resolves
+  inside the workspace root it was recorded against. Escaping paths (absolute
+  paths, parent traversals, symlinks pointing outside) are refused before any
+  unlink, so a delete can never remove a file the thread does not own.
 - **Independence.** Every item is executed and recorded on its own. One item's
   failure is captured as that item's failure and never aborts, skips, or masks
   the items after it, so a stuck checkpoint delete cannot leave artifact files
@@ -124,15 +123,13 @@ def resolve_contained_artifact_path(
 
 def build_cleanup_manifest(
     thread: Any,
-    artifacts: Sequence[Any],
     *,
     include_checkpoint: bool,
 ) -> list[CleanupItem]:
     """Capture the immutable cleanup manifest for a thread being deleted.
 
-    The manifest lists the checkpoint (when available), each contained artifact
-    file, and run-owned replay state in the configured journal directories.
-    Escaping artifact paths are refused here and never enter the manifest.
+    The manifest lists the checkpoint (when available) and run-owned replay
+    state in the configured journal directories.
     """
     items: list[CleanupItem] = []
     if include_checkpoint:
@@ -155,21 +152,6 @@ def build_cleanup_manifest(
                     root=str(directory),
                 )
             )
-    workspace_root = _workspace_root_from_thread(thread)
-    if workspace_root is None:
-        return items
-    for artifact in artifacts:
-        resolved = resolve_contained_artifact_path(workspace_root, artifact.path)
-        if resolved is None:
-            continue
-        items.append(
-            CleanupItem(
-                kind=CleanupKind.ARTIFACT_FILE,
-                key=f"artifact:{artifact.id}",
-                target=str(resolved),
-                root=str(workspace_root),
-            )
-        )
     return items
 
 

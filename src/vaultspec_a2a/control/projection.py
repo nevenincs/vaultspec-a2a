@@ -65,6 +65,7 @@ __all__ = [
     "mark_degraded",
     "project_execution_state_model",
     "reconcile_checkpoint_permissions_with_durable_state",
+    "withhold_terminal_interrupt_disclosure",
 ]
 
 _JSON_LIST_ADAPTER = TypeAdapter(list[object])
@@ -402,6 +403,36 @@ def reconcile_checkpoint_permissions_with_durable_state(
     return snapshot
 
 
+def withhold_terminal_interrupt_disclosure(
+    snapshot: ThreadStateSnapshot, *, thread_status: str
+) -> ThreadStateSnapshot:
+    """Withdraw every answerable interrupt from a SETTLED run's disclosure.
+
+    The one terminal gate, and it runs AFTER the checkpoint merge on purpose.
+    Settling a run does not rewrite its checkpoint, so the request it parked on
+    is still held there: withdrawing the durable half first only let the merge
+    put the checkpoint half straight back, which is how a cancelled run went on
+    serving the questionnaire it parked on.
+
+    No respond verb accepts a settled run, so anything still disclosed here is
+    an offer no caller can take up, and nothing on the wire distinguishes it
+    from one that can. The pause cause goes with it: a run that has stopped is
+    not paused on anything.
+
+    Degraded reasons are deliberately untouched. That a settled run still holds
+    unanswered requests is an operator signal about the record, and this gate
+    removes the offer, not the finding.
+    """
+    if thread_status not in TERMINAL_STATUS_VALUES:
+        return snapshot
+    snapshot.pending_permissions = []
+    snapshot.pending_clarification = None
+    snapshot.approval_status = None
+    snapshot.approval_request_id = None
+    snapshot.pause_cause = None
+    return snapshot
+
+
 def project_execution_state_model(
     model: ThreadExecutionStateModel,
 ) -> ExecutionStateProjection:
@@ -511,9 +542,6 @@ async def enrich_snapshot_from_durable_state(
 ) -> ThreadStateSnapshot:
     """Merge durable gateway-owned state into a reconnect snapshot."""
     record_repair_posture(snapshot, thread.repair_status)
-    approval = thread.approval_status
-    snapshot.approval_status = None if approval is None else ApprovalStatus(approval)
-    snapshot.approval_request_id = thread.approval_request_id
     # Read before the terminal branch below returns, so a settled run reports
     # the truth rather than inheriting the default: a run that ends with
     # something still queued on it would be a defect, and this is where it
@@ -523,24 +551,26 @@ async def enrich_snapshot_from_durable_state(
     )
     if thread.status in TERMINAL_STATUS_VALUES:
         # A settled run is outside the live-run query, so what it never
-        # answered is read directly.
+        # answered is read directly. The residue is REPORTED and never
+        # DISCLOSED: nothing readable is written onto the snapshot here, so the
+        # terminal gate has nothing to undo and the posture it leaves behind is
+        # an operator signal rather than an offer to answer.
         residue = await get_pending_permission_requests(
             session,
             thread_id=thread.id,
             include_answered_pending_apply=False,
         )
-        if residue or snapshot.approval_status == ApprovalStatus.PENDING:
+        if residue or thread.approval_status == ApprovalStatus.PENDING.value:
             mark_degraded(
                 snapshot,
                 DegradedReason.TERMINAL_THREAD_PENDING_PERMISSION_RESIDUE,
                 repair=RepairStatus.NEEDS_RECONCILIATION,
             )
-        snapshot.pending_permissions = []
-        snapshot.pending_clarification = None
-        snapshot.approval_status = None
-        snapshot.approval_request_id = None
         return snapshot
 
+    approval = thread.approval_status
+    snapshot.approval_status = None if approval is None else ApprovalStatus(approval)
+    snapshot.approval_request_id = thread.approval_request_id
     pending = await actionable_pending_permissions(session, thread_id=thread.id)
     _merge_durable_permissions(snapshot, pending)
     snapshot.approval_status, snapshot.approval_request_id = durable_approval(pending)

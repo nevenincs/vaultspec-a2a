@@ -6,14 +6,14 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from ..testing import wait_for_run_status
-from ..testing.payloads import (
+from ..testing import (
     json_object,
     json_object_list,
+    read_frames_until,
     required_bool,
     required_text,
+    wait_for_run_status,
 )
-from ..testing.sse import read_frames_until
 from ._state import select_option_id, thread_state
 
 if TYPE_CHECKING:

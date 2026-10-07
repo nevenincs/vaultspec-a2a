@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from ...testing.factories import build_settings
+from ...testing import build_settings
 from ..config import Settings
 
 

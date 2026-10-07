@@ -36,6 +36,8 @@ from ..testing import (
     await_gateway_ready,
     booted_gateway,
     foreign_worker,
+    free_port,
+    gateway_run_verbs,
     reap_process,
     reap_tree,
     seat_app_home,
@@ -44,8 +46,6 @@ from ..testing import (
     unvalidated_selection,
     worker_lifecycle_gateway_script,
 )
-from ..testing.gateway_verbs import gateway_run_verbs
-from ..testing.ports import free_port
 from ..utils._process_tree import pid_is_live
 
 if TYPE_CHECKING:

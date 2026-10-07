@@ -56,7 +56,7 @@ from ...providers._subprocess import spawn_acp_process
 from ...providers.acp_chat_model import AcpChatModel
 from ...providers.acp_exceptions import AcpPromptError
 from ...providers.codex_chat_model import CodexChatModel
-from ...testing.lanes import DeterministicResearchAdrChatModel
+from ...testing import DeterministicResearchAdrChatModel
 from ...tests._write_authority import make_test_thread_authority_columns
 from ...thread.models import TokenUsageEntry
 from ...thread.state import merge_token_usage

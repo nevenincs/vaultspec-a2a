@@ -34,8 +34,7 @@ from ...database import (
 )
 from ...database.session import close_db, get_session_factory, init_db
 from ...ipc.schemas import DispatchRequest
-from ...testing import adopted_spawner
-from ...testing.catalog_authority import current_execution_metadata
+from ...testing import adopted_spawner, current_execution_metadata
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from ...thread.failure_evidence import (

@@ -8,8 +8,7 @@ proven end to end rather than inferred from the resolver alone.
 from pathlib import Path
 
 from ...domain_config import DomainSettingsConfig
-from ...testing import armed_environment
-from ...testing.factories import build_settings
+from ...testing import armed_environment, build_settings
 from ..config import Settings
 from ..settings_base import (
     ENV_FILE_ENV,

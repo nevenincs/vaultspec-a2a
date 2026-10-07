@@ -49,7 +49,7 @@ def _open_checkpointer_in_child(url: str, barrier: Any, results: Any) -> None:
     """
 
     async def run() -> str:
-        from ...testing.environment import settings_override
+        from ...testing import settings_override
         from ..checkpoints import open_checkpointer
 
         try:

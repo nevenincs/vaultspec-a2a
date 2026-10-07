@@ -29,10 +29,10 @@ from ...authoring import AuthoringClient, AuthoringResponse, Denial, mint_actor_
 from ...control.config import setting_env, settings
 from ...control.run_start_policy import required_role_ids
 from ...team.team_config import load_team_config
-from ...testing.gateway_verbs import actor_tokens_body
-from ...testing.progress import (
+from ...testing import (
     ProgressDeadline,
     ProgressStalledError,
+    actor_tokens_body,
     wait_for_async,
 )
 from ._harness import certified_gateway

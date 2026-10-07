@@ -25,8 +25,7 @@ from sqlalchemy.ext.asyncio import (
 
 from ...control.drain import DrainGate
 from ...database import get_control_action_by_dispatch_id, get_thread
-from ...testing import serve_on_loopback
-from ...testing.gateway_verbs import async_run_start_body
+from ...testing import async_run_start_body, serve_on_loopback
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from ...providers.team_selection import model_assignment_digest
-from ...testing.catalog_authority import current_execution_metadata
+from ...testing import current_execution_metadata
 from ..execution_authority import (
     ExecutionAuthorityError,
     ExecutionAuthorityFailure,

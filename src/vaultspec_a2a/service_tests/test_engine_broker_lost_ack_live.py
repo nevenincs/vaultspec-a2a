@@ -41,9 +41,9 @@ from ..service_tests._live_desktop_gateway import armed_gateway
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     LIVE_PROVIDER_PREREQUISITES,
+    free_port,
     selection_from_served_catalog,
 )
-from ..testing.ports import free_port
 from ..utils.process import ProcessContainment
 
 if TYPE_CHECKING:

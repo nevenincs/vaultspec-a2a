@@ -17,10 +17,10 @@ from ...testing import (
     JsonReplyHandler,
     armed_environment,
     health_listener,
+    plant_link_to_file,
     serve_handler,
     settings_override,
 )
-from ...testing.links import plant_link_to_file
 from ..discovery import resolve_engine
 from ._engine_peer import (
     TEST_BEARER,

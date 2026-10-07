@@ -80,18 +80,19 @@ from ..graph.nodes.diverge import WEB_LOCATOR_KIND
 from ..providers._json_contract import JsonObject
 from ..providers.conditions import ProviderCondition, condition_from_acp_error
 from ..team.team_config import load_team_config
-from ..testing.acceptance import (
+from ..testing import (
     GATEWAY_AUTH_HEADERS,
     MODE_MANUAL,
     PRESET_LIVE,
     AcceptanceCase,
     AcceptanceHarness,
     ResilientAuthoringClient,
+    json_object,
+    json_object_list,
     reachable_stack,
     snapshot_vault,
     vault_write_delta,
 )
-from ..testing.payloads import json_object, json_object_list
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence

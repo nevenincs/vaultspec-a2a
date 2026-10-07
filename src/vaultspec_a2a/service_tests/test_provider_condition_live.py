@@ -57,12 +57,12 @@ import pytest
 from ..providers._json_contract import lenient_json_object, lenient_json_object_list
 from ..providers.conditions import ProviderCondition
 from ..testing import (
+    GATEWAY_AUTH_HEADERS,
     async_fetch_provider_catalog,
     named_lane_selection,
+    resolve_gateway_url,
     wait_for_run_status_async,
 )
-from ..testing.acceptance import GATEWAY_AUTH_HEADERS
-from ..testing.endpoints import resolve_gateway_url
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule

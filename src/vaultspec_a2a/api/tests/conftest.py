@@ -29,8 +29,7 @@ from ...control.event_handlers import CheckpointPruneRegistry
 from ...database import create_thread
 from ...providers.in_process_catalog import in_process_catalog_key, in_process_lanes
 from ...streaming.aggregator import EventAggregator
-from ...testing import adopted_spawner
-from ...testing.factories import LaneInventoryFactory
+from ...testing import LaneInventoryFactory, adopted_spawner
 from ...tests._write_authority import make_test_write_authority
 from ...worker._dispatch_contract import CAPACITY_FULL
 from ...worker.app import _capacity_refusal, _verify_dispatch_token

@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing.factories import LaneInventoryFactory
+from ...testing import LaneInventoryFactory
 from ..factory import ProviderCatalogRegistration
 from ..provider_catalog import (
     AuthenticationState,

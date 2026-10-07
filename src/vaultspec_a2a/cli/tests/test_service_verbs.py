@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing.ports import free_port
+from ...testing import free_port
 
 if TYPE_CHECKING:
     from pathlib import Path

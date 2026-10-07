@@ -27,7 +27,7 @@ from pydantic import ValidationError
 from ...control.config import Settings
 from ...desktop.profile import derive_state_paths
 from ...testing import armed_environment as _environment
-from ...testing.factories import build_settings
+from ...testing import build_settings
 from ..state_layout import DEFAULT_HOME
 
 if TYPE_CHECKING:

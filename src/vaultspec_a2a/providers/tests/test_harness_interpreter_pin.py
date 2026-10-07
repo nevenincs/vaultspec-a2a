@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing.children import run_child
+from ...testing import run_child
 from .._acp_mcp import codex_mcp_server_specs, resolve_harness_mcp_servers
 from .._harness_mcp_registry import (
     _KNOWN_MCP_SERVERS,

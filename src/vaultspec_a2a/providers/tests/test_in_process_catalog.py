@@ -19,11 +19,13 @@ from pydantic import ValidationError
 
 from ...control.config import Settings
 from ...graph.enums import Provider
-from ...testing import armed_desktop_app_home, armed_environment, settings_override
-from ...testing.lanes import (
+from ...testing import (
     DETERMINISTIC_LANE,
     DeterministicResearchAdrChatModel,
+    armed_desktop_app_home,
+    armed_environment,
     seated_lanes,
+    settings_override,
 )
 from ..factory import ProviderFactory, _discover_in_process_catalog
 from ..in_process_catalog import (

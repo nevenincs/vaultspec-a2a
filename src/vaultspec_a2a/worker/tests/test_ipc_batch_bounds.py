@@ -24,7 +24,7 @@ from ...api.internal import internal_router
 from ...control.config import settings
 from ...ipc.body_limit import BoundedHttpBodyMiddleware, gateway_body_limit
 from ...streaming.aggregator import EventAggregator
-from ...testing.environment import settings_override
+from ...testing import settings_override
 from ..ipc import WorkerBridge
 
 # Small enough to reach the batch boundary with a handful of events, and applied

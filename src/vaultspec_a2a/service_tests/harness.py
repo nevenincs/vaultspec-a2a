@@ -30,16 +30,16 @@ from ..testing import (
     NoSelectableLaneError,
     RunVerbs,
     WatchedProcess,
+    armed_lane_environment,
     await_ready,
     fetch_in_process_selection,
+    free_port,
     gateway_process_env,
     log_tail,
     prune_stale_dirs,
     reap_process,
     spawn_logged,
 )
-from ..testing.lanes import armed_lane_environment
-from ..testing.ports import free_port
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

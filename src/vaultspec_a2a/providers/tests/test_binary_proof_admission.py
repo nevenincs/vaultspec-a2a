@@ -12,8 +12,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ...graph.enums import Provider
-from ...testing import settings_override
-from ...testing.factories import LaneInventoryFactory
+from ...testing import LaneInventoryFactory, settings_override
 from .. import factory as factory_module
 from .._catalog_discovery import ProviderCatalogDiscovery
 from .._factory_commands import ProviderCommand

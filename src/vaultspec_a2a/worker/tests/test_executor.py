@@ -42,8 +42,12 @@ from ...providers.acp_exceptions import AcpPromptError
 from ...providers.conditions import condition_from_acp_error
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...team.team_config import load_agent_config, load_team_config
-from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ...testing.catalog_authority import current_execution_metadata
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    current_execution_metadata,
+    new_state_graph,
+)
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,

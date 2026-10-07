@@ -12,7 +12,11 @@ agent side of the protocol over stdio, with the frame builders and the request a
 reply exchange a client-side test uses against it. Beside them sits the
 real-process support every test tier composes rather than retypes: the gateway
 boot and its peers (``boot``), the loopback listeners a test points code at
-(``http``), the run-start verb shaped once (``verbs``), and the in-process
+(``http``), the run-start verb shaped once (``verbs``) and the gateway verb kit
+built around it (``gateway_verbs``), the acceptance harness that drives a
+document-authoring run end to end (``acceptance``), the readers that check a
+decoded JSON response's shape (``payloads``), the inputs a test chooses for a
+production constructor (``factories``, ``catalog_authority``), and the in-process
 fixture lanes a test gateway or test process holds (``lanes``).
 
 The plugin is loaded by the repository-root ``conftest.py``, which is the one
@@ -20,12 +24,41 @@ channel that neither an ``addopts`` override can strip nor a consumer
 environment can inherit; importing this facade does not register it. Public
 names resolve lazily so the contained runner can declare its test environment
 before any test-only import reaches the eager settings singleton.
+
+The facade re-exports each support module whole. The contained runner's own
+modules (``plugin``, ``runner``, ``runner_child``, ``completion``) are the
+exception: they run before or outside the test process and are named by module
+path, as ``-m`` and ``pytest_plugins`` do.
 """
 
 from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .acceptance import (
+        CODER_ROLE,
+        GATEWAY_AUTH_HEADERS,
+        MODE_AUTONOMOUS,
+        MODE_MANUAL,
+        OBSERVE_DEADLINE_SECONDS,
+        POLICY_AUTO,
+        POLICY_HUMAN,
+        PRESET_DETERMINISTIC,
+        PRESET_LIVE,
+        SOLO_CODER_PRESET,
+        AcceptanceCase,
+        AcceptanceHarness,
+        Materialization,
+        ResilientAuthoringClient,
+        is_live_lane,
+        message_content,
+        observe_bridged_authoring_run,
+        reachable_stack,
+        resolve_selection,
+        runtime_budget_for,
+        snapshot_vault,
+        vault_write_delta,
+    )
     from .acp import (
         ACP_PROTOCOL_VERSION,
         ACP_SIMULATOR_PATH,
@@ -39,6 +72,7 @@ if TYPE_CHECKING:
         request_permission_request,
         simulator_command,
     )
+    from .antigravity import antigravity_credential_path
     from .boot import (
         DEFAULT_ATTACH_CREDENTIAL,
         DEFAULT_OWNERSHIP_CAPABILITY,
@@ -93,6 +127,7 @@ if TYPE_CHECKING:
         selection_from_served_catalog,
         unvalidated_selection,
     )
+    from .catalog_authority import current_execution_metadata
     from .children import (
         DEFAULT_IDLE_WINDOW_S,
         await_child,
@@ -109,13 +144,29 @@ if TYPE_CHECKING:
         armed_environment,
         settings_override,
     )
+    from .factories import LaneInventoryFactory, build_settings
+    from .gateway_verbs import (
+        DEFAULT_PRESET_LANE,
+        DEFAULT_REQUIRED_ROLE,
+        DEFAULT_TEAM_PRESET,
+        GatewayVerbs,
+        actor_tokens_body,
+        async_run_start_body,
+        gateway_run_verbs,
+        role_tokens,
+    )
     from .graph import (
         add_test_node,
         ainvoke_test_graph,
         compile_test_graph,
         new_state_graph,
     )
-    from .harness_names import CPU_BUDGET_ENV
+    from .harness_names import (
+        COMPLETION_ENDPOINT_ENV,
+        COMPLETION_OWNER_PID_ENV,
+        CPU_BUDGET_ENV,
+        TEST_ENV_PREFIX,
+    )
     from .http import (
         JsonReplyHandler,
         health_listener,
@@ -125,16 +176,34 @@ if TYPE_CHECKING:
         serve_on_loopback_in_thread,
         uvicorn_started,
     )
-    from .lanes import armed_lane_environment, seated_lanes
+    from .lanes import (
+        DETERMINISTIC_LANE,
+        LANES,
+        armed_lane_environment,
+        held_turns,
+        register_lanes,
+        seated_lanes,
+    )
+    from .lanes.deterministic import UNATTENDED_REPLY, DeterministicResearchAdrChatModel
     from .leases import (
         LEASE_TTL_MS,
         Lease,
         LeaseAcquisitionTimeoutError,
         hold_lease,
         lease_home,
+        live_shared_holder_count,
     )
     from .links import plant_link_to_file
     from .markers import LayerRule, apply_layer_markers
+    from .payloads import (
+        json_list,
+        json_object,
+        json_object_list,
+        json_text,
+        required_bool,
+        required_text,
+        text_list,
+    )
     from .polling import (
         is_terminal,
         ok_body,
@@ -156,6 +225,7 @@ if TYPE_CHECKING:
         ResourceDiedError,
         registry_watch,
         wait_for,
+        wait_for_async,
     )
     from .purity import (
         IMPURE_FIXTURES,
@@ -174,7 +244,13 @@ if TYPE_CHECKING:
         exclusive_keys,
         resolve_spec,
     )
-    from .session_root import prune_stale_dirs, session_scratch_dir
+    from .session_root import (
+        TEST_ROOT_NAME,
+        TestSessionSettings,
+        prune_stale_dirs,
+        seat_test_session,
+        session_scratch_dir,
+    )
     from .sessions import (
         SESSION_LEASE_KEY,
         effective_worker_count,
@@ -182,7 +258,7 @@ if TYPE_CHECKING:
         machine_cpu_budget,
         register_session,
     )
-    from .sse import SseFrame, SseReader, decode_frame, read_frame
+    from .sse import SseFrame, SseReader, decode_frame, read_frame, read_frames_until
     from .verbs import (
         RunVerbs,
         status_and_json,
@@ -198,6 +274,43 @@ if TYPE_CHECKING:
 #: naming ``vaultspec_a2a.testing.children``, leaving every submodule this
 #: facade lazily loads misreported as reachable only through type checking.
 _LAZY_EXPORTS = {
+    "CODER_ROLE": ("vaultspec_a2a.testing.acceptance", "CODER_ROLE"),
+    "GATEWAY_AUTH_HEADERS": (
+        "vaultspec_a2a.testing.acceptance",
+        "GATEWAY_AUTH_HEADERS",
+    ),
+    "MODE_AUTONOMOUS": ("vaultspec_a2a.testing.acceptance", "MODE_AUTONOMOUS"),
+    "MODE_MANUAL": ("vaultspec_a2a.testing.acceptance", "MODE_MANUAL"),
+    "OBSERVE_DEADLINE_SECONDS": (
+        "vaultspec_a2a.testing.acceptance",
+        "OBSERVE_DEADLINE_SECONDS",
+    ),
+    "POLICY_AUTO": ("vaultspec_a2a.testing.acceptance", "POLICY_AUTO"),
+    "POLICY_HUMAN": ("vaultspec_a2a.testing.acceptance", "POLICY_HUMAN"),
+    "PRESET_DETERMINISTIC": (
+        "vaultspec_a2a.testing.acceptance",
+        "PRESET_DETERMINISTIC",
+    ),
+    "PRESET_LIVE": ("vaultspec_a2a.testing.acceptance", "PRESET_LIVE"),
+    "SOLO_CODER_PRESET": ("vaultspec_a2a.testing.acceptance", "SOLO_CODER_PRESET"),
+    "AcceptanceCase": ("vaultspec_a2a.testing.acceptance", "AcceptanceCase"),
+    "AcceptanceHarness": ("vaultspec_a2a.testing.acceptance", "AcceptanceHarness"),
+    "Materialization": ("vaultspec_a2a.testing.acceptance", "Materialization"),
+    "ResilientAuthoringClient": (
+        "vaultspec_a2a.testing.acceptance",
+        "ResilientAuthoringClient",
+    ),
+    "is_live_lane": ("vaultspec_a2a.testing.acceptance", "is_live_lane"),
+    "message_content": ("vaultspec_a2a.testing.acceptance", "message_content"),
+    "observe_bridged_authoring_run": (
+        "vaultspec_a2a.testing.acceptance",
+        "observe_bridged_authoring_run",
+    ),
+    "reachable_stack": ("vaultspec_a2a.testing.acceptance", "reachable_stack"),
+    "resolve_selection": ("vaultspec_a2a.testing.acceptance", "resolve_selection"),
+    "runtime_budget_for": ("vaultspec_a2a.testing.acceptance", "runtime_budget_for"),
+    "snapshot_vault": ("vaultspec_a2a.testing.acceptance", "snapshot_vault"),
+    "vault_write_delta": ("vaultspec_a2a.testing.acceptance", "vault_write_delta"),
     "ACP_PROTOCOL_VERSION": ("vaultspec_a2a.testing.acp", "ACP_PROTOCOL_VERSION"),
     "ACP_SIMULATOR_PATH": ("vaultspec_a2a.testing.acp", "ACP_SIMULATOR_PATH"),
     "REQUEST_PERMISSION_METHOD": (
@@ -218,6 +331,10 @@ _LAZY_EXPORTS = {
         "request_permission_request",
     ),
     "simulator_command": ("vaultspec_a2a.testing.acp", "simulator_command"),
+    "antigravity_credential_path": (
+        "vaultspec_a2a.testing.antigravity",
+        "antigravity_credential_path",
+    ),
     "DEFAULT_ATTACH_CREDENTIAL": (
         "vaultspec_a2a.testing.boot",
         "DEFAULT_ATTACH_CREDENTIAL",
@@ -331,6 +448,10 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.catalog",
         "unvalidated_selection",
     ),
+    "current_execution_metadata": (
+        "vaultspec_a2a.testing.catalog_authority",
+        "current_execution_metadata",
+    ),
     "DEFAULT_IDLE_WINDOW_S": (
         "vaultspec_a2a.testing.children",
         "DEFAULT_IDLE_WINDOW_S",
@@ -363,13 +484,53 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.session_root",
         "session_scratch_dir",
     ),
+    "TEST_ROOT_NAME": ("vaultspec_a2a.testing.session_root", "TEST_ROOT_NAME"),
+    "TestSessionSettings": (
+        "vaultspec_a2a.testing.session_root",
+        "TestSessionSettings",
+    ),
+    "seat_test_session": ("vaultspec_a2a.testing.session_root", "seat_test_session"),
     "armed_environment": ("vaultspec_a2a.testing.environment", "armed_environment"),
     "settings_override": ("vaultspec_a2a.testing.environment", "settings_override"),
+    "LaneInventoryFactory": ("vaultspec_a2a.testing.factories", "LaneInventoryFactory"),
+    "build_settings": ("vaultspec_a2a.testing.factories", "build_settings"),
+    "DEFAULT_PRESET_LANE": (
+        "vaultspec_a2a.testing.gateway_verbs",
+        "DEFAULT_PRESET_LANE",
+    ),
+    "DEFAULT_REQUIRED_ROLE": (
+        "vaultspec_a2a.testing.gateway_verbs",
+        "DEFAULT_REQUIRED_ROLE",
+    ),
+    "DEFAULT_TEAM_PRESET": (
+        "vaultspec_a2a.testing.gateway_verbs",
+        "DEFAULT_TEAM_PRESET",
+    ),
+    "GatewayVerbs": ("vaultspec_a2a.testing.gateway_verbs", "GatewayVerbs"),
+    "actor_tokens_body": ("vaultspec_a2a.testing.gateway_verbs", "actor_tokens_body"),
+    "async_run_start_body": (
+        "vaultspec_a2a.testing.gateway_verbs",
+        "async_run_start_body",
+    ),
+    "gateway_run_verbs": ("vaultspec_a2a.testing.gateway_verbs", "gateway_run_verbs"),
+    "role_tokens": ("vaultspec_a2a.testing.gateway_verbs", "role_tokens"),
     "armed_lane_environment": (
         "vaultspec_a2a.testing.lanes",
         "armed_lane_environment",
     ),
     "seated_lanes": ("vaultspec_a2a.testing.lanes", "seated_lanes"),
+    "DETERMINISTIC_LANE": ("vaultspec_a2a.testing.lanes", "DETERMINISTIC_LANE"),
+    "LANES": ("vaultspec_a2a.testing.lanes", "LANES"),
+    "UNATTENDED_REPLY": (
+        "vaultspec_a2a.testing.lanes.deterministic",
+        "UNATTENDED_REPLY",
+    ),
+    "DeterministicResearchAdrChatModel": (
+        "vaultspec_a2a.testing.lanes.deterministic",
+        "DeterministicResearchAdrChatModel",
+    ),
+    "held_turns": ("vaultspec_a2a.testing.lanes", "held_turns"),
+    "register_lanes": ("vaultspec_a2a.testing.lanes", "register_lanes"),
     "add_test_node": ("vaultspec_a2a.testing.graph", "add_test_node"),
     "ainvoke_test_graph": ("vaultspec_a2a.testing.graph", "ainvoke_test_graph"),
     "compile_test_graph": ("vaultspec_a2a.testing.graph", "compile_test_graph"),
@@ -382,9 +543,20 @@ _LAZY_EXPORTS = {
     ),
     "hold_lease": ("vaultspec_a2a.testing.leases", "hold_lease"),
     "lease_home": ("vaultspec_a2a.testing.leases", "lease_home"),
+    "live_shared_holder_count": (
+        "vaultspec_a2a.testing.leases",
+        "live_shared_holder_count",
+    ),
     "plant_link_to_file": ("vaultspec_a2a.testing.links", "plant_link_to_file"),
     "LayerRule": ("vaultspec_a2a.testing.markers", "LayerRule"),
     "apply_layer_markers": ("vaultspec_a2a.testing.markers", "apply_layer_markers"),
+    "json_list": ("vaultspec_a2a.testing.payloads", "json_list"),
+    "json_object": ("vaultspec_a2a.testing.payloads", "json_object"),
+    "json_object_list": ("vaultspec_a2a.testing.payloads", "json_object_list"),
+    "json_text": ("vaultspec_a2a.testing.payloads", "json_text"),
+    "required_bool": ("vaultspec_a2a.testing.payloads", "required_bool"),
+    "required_text": ("vaultspec_a2a.testing.payloads", "required_text"),
+    "text_list": ("vaultspec_a2a.testing.payloads", "text_list"),
     "is_terminal": ("vaultspec_a2a.testing.polling", "is_terminal"),
     "ok_body": ("vaultspec_a2a.testing.polling", "ok_body"),
     "wait_for_run_status": ("vaultspec_a2a.testing.polling", "wait_for_run_status"),
@@ -410,6 +582,7 @@ _LAZY_EXPORTS = {
     "ResourceDiedError": ("vaultspec_a2a.testing.progress", "ResourceDiedError"),
     "registry_watch": ("vaultspec_a2a.testing.progress", "registry_watch"),
     "wait_for": ("vaultspec_a2a.testing.progress", "wait_for"),
+    "wait_for_async": ("vaultspec_a2a.testing.progress", "wait_for_async"),
     "IMPURE_FIXTURES": ("vaultspec_a2a.testing.purity", "IMPURE_FIXTURES"),
     "SERVICE_MARKER": ("vaultspec_a2a.testing.purity", "SERVICE_MARKER"),
     "forfeits_purity": ("vaultspec_a2a.testing.purity", "forfeits_purity"),
@@ -427,6 +600,15 @@ _LAZY_EXPORTS = {
     "exclusive_keys": ("vaultspec_a2a.testing.resources", "exclusive_keys"),
     "resolve_spec": ("vaultspec_a2a.testing.resources", "resolve_spec"),
     "CPU_BUDGET_ENV": ("vaultspec_a2a.testing.harness_names", "CPU_BUDGET_ENV"),
+    "COMPLETION_ENDPOINT_ENV": (
+        "vaultspec_a2a.testing.harness_names",
+        "COMPLETION_ENDPOINT_ENV",
+    ),
+    "COMPLETION_OWNER_PID_ENV": (
+        "vaultspec_a2a.testing.harness_names",
+        "COMPLETION_OWNER_PID_ENV",
+    ),
+    "TEST_ENV_PREFIX": ("vaultspec_a2a.testing.harness_names", "TEST_ENV_PREFIX"),
     "SESSION_LEASE_KEY": ("vaultspec_a2a.testing.sessions", "SESSION_LEASE_KEY"),
     "effective_worker_count": (
         "vaultspec_a2a.testing.sessions",
@@ -439,6 +621,7 @@ _LAZY_EXPORTS = {
     "SseReader": ("vaultspec_a2a.testing.sse", "SseReader"),
     "decode_frame": ("vaultspec_a2a.testing.sse", "decode_frame"),
     "read_frame": ("vaultspec_a2a.testing.sse", "read_frame"),
+    "read_frames_until": ("vaultspec_a2a.testing.sse", "read_frames_until"),
     "JsonReplyHandler": ("vaultspec_a2a.testing.http", "JsonReplyHandler"),
     "health_listener": ("vaultspec_a2a.testing.http", "health_listener"),
     "loopback_uvicorn": ("vaultspec_a2a.testing.http", "loopback_uvicorn"),
@@ -473,19 +656,35 @@ def __dir__() -> list[str]:
 __all__ = [
     "ACP_PROTOCOL_VERSION",
     "ACP_SIMULATOR_PATH",
+    "CODER_ROLE",
+    "COMPLETION_ENDPOINT_ENV",
+    "COMPLETION_OWNER_PID_ENV",
     "CPU_BUDGET_ENV",
     "DEFAULT_ATTACH_CREDENTIAL",
     "DEFAULT_IDLE_WINDOW_S",
     "DEFAULT_OWNERSHIP_CAPABILITY",
+    "DEFAULT_PRESET_LANE",
+    "DEFAULT_REQUIRED_ROLE",
+    "DEFAULT_TEAM_PRESET",
+    "DETERMINISTIC_LANE",
     "FIRST_DEMAND_TIMEOUT",
     "FOREIGN_WORKER_PROGRAM",
+    "GATEWAY_AUTH_HEADERS",
     "IMPURE_FIXTURES",
+    "LANES",
     "LEASE_TTL_MS",
     "LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON",
     "LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON",
     "LIVE_PROVIDER_PREREQUISITES",
     "LOOPBACK_TIMEOUT",
     "MARKER_NAME",
+    "MODE_AUTONOMOUS",
+    "MODE_MANUAL",
+    "OBSERVE_DEADLINE_SECONDS",
+    "POLICY_AUTO",
+    "POLICY_HUMAN",
+    "PRESET_DETERMINISTIC",
+    "PRESET_LIVE",
     "READINESS_TIMEOUT",
     "REQUEST_PERMISSION_METHOD",
     "RESOURCES",
@@ -493,17 +692,28 @@ __all__ = [
     "SCRATCH_ROLE",
     "SERVICE_MARKER",
     "SESSION_LEASE_KEY",
+    "SOLO_CODER_PRESET",
+    "TEST_ENV_PREFIX",
+    "TEST_ROOT_NAME",
+    "UNATTENDED_REPLY",
+    "AcceptanceCase",
+    "AcceptanceHarness",
     "BootedGateway",
+    "DeterministicResearchAdrChatModel",
     "GatewayBootError",
+    "GatewayVerbs",
     "JsonReplyHandler",
+    "LaneInventoryFactory",
     "LayerRule",
     "Lease",
     "LeaseAcquisitionTimeoutError",
     "LivenessWatch",
+    "Materialization",
     "NoSelectableLaneError",
     "PortAllocationError",
     "ProgressDeadline",
     "ProgressStalledError",
+    "ResilientAuthoringClient",
     "ResolvedService",
     "ResourceClaim",
     "ResourceDeclarationError",
@@ -513,12 +723,15 @@ __all__ = [
     "SignalledChild",
     "SseFrame",
     "SseReader",
+    "TestSessionSettings",
     "WatchedProcess",
     "acp_request",
+    "actor_tokens_body",
     "add_test_node",
     "adopted_spawner",
     "ainvoke_test_graph",
     "allocate_free_ports",
+    "antigravity_credential_path",
     "apply_layer_markers",
     "armed_desktop_app_home",
     "armed_environment",
@@ -527,15 +740,18 @@ __all__ = [
     "async_catalog_run_fields",
     "async_fetch_in_process_selection",
     "async_fetch_provider_catalog",
+    "async_run_start_body",
     "await_child",
     "await_gateway_ready",
     "await_ready",
     "booted_gateway",
     "broker_gateway_env",
+    "build_settings",
     "catalog_run_fields",
     "child_tree_progress",
     "clean_subprocess_environment",
     "compile_test_graph",
+    "current_execution_metadata",
     "declared_claims",
     "declared_lane_model_value",
     "decode_frame",
@@ -551,45 +767,64 @@ __all__ = [
     "forfeits_purity",
     "free_port",
     "gateway_process_env",
+    "gateway_run_verbs",
     "gateway_script",
     "health_listener",
+    "held_turns",
     "hold_for_process_lifetime",
     "hold_lease",
     "in_process_lane_selection",
     "in_process_selection",
     "initialize_request",
     "initialize_result",
+    "is_live_lane",
     "is_terminal",
+    "json_list",
+    "json_object",
+    "json_object_list",
+    "json_text",
     "lease_home",
     "live_peer_sessions",
     "live_provider_catalog_selector_is_configured",
     "live_provider_override_selector_is_configured",
+    "live_shared_holder_count",
     "log_tail",
     "loopback_callback_bridge",
     "loopback_uvicorn",
     "machine_cpu_budget",
     "measured_child_startup_s",
+    "message_content",
     "named_lane_selection",
     "new_state_graph",
+    "observe_bridged_authoring_run",
     "ok_body",
     "override_selection_from_served_catalog",
     "plant_link_to_file",
     "prune_stale_dirs",
+    "reachable_stack",
     "read_acp_frame",
     "read_frame",
+    "read_frames_until",
     "reap_process",
     "reap_tree",
+    "register_lanes",
     "register_session",
     "registry_watch",
     "request_permission_params",
     "request_permission_request",
+    "required_bool",
+    "required_text",
     "reserve_scratch_ports",
     "resolve_gateway_url",
+    "resolve_selection",
     "resolve_service",
     "resolve_spec",
+    "role_tokens",
     "run_child",
     "run_cli",
+    "runtime_budget_for",
     "seat_app_home",
+    "seat_test_session",
     "seated_lanes",
     "selection_from_served_catalog",
     "serve_handler",
@@ -598,15 +833,19 @@ __all__ = [
     "session_scratch_dir",
     "settings_override",
     "simulator_command",
+    "snapshot_vault",
     "spawn_gateway",
     "spawn_logged",
     "spawn_signalled",
     "spawn_until_ready",
     "status_and_json",
+    "text_list",
     "unvalidated_selection",
     "uses_impure_fixture",
     "uvicorn_started",
+    "vault_write_delta",
     "wait_for",
+    "wait_for_async",
     "wait_for_run_status",
     "wait_for_run_status_async",
     "worker_lifecycle_gateway_script",

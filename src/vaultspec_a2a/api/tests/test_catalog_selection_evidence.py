@@ -27,8 +27,7 @@ import httpx
 import pytest
 
 from ...database import get_thread
-from ...testing import async_catalog_run_fields, serve_on_loopback
-from ...testing.gateway_verbs import async_run_start_body
+from ...testing import async_catalog_run_fields, async_run_start_body, serve_on_loopback
 from .conftest import SessionFactory, make_app
 from .test_gateway_live import _PRESET
 

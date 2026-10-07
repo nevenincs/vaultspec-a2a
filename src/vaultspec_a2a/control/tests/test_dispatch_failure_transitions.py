@@ -40,8 +40,7 @@ from ...domain_config import domain_config
 from ...ipc.schemas import DispatchRequest
 from ...providers.conditions import ProviderCondition
 from ...team.team_config import load_team_config
-from ...testing import adopted_spawner, session_scratch_dir
-from ...testing.catalog_authority import current_execution_metadata
+from ...testing import adopted_spawner, current_execution_metadata, session_scratch_dir
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType

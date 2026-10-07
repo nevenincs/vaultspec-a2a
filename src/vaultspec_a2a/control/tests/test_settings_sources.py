@@ -20,8 +20,7 @@ import pytest
 import vaultspec_core
 from vaultspec_core.config import ConfigurationError
 
-from ...testing import armed_environment
-from ...testing.factories import build_settings
+from ...testing import armed_environment, build_settings
 from ..config import Settings
 from ..env_registry import CREDENTIAL_VARIABLES
 from ..settings_base import (

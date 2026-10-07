@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ..testing.acceptance import (
+from ..testing import (
     CODER_ROLE,
     GATEWAY_AUTH_HEADERS,
     MODE_AUTONOMOUS,

@@ -20,7 +20,7 @@ from ...database import (
     record_permission_response_submission,
 )
 from ...database.reconciliation import reconcile_threads_on_startup
-from ...testing.catalog_authority import current_execution_metadata
+from ...testing import current_execution_metadata
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 

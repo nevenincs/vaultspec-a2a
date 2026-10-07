@@ -31,8 +31,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...testing import read_frame
-from ...testing.gateway_verbs import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET
+from ...testing import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET, read_frame
 from ...thread.enums import (
     TERMINAL_STATUS_VALUES,
     TERMINAL_STATUSES,

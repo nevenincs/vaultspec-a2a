@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing.links import plant_link_to_file
+from ...testing import plant_link_to_file
 from ..atomic_write import atomic_write_text
 
 if TYPE_CHECKING:

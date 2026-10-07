@@ -18,8 +18,7 @@ from pydantic import ValidationError
 
 from ...cli.service import setup_service
 from ...lifecycle.singleton import acquire_singleton
-from ...testing import armed_environment
-from ...testing.factories import build_settings
+from ...testing import armed_environment, build_settings
 from ..settings_base import PROJECT_ROOT_ENV
 from ..state_layout import SEAL_FILE, UnsafeStateHomeError, seal_state_home
 

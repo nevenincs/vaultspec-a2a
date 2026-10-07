@@ -60,19 +60,19 @@ import pytest
 from ..control.run_start_policy import required_role_ids
 from ..streaming.sse_frames import iter_sse_events
 from ..team.team_config import load_team_config
-from ..testing.acceptance import (
+from ..testing import (
     OBSERVE_DEADLINE_SECONDS,
     PRESET_LIVE,
     AcceptanceCase,
     AcceptanceHarness,
     ResilientAuthoringClient,
+    SseFrame,
     message_content,
     reachable_stack,
     resolve_selection,
     snapshot_vault,
     vault_write_delta,
 )
-from ..testing.sse import SseFrame
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -32,8 +32,7 @@ from ...control._worker_health import WorkerLiveness, WorkerState
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
-from ...testing import adopted_spawner
-from ...testing.ports import free_port
+from ...testing import adopted_spawner, free_port
 from ...utils import ProcessContainment, spawn_contained
 
 if TYPE_CHECKING:

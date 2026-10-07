@@ -7,7 +7,7 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from ..testing.session_root import session_scratch_dir
+from ..testing import session_scratch_dir
 
 if TYPE_CHECKING:
     from collections.abc import Callable

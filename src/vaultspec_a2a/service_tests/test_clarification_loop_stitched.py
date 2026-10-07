@@ -79,17 +79,15 @@ from ..team.team_config import load_team_config
 from ..testing import (
     fetch_provider_catalog,
     is_terminal,
-    selection_from_served_catalog,
-)
-from ..testing.gateway_verbs import role_tokens
-from ..testing.payloads import (
     json_object,
     json_object_list,
+    read_frames_until,
     required_bool,
     required_text,
+    role_tokens,
+    selection_from_served_catalog,
     text_list,
 )
-from ..testing.sse import read_frames_until
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

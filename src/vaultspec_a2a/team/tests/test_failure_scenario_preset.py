@@ -27,7 +27,7 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
-from ...testing.lanes import DeterministicResearchAdrChatModel, seated_lanes
+from ...testing import DeterministicResearchAdrChatModel, seated_lanes
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping

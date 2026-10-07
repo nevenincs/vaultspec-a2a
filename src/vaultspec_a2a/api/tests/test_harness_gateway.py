@@ -22,8 +22,12 @@ import pytest
 
 from ...cli.provision import provision_workspace
 from ...team.team_config import load_team_config
-from ...testing import async_catalog_run_fields, serve_on_loopback
-from ...testing.gateway_verbs import actor_tokens_body, role_tokens
+from ...testing import (
+    actor_tokens_body,
+    async_catalog_run_fields,
+    role_tokens,
+    serve_on_loopback,
+)
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:

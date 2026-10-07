@@ -22,6 +22,7 @@ from .ipc_auth import BearerVerdict as BearerVerdict
 from .ipc_auth import bearer_header as bearer_header
 from .ipc_auth import bearer_matches as bearer_matches
 from .ipc_auth import verify_internal_bearer as verify_internal_bearer
+from .logging import active_trace_ids as active_trace_ids
 from .logging import configure_logging as configure_logging
 from .logging import reconfigure_console_utf8 as reconfigure_console_utf8
 from .process import ProcessContainment as ProcessContainment
@@ -41,6 +42,7 @@ __all__ = [
     "LogLevel",
     "ProcessContainment",
     "ProcessContainmentError",
+    "active_trace_ids",
     "bearer_header",
     "bearer_matches",
     "configure_logging",

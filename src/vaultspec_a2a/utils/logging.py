@@ -51,6 +51,7 @@ __all__ = [
     "LivenessPollFilter",
     "LogContextFilter",
     "OTelCorrelationFilter",
+    "active_trace_ids",
     "configure_logging",
     "log_context",
     "reconfigure_console_utf8",
@@ -173,6 +174,26 @@ class LivenessPollFilter(logging.Filter):
         return True
 
 
+def active_trace_ids() -> tuple[str | None, str | None]:
+    """Return the ambient span's W3C trace and span ids, hex-formatted.
+
+    ``(None, None)`` where no valid span context is in scope: outside any
+    span, and under a non-recording one. The pair is never a zero id, which is
+    the whole reason this is a function rather than two format calls - an
+    all-zero id reads as a trace that exists, so a caller recording the
+    absence must be able to record it AS absence.
+
+    Shared because two unrelated consumers correlate on the same two values:
+    every log record this process emits, and every retained progress frame
+    this gateway numbers. A second reading of the span context would be a
+    second chance to disagree about what "no trace" looks like.
+    """
+    context = trace.get_current_span().get_span_context()
+    if not context.is_valid:
+        return None, None
+    return format_trace_id(context.trace_id), format_span_id(context.span_id)
+
+
 class OTelCorrelationFilter(logging.Filter):
     """Inject OTel correlation fields into log records when a span is active."""
 
@@ -181,13 +202,14 @@ class OTelCorrelationFilter(logging.Filter):
         """Populate correlation fields without overwriting caller-provided values."""
         span = trace.get_current_span()
         context = span.get_span_context()
-        if not context.is_valid:
+        trace_id, span_id = active_trace_ids()
+        if trace_id is None or span_id is None:
             return True
 
         if "trace_id" not in record.__dict__:
-            record.trace_id = format_trace_id(context.trace_id)
+            record.trace_id = trace_id
         if "span_id" not in record.__dict__:
-            record.span_id = format_span_id(context.span_id)
+            record.span_id = span_id
         if "trace_sampled" not in record.__dict__:
             record.trace_sampled = bool(context.trace_flags.sampled)
 

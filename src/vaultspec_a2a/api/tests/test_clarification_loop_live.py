@@ -67,7 +67,11 @@ from ...database import (
 from ...database.models import ControlActionModel
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import async_catalog_run_fields, wait_for_run_status_async
+from ...testing import (
+    async_catalog_run_fields,
+    loopback_callback_bridge,
+    wait_for_run_status_async,
+)
 from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import (
@@ -85,7 +89,6 @@ from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from .clarification_harness import (
     clarification_graph,
-    loopback_callback_bridge,
     park_clarification,
 )
 from .conftest import make_app

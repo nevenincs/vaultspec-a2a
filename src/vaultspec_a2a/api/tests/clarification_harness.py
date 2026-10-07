@@ -1,23 +1,17 @@
 """Shared real-behavior harness for clarification API tests.
 
 The harness owns one minimal graph topology that raises the real clarification
-interrupt and a loopback callback server for a normally constructed worker
-bridge.  Endpoint and worker-loop tests therefore exercise the same graph and
+interrupt. Endpoint and worker-loop tests therefore exercise the same graph and
 checkpoint boundary without importing private helpers from one another.
 """
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Literal, Protocol
 
-import anyio
-import uvicorn
-from fastapi import FastAPI
 from langchain_core.messages import HumanMessage
 
-from ...control.config import settings
 from ...graph.nodes.clarification import (
     create_clarification_gate_node,
     create_clarification_request_node,
@@ -30,11 +24,8 @@ from ...thread.clarification import (
     pending_clarification,
 )
 from ...worker.graph_lifecycle import RegisteredCompiledGraph
-from ...worker.ipc import WorkerBridge
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from langgraph.types import Command
@@ -44,7 +35,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "clarification_graph",
-    "loopback_callback_bridge",
     "park_clarification",
 ]
 
@@ -57,18 +47,6 @@ type ClarificationCommand = Command[ClarificationNode]
 
 class ClarificationGraph(RegisteredCompiledGraph, Protocol):
     """Compiled graph surface the shared clarification tests exercise."""
-
-
-class BoundSocket(Protocol):
-    """Socket surface needed to discover Uvicorn's ephemeral bound port."""
-
-    def getsockname(self) -> tuple[object, ...]: ...
-
-
-class BoundServer(Protocol):
-    """Uvicorn listener surface exposed after startup."""
-
-    sockets: list[BoundSocket] | None
 
 
 @dataclass(frozen=True)
@@ -164,73 +142,3 @@ async def park_clarification(
     )
     assert request is not None, "clarification graph did not park"
     return ParkedClarification(graph=graph, request=request)
-
-
-async def _accept_event_batch() -> dict[str, str]:
-    """Accept the bridge's real batched callback payload."""
-    return {"status": "ok"}
-
-
-async def _accept_heartbeat() -> dict[str, str]:
-    """Accept the bridge's real heartbeat callback payload."""
-    return {"status": "ok"}
-
-
-@asynccontextmanager
-async def loopback_callback_bridge(
-    gateway: FastAPI | None = None,
-) -> AsyncGenerator[WorkerBridge]:
-    """Serve worker callbacks on an ephemeral loopback listener.
-
-    ``WorkerBridge`` remains normally constructed with its production HTTP
-    client; only the callback destination is local to this focused test. With
-    no *gateway* the callbacks are accepted and dropped; given the gateway app
-    under test, they reach its real internal routes, so the worker's own frames
-    drive the relay a deployed gateway runs.
-    """
-    if gateway is None:
-        app = FastAPI()
-        app.add_api_route(
-            "/internal/events/batch",
-            _accept_event_batch,
-            methods=["POST"],
-        )
-        app.add_api_route("/internal/heartbeat", _accept_heartbeat, methods=["POST"])
-    else:
-        app = gateway
-
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=0,
-            lifespan="off",
-            log_config=None,
-        )
-    )
-    async with anyio.create_task_group() as task_group:
-        task_group.start_soon(server.serve)
-        with anyio.fail_after(5.0):
-            while not server.started:
-                await anyio.sleep(0.01)
-
-        servers = cast("list[BoundServer]", server.servers)
-        assert servers
-        listeners = servers[0].sockets
-        assert listeners is not None
-        socket = listeners[0]
-        address = socket.getsockname()
-        assert isinstance(address, tuple)
-        assert len(address) >= 2
-        port = address[1]
-        assert isinstance(port, int)
-        bridge = WorkerBridge(
-            api_url=f"http://127.0.0.1:{port}",
-            worker_id="clarification-loop-worker",
-            internal_token=settings.internal_token,
-        )
-        try:
-            yield bridge
-        finally:
-            await bridge.close()
-            server.should_exit = True

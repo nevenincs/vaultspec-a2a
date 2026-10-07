@@ -23,15 +23,15 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, override
+from http.server import BaseHTTPRequestHandler
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ...graph.enums import Provider
+from ...testing import JsonReplyHandler, serve_handler
 from .._claude_tool_policy import claude_rule_path, workspace_scoped_tool_rule
 from ..cli_resolution import resolve_provider_cli_executable
 
@@ -161,13 +161,8 @@ def _tool_results_in(body: JsonObject) -> list[JsonObject]:
 
 
 def _handler_for(turn: _Turn) -> type[BaseHTTPRequestHandler]:
-    class _Handler(BaseHTTPRequestHandler):
+    class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
-
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            """Keep the endpoint silent; the test reports what matters."""
-            del format, args
 
         def do_POST(self) -> None:
             length = int(self.headers.get("content-length") or 0)
@@ -197,15 +192,8 @@ def _handler_for(turn: _Turn) -> type[BaseHTTPRequestHandler]:
 def _scripted_endpoint(read_path: Path) -> Generator[tuple[str, _Turn]]:
     """Serve the scripted turn on a real loopback socket for one CLI run."""
     turn = _Turn(read_path=read_path)
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(turn))
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}", turn
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=10)
+    with serve_handler(_handler_for(turn)) as port:
+        yield f"http://127.0.0.1:{port}", turn
 
 
 def _child_environment(home: Path, base_url: str) -> dict[str, str]:

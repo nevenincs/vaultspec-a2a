@@ -21,62 +21,19 @@ import json
 import os
 import subprocess
 import sys
-import threading
-import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
-import uvicorn
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...api.tests.conftest import SEATED_ATTACH_TOKEN, make_app
 from ...conftest import materialize_schema
 from ...lifecycle.discovery import service_json_path, write_service_json
-from ...testing import fetch_in_process_selection_at
-
-if TYPE_CHECKING:
-    from types import TracebackType
+from ...testing import fetch_in_process_selection_at, serve_on_loopback_in_thread
 
 _PRESET = "mock-success-single"
 _MODULE = "vaultspec_a2a.cli.main"
-
-
-class _ThreadedServer:
-    """Run a uvicorn server for *app* in a daemon thread on an ephemeral port."""
-
-    def __init__(self, app: object) -> None:
-        config = uvicorn.Config(
-            cast("Any", app),
-            host="127.0.0.1",
-            port=0,
-            log_level="warning",
-            lifespan="on",
-        )
-        self._server = uvicorn.Server(config)
-        self._thread = threading.Thread(target=self._server.run, daemon=True)
-        self.base = ""
-
-    def __enter__(self) -> _ThreadedServer:
-        self._thread.start()
-        for _ in range(500):
-            if self._server.started and self._server.servers:
-                break
-            time.sleep(0.01)
-        if not (self._server.started and self._server.servers):
-            raise RuntimeError("uvicorn did not start")
-        port = self._server.servers[0].sockets[0].getsockname()[1]
-        self.base = f"http://127.0.0.1:{port}"
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        self._server.should_exit = True
-        self._thread.join(timeout=5.0)
 
 
 class _GatewayFixture:
@@ -174,8 +131,8 @@ def test_cli_uses_matching_loopback_discovery_token(tmp_path: Any) -> None:
     token = "cli-discovery-token"
     with _GatewayFixture(tmp_path) as gw:
         gw.app.state.v1_service_token = token
-        with _ThreadedServer(gw.app) as srv:
-            port = int(srv.base.rsplit(":", 1)[1])
+        with serve_on_loopback_in_thread(gw.app) as base:
+            port = int(base.rsplit(":", 1)[1])
             a2a_home = tmp_path / "cli-a2a-home"
             write_service_json(
                 service_json_path(a2a_home),
@@ -186,7 +143,7 @@ def test_cli_uses_matching_loopback_discovery_token(tmp_path: Any) -> None:
             environment = os.environ.copy()
             environment.pop("VAULTSPEC_A2A_INTERNAL_TOKEN", None)
             environment["VAULTSPEC_A2A_HOME"] = str(a2a_home)
-            result = _run_cli("presets", "--url", srv.base, env=environment)
+            result = _run_cli("presets", "--url", base, env=environment)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["api_version"] == "v1"
@@ -197,8 +154,8 @@ def test_configured_cli_token_precedes_matching_discovery_token(tmp_path: Any) -
     configured = "configured-cli-token"
     with _GatewayFixture(tmp_path) as gw:
         gw.app.state.v1_service_token = configured
-        with _ThreadedServer(gw.app) as srv:
-            port = int(srv.base.rsplit(":", 1)[1])
+        with serve_on_loopback_in_thread(gw.app) as base:
+            port = int(base.rsplit(":", 1)[1])
             a2a_home = tmp_path / "configured-cli-a2a-home"
             write_service_json(
                 service_json_path(a2a_home),
@@ -210,23 +167,26 @@ def test_configured_cli_token_precedes_matching_discovery_token(tmp_path: Any) -
             environment.pop("VAULTSPEC_A2A_INTERNAL_TOKEN", None)
             environment["VAULTSPEC_A2A_HOME"] = str(a2a_home)
             environment["VAULTSPEC_A2A_GATEWAY_TOKEN"] = configured
-            result = _run_cli("presets", "--url", srv.base, env=environment)
+            result = _run_cli("presets", "--url", base, env=environment)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["api_version"] == "v1"
 
 
 def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
-    with _GatewayFixture(tmp_path) as gw, _ThreadedServer(gw.app) as srv:
+    with (
+        _GatewayFixture(tmp_path) as gw,
+        serve_on_loopback_in_thread(gw.app) as base,
+    ):
         # presets-list
-        presets = _run_cli("presets", "--url", srv.base)
+        presets = _run_cli("presets", "--url", base)
         assert presets.returncode == 0, presets.stdout + presets.stderr
         pbody = json.loads(presets.stdout)
         assert pbody["api_version"] == "v1"
         assert any(p["id"] == _PRESET for p in pbody["presets"])
 
         # doctor (service-state)
-        doctor = _run_cli("doctor", "--url", srv.base)
+        doctor = _run_cli("doctor", "--url", base)
         assert doctor.returncode == 0, doctor.stdout + doctor.stderr
         assert json.loads(doctor.stdout)["api_version"] == "v1"
 
@@ -234,9 +194,9 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
         # The operator names the lane and entry; the CLI resolves only the
         # catalog revision. Read here from the same served catalog rather than
         # hardcoded, so this proves the real end-to-end path.
-        catalog = _run_cli("presets", "--url", srv.base)
+        catalog = _run_cli("presets", "--url", base)
         assert catalog.returncode == 0, catalog.stdout + catalog.stderr
-        lane = _in_process_lane_arguments(srv.base)
+        lane = _in_process_lane_arguments(base)
         start = _run_cli(
             "run",
             "start",
@@ -252,23 +212,23 @@ def test_cli_verbs_against_live_gateway(tmp_path: Any) -> None:
             lane["entry_id"],
             "--autonomous",
             "--url",
-            srv.base,
+            base,
         )
         assert start.returncode == 0, start.stdout + start.stderr
         run_id = json.loads(start.stdout)["run_id"]
         assert run_id
         assert gw.worker.dispatches, "run start must dispatch to the worker"
 
-        status = _run_cli("run", "status", run_id, "--url", srv.base)
+        status = _run_cli("run", "status", run_id, "--url", base)
         assert status.returncode == 0, status.stdout + status.stderr
         assert json.loads(status.stdout)["run_id"] == run_id
 
-        cancel = _run_cli("run", "cancel", run_id, "--url", srv.base)
+        cancel = _run_cli("run", "cancel", run_id, "--url", base)
         assert cancel.returncode == 0, cancel.stdout + cancel.stderr
         assert json.loads(cancel.stdout)["api_version"] == "v1"
 
         # unknown run -> non-zero exit with the error body printed
-        missing = _run_cli("run", "status", "nope", "--url", srv.base)
+        missing = _run_cli("run", "status", "nope", "--url", base)
         assert missing.returncode == 1
 
 
@@ -298,8 +258,8 @@ def test_doctor_flags_a_resident_missing_a_route(tmp_path: Any) -> None:
         )
         stale_route = gateway_router.routes.pop(stale_index)
         try:
-            with _ThreadedServer(gw.app) as srv:
-                doctor = _run_cli("doctor", "--url", srv.base)
+            with serve_on_loopback_in_thread(gw.app) as base:
+                doctor = _run_cli("doctor", "--url", base)
                 # A distinct non-zero exit (not the generic transport-error 1)
                 # so automation catches a stale resident without parsing JSON.
                 assert doctor.returncode == 3, doctor.stderr

@@ -37,20 +37,19 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from ...desktop.profile import derive_state_paths
-from ...testing import free_port, run_cli
-from ...testing.tests._support.http_handlers import JsonReplyHandler
-from ...testing.tests._support.listeners import serve_handler
-from ...tests._write_authority import make_test_thread_authority_columns
-from ...tests.gateway_boot import (
+from ...testing import (
+    DEFAULT_ATTACH_CREDENTIAL,
     LOOPBACK_TIMEOUT,
+    JsonReplyHandler,
+    booted_gateway,
     broker_gateway_env,
+    free_port,
     gateway_script,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
-    spawn_gateway,
-    spawn_until_ready,
+    run_cli,
+    seat_app_home,
+    serve_handler,
 )
+from ...tests._write_authority import make_test_thread_authority_columns
 from ..models import Base, ControlActionModel, ThreadModel
 from ..session import (
     CheckpointMode,
@@ -480,9 +479,6 @@ def test_incremental_vacuum_reclaims_far_less_than_a_full_vacuum(
 _GATEWAY_PORT_ENV = "VAULTSPEC_A2A_PORT"
 _WORKER_PORT_ENV = "VAULTSPEC_A2A_WORKER_PORT"
 
-_ATTACH = "attach-credential-compaction-1234567890abcdef"
-_OWNERSHIP = "ownership-capability-compaction-fedcba0987654321"
-
 
 def _verb_env(overrides: Mapping[str, str] | None = None) -> dict[str, str]:
     """Return the environment a ``migrate`` child runs under in these tests.
@@ -711,47 +707,27 @@ def test_migrate_compact_refuses_while_a_real_gateway_holds_the_store(
     it is proven against the real product as well as against a bare listener.
     """
     app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
-
-    log_path = tmp_path / "gateway.log"
-    with log_path.open("wb") as log_handle:
-
-        def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-            return spawn_gateway(
-                script=gateway_script(log_level="warning"),
-                gateway_port=gateway_port,
-                env=broker_gateway_env(
-                    app_home,
-                    gateway_port=gateway_port,
-                    worker_port=worker_port,
-                    gateway_token=_ATTACH,
-                ),
-                log_handle=log_handle,
-            )
-
-        proc, gateway_port, worker_port, base = spawn_until_ready(
-            _spawn, log_path=log_path
+    seat_app_home(app_home)
+    with booted_gateway(
+        broker_gateway_env(app_home, gateway_token=DEFAULT_ATTACH_CREDENTIAL),
+        log_path=tmp_path / "gateway.log",
+        script=gateway_script(log_level="warning"),
+    ) as gateway:
+        result, payload = _migrate(
+            app_home,
+            "--compact",
+            env={
+                _GATEWAY_PORT_ENV: str(gateway.gateway_port),
+                _WORKER_PORT_ENV: str(gateway.worker_port),
+            },
         )
-        try:
-            result, payload = _migrate(
-                app_home,
-                "--compact",
-                env={
-                    _GATEWAY_PORT_ENV: str(gateway_port),
-                    _WORKER_PORT_ENV: str(worker_port),
-                },
-            )
-            health = httpx.get(f"{base}/health", timeout=LOOPBACK_TIMEOUT)
-        finally:
-            reap_gateway(proc)
+        health = httpx.get(f"{gateway.base_url}/health", timeout=LOOPBACK_TIMEOUT)
 
     assert result.returncode == 1, payload
     assert payload["status"] == "failed"
     assert payload["failed_stage"] == "lock"
     assert payload["error_class"] == "StoreLockedError"
-    assert f"listening on port {gateway_port}" in str(payload["detail"])
+    assert f"listening on port {gateway.gateway_port}" in str(payload["detail"])
     assert payload["stores"] == []
     # The refusal left the service it detected serving.
     assert health.status_code == 200

@@ -23,10 +23,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ..tests.gateway_boot import (
-    GatewayBootError,
-    spawn_until_ready,
-)
+from ..testing import GatewayBootError, spawn_until_ready
 from ..utils._process_tree import pid_is_live
 
 if TYPE_CHECKING:

@@ -9,7 +9,10 @@ resolution (``endpoints``), and the pytest plugin
 (``plugin``) that derives scheduling groups, timeout backstops, and lease
 acquisition from the declarations. The ACP test peer (``acp``) is the simulated
 agent side of the protocol over stdio, with the frame builders and the request and
-reply exchange a client-side test uses against it.
+reply exchange a client-side test uses against it. Beside them sits the
+real-process support every test tier composes rather than retypes: the gateway
+boot and its peers (``boot``), the loopback listeners a test points code at
+(``http``), and the run-start verb shaped once (``verbs``).
 
 The plugin is loaded by the repository-root ``conftest.py``, which is the one
 channel that neither an ``addopts`` override can strip nor a consumer
@@ -34,6 +37,37 @@ if TYPE_CHECKING:
         request_permission_params,
         request_permission_request,
         simulator_command,
+    )
+    from .boot import (
+        DEFAULT_ATTACH_CREDENTIAL,
+        DEFAULT_OWNERSHIP_CAPABILITY,
+        FIRST_DEMAND_TIMEOUT,
+        FOREIGN_WORKER_PROGRAM,
+        LOOPBACK_TIMEOUT,
+        READINESS_TIMEOUT,
+        BootedGateway,
+        GatewayBootError,
+        SignalledChild,
+        WatchedProcess,
+        armed_gateway_env,
+        await_gateway_ready,
+        await_ready,
+        booted_gateway,
+        broker_gateway_env,
+        clean_subprocess_environment,
+        desktop_workspace,
+        foreign_worker,
+        gateway_process_env,
+        gateway_script,
+        log_tail,
+        loopback_callback_bridge,
+        reap_process,
+        seat_app_home,
+        spawn_gateway,
+        spawn_logged,
+        spawn_signalled,
+        spawn_until_ready,
+        worker_lifecycle_gateway_script,
     )
     from .catalog import (
         LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
@@ -62,6 +96,7 @@ if TYPE_CHECKING:
         child_tree_progress,
         file_size_fingerprint,
         measured_child_startup_s,
+        reap_tree,
         run_child,
     )
     from .cli import run_cli
@@ -78,6 +113,15 @@ if TYPE_CHECKING:
         new_state_graph,
     )
     from .harness_names import CPU_BUDGET_ENV
+    from .http import (
+        JsonReplyHandler,
+        health_listener,
+        loopback_uvicorn,
+        serve_handler,
+        serve_on_loopback,
+        serve_on_loopback_in_thread,
+        uvicorn_started,
+    )
     from .leases import (
         LEASE_TTL_MS,
         Lease,
@@ -126,7 +170,7 @@ if TYPE_CHECKING:
         exclusive_keys,
         resolve_spec,
     )
-    from .session_root import session_scratch_dir
+    from .session_root import prune_stale_dirs, session_scratch_dir
     from .sessions import (
         SESSION_LEASE_KEY,
         effective_worker_count,
@@ -135,6 +179,10 @@ if TYPE_CHECKING:
         register_session,
     )
     from .sse import SseFrame, SseReader, decode_frame, read_frame
+    from .verbs import (
+        RunVerbs,
+        status_and_json,
+    )
 
 
 #: Fully-qualified (never relative) submodule names: this dict's string values
@@ -166,6 +214,50 @@ _LAZY_EXPORTS = {
         "request_permission_request",
     ),
     "simulator_command": ("vaultspec_a2a.testing.acp", "simulator_command"),
+    "DEFAULT_ATTACH_CREDENTIAL": (
+        "vaultspec_a2a.testing.boot",
+        "DEFAULT_ATTACH_CREDENTIAL",
+    ),
+    "DEFAULT_OWNERSHIP_CAPABILITY": (
+        "vaultspec_a2a.testing.boot",
+        "DEFAULT_OWNERSHIP_CAPABILITY",
+    ),
+    "FIRST_DEMAND_TIMEOUT": ("vaultspec_a2a.testing.boot", "FIRST_DEMAND_TIMEOUT"),
+    "FOREIGN_WORKER_PROGRAM": ("vaultspec_a2a.testing.boot", "FOREIGN_WORKER_PROGRAM"),
+    "LOOPBACK_TIMEOUT": ("vaultspec_a2a.testing.boot", "LOOPBACK_TIMEOUT"),
+    "READINESS_TIMEOUT": ("vaultspec_a2a.testing.boot", "READINESS_TIMEOUT"),
+    "BootedGateway": ("vaultspec_a2a.testing.boot", "BootedGateway"),
+    "GatewayBootError": ("vaultspec_a2a.testing.boot", "GatewayBootError"),
+    "SignalledChild": ("vaultspec_a2a.testing.boot", "SignalledChild"),
+    "WatchedProcess": ("vaultspec_a2a.testing.boot", "WatchedProcess"),
+    "armed_gateway_env": ("vaultspec_a2a.testing.boot", "armed_gateway_env"),
+    "await_gateway_ready": ("vaultspec_a2a.testing.boot", "await_gateway_ready"),
+    "await_ready": ("vaultspec_a2a.testing.boot", "await_ready"),
+    "booted_gateway": ("vaultspec_a2a.testing.boot", "booted_gateway"),
+    "broker_gateway_env": ("vaultspec_a2a.testing.boot", "broker_gateway_env"),
+    "clean_subprocess_environment": (
+        "vaultspec_a2a.testing.boot",
+        "clean_subprocess_environment",
+    ),
+    "desktop_workspace": ("vaultspec_a2a.testing.boot", "desktop_workspace"),
+    "foreign_worker": ("vaultspec_a2a.testing.boot", "foreign_worker"),
+    "gateway_process_env": ("vaultspec_a2a.testing.boot", "gateway_process_env"),
+    "gateway_script": ("vaultspec_a2a.testing.boot", "gateway_script"),
+    "log_tail": ("vaultspec_a2a.testing.boot", "log_tail"),
+    "loopback_callback_bridge": (
+        "vaultspec_a2a.testing.boot",
+        "loopback_callback_bridge",
+    ),
+    "reap_process": ("vaultspec_a2a.testing.boot", "reap_process"),
+    "seat_app_home": ("vaultspec_a2a.testing.boot", "seat_app_home"),
+    "spawn_gateway": ("vaultspec_a2a.testing.boot", "spawn_gateway"),
+    "spawn_logged": ("vaultspec_a2a.testing.boot", "spawn_logged"),
+    "spawn_signalled": ("vaultspec_a2a.testing.boot", "spawn_signalled"),
+    "spawn_until_ready": ("vaultspec_a2a.testing.boot", "spawn_until_ready"),
+    "worker_lifecycle_gateway_script": (
+        "vaultspec_a2a.testing.boot",
+        "worker_lifecycle_gateway_script",
+    ),
     "LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON": (
         "vaultspec_a2a.testing.catalog",
         "LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON",
@@ -244,6 +336,7 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.children",
         "measured_child_startup_s",
     ),
+    "reap_tree": ("vaultspec_a2a.testing.children", "reap_tree"),
     "run_child": ("vaultspec_a2a.testing.children", "run_child"),
     "run_cli": ("vaultspec_a2a.testing.cli", "run_cli"),
     "ResolvedService": ("vaultspec_a2a.testing.endpoints", "ResolvedService"),
@@ -256,6 +349,7 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.environment",
         "armed_desktop_app_home",
     ),
+    "prune_stale_dirs": ("vaultspec_a2a.testing.session_root", "prune_stale_dirs"),
     "session_scratch_dir": (
         "vaultspec_a2a.testing.session_root",
         "session_scratch_dir",
@@ -331,6 +425,18 @@ _LAZY_EXPORTS = {
     "SseReader": ("vaultspec_a2a.testing.sse", "SseReader"),
     "decode_frame": ("vaultspec_a2a.testing.sse", "decode_frame"),
     "read_frame": ("vaultspec_a2a.testing.sse", "read_frame"),
+    "JsonReplyHandler": ("vaultspec_a2a.testing.http", "JsonReplyHandler"),
+    "health_listener": ("vaultspec_a2a.testing.http", "health_listener"),
+    "loopback_uvicorn": ("vaultspec_a2a.testing.http", "loopback_uvicorn"),
+    "serve_handler": ("vaultspec_a2a.testing.http", "serve_handler"),
+    "serve_on_loopback": ("vaultspec_a2a.testing.http", "serve_on_loopback"),
+    "serve_on_loopback_in_thread": (
+        "vaultspec_a2a.testing.http",
+        "serve_on_loopback_in_thread",
+    ),
+    "uvicorn_started": ("vaultspec_a2a.testing.http", "uvicorn_started"),
+    "RunVerbs": ("vaultspec_a2a.testing.verbs", "RunVerbs"),
+    "status_and_json": ("vaultspec_a2a.testing.verbs", "status_and_json"),
 }
 
 
@@ -354,19 +460,28 @@ __all__ = [
     "ACP_PROTOCOL_VERSION",
     "ACP_SIMULATOR_PATH",
     "CPU_BUDGET_ENV",
+    "DEFAULT_ATTACH_CREDENTIAL",
     "DEFAULT_IDLE_WINDOW_S",
+    "DEFAULT_OWNERSHIP_CAPABILITY",
+    "FIRST_DEMAND_TIMEOUT",
+    "FOREIGN_WORKER_PROGRAM",
     "IMPURE_FIXTURES",
     "LEASE_TTL_MS",
     "LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON",
     "LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON",
     "LIVE_PROVIDER_PREREQUISITES",
+    "LOOPBACK_TIMEOUT",
     "MARKER_NAME",
+    "READINESS_TIMEOUT",
     "REQUEST_PERMISSION_METHOD",
     "RESOURCES",
     "SCRATCH_PREFIX",
     "SCRATCH_ROLE",
     "SERVICE_MARKER",
     "SESSION_LEASE_KEY",
+    "BootedGateway",
+    "GatewayBootError",
+    "JsonReplyHandler",
     "LayerRule",
     "Lease",
     "LeaseAcquisitionTimeoutError",
@@ -380,8 +495,11 @@ __all__ = [
     "ResourceDeclarationError",
     "ResourceDiedError",
     "ResourceSpec",
+    "RunVerbs",
+    "SignalledChild",
     "SseFrame",
     "SseReader",
+    "WatchedProcess",
     "acp_request",
     "add_test_node",
     "ainvoke_test_graph",
@@ -389,16 +507,23 @@ __all__ = [
     "apply_layer_markers",
     "armed_desktop_app_home",
     "armed_environment",
+    "armed_gateway_env",
     "async_catalog_run_fields",
     "async_fetch_in_process_selection",
     "async_fetch_provider_catalog",
     "await_child",
+    "await_gateway_ready",
+    "await_ready",
+    "booted_gateway",
+    "broker_gateway_env",
     "catalog_run_fields",
     "child_tree_progress",
+    "clean_subprocess_environment",
     "compile_test_graph",
     "declared_claims",
     "declared_lane_model_value",
     "decode_frame",
+    "desktop_workspace",
     "effective_worker_count",
     "exchange_acp_request",
     "exclusive_keys",
@@ -406,8 +531,12 @@ __all__ = [
     "fetch_in_process_selection_at",
     "fetch_provider_catalog",
     "file_size_fingerprint",
+    "foreign_worker",
     "forfeits_purity",
     "free_port",
+    "gateway_process_env",
+    "gateway_script",
+    "health_listener",
     "hold_for_process_lifetime",
     "hold_lease",
     "in_process_lane_selection",
@@ -419,6 +548,9 @@ __all__ = [
     "live_peer_sessions",
     "live_provider_catalog_selector_is_configured",
     "live_provider_override_selector_is_configured",
+    "log_tail",
+    "loopback_callback_bridge",
+    "loopback_uvicorn",
     "machine_cpu_budget",
     "measured_child_startup_s",
     "named_lane_selection",
@@ -426,8 +558,11 @@ __all__ = [
     "ok_body",
     "override_selection_from_served_catalog",
     "plant_link_to_file",
+    "prune_stale_dirs",
     "read_acp_frame",
     "read_frame",
+    "reap_process",
+    "reap_tree",
     "register_session",
     "registry_watch",
     "request_permission_params",
@@ -438,12 +573,23 @@ __all__ = [
     "resolve_spec",
     "run_child",
     "run_cli",
+    "seat_app_home",
     "selection_from_served_catalog",
+    "serve_handler",
+    "serve_on_loopback",
+    "serve_on_loopback_in_thread",
     "session_scratch_dir",
     "settings_override",
     "simulator_command",
+    "spawn_gateway",
+    "spawn_logged",
+    "spawn_signalled",
+    "spawn_until_ready",
+    "status_and_json",
     "uses_impure_fixture",
+    "uvicorn_started",
     "wait_for",
     "wait_for_run_status",
     "wait_for_run_status_async",
+    "worker_lifecycle_gateway_script",
 ]

@@ -13,13 +13,12 @@ from langchain_core.messages import AIMessage, HumanMessage
 from ...control.thread_service import successor_seed_transcript
 from ...database.checkpoints import open_checkpointer
 from ...ipc.schemas import DispatchRequest
-from ...testing import async_catalog_run_fields
+from ...testing import async_catalog_run_fields, serve_on_loopback
 from ...testing.environment import settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...worker.graph_lifecycle import GraphLifecycleManager
 from .conftest import make_app
 from .test_gateway_drain import _relay_terminal, _RelayContext
-from .test_gateway_live import _live_server
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,7 +35,7 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
 ) -> None:
     app, _aggregator, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         fields = await async_catalog_run_fields(client)

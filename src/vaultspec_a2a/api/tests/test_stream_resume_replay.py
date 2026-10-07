@@ -22,10 +22,10 @@ from ...database.run_event_repository import RunEventRecord, RunEventStore
 from ...streaming.aggregator import EventAggregator
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import SequenceAllocation
-from ...testing import SseFrame, SseReader
+from ...testing import SseFrame, SseReader, serve_on_loopback
 from ...thread.enums import ThreadStatus
 from .._stream_replay import retained_after
-from .conftest import _live_server, make_app, seed_run_with_status
+from .conftest import make_app, seed_run_with_status
 from .test_internal import _record_completed_checkpoint, _seed_accepted_thread
 
 if TYPE_CHECKING:
@@ -99,7 +99,7 @@ async def test_a_reconnect_covers_every_sequence_to_the_terminal_exactly_once(
     await _record_completed_checkpoint(checkpointer, receipt)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         async with client.stream("GET", f"/v1/runs/{_RUN}/stream") as first:
@@ -159,7 +159,7 @@ async def test_the_window_sentinel_replays_everything_still_retained_once(
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         await _relay(client, [_progress_event(_RUN, index) for index in (1, 2, 3)])
@@ -186,7 +186,7 @@ async def test_a_resume_at_the_head_of_the_window_replays_nothing(
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         await _relay(client, [_progress_event(_RUN, index) for index in (1, 2)])

@@ -12,21 +12,21 @@ import asyncio
 import json
 import socket
 import sys
-import threading
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING, Literal, cast
 
 import httpx
 import pytest
 
-from ...testing.tests._support.http_handlers import JsonReplyHandler
+from ...testing import JsonReplyHandler, serve_handler
 from .. import AuthoringClient
 from .._errors import AuthoringTransportError
 from ..catalog import make_tool_dispatch, parse_catalog
 from ._engine_peer import reply_health_proof
 
 if TYPE_CHECKING:
+    import threading
     from collections.abc import Iterator
     from pathlib import Path
 
@@ -79,7 +79,7 @@ class _EngineState:
 
 def _make_handler(state: _EngineState, bearer: str = _BEARER) -> type[JsonReplyHandler]:
     # BaseHTTPRequestHandler is listed again, redundantly - see
-    # testing/http_handlers.py's docstring for why.
+    # testing/http.py's docstring for why.
     class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -127,16 +127,8 @@ def _make_handler(state: _EngineState, bearer: str = _BEARER) -> type[JsonReplyH
 @pytest.fixture
 def engine() -> Iterator[tuple[str, _EngineState]]:
     state = _EngineState()
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
-    port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with serve_handler(_make_handler(state)) as port:
         yield f"http://127.0.0.1:{port}", state
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5.0)
 
 
 def _str(value: object) -> str:

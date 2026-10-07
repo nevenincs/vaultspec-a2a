@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-import uvicorn
 from httpx import ASGITransport
 
 from ...api.app import _bind_server_shutdown_owner, create_app
 from ...api.dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ...api.routes.gateway import admission_gate
 from ...control.drain import AdmissionState
+from ...testing import loopback_uvicorn, uvicorn_started
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -76,26 +76,14 @@ async def test_shutdown_refuses_missing_or_malformed_owner_before_admission_clos
 @pytest.mark.asyncio
 async def test_production_uvicorn_owner_returns_202_before_cooperative_exit() -> None:
     app = _make_app()
-    config = uvicorn.Config(
-        app,
-        host="127.0.0.1",
-        port=0,
-        log_level="error",
-        lifespan="off",
-    )
-    server = uvicorn.Server(config)
+    server = loopback_uvicorn(app, lifespan="off", log_level="error")
     _bind_server_shutdown_owner(app, server)
     serving = asyncio.create_task(server.serve())
     try:
-        for _ in range(500):
-            if server.started and server.servers:
-                break
-            await asyncio.sleep(0.01)
-        assert server.started and server.servers, "Uvicorn owner did not start"
-        port = server.servers[0].sockets[0].getsockname()[1]
+        base = await uvicorn_started(server, serving)
         async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.post(
-                f"http://127.0.0.1:{port}/admin/shutdown",
+                f"{base}/admin/shutdown",
                 headers={
                     "Authorization": f"Bearer {_ATTACH}",
                     LIFECYCLE_CAPABILITY_HEADER: _CAPABILITY,

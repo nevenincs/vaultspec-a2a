@@ -36,11 +36,11 @@ from ...control.tests._continuation import (
 from ...database import get_thread
 from ...database.run_event_repository import RunEventStore
 from ...streaming.aggregator import EventAggregator
-from ...testing import SseFrame, SseReader
+from ...testing import SseFrame, SseReader, serve_on_loopback
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
-from .conftest import _live_server, make_app
+from .conftest import make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -215,7 +215,7 @@ async def test_the_http_relay_withholds_a_promoted_turn_s_terminal(
     """One terminal per run, at the last turn's end, over the batch route."""
     app, continuation = staged_run
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as worker,
     ):
 

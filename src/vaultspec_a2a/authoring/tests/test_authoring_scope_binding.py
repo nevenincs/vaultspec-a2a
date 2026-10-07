@@ -18,16 +18,15 @@ run's project is what gives it something to validate against.
 from __future__ import annotations
 
 import json
-import threading
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from ...graph.enums import PipelinePhase
-from ...testing.tests._support.http_handlers import JsonReplyHandler
+from ...testing import JsonReplyHandler, serve_handler
 from ...thread.actor_tokens import ActorTokenBundle
 from ...worker.token_store import RunTokenStore
 from ..client import AuthoringClient
@@ -86,7 +85,7 @@ class _RecordedEngine:
 
 def _make_handler(state: _RecordedEngine) -> type[JsonReplyHandler]:
     # BaseHTTPRequestHandler is listed again, redundantly - see
-    # testing/http_handlers.py's docstring for why.
+    # testing/http.py's docstring for why.
     class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -115,16 +114,8 @@ def _make_handler(state: _RecordedEngine) -> type[JsonReplyHandler]:
 def engine() -> Iterator[tuple[str, _RecordedEngine]]:
     """Run a real loopback authoring endpoint and yield its origin and record."""
     state = _RecordedEngine()
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        host, port = server.server_address[0], server.server_address[1]
-        yield f"http://{host}:{port}", state
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    with serve_handler(_make_handler(state)) as port:
+        yield f"http://127.0.0.1:{port}", state
 
 
 def _token_store(thread_id: str = _THREAD_ID) -> RunTokenStore:

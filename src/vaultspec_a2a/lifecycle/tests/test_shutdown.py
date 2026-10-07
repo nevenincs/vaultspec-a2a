@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import socket
 from contextlib import asynccontextmanager
 
 import httpx
@@ -12,6 +11,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 
+from ...testing import uvicorn_started
 from ..shutdown import ShutdownDeadline, ShutdownServer
 
 
@@ -38,27 +38,21 @@ async def test_parked_sse_is_cancelled_inside_the_server_shutdown_clock() -> Non
 
         return StreamingResponse(body(), media_type="text/event-stream")
 
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("127.0.0.1", 0))
-    listener.listen()
-    listener.setblocking(False)
-    port = listener.getsockname()[1]
-
     config = uvicorn.Config(
         app,
+        host="127.0.0.1",
+        port=0,
         log_level="error",
         lifespan="on",
         timeout_graceful_shutdown=1,
     )
     server = ShutdownServer(config, app=app, total_seconds=3.0)
-    serving = asyncio.create_task(server.serve(sockets=[listener]))
+    serving = asyncio.create_task(server.serve())
     try:
-        while not server.started:
-            await asyncio.sleep(0.01)
+        base = await uvicorn_started(server, serving)
         async with (
             httpx.AsyncClient(timeout=5.0) as client,
-            client.stream("GET", f"http://127.0.0.1:{port}/stream") as response,
+            client.stream("GET", f"{base}/stream") as response,
         ):
             assert response.status_code == 200
             iterator = response.aiter_bytes()
@@ -74,7 +68,6 @@ async def test_parked_sse_is_cancelled_inside_the_server_shutdown_clock() -> Non
         server.should_exit = True
         if not serving.done():
             await asyncio.wait_for(serving, timeout=3.5)
-        listener.close()
 
     assert elapsed < 3.5
     assert observed_remaining, "lifespan never observed the server shutdown clock"

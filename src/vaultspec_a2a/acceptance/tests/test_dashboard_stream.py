@@ -58,7 +58,7 @@ async def test_terminal_replay_is_idempotent_across_reconnects_and_reconciles(
     reconnect, or replayed a different status than run-status, would fail.
     """
     run_id = "run-stream-terminal"
-    started = gateway.start(run_id)
+    started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
     authoritative = wait_for_run_status(
         lambda: ok_body(gateway.status(run_id)), label=f"run {run_id}"

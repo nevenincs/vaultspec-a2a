@@ -16,10 +16,10 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...streaming.aggregator import EventAggregator
-from ...testing import SseReader, settings_override
+from ...testing import SseReader, serve_on_loopback, settings_override
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
-from .conftest import _live_server, make_app, seed_run_with_status
+from .conftest import make_app, seed_run_with_status
 from .test_stream_resume_replay import _progress_event, _relay
 
 if TYPE_CHECKING:
@@ -45,7 +45,7 @@ async def test_a_run_with_retained_frames_reports_a_resumable_stream(
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         before = await client.get(f"/v1/runs/{_RUN}")
@@ -77,7 +77,7 @@ async def test_a_switched_off_service_reports_no_resumable_stream(
 
     with settings_override(stream_replay_enabled=False):
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         ):
             await _relay(client, [_progress_event(_RUN, 1)])
@@ -121,7 +121,7 @@ async def test_run_status_answers_the_field_on_one_pooled_connection(
 
     try:
         async with (
-            _live_server(producer) as producer_base,
+            serve_on_loopback(producer) as producer_base,
             httpx.AsyncClient(base_url=producer_base, timeout=10.0) as relay_client,
         ):
             await _relay(relay_client, [_progress_event(_RUN, 1)])
@@ -130,7 +130,7 @@ async def test_run_status_answers_the_field_on_one_pooled_connection(
         )
 
         async with (
-            _live_server(viewer) as viewer_base,
+            serve_on_loopback(viewer) as viewer_base,
             httpx.AsyncClient(base_url=viewer_base, timeout=10.0) as client,
         ):
             status = await client.get(f"/v1/runs/{_RUN}")

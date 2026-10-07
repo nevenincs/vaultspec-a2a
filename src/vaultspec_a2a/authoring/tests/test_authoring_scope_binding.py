@@ -111,7 +111,7 @@ def _make_handler(state: _RecordedEngine) -> type[JsonReplyHandler]:
 
 
 @pytest.fixture
-def engine() -> Iterator[tuple[str, _RecordedEngine]]:
+def loopback_engine() -> Iterator[tuple[str, _RecordedEngine]]:
     """Run a real loopback authoring endpoint and yield its origin and record."""
     state = _RecordedEngine()
     with serve_handler(_make_handler(state)) as port:
@@ -187,10 +187,10 @@ class TestScopeToken:
 
 @pytest.mark.asyncio
 async def test_session_is_opened_under_the_runs_project(
-    engine: tuple[str, _RecordedEngine], tmp_path: Path
+    loopback_engine: tuple[str, _RecordedEngine], tmp_path: Path
 ) -> None:
     """The session's scope is the run's project, never a literal constant."""
-    origin, recorded = engine
+    origin, recorded = loopback_engine
     workspace = tmp_path / "bound-project"
     workspace.mkdir()
 
@@ -204,7 +204,7 @@ async def test_session_is_opened_under_the_runs_project(
 
 @pytest.mark.asyncio
 async def test_every_proposal_command_rides_the_bound_session(
-    engine: tuple[str, _RecordedEngine], tmp_path: Path
+    loopback_engine: tuple[str, _RecordedEngine], tmp_path: Path
 ) -> None:
     """A proposal's binding is the session it names, so it must name the bound one.
 
@@ -213,7 +213,7 @@ async def test_every_proposal_command_rides_the_bound_session(
     the session it was created under. Every mutating command in the walk must
     therefore run on the session opened above, and the create must name it.
     """
-    origin, recorded = engine
+    origin, recorded = loopback_engine
     workspace = tmp_path / "bound-project"
     workspace.mkdir()
 
@@ -225,7 +225,7 @@ async def test_every_proposal_command_rides_the_bound_session(
 
 
 def test_a_blank_project_authors_nothing(
-    engine: tuple[str, _RecordedEngine],
+    loopback_engine: tuple[str, _RecordedEngine],
 ) -> None:
     """No project means no proposal - not a proposal under an implied one.
 
@@ -233,7 +233,7 @@ def test_a_blank_project_authors_nothing(
     fenced at apply against whichever workspace the operator last selected, which
     is precisely the mid-run switch the run cannot see.
     """
-    origin, recorded = engine
+    origin, recorded = loopback_engine
 
     with pytest.raises(EngineUnavailableError, match="no usable active project"):
         _submitter(origin, "")
@@ -242,7 +242,7 @@ def test_a_blank_project_authors_nothing(
 
 
 def test_a_relative_project_refuses_rather_than_defaults(
-    engine: tuple[str, _RecordedEngine],
+    loopback_engine: tuple[str, _RecordedEngine],
 ) -> None:
     """A relative project cannot be minted, so it is an absent one.
 
@@ -250,7 +250,7 @@ def test_a_relative_project_refuses_rather_than_defaults(
     ambient inheritance the bound project replaces, so it is refused at the mint
     rather than quietly made absolute.
     """
-    origin, recorded = engine
+    origin, recorded = loopback_engine
 
     with pytest.raises(EngineUnavailableError, match="no usable active project"):
         _submitter(origin, "relative/project")

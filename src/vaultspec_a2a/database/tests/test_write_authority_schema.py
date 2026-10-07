@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from .._write_authority_check_parser import extract_named_check_predicates
 from ..write_authority_schema import (
     WRITE_AUTHORITY_CHECKS,
-    extract_named_check_predicates,
     write_authority_checks_match,
     write_authority_receipt_index_matches,
 )

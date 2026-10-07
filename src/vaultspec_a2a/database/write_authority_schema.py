@@ -7,9 +7,6 @@ from typing import TYPE_CHECKING, cast
 
 from ..thread import RECEIPT_ID_MAX_LENGTH
 from ..thread.enums import ControlActionType
-from ._write_authority_check_parser import (
-    extract_named_check_predicates as extract_named_check_predicates,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping

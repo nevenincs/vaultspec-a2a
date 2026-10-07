@@ -1,9 +1,9 @@
 """Event handlers for worker → gateway relay.
 
 Business-logic handlers that persist worker events into the database,
-manage permission state machines, and perform aggregator GC on thread
-termination.  Extracted from ``api/internal.py`` to decouple protocol
-translation from domain logic.
+journal permission requests, re-project the run's pause, and perform
+aggregator GC on thread termination.  Extracted from ``api/internal.py``
+to decouple protocol translation from domain logic.
 
 The :func:`relay_event` orchestrator consolidates the duplicated 4-handler
 call sequence that previously appeared in 3 call sites.
@@ -30,9 +30,6 @@ from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ..thread.enums import TERMINAL_STATUS_VALUES, InterruptType, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ..thread.idempotency import permission_request_action_key
-from ..thread.permission_fsm import (
-    compute_permission_request_effects,
-)
 from ..thread.snapshots import (
     PERMISSION_REQUEST_EVENT_TYPES,
     classify_permission_pause_reason,
@@ -62,7 +59,6 @@ if TYPE_CHECKING:
     from ..database import ThreadStatusElectionOutcome
     from ..database.checkpoints import Checkpointer
     from ..streaming.aggregator import EventAggregator
-    from ..thread import ThreadWriteExpectation
     from .drain import DrainGate
 
 __all__ = [
@@ -777,18 +773,6 @@ def _permission_request_fields(
     )
 
 
-def _permission_receipt_is_current(
-    expectation: ThreadWriteExpectation,
-    status: ThreadStatus,
-    dispatch_id: str,
-) -> bool:
-    from ..thread.enums import ControlActionType
-
-    return expectation.status is status and expectation.authority.owned_by(
-        ControlActionType.PERMISSION_REQUEST_CREATED, dispatch_id
-    )
-
-
 async def _persist_permission_request(
     db: AsyncSession,
     thread_id: str,
@@ -796,41 +780,29 @@ async def _persist_permission_request(
     *,
     event_type: str,
 ) -> None:
-    """Persist a fresh permission/approval request into the durable journal.
+    """Record a fresh permission or approval request in the durable journal.
 
-    Supersedes any competing pending requests, records the request row and its
-    creation control action, and projects the resulting pause onto thread status,
-    repair state, and - for a plan approval - approval state. A payload with no
-    request id is ignored, matching the prior inline guard.
+    The request row and its creation action are the journal: they hold the
+    request's lifecycle and cache its description and offered options for
+    disclosure. Whether the run is parked on it is the checkpoint's to say, so
+    the pause recorder projects the pause and this writes no run state. A
+    payload with no request id is ignored, and a replayed event finds its
+    creation action already reserved and changes nothing.
     """
     from ..database import (
-        ThreadStatusElectionOutcome,
-        elect_thread_status,
         get_thread,
         record_permission_request,
         reserve_control_action,
-        set_thread_approval_state,
         supersede_permission_requests,
-        thread_write_expectation,
     )
-    from ..thread.enums import (
-        ApprovalStatus,
-        ControlActionResultStatus,
-        ControlActionType,
-    )
-    from ..thread.repair_policy import RepairPhase, repair_state_for_action
-    from .repair_transitions import apply_repair_transition
+    from ..thread.enums import ControlActionResultStatus, ControlActionType
 
     fields = _permission_request_fields(payload, event_type)
     if fields is None:
         return
     request_id, tool_call, pause_reason_type, description = fields
-    fx = compute_permission_request_effects(pause_reason_type)
-    thread = await get_thread(db, thread_id)
-    if thread is None:
+    if await get_thread(db, thread_id) is None:
         return
-    expectation = thread_write_expectation(thread)
-    allowed_options = _option_mappings(payload.get("options"))
     reservation = await reserve_control_action(
         db,
         thread_id=thread_id,
@@ -839,36 +811,10 @@ async def _persist_permission_request(
         idempotency_key=permission_request_action_key(request_id),
         payload={"description": description},
     )
-    if not reservation.payload_matches:
+    if not reservation.payload_matches or not reservation.created:
         await db.rollback()
         return
-    action = reservation.action
-    action.result_status = ControlActionResultStatus.APPLIED.value
-    if action.dispatch_id is None:
-        await db.rollback()
-        raise RuntimeError("permission-request action has no durable receipt")
-    if _permission_receipt_is_current(
-        expectation, fx.thread_status, action.dispatch_id
-    ):
-        await db.rollback()
-        return
-    if not reservation.created:
-        # A persisted creation receipt proves only that this event was handled
-        # before. Once a newer action owns the run, replaying the old event must
-        # never reinstall its receipt or reopen the old permission pause.
-        await db.rollback()
-        return
-    election = await elect_thread_status(
-        db,
-        thread_id,
-        expectation=expectation,
-        status=fx.thread_status,
-        action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
-        action_receipt_id=action.dispatch_id,
-    )
-    if election.outcome is not ThreadStatusElectionOutcome.WON:
-        await db.rollback()
-        return
+    reservation.action.result_status = ControlActionResultStatus.APPLIED.value
     await supersede_permission_requests(
         db,
         thread_id=thread_id,
@@ -880,23 +826,9 @@ async def _persist_permission_request(
         thread_id=thread_id,
         pause_reason_type=pause_reason_type,
         description=description,
-        allowed_options=allowed_options,
+        allowed_options=_option_mappings(payload.get("options")),
         tool_call=tool_call,
     )
-    await apply_repair_transition(
-        db,
-        thread_id,
-        repair_state_for_action(fx.last_applied_action, RepairPhase.APPLIED),
-    )
-    if fx.is_plan_approval:
-        await set_thread_approval_state(
-            db,
-            thread_id,
-            approval_status=ApprovalStatus.PENDING,
-            approval_request_id=request_id,
-            approval_reason=description,
-            approval_response_action_id=None,
-        )
 
 
 async def _handle_permission_event(
@@ -1003,33 +935,47 @@ async def _handle_execution_state_event(
         await db.commit()
 
 
-async def _handle_clarification_pause_event(
+def _prompts_pause_read(payload: dict[str, object]) -> bool:
+    """Whether a relayed event says the run's pause may have moved.
+
+    A clarification nudge or a permission request says the run may have
+    parked; a permission resolution or a resume's application receipt says it
+    may have left the pause. None of them is trusted for the answer: each only
+    prompts the checkpoint read that decides.
+    """
+    event_type = wire_event_type(payload)
+    if event_type == ServerEventType.CLARIFICATION_PENDING or is_permission_event(
+        payload
+    ):
+        return True
+    return event_type == "dispatch_applied" and payload.get("action") == "resume"
+
+
+async def _handle_pause_event(
     thread_id: str,
     payload: dict[str, object],
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     checkpointer: Checkpointer | None = None,
 ) -> None:
-    """Re-project a clarification pause when the worker reports one may have moved.
-
-    A clarification nudge says the run may have parked, and a resume's
-    application receipt says it may have left the pause. Neither frame is
-    trusted for the answer: both only prompt the checkpoint read that decides.
-    """
-    event_type = payload.get("type")
-    if event_type != ServerEventType.CLARIFICATION_PENDING and not (
-        event_type == "dispatch_applied" and payload.get("action") == "resume"
-    ):
+    """Re-project the run's pause when a relayed event says it may have moved."""
+    if not _prompts_pause_read(payload):
         return
     factory = _session_factory(session_factory)
-    if factory is None or checkpointer is None:
+    if factory is None:
+        _skip_without_database("the pause projection", thread_id)
         return
-    from .clarification_service import reconcile_clarification_pause
+    if checkpointer is None:
+        logger.warning(
+            "Skipping the pause projection for %s: no checkpointer is available",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "pause_proof_unavailable"},
+        )
+        return
+    from .pause import reconcile_run_pause
 
     async with factory() as db:
-        await reconcile_clarification_pause(
-            db, thread_id=thread_id, checkpointer=checkpointer
-        )
+        await reconcile_run_pause(db, thread_id=thread_id, checkpointer=checkpointer)
 
 
 async def relay_event(
@@ -1049,8 +995,7 @@ async def relay_event(
 
     This function handles the DB-side event processing:
     permission journal, progress inference, execution state persistence,
-    the clarification pause projection, and terminal status updates with
-    aggregator GC.
+    the pause projection, and terminal status updates with aggregator GC.
 
     A terminal frame is the one exception to the caller owning the fan-out.
     Whether it may be shown at all is this plane's answer, so the caller hands
@@ -1079,7 +1024,7 @@ async def relay_event(
         session_factory=session_factory,
         checkpointer=checkpointer,
     )
-    await _handle_clarification_pause_event(
+    await _handle_pause_event(
         thread_id,
         payload,
         session_factory=session_factory,

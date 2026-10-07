@@ -20,18 +20,14 @@ from ..database import (
     CheckpointRead,
     ControlActionModel,
     ThreadModel,
-    ThreadStatusElectionOutcome,
     begin_write_transaction,
-    elect_thread_status,
     get_control_action_by_idempotency_key,
-    get_pending_permission_requests,
     get_thread,
     mark_control_action_applied,
     read_latest_checkpoint,
     settle_control_action_lease,
     thread_write_expectation,
 )
-from ..thread import project_checkpoint_tuple
 from ..thread.clarification import (
     ClarificationAnswers,
     ClarificationRequest,
@@ -46,7 +42,6 @@ from ..thread.enums import (
     NON_ACTIVE_STATUSES,
     ControlActionResultStatus,
     ControlActionType,
-    ThreadStatus,
 )
 from ..thread.idempotency import (
     CLARIFICATION_RESPONSE_KEY_PREFIX,
@@ -60,6 +55,7 @@ from .action_lease import (
     prepare_control_action_claim,
 )
 from .leased_dispatch import DispatchRefusal, build_followon_dispatch, dispatch_leased
+from .pause import project_checkpoint_read, reconcile_run_pause
 from .repair_transitions import record_undelivered_dispatch
 
 if TYPE_CHECKING:
@@ -71,24 +67,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ClarificationRuntime",
-    "reconcile_clarification_pause",
     "redrive_clarification_actions",
     "respond_to_clarification",
 ]
 
 logger = logging.getLogger(__name__)
-
-#: The writers a clarification pause is recorded under: the dispatches that run
-#: the graph. A permission pause and the answer to one hold writers of their
-#: own, and this projection never records or clears either.
-_GRAPH_RUN_WRITERS = frozenset(
-    {
-        ControlActionType.INGEST,
-        ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-        ControlActionType.RESUME,
-    }
-)
-_PARKABLE_STATUSES = frozenset({ThreadStatus.SUBMITTED, ThreadStatus.RUNNING})
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,32 +255,6 @@ def _checkpoint_receipt(checkpoint: CheckpointRead, request_id: str) -> str | No
     return fingerprint if isinstance(fingerprint, str) else None
 
 
-def _parked_clarification(
-    checkpoint: CheckpointRead, thread_id: str
-) -> ClarificationRequest | None:
-    """Return the clarification the read checkpoint shows the run parked on.
-
-    A checkpoint the projection cannot read reads as no pending clarification,
-    as an absent one does, so the answer path refuses rather than failing. The
-    failure is logged because, unlike absence, it hides a checkpoint that exists.
-    """
-    if checkpoint.checkpoint_tuple is None:
-        return None
-    try:
-        projection = project_checkpoint_tuple(
-            checkpoint.checkpoint_tuple, thread_id=thread_id
-        )
-    except (AttributeError, TypeError, ValueError):
-        logger.warning(
-            "Could not project the checkpoint of thread %s; reading no pending "
-            "clarification",
-            thread_id,
-            exc_info=True,
-        )
-        return None
-    return pending_clarification(projection)
-
-
 def _stored_resolution(
     action: ControlActionModel,
 ) -> ClarificationResolution | None:
@@ -459,7 +416,9 @@ async def respond_to_clarification(
     # transaction opens: holding the write lock across it would block every
     # other writer for the length of a checkpoint round trip.
     checkpoint = await read_latest_checkpoint(checkpointer, thread_id)
-    parked = _parked_clarification(checkpoint, thread_id)
+    # A checkpoint that cannot be projected reads as no pending clarification,
+    # as an absent one does, so the answer path refuses rather than failing.
+    parked = pending_clarification(project_checkpoint_read(checkpoint, thread_id))
     attempt = _ClarificationAttempt(
         thread_id=thread_id,
         request_id=request_id,
@@ -718,61 +677,6 @@ async def _dispatch_claimed(
     return _result(action, applied=applied, dispatched=True)
 
 
-async def reconcile_clarification_pause(
-    db: AsyncSession, *, thread_id: str, checkpointer: Checkpointer
-) -> None:
-    """Make the run's status say whether its checkpoint is parked on a question.
-
-    The checkpoint owns the pause and the status is its durable projection: a
-    parked run reads ``input_required`` and refuses follow-up turns, and a
-    resumed one reads ``running`` again. A relayed frame only prompts this read,
-    so a stale or replayed nudge changes nothing the checkpoint does not show.
-
-    The witness is taken before the checkpoint read, so an election that loses
-    to a writer that moved in between changes nothing. The status moves under
-    the current writer's own identity because the pause is a fact about the
-    dispatch that raised it, not a new control action.
-    """
-    thread = await get_thread(db, thread_id)
-    expectation = thread_write_expectation(thread) if thread is not None else None
-    await db.rollback()
-    if (
-        expectation is None
-        or expectation.authority.action_type not in _GRAPH_RUN_WRITERS
-    ):
-        return
-    recorded_as_parked = expectation.status is ThreadStatus.INPUT_REQUIRED
-    if not recorded_as_parked and expectation.status not in _PARKABLE_STATUSES:
-        return
-    checkpoint = await read_latest_checkpoint(checkpointer, thread_id)
-    if checkpoint.checkpoint_tuple is None:
-        # A missing or unreadable checkpoint proves neither a pause nor its end.
-        return
-    parked = _parked_clarification(checkpoint, thread_id) is not None
-    if parked == recorded_as_parked:
-        return
-    await begin_write_transaction(db)
-    try:
-        if not parked and await get_pending_permission_requests(
-            db, thread_id=thread_id
-        ):
-            # The run is held by a permission request, which owns its own exit.
-            return
-        election = await elect_thread_status(
-            db,
-            thread_id,
-            expectation=expectation,
-            status=ThreadStatus.INPUT_REQUIRED if parked else ThreadStatus.RUNNING,
-            action_type=expectation.authority.action_type,
-            action_receipt_id=expectation.authority.action_receipt_id,
-        )
-        if election.outcome is ThreadStatusElectionOutcome.WON:
-            await db.commit()
-    finally:
-        if db.in_transaction():
-            await db.rollback()
-
-
 async def redrive_clarification_actions(
     session_factory: async_sessionmaker[AsyncSession],
     *,
@@ -811,7 +715,7 @@ async def redrive_clarification_actions(
             )
             # The receipt that would have resumed the status may have been lost
             # with the previous process, so restart re-projects the pause too.
-            await reconcile_clarification_pause(
+            await reconcile_run_pause(
                 db, thread_id=row.thread_id, checkpointer=runtime.checkpointer
             )
         if result.applied:

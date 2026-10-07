@@ -50,6 +50,7 @@ from ..graph.nodes.diverge import WEB_LOCATOR_KIND
 from ..graph.nodes.phase_gate import ProposalRevisionRequiredError
 from ..ipc.schemas import canonical_project_root
 from ..thread.state import read_untrusted_state_value
+from ..utils.coercion import coerce_nonempty_str
 from ._envelope import AuthoringResponse, Denial
 from ._errors import AuthoringError
 from ._ids import derive_idempotency_key
@@ -428,8 +429,7 @@ def _web_url_from_locator(locator: object) -> str | None:
     locator = cast("dict[str, Any]", locator)
     if locator.get("kind") != WEB_LOCATOR_KIND:
         return None
-    url = locator.get("url")
-    return url if isinstance(url, str) and url else None
+    return coerce_nonempty_str(locator.get("url"))
 
 
 def _web_locator_urls(state: TeamState) -> list[str]:

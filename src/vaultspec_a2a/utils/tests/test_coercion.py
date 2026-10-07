@@ -24,6 +24,7 @@ import pytest
 
 from ..coercion import (
     coerce_int,
+    coerce_nonempty_str,
     coerce_object_list,
     coerce_object_mapping,
     coerce_string_list,
@@ -61,6 +62,20 @@ def test_a_fractional_float_is_rejected_rather_than_truncated(value: float) -> N
 def test_every_other_type_is_rejected(value: object) -> None:
     """A numeric string is the dangerous case: int() would accept it."""
     assert coerce_int(value) is None
+
+
+@pytest.mark.parametrize("value", ["a", "feature-tag", " padded ", "   ", "\n"])
+def test_a_non_empty_string_is_returned_exactly_as_given(value: str) -> None:
+    """Never stripped, so whitespace-only text is non-empty and survives intact."""
+    assert coerce_nonempty_str(value) == value
+
+
+@pytest.mark.parametrize(
+    "value", ["", None, 0, 1, False, b"abc", ["a"], {"a": "b"}, object()]
+)
+def test_an_empty_string_or_any_non_string_is_refused(value: object) -> None:
+    """The empty name is absent, and bytes or a number is never converted."""
+    assert coerce_nonempty_str(value) is None
 
 
 class _HandRolledMapping(Mapping[str, object]):

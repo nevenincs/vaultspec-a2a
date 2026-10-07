@@ -30,6 +30,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langgraph.constants import TAG_NOSTREAM
 
 from ..graph.enums import ToolCallStatus
+from ..utils.coercion import coerce_nonempty_str
 from .translation import (
     ToolEmission,
     emit_tool_completion,
@@ -275,8 +276,7 @@ def _mapping_argument(kwargs: dict[str, Any], name: str) -> dict[str, Any] | Non
 
 
 def _node(metadata: dict[str, Any] | None) -> str | None:
-    node = (metadata or {}).get("langgraph_node")
-    return node if isinstance(node, str) and node else None
+    return coerce_nonempty_str((metadata or {}).get("langgraph_node"))
 
 
 def _final_message(response: LLMResult) -> object:

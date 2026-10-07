@@ -63,7 +63,11 @@ from ..thread.idempotency import (
     AUTHORING_VERDICT_KEY_PREFIX,
     authoring_verdict_action_key,
 )
-from ..utils.coercion import coerce_object_list, coerce_object_mapping
+from ..utils.coercion import (
+    coerce_nonempty_str,
+    coerce_object_list,
+    coerce_object_mapping,
+)
 from .accepted_input import freeze_accepted_input
 from .action_lease import ControlActionClaimRequest, prepare_control_action_claim
 from .leased_dispatch import (
@@ -376,8 +380,9 @@ class VerdictSubscriber:
             thread_id,
             timeout=self._config.checkpoint_timeout_seconds,
         )
-        pending = checkpoint.channel_values.get(_GATE_PENDING_PROPOSAL_FIELD)
-        return pending if isinstance(pending, str) and pending else None
+        return coerce_nonempty_str(
+            checkpoint.channel_values.get(_GATE_PENDING_PROPOSAL_FIELD)
+        )
 
     # ------------------------------------------------------------------
     # Page consumption

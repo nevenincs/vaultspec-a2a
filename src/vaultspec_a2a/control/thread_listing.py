@@ -22,7 +22,7 @@ from ..database import (
 from ..domain_config import domain_config
 from ..thread.enums import DegradedReason, RepairStatus, ThreadStatus
 from ..thread.snapshots import ThreadStateData, record_repair_posture
-from ..utils.coercion import decode_json_object
+from ..utils.coercion import coerce_nonempty_str, decode_json_object
 from .projection import (
     clear_permissions_without_checkpoint_truth,
     durable_approval,
@@ -43,10 +43,6 @@ __all__ = [
 ]
 
 
-def _summary_text(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
 def _parse_thread_summary_metadata(
     raw_json: str | None,
 ) -> tuple[str | None, str | None, str | None]:
@@ -58,9 +54,9 @@ def _parse_thread_summary_metadata(
     if meta is None:
         return None, None, None
     return (
-        _summary_text(meta.get("feature_tag")),
-        _summary_text(meta.get("source_branch")),
-        _summary_text(meta.get("callee")),
+        coerce_nonempty_str(meta.get("feature_tag")),
+        coerce_nonempty_str(meta.get("source_branch")),
+        coerce_nonempty_str(meta.get("callee")),
     )
 
 

@@ -25,6 +25,7 @@ from ..ipc.schemas import WorkerEventBatch, WorkerEventEnvelope
 from ..streaming.fanout import is_protected_payload, pop_oldest_droppable
 from ..telemetry import trace_headers
 from ..thread.snapshots import wire_event_type
+from ..utils import bearer_header
 
 __all__ = ["WorkerBridge", "event_client_timeout"]
 
@@ -166,13 +167,10 @@ class WorkerBridge:
         self._api_url = api_url.rstrip("/")
         self._worker_id = worker_id
         # Attach bearer token to all internal IPC requests if provided.
-        headers: dict[str, str] = {}
-        if internal_token:
-            headers["Authorization"] = f"Bearer {internal_token}"
         self._client = httpx.AsyncClient(
             base_url=self._api_url,
             timeout=event_client_timeout(),
-            headers=headers,
+            headers=bearer_header(internal_token) if internal_token else {},
         )
         self._active_threads: set[str] = set()
         self._start_time = time.monotonic()  # track uptime

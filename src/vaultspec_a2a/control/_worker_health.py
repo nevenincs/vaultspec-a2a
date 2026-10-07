@@ -17,7 +17,7 @@ from ..lifecycle.pairing import (
     classify_worker_pairing,
     eviction_is_authorized,
 )
-from ..utils import redact_text
+from ..utils import bearer_header, redact_text
 from ..utils._process_tree import port_has_listener_async
 from ..utils.coercion import coerce_object_mapping
 from .config import settings
@@ -363,7 +363,7 @@ def _internal_auth_headers() -> dict[str, str] | None:
     """
     if settings.internal_token is None:
         return None
-    return {"Authorization": f"Bearer {settings.internal_token}"}
+    return bearer_header(settings.internal_token)
 
 
 async def probe_worker_health(

@@ -1,8 +1,8 @@
 """Collect narrow utilities shared across runtime packages.
 
-Utilities cover enum handling, bearer-token verification, logging, secret
-redaction, and process termination. Some helpers support public integration
-points, while others remain internal implementation tools.
+Utilities cover enum handling, bearer-token headers and verification, logging,
+secret redaction, and process termination. Some helpers support public
+integration points, while others remain internal implementation tools.
 
 Prefer the owning utility module over broad facade imports. Primary consumers
 include :mod:`vaultspec_a2a.api`, :mod:`vaultspec_a2a.control`,
@@ -14,6 +14,8 @@ from .enums import AcpRequestId as AcpRequestId
 from .enums import Environment as Environment
 from .enums import LogLevel as LogLevel
 from .ipc_auth import BearerVerdict as BearerVerdict
+from .ipc_auth import bearer_header as bearer_header
+from .ipc_auth import bearer_matches as bearer_matches
 from .ipc_auth import verify_internal_bearer as verify_internal_bearer
 from .logging import configure_logging as configure_logging
 from .logging import reconfigure_console_utf8 as reconfigure_console_utf8
@@ -27,6 +29,8 @@ __all__ = [
     "BearerVerdict",
     "Environment",
     "LogLevel",
+    "bearer_header",
+    "bearer_matches",
     "configure_logging",
     "is_secret_name",
     "kill_pid_tree_async",

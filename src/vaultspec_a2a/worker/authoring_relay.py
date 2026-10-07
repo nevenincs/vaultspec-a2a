@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import logging
 import os
 import time
@@ -16,9 +14,14 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..authoring import AuthoringClient
+from ..authoring._connection_proof import proof_digest
 from ..authoring._engine_trust import CHALLENGE_HEADER, PROOF_HEADER
 from ..authoring._errors import AuthoringError
-from ..authoring._relay_client import RELAY_CALL_PATH, RELAY_PROOF_DOMAIN
+from ..authoring._relay_client import (
+    RELAY_CALL_PATH,
+    RELAY_PROOF_PATH,
+    relay_proof_message,
+)
 from ..authoring._tool_calls import private_tool_call_journal_path
 from ..authoring.catalog import make_tool_dispatch
 from ..authoring.discovery import resolve_engine
@@ -28,6 +31,7 @@ from ..thread.constants import (
     ROLE_ID_PATTERN,
     RUN_ID_PATTERN,
 )
+from ..utils import bearer_matches
 
 if TYPE_CHECKING:
     from .catalog_store import RunCatalogStore
@@ -69,9 +73,7 @@ class AuthoringRelay:
 
     def authorize(self, call: RelayCall, authorization: str | None) -> str:
         actor = self.actor(call.run_id, call.role)
-        if not authorization or not hmac.compare_digest(
-            authorization.encode("utf-8"), f"Bearer {actor}".encode()
-        ):
+        if not bearer_matches(authorization, actor):
             raise HTTPException(403, "authoring authority is unavailable")
         return actor
 
@@ -86,11 +88,10 @@ class AuthoringRelay:
         path = request.scope["raw_path"].decode("ascii")
         query = request.scope["query_string"].decode("ascii")
         path += "?" + query
-        message = (
-            f"{RELAY_PROOF_DOMAIN}:1\n{server[1]}\n{os.getpid()}\n"
-            f"{self._started_ms}\n{path}\n{challenge}"
-        ).encode("ascii")
-        proof = hmac.new(actor.encode("utf-8"), message, hashlib.sha256).hexdigest()
+        message = relay_proof_message(
+            server[1], os.getpid(), self._started_ms, path, challenge
+        )
+        proof = proof_digest(actor, message)
         return Response(
             headers={
                 PROOF_HEADER: proof,
@@ -147,7 +148,7 @@ def _relay(request: Request) -> AuthoringRelay:
     return relay
 
 
-@router.get("/internal/authoring/proof", include_in_schema=False)
+@router.get(RELAY_PROOF_PATH, include_in_schema=False)
 async def prove_authoring(request: Request, run_id: str, role: str) -> Response:
     return _relay(request).proof(request, run_id, role)
 

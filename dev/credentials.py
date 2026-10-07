@@ -122,12 +122,15 @@ class Scope:
 #: escalate to a failure only when a caller guaranteed it with
 #: `--require-prerequisite`. Making them required here would break exactly the
 #: hosts that system was built to accommodate.
+#:
+#: Spelled out rather than read from the service's credential registry, which
+#: this stdlib-only module cannot import; a test holds the list to it. A name
+#: the service accepts for no lane is not granted: `ANTHROPIC_API_KEY` reaches
+#: no provider child in production, so a scope that injected it would only let
+#: a development run authenticate in a way a served one cannot.
 _PROVIDER_CREDENTIALS: Final[tuple[str, ...]] = (
-    "ANTHROPIC_API_KEY",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "OPENAI_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
     "KIMI_MODEL_API_KEY",
     "KIMI_MODEL_BASE_URL",
     "KIMI_MODEL_CAPABILITIES",

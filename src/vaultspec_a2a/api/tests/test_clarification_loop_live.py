@@ -47,14 +47,13 @@ from ...control.action_lease import (
     prepare_control_action_claim,
 )
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.clarification_service import (
-    ClarificationRecoverySummary,
-    ClarificationRuntime,
-    redrive_clarification_actions,
+from ...control.direct_control_recovery import (
+    DirectControlRecoverySummary,
+    redrive_direct_control_actions,
 )
 from ...control.execution_authority import resolve_execution_authority
 from ...control.graph_definition import read_accepted_graph_definition
-from ...control.leased_dispatch import DispatchTransport, accepted_recursion_budget
+from ...control.leased_dispatch import accepted_recursion_budget
 from ...control.reconciliation import reconcile_threads_on_startup
 from ...database import (
     CONTROL_ACTION_LEASE_TTL,
@@ -82,12 +81,13 @@ from ...thread.clarification import (
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.idempotency import (
+    CLARIFICATION_RESPONSE_KEY_PREFIX,
     clarification_response_action_key,
 )
 from .conftest import make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Sequence
 
     from fastapi import FastAPI
     from langchain_core.messages import BaseMessage
@@ -176,9 +176,9 @@ class _ExpiredClaim:
 class _RecoveryOutcome:
     """The two recovery summaries and settled graph snapshot."""
 
-    first: ClarificationRecoverySummary
+    first: DirectControlRecoverySummary
     settled: GraphStateSnapshot
-    second: ClarificationRecoverySummary
+    second: DirectControlRecoverySummary
 
 
 async def _create_parked_run(
@@ -485,6 +485,22 @@ async def _prepare_expired_claim(
     )
 
 
+async def _clarification_resumes(
+    db: AsyncSession, thread_id: str
+) -> Sequence[ControlActionModel]:
+    """Every accepted clarification resolution this run has journaled."""
+    return (
+        await db.scalars(
+            select(ControlActionModel).where(
+                ControlActionModel.thread_id == thread_id,
+                ControlActionModel.idempotency_key.like(
+                    f"{CLARIFICATION_RESPONSE_KEY_PREFIX}%"
+                ),
+            )
+        )
+    ).all()
+
+
 async def _wait_for_terminal_state(
     graph: RegisteredCompiledGraph, config: RunnableConfig
 ) -> GraphStateSnapshot:
@@ -498,34 +514,32 @@ async def _wait_for_terminal_state(
 
 
 async def _redrive_expired_claim(
+    app: FastAPI,
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
     run: _ParkedRun,
-    claim: _ExpiredClaim,
 ) -> _RecoveryOutcome:
     circuit_breaker = WorkerCircuitBreaker(
         failure_threshold=3,
         recovery_timeout=30.0,
     )
     worker_spawner = adopted_spawner()
-    async with _real_worker(None, run.target, checkpointer) as worker_client:
-        runtime = ClarificationRuntime(
-            checkpointer,
-            DispatchTransport(
+    async with _real_worker(
+        app, run.target, checkpointer, relay_to_gateway=True
+    ) as worker_client:
+
+        async def redrive() -> DirectControlRecoverySummary:
+            return await redrive_direct_control_actions(
+                session_factory,
                 worker_client=worker_client,
                 circuit_breaker=circuit_breaker,
                 worker_spawner=worker_spawner,
-            ),
-        )
-        first = await redrive_clarification_actions(
-            session_factory,
-            runtime=runtime,
-        )
+                trace_headers=None,
+            )
+
+        first = await redrive()
         settled = await _wait_for_terminal_state(run.parked.graph, run.config)
-        second = await redrive_clarification_actions(
-            session_factory,
-            runtime=runtime,
-        )
+        second = await redrive()
     return _RecoveryOutcome(first=first, settled=settled, second=second)
 
 
@@ -533,29 +547,27 @@ async def _redrive_expired_claim(
 async def test_restart_redrives_an_expired_committed_clarification_lease(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """Startup recovery resumes a parked graph after claim-before-dispatch loss.
+    """One recovery owner redrives a clarification resume, as it does every verb.
 
     The database and checkpointer are both file-backed.  The first process is
     represented by the production lease claim committed with an already-expired
-    ownership window, then disappearing before dispatch.  A new recovery pass
-    uses the stored typed payload and stable dispatch identity to drive the real
-    worker and Executor.  A second pass settles from checkpoint truth without
-    dispatching again.
+    ownership window, then disappearing before dispatch.  The durable recovery
+    sweep every accepted action shares then uses the stored typed payload and
+    stable dispatch identity to drive the real worker and Executor; a clarification
+    resume has no redrive of its own.  The worker's own application receipt reaches
+    the gateway's real internal route, which is what settles the journal row, so a
+    second pass finds it applied and dispatches nothing.
     """
+    app, _hub, _stub, _cp = make_app(session_factory, checkpointer)
     thread, metadata = await _seed_clarification_run(session_factory)
     run = await _load_parked_run(session_factory, checkpointer, thread.id)
     # This current-schema run predates checkpoint evidence. The production
     # resume command must bind the exact durable digest atomically with the
     # interrupt response, without an update_state call that invalidates it.
     claim = await _prepare_expired_claim(session_factory, thread, metadata, run)
-    outcome = await _redrive_expired_claim(
-        session_factory,
-        checkpointer,
-        run,
-        claim,
-    )
-    assert outcome.first.examined == 1
-    assert outcome.first.dispatched == 1
+    outcome = await _redrive_expired_claim(app, session_factory, checkpointer, run)
+    assert outcome.first.examined == 1, outcome.first
+    assert outcome.first.dispatched == 1, outcome.first
     transcript = cast("list[BaseMessage]", outcome.settled.values["messages"])
     assert transcript[-1].type == "human"
     assert transcript[-1].content == (
@@ -563,9 +575,7 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
         "- Which provider should author the plan?: codex"
     )
     assert outcome.settled.values["model_assignment_digest"] == run.cache_key[3]
-    assert outcome.second.examined == 1
-    assert outcome.second.applied == 1
-    assert outcome.second.dispatched == 0
+    assert outcome.second.dispatched == 0, outcome.second
 
     async with session_factory() as db:
         action = await get_control_action_by_idempotency_key(
@@ -573,9 +583,13 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
             thread_id=run.thread_id,
             idempotency_key=claim.idempotency_key,
         )
+        resumes = await _clarification_resumes(db, run.thread_id)
     assert action is not None
     assert action.dispatch_id == claim.claim.dispatch_id
+    # The receipt settled the row, so nothing redrives it a second time.
     assert action.applied_at is not None
+    # One resolution, one accepted action, one delivery identity.
+    assert [row.dispatch_id for row in resumes] == [claim.claim.dispatch_id]
 
 
 async def _read_run_status(client: httpx.AsyncClient, run_id: str) -> dict[str, object]:

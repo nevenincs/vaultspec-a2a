@@ -15,22 +15,26 @@ continuations are two turns, and a content digest silently folds the second
 into the first, so that verb takes the client's own key and has no default to
 fall back on.
 
-Every other derived key is a READABLE ``<prefix>:<identity>`` string. Where a
-query finds rows by prefix - the clarification recovery sweep's SQL ``LIKE``,
-the verdict receipt's ``startswith`` - the prefix is exported beside its
-builder and the reader imports it. A digest has no queryable prefix, so
-converging those keys onto the digest shape would make the reader match
-nothing, and nothing would raise.
+Every other derived key is a READABLE ``<prefix>:<identity>`` string, which is
+what lets a reader find rows by prefix: a SQL ``LIKE`` takes the exported prefix,
+and a settlement owner that has to tell one resume from another takes the typed
+:class:`ResumeIntent` this module reads the prefix into, rather than matching a
+prefix of its own. A digest has no queryable prefix, so converging those keys
+onto the digest shape would make the reader match nothing, and nothing would
+raise.
 """
 
 from __future__ import annotations
 
+from enum import StrEnum
+from typing import Final
+
 from .action_receipts import sha256_hex
 
 __all__ = [
-    "AUTHORING_VERDICT_KEY_PREFIX",
     "CLARIFICATION_RESPONSE_KEY_PREFIX",
     "IDEMPOTENCY_KEY_MAX_LENGTH",
+    "ResumeIntent",
     "authoring_verdict_action_key",
     "clarification_response_action_key",
     "default_cancel_key",
@@ -40,6 +44,7 @@ __all__ = [
     "permission_request_action_key",
     "permission_response_action_key",
     "permission_response_applied_action_key",
+    "resume_intent",
     "thread_create_action_key",
 ]
 
@@ -54,8 +59,44 @@ keeps an unbounded header out of a durable uniqueness constraint.
 CLARIFICATION_RESPONSE_KEY_PREFIX = "clarification-response:"
 """Prefix the clarification restart-recovery sweep matches unapplied rows by."""
 
-AUTHORING_VERDICT_KEY_PREFIX = "authoring-verdict:"
-"""Prefix that tells a verdict resume from the other resumes on its wire verb."""
+_AUTHORING_VERDICT_KEY_PREFIX = "authoring-verdict:"
+"""Prefix that tells a verdict resume from the other resumes on its wire verb.
+
+Private: no query matches it, and the one reader that has to recognise it reads
+it through :func:`resume_intent`.
+"""
+
+
+class ResumeIntent(StrEnum):
+    """What one accepted ``resume`` answers, as its journal key records it.
+
+    Unrelated answers share the ``resume`` wire verb and the ``RESUME`` control
+    action, and each has a settlement owner of its own. The readable journal key
+    is the only durable record of which answer a row holds, so it is read into a
+    typed member exactly once, here, rather than re-derived from a string prefix
+    by every owner that has to tell them apart.
+    """
+
+    CLARIFICATION = "clarification"
+    AUTHORING_VERDICT = "authoring_verdict"
+
+
+_RESUME_INTENTS: Final[tuple[tuple[str, ResumeIntent], ...]] = (
+    (CLARIFICATION_RESPONSE_KEY_PREFIX, ResumeIntent.CLARIFICATION),
+    (_AUTHORING_VERDICT_KEY_PREFIX, ResumeIntent.AUTHORING_VERDICT),
+)
+
+
+def resume_intent(idempotency_key: str) -> ResumeIntent | None:
+    """Return what a resume's journal key says it answers, or ``None``.
+
+    ``None`` means the key belongs to no resume this policy knows: the row is
+    not one of the answers above, so no settlement owner may claim it.
+    """
+    for prefix, intent in _RESUME_INTENTS:
+        if idempotency_key.startswith(prefix):
+            return intent
+    return None
 
 
 def default_cancel_key(thread_id: str) -> str:
@@ -116,4 +157,4 @@ def permission_response_applied_action_key(request_id: str) -> str:
 
 def authoring_verdict_action_key(proposal_id: str) -> str:
     """Return the request-level journal key for one document-gate verdict."""
-    return f"{AUTHORING_VERDICT_KEY_PREFIX}{proposal_id}"
+    return f"{_AUTHORING_VERDICT_KEY_PREFIX}{proposal_id}"

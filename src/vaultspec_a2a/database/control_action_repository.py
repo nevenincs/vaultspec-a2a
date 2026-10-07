@@ -52,7 +52,6 @@ __all__ = [
     "get_control_action_by_idempotency_key",
     "get_latest_control_action",
     "get_or_create_control_action",
-    "get_unapplied_control_actions",
     "get_writer_action",
     "has_live_queued_continuation_lease",
     "idempotency_key_admitted",
@@ -453,26 +452,6 @@ async def get_latest_control_action(
             ).value
         )
     return (await session.execute(stmt.limit(1))).scalar_one_or_none()
-
-
-async def get_unapplied_control_actions(
-    session: AsyncSession, *, idempotency_key_prefix: str
-) -> Sequence[ControlActionModel]:
-    """Return every unapplied action whose idempotency key starts with the prefix."""
-    return (
-        (
-            await session.execute(
-                select(ControlActionModel).where(
-                    ControlActionModel.idempotency_key.like(
-                        f"{idempotency_key_prefix}%"
-                    ),
-                    ControlActionModel.applied_at.is_(None),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
 
 
 def select_recoverable_actions(

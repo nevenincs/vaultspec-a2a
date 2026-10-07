@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from ..database import list_non_terminal_threads
 from ..domain_config import domain_config
 from ..thread.enums import ThreadStatus
+from .pause import reconcile_run_pause
 from .recovery_authority import (
     PROMOTION_OWNED_CONDITIONS,
     RecoveryRequest,
@@ -27,7 +28,17 @@ async def reconcile_threads_on_startup(
     session: AsyncSession,
     checkpointer: Checkpointer,
 ) -> dict[str, int]:
-    """Request bounded checkpoint settlement before any worker demand gate."""
+    """Request bounded checkpoint settlement before any worker demand gate.
+
+    Each run's pause is re-projected BEFORE its checkpoint is reconciled. The
+    nudge that would have recorded a pause can be lost with the process that was
+    serving the run, which leaves a parked run reading ``running``; checkpoint
+    reconciliation reads that as a writer that died and elects ``reconciling``,
+    after which the re-dispatch sweep sends the run's accepted work to a worker
+    again while a human is still answering its question. Reading the pause off
+    the checkpoint first is what stops that: a run that reads ``input_required``
+    is explicitly left alone by the election below.
+    """
     rows = await list_non_terminal_threads(session)
     thread_ids = [row.id for row in rows]
     await session.commit()
@@ -40,6 +51,9 @@ async def reconcile_threads_on_startup(
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
             break
+        await reconcile_run_pause(
+            session, thread_id=thread_id, checkpointer=checkpointer
+        )
         observed = await reconcile_run_checkpoint(
             session,
             checkpointer,

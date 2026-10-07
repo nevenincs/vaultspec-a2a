@@ -298,3 +298,52 @@ def test_a_description_is_bounded_to_the_contract_length() -> None:
     trimmed = optional_description("d" * (MAX_TEXT_LENGTH + 1))
     assert trimmed is not None
     assert len(trimmed) == MAX_TEXT_LENGTH
+
+
+def _record_with_digest(digest: str) -> dict[str, Any]:
+    """Return a real persisted record whose stored digest is replaced verbatim."""
+    record = _record_carrying(_legal_lane())
+    record["digest"] = digest
+    return record
+
+
+def test_a_non_ascii_stored_digest_is_refused_in_this_modules_own_dialect() -> None:
+    """A digest is hex text, and a record whose digest is not gets one refusal.
+
+    The stored value is attacker-reachable persisted state, and the constant-time
+    comparison this boundary seals its record with raises outright on non-ASCII
+    text rather than reporting a mismatch. A raise there is not a refusal: it
+    escapes this module's typed dialect and reaches the caller as an unhandled
+    error from a comparison, so the record's own grammar refuses it first.
+    """
+    with pytest.raises(TeamSelectionError, match="persisted team selection is invalid"):
+        frozen_team_selection_from_record(_record_with_digest("é" * 64))
+
+
+@pytest.mark.parametrize(
+    "digest",
+    (
+        "A" * 64,
+        "a" * 63,
+        "a" * 65,
+        "sha256:" + "a" * 64,
+        "",
+        "  ",
+    ),
+)
+def test_a_stored_digest_outside_the_sealed_grammar_is_refused(digest: str) -> None:
+    """Only the bare lowercase hex the sealing helper produces is admitted."""
+    with pytest.raises(TeamSelectionError, match="persisted team selection is invalid"):
+        frozen_team_selection_from_record(_record_with_digest(digest))
+
+
+def test_a_well_formed_digest_for_other_contents_still_reports_a_mismatch() -> None:
+    """Narrowing the grammar must not swallow the mismatch it exists beside.
+
+    A digest of the right shape and the wrong value is the integrity failure this
+    boundary was built for, and it keeps its own distinct refusal.
+    """
+    with pytest.raises(
+        TeamSelectionError, match="persisted team selection digest does not match"
+    ):
+        frozen_team_selection_from_record(_record_with_digest("0" * 64))

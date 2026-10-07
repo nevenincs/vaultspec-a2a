@@ -21,6 +21,14 @@ __all__ = ["frozen_team_selection_from_record"]
 # Role-level fields a compiled assignment carries and a persisted lane never does.
 _ROLE_LEVEL_FIELDS = frozenset({"fallbacks", "provenance"})
 
+# The exact text :func:`digest_record` produces: a bare lowercase hex SHA-256.
+# Declared on the record rather than checked beside the comparison because the
+# comparison cannot defend itself - the constant-time primitive REFUSES to
+# compare non-ASCII text and raises, which would leave this boundary's caller
+# holding an unhandled error from a checksum instead of a typed refusal. A stored
+# digest is persisted state, so the grammar is what makes that unrepresentable.
+_SEALED_DIGEST = r"^[a-f0-9]{64}$"
+
 
 class _PersistedTeamSelection(BaseModel):
     """The closed schema-v1 record a run's metadata stores for its selection."""
@@ -28,7 +36,7 @@ class _PersistedTeamSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[1]
-    digest: str
+    digest: str = Field(pattern=_SEALED_DIGEST)
     selection: FrozenLaneAssignment
     overrides: dict[str, FrozenLaneAssignment]
     fallbacks: tuple[FrozenLaneAssignment, ...] = Field(max_length=MAX_FALLBACKS)

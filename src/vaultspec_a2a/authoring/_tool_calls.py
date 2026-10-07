@@ -19,12 +19,20 @@ from weakref import WeakValueDictionary
 
 import aiosqlite
 
-from ..desktop._filesystem_authority import path_is_link_like
+from ..desktop._platform_acl import harden_credential_path, path_is_link_like
 from ._ids import derive_idempotency_key
 from ._journal_index import JournalIndex, closed_marker_name, journal_name
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
+
+__all__ = [
+    "ToolCallJournal",
+    "private_tool_call_journal_path",
+    "retire_run_tool_calls",
+    "tool_call_journal_directories",
+    "tool_call_journal_path",
+]
 
 _OWNER_SCHEMA = (
     "CREATE TABLE IF NOT EXISTS owner ("
@@ -75,7 +83,7 @@ def private_tool_call_journal_path(run_id: str, call_scope: str) -> Path:
         metadata = directory.stat()
         if metadata.st_uid != os.getuid():
             raise ValueError("private authoring journal must be owned by the service")
-        directory.chmod(0o700)
+        harden_credential_path(directory)
     return path
 
 

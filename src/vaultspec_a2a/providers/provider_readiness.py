@@ -14,6 +14,7 @@ from ._factory_commands import (
     classify_provider_command,
     kimi_temporary_model_configuration_reason,
 )
+from .provider_catalog import HealthState
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -22,11 +23,20 @@ if TYPE_CHECKING:
     from ..context.harness import HarnessReadiness
 
 __all__ = [
+    "ProviderConfiguration",
+    "ProviderReadiness",
     "probe_harness_ready",
+    "probe_provider_configuration",
     "probe_provider_readiness",
 ]
 
 logger = logging.getLogger(__name__)
+
+#: Lanes launched as a native subprocess: the desktop profile refuses them, and
+#: each is ready only once its launch command resolves.
+_COMMAND_LANES = frozenset(
+    {Provider.CLAUDE, Provider.CODEX, Provider.ZAI, Provider.KIMI}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,30 +48,39 @@ class ProviderReadiness:
     reason: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderConfiguration:
+    """Whether one lane's own settings are present. Never holds a secret.
+
+    ``state`` is ``AVAILABLE`` when the settings the lane reads are present,
+    ``UNAVAILABLE`` when they are missing or contradict each other, and
+    ``UNKNOWN`` when the lane configures itself from state this probe does not
+    read, such as an ambient or persisted CLI login. ``reason`` is set exactly
+    when the state is ``UNAVAILABLE``, and names what is missing.
+
+    Presence is all this answers. A configured lane can still fail
+    authentication, and serving it also takes its completed-turn proof and
+    binary identity, which are judged elsewhere.
+    """
+
+    state: HealthState
+    reason: str | None = None
+
+
 def _has_text(value: str | None) -> bool:
     return bool(value and value.strip())
 
 
-def _api_key_readiness(provider: Provider, key: str | None) -> ProviderReadiness:
-    if _has_text(key):
-        return ProviderReadiness(provider=provider, ready=True)
-    name = "OpenAI" if provider == Provider.OPENAI else "Zhipu"
-    return ProviderReadiness(
-        provider=provider, ready=False, reason=f"no {name} API key configured"
-    )
+def _present(present: bool, missing: str) -> ProviderConfiguration:
+    if present:
+        return ProviderConfiguration(state=HealthState.AVAILABLE)
+    return ProviderConfiguration(state=HealthState.UNAVAILABLE, reason=missing)
 
 
-def _zai_readiness() -> ProviderReadiness:
-    if not _has_text(settings.zai_auth_token):
-        return ProviderReadiness(
-            provider=Provider.ZAI, ready=False, reason="no Z.ai auth token configured"
-        )
-    return _command_readiness(Provider.ZAI)
-
-
-def _kimi_readiness() -> ProviderReadiness:
-    # Temporary definitions are checked before any command is resolved. A
-    # missing definition remains eligible for persisted-config/device-session mode.
+def _kimi_configuration() -> ProviderConfiguration:
+    # Without a temporary definition Kimi runs on its persisted config or device
+    # session, which this probe cannot read; an explicit home names where that
+    # state lives. Only a partial definition is a refusal.
     key = settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
     reason = kimi_temporary_model_configuration_reason(
         kimi_api_key=key,
@@ -71,19 +90,48 @@ def _kimi_readiness() -> ProviderReadiness:
         kimi_temporary_model_capabilities=settings.kimi_temporary_model_capabilities,
     )
     if reason is not None:
-        return ProviderReadiness(provider=Provider.KIMI, ready=False, reason=reason)
-    return _command_readiness(Provider.KIMI)
+        return ProviderConfiguration(state=HealthState.UNAVAILABLE, reason=reason)
+    if _has_text(key) or _has_text(settings.kimi_code_home):
+        return ProviderConfiguration(state=HealthState.AVAILABLE)
+    return ProviderConfiguration(state=HealthState.UNKNOWN)
+
+
+def probe_provider_configuration(provider: Provider) -> ProviderConfiguration:
+    """Report whether ``provider``'s own settings are present.
+
+    Readiness gates on this answer and catalog discovery serves it as the lane's
+    ``configured`` axis, so neither restates what configured means for a lane
+    read here. Only presence is read: no credential value leaves this function,
+    and nothing is resolved or spawned. A lane whose configuration lives outside
+    these settings answers ``UNKNOWN``.
+    """
+    if provider == Provider.OPENAI:
+        return _present(
+            _has_text(settings.openai_api_key), "no OpenAI API key configured"
+        )
+    if provider == Provider.ZHIPU:
+        return _present(
+            _has_text(settings.zhipu_api_key), "no Zhipu API key configured"
+        )
+    if provider == Provider.ZAI:
+        return _present(
+            _has_text(settings.zai_auth_token), "no Z.ai auth token configured"
+        )
+    if provider == Provider.KIMI:
+        return _kimi_configuration()
+    return ProviderConfiguration(state=HealthState.UNKNOWN)
 
 
 def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
     """Report whether ``provider`` is runnable without instantiating anything.
 
     Profile execution authority, then presence/resolvability (never quota
-    headroom): a configured credential and a resolvable command. Credentials and
-    commands are workspace-independent, so no workspace is taken. The reason
-    string is safe - it names what is missing, never a secret value.
+    headroom): the lane's configuration (:func:`probe_provider_configuration`)
+    and a resolvable command. Credentials and commands are
+    workspace-independent, so no workspace is taken. The reason string is safe -
+    it names what is missing, never a secret value.
     """
-    if provider in (Provider.CLAUDE, Provider.CODEX, Provider.ZAI, Provider.KIMI):
+    if provider in _COMMAND_LANES:
         reason = native_execution_refusal_reason()
         if reason is not None:
             return ProviderReadiness(provider=provider, ready=False, reason=reason)
@@ -93,24 +141,20 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
         # server is reachable or that it can satisfy the completion floor.
         return ProviderReadiness(provider=provider, ready=True)
 
-    if provider in (Provider.CLAUDE, Provider.CODEX):
+    # A missing configuration is refused before any command is resolved.
+    configuration = probe_provider_configuration(provider)
+    if configuration.reason is not None:
+        return ProviderReadiness(
+            provider=provider, ready=False, reason=configuration.reason
+        )
+
+    if provider in _COMMAND_LANES:
         # This layer does not inspect CLI authentication. Claude inherits ambient
-        # auth; Codex uses its persisted session. Both require a resolvable command.
+        # auth; Codex uses its persisted session. Each needs a resolvable command.
         return _command_readiness(provider)
 
     if provider in (Provider.OPENAI, Provider.ZHIPU):
-        key = (
-            settings.openai_api_key
-            if provider == Provider.OPENAI
-            else settings.zhipu_api_key
-        )
-        return _api_key_readiness(provider, key)
-
-    if provider == Provider.ZAI:
-        return _zai_readiness()
-
-    if provider == Provider.KIMI:
-        return _kimi_readiness()
+        return ProviderReadiness(provider=provider, ready=True)
 
     return ProviderReadiness(
         provider=provider, ready=False, reason=f"unsupported provider {provider.value}"

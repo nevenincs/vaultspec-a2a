@@ -23,6 +23,7 @@ can produce.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from ..workspace.environment import resolve_env_vars
@@ -43,6 +44,7 @@ from .provider_catalog import (
     MAX_MODELS,
     AuthenticationState,
     ControlKind,
+    HealthState,
     ModelCatalogEntry,
     NativeControl,
     NativeControlOption,
@@ -118,11 +120,25 @@ async def discover_antigravity_catalog(
     cli_path: str | None = None,
     home: str | None = None,
 ) -> ProviderCatalogDiscovery:
-    """Discover the Antigravity catalog by listing models with the real CLI."""
+    """Discover the Antigravity catalog by listing models with the real CLI.
+
+    The lane has no credential setting, so an installed CLI is its whole
+    configuration: the one resolution here is also the ``configured`` evidence.
+    """
     executable = resolve_antigravity_command(cli_path=cli_path, home=home)
     if executable is None:
-        return unavailable_discovery(key, reason="Antigravity CLI is not installed")
+        return unavailable_discovery(
+            key,
+            reason="Antigravity CLI is not installed",
+            configured=HealthState.UNAVAILABLE,
+        )
+    listed = await _list_models(key, workspace_root, executable)
+    return replace(listed, configured=HealthState.AVAILABLE)
 
+
+async def _list_models(
+    key: ProviderCatalogKey, workspace_root: Path, executable: Path
+) -> ProviderCatalogDiscovery:
     try:
         process = await spawn_acp_process(
             [str(executable), "models"],

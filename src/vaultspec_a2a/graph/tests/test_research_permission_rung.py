@@ -8,8 +8,9 @@ real ``AsyncSqliteSaver`` to prove the rung works anyway - two branches park on
 their own requests, each is answered by the interrupt it belongs to, both
 finish - and that an autonomous run still asks nobody.
 
-The researcher lane is a scripted in-process model, as every other graph test
-of this topology uses; the permission seam it drives is the production
+The researcher lane is a scripted in-process model that asks for each branch it
+serves; every other role runs on the deterministic lane through the real
+provider factory. The permission seam the researcher drives is the production
 callback, not a stand-in for one.
 """
 
@@ -20,11 +21,11 @@ from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 from langchain_core.language_models import BaseChatModel
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.types import Command, Interrupt
 
+from ...providers import ProviderFactory
 from ...team.team_config import ResearchThreadSpec, load_agent_config, load_team_config
 from ..compiler import compile_team_graph
 from ..protocols import ProviderFactoryProtocol
@@ -103,23 +104,30 @@ class _PermissionAskingResearcher(BaseChatModel):
 
 
 class _ResearcherPermissionFactory:
-    """Serve the asking lane to the researcher role and a stub to the rest."""
+    """Serve the asking lane to the researcher and the real factory's to the rest."""
 
     def __init__(self, *, calls_per_turn: int = 1) -> None:
         self._calls_per_turn = calls_per_turn
+        self._factory = ProviderFactory()
 
     def create(
         self,
         provider: Any,
         *,
-        model: Any | None = None,
+        model: Any,
         agent_config: Any | None = None,
         workspace_root: Any | None = None,
         **kwargs: Any,
     ) -> BaseChatModel:
         if getattr(agent_config, "role", None) == "researcher":
             return _PermissionAskingResearcher(calls_per_turn=self._calls_per_turn)
-        return FakeListChatModel(responses=["stub response"])
+        return self._factory.create(
+            provider,
+            model=model,
+            agent_config=agent_config,
+            workspace_root=workspace_root,
+            **kwargs,
+        )
 
 
 class _FakeSubmitter:

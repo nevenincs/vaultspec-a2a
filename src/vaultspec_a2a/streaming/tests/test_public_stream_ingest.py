@@ -12,7 +12,8 @@ arrangement are what a client depends on:
   to make any of it work.
 
 Driven against real compiled graphs, a real checkpointer and the real
-aggregator.
+aggregator; the model text comes from the deterministic lane, built through the
+real provider factory.
 """
 
 from __future__ import annotations
@@ -28,15 +29,14 @@ import textwrap
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import pytest
-from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START
 from langgraph.types import interrupt
 
-from ...graph.enums import ToolCallStatus
+from ...graph.enums import Provider, ToolCallStatus
 from ...graph.events import (
     AgentStatus,
     ArtifactUpdate,
@@ -47,11 +47,13 @@ from ...graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
+from ...providers import ProviderFactory
+from ...team.team_config import load_agent_config
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import EventAggregator
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
+    from collections.abc import Awaitable, Callable, Coroutine
 
     from ..types import SequencedEvent, StreamableGraph
 
@@ -67,29 +69,41 @@ def write_report(file_path: str) -> str:
     return f"wrote {file_path}"
 
 
-async def _speaking_node(state: _State) -> dict[str, Any]:
-    del state
-    writer = get_stream_writer()
-    writer({"content": "considering the request"})
-    model = GenericFakeChatModel(messages=iter([AIMessage(content="the answer text")]))
-    await model.ainvoke([HumanMessage(content="answer")])
-    await write_report.ainvoke(
-        {
-            "name": "write_report",
-            "args": {"file_path": "/work/report.md"},
-            "id": "call_REPORT",
-            "type": "tool_call",
+def _speaking_node(
+    replies: list[str],
+) -> Callable[[_State], Awaitable[dict[str, Any]]]:
+    """A node that thinks, answers, and writes a report, keeping its answer."""
+
+    async def node(state: _State) -> dict[str, Any]:
+        del state
+        writer = get_stream_writer()
+        writer({"content": "considering the request"})
+        model = ProviderFactory().create(
+            Provider.DETERMINISTIC,
+            model="deterministic",
+            agent_config=load_agent_config("vaultspec-researcher"),
+        )
+        answer = await model.ainvoke([HumanMessage(content="answer")])
+        replies.append(str(answer.content))
+        await write_report.ainvoke(
+            {
+                "name": "write_report",
+                "args": {"file_path": "/work/report.md"},
+                "id": "call_REPORT",
+                "type": "tool_call",
+            }
+        )
+        return {
+            "note": "spoken",
+            "current_plan": [{"content": "ship the report", "status": "pending"}],
         }
-    )
-    return {
-        "note": "spoken",
-        "current_plan": [{"content": "ship the report", "status": "pending"}],
-    }
+
+    return node
 
 
-def _full_surface_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
+def _full_surface_graph(saver: AsyncSqliteSaver, replies: list[str]) -> StreamableGraph:
     builder = new_state_graph(_State)
-    add_test_node(builder, "speaker", _speaking_node)
+    add_test_node(builder, "speaker", _speaking_node(replies))
     builder.add_edge(START, "speaker")
     builder.add_edge("speaker", END)
     return cast("StreamableGraph", compile_test_graph(builder, checkpointer=saver))
@@ -105,6 +119,7 @@ async def _drain(queue: Any) -> list[SequencedEvent]:
 @pytest.mark.asyncio
 async def test_a_run_still_reports_every_family_of_frame_it_used_to() -> None:
     """The public stream plus its callbacks carry the whole wire surface."""
+    replies: list[str] = []
     async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
         await saver.setup()
         aggregator = EventAggregator()
@@ -116,7 +131,7 @@ async def test_a_run_still_reports_every_family_of_frame_it_used_to() -> None:
             ingest(
                 thread_id="thread-surface",
                 agent_id="supervisor",
-                graph=_full_surface_graph(saver),
+                graph=_full_surface_graph(saver, replies),
                 graph_input={"note": ""},
                 config={"configurable": {"thread_id": "thread-surface"}},
             ),
@@ -127,7 +142,8 @@ async def test_a_run_still_reports_every_family_of_frame_it_used_to() -> None:
     events = [sequenced.event for sequenced in await _drain(queue)]
 
     text = "".join(e.content for e in events if isinstance(e, MessageChunk))
-    assert "the answer text" in text
+    assert len(replies) == 1
+    assert replies[0] in text
 
     thoughts = [e.content for e in events if isinstance(e, ThoughtChunk)]
     assert "considering the request" in thoughts

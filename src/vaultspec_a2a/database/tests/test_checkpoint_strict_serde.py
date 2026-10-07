@@ -26,7 +26,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.serde.event_hooks import register_serde_event_listener
 from langgraph.graph import END, START
@@ -34,6 +33,7 @@ from langgraph.types import Command
 
 from ...graph.compiler import compile_team_graph
 from ...graph.tests.conftest import deterministic_model_assignment
+from ...providers import ProviderFactory
 from ...team.team_config import (
     ResearchThreadSpec,
     load_agent_config,
@@ -64,7 +64,7 @@ if TYPE_CHECKING:
 
 _POSTGRES_URL_ENV = "VAULTSPEC_A2A_TEST_POSTGRES_URL"
 
-_PRESET = "vaultspec-adr-research-mock"
+_PRESET = "vaultspec-adr-research-deterministic"
 
 
 @contextmanager
@@ -104,26 +104,11 @@ class _Submitter:
         return f"prop-{phase}"
 
 
-class _PassingFactory:
-    """Every lane replies ``PASS`` so the run reaches its first human gate."""
-
-    def create(
-        self,
-        provider: Any,
-        *,
-        model: Any | None = None,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
-        **kwargs: Any,
-    ) -> FakeListChatModel:
-        del provider, model, agent_config, workspace_root, kwargs
-        return FakeListChatModel(responses=["PASS"])
-
-
 def _research_graph(saver: Checkpointer) -> Any:
-    """Compile the shipped research preset over *saver*.
+    """Compile the shipped research preset over *saver* on the deterministic lane.
 
-    ``Any`` because the compiler's supported surface is invoke-and-inspect,
+    The lane's reviewer passes every draft, so the run reaches its first human
+    gate. ``Any`` because the compiler's supported surface is invoke-and-inspect,
     and reading a parked run's state back is what this asks of it.
     """
     team = load_team_config(_PRESET)
@@ -135,7 +120,7 @@ def _research_graph(saver: Checkpointer) -> Any:
         team_config=team,
         agent_configs={w.agent_id: load_agent_config(w.agent_id) for w in team.workers},
         checkpointer=saver,
-        provider_factory=_PassingFactory(),
+        provider_factory=ProviderFactory(),
         proposal_submitter=_Submitter(),
         model_assignment=deterministic_model_assignment(team),
     )

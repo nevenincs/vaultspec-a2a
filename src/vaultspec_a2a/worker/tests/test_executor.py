@@ -35,6 +35,7 @@ from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...domain_config import domain_config
 from ...graph.compiler import compile_team_graph
+from ...graph.tests.conftest import deterministic_model_assignment
 from ...ipc.schemas import DispatchRequest
 from ...providers import ProviderCondition
 from ...providers.acp_exceptions import AcpPromptError
@@ -2448,26 +2449,6 @@ class _LoopReviewFactory:
         return FakeListChatModel(responses=[f"{agent_id} did its part"])
 
 
-def _loop_assignment(team: Any) -> dict[str, FrozenLaneAssignment]:
-    lane = FrozenLaneAssignment.model_validate(
-        {
-            "schema_version": 1,
-            "provider_id": "deterministic",
-            "execution_mode": "in-process-deterministic",
-            "catalog_revision": "test-revision",
-            "entry_id": "test-entry",
-            "model_name": "deterministic",
-            "controls": [],
-            "defaulted_control_ids": [],
-            "provenance": {"selection_source": "team_selection"},
-        }
-    )
-    return {
-        "__supervisor__": lane,
-        **{ref.agent_id: lane for ref in team.workers},
-    }
-
-
 def _loop_turn_input(
     request: DispatchRequest, *, is_first_ingest: bool
 ) -> dict[str, Any]:
@@ -2509,7 +2490,7 @@ async def test_a_follow_up_turn_gets_the_whole_loop_ceiling() -> None:
         agent_configs={w.agent_id: load_agent_config(w.agent_id) for w in team.workers},
         checkpointer=InMemorySaver(),
         provider_factory=_LoopReviewFactory(),
-        model_assignment=_loop_assignment(team),
+        model_assignment=deterministic_model_assignment(team),
     )
     config: Any = {"configurable": {"thread_id": "loop-turns"}}
 

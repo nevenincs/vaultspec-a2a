@@ -31,12 +31,12 @@ from ...control.event_handlers import (
     _handle_terminal_event,
     relay_event,
 )
-from ...control.permission_options import decode_allowed_options
 from ...database import (
     ThreadStatusElectionOutcome,
     acquire_control_action_lease,
     create_control_action,
     create_thread,
+    decode_allowed_options,
     elect_thread_status,
     get_permission_request,
     get_thread,

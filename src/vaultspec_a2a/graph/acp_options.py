@@ -28,12 +28,15 @@ never see ``None`` leak into a set of "valid" ids, and never need a bare
 payload from a subprocess.
 """
 
-from typing import cast
+from typing import Final, cast
 
 from .enums import PermissionOptionKind
 
 __all__ = [
+    "APPROVAL_OPTIONS",
+    "APPROVE_OPTION_ID",
     "OPTION_ID_KEYS",
+    "REJECT_OPTION_ID",
     "is_approval",
     "is_rejection",
     "is_remembering",
@@ -48,6 +51,17 @@ __all__ = [
 
 # Accepted spellings of the option identity field, in precedence order.
 OPTION_ID_KEYS: tuple[str, ...] = ("optionId", "option_id")
+
+APPROVE_OPTION_ID: Final = "approve"
+REJECT_OPTION_ID: Final = "reject"
+
+# The answers a plan or document decision accepts. An approval gate's interrupt
+# names its request but offers no choices, so this pair is the whole offer; each
+# surface that shows it supplies its own display names.
+APPROVAL_OPTIONS: Final[tuple[dict[str, str], ...]] = (
+    {"option_id": APPROVE_OPTION_ID, "kind": PermissionOptionKind.ALLOW_ONCE.value},
+    {"option_id": REJECT_OPTION_ID, "kind": PermissionOptionKind.REJECT_ONCE.value},
+)
 
 _DECLARED_KINDS: dict[str, PermissionOptionKind] = {
     kind.value: kind for kind in PermissionOptionKind

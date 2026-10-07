@@ -50,6 +50,7 @@ from ..thread.snapshots import (
     ThreadStateData,
     record_repair_posture,
 )
+from .permission_options import pending_option_ids
 
 __all__ = [
     "apply_authoring_completion_check",
@@ -477,7 +478,7 @@ def durable_approval(
         return None, None
     if any(entry.offered is None for entry in plan_approvals):
         return None, None
-    if not plan_approvals[-1].option_ids:
+    if not pending_option_ids(plan_approvals[-1]):
         return None, None
     return ApprovalStatus.PENDING, plan_approvals[-1].request.request_id
 

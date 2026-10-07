@@ -16,8 +16,8 @@ from ...control.clarification_service import (
 from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
 from ...control.repair_transitions import (
-    apply_dispatch_failure,
     apply_repair_transition,
+    record_failed_permission_resume,
 )
 from ...database import (
     create_thread,
@@ -25,7 +25,6 @@ from ...database import (
     get_thread,
     record_permission_request,
 )
-from ...providers.conditions import ProviderCondition
 from ...testing import (
     adopted_spawner,
     capacity_holders,
@@ -39,11 +38,7 @@ from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, RepairStatus, ThreadStatus
-from ...thread.repair_policy import (
-    DISPATCH_FAILED_TRANSITION,
-    RepairPhase,
-    repair_state_for_action,
-)
+from ...thread.repair_policy import RepairPhase, repair_state_for_action
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -120,53 +115,16 @@ async def test_every_action_step_persists_through_the_one_applier(
 
 
 @pytest.mark.asyncio
-async def test_a_failed_dispatch_records_its_reason_and_condition(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    """A dispatch that fails the run persists why, on both durable channels."""
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Failed dispatch",
-            repair_status="healthy",
-        )
-        await seed_create_action(session, thread.id)
-        await session.commit()
-
-    async with session_factory() as session:
-        await apply_dispatch_failure(
-            session,
-            thread.id,
-            failed_status=ThreadStatus.FAILED,
-            reason="the gateway worker is not reachable",
-        )
-        await session.commit()
-
-    async with session_factory() as session:
-        updated = await get_thread(session, thread.id)
-        assert updated is not None
-        assert updated.status == ThreadStatus.FAILED.value
-        assert updated.failure_reason == "the gateway worker is not reachable"
-        # The floor, not a provider member: nothing here reached a provider.
-        assert updated.provider_condition == ProviderCondition.UNKNOWN.value
-        assert updated.repair_reason == "the gateway worker is not reachable"
-        # The status change and the repair transition land together.
-        assert updated.repair_status == DISPATCH_FAILED_TRANSITION.repair_status
-        assert updated.execution_readiness == updated.repair_status
-
-
-@pytest.mark.asyncio
 async def test_an_undelivered_resume_does_not_stamp_a_failure_on_a_live_run(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A run left parked keeps its question, and reports no failure.
 
-    The permission-resume caller passes INPUT_REQUIRED: the resume did not
-    arrive, but the run is still alive and still waiting on its answer. Writing
-    a failure reason or condition here would make a reloading client report a
-    failure that never happened, because both columns are defined as describing
-    a run that FAILED. The account survives on the repair reason instead.
+    The resume did not arrive, but the run is still alive and still waiting on
+    its answer. Writing a failure reason or condition here would make a
+    reloading client report a failure that never happened, because both columns
+    are defined as describing a run that FAILED. The account survives on the
+    repair reason instead.
     """
     async with session_factory() as session:
         thread = await create_thread(
@@ -179,10 +137,9 @@ async def test_an_undelivered_resume_does_not_stamp_a_failure_on_a_live_run(
         await session.commit()
 
     async with session_factory() as session:
-        await apply_dispatch_failure(
+        await record_failed_permission_resume(
             session,
             thread.id,
-            failed_status=ThreadStatus.INPUT_REQUIRED,
             reason="the gateway worker is not reachable",
         )
         await session.commit()
@@ -274,45 +231,6 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
         # pause it is parked on is unchanged.
         assert updated.repair_status == "paused_resumable"
         assert updated.execution_readiness == "paused_resumable"
-
-
-@pytest.mark.asyncio
-async def test_a_reasonless_failure_still_carries_a_condition(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    """A failed run is classified even when the caller supplied no message.
-
-    The condition rides the FAILURE, not the reason. A caller that fails a run
-    without a message must still leave a classified row - otherwise the blank
-    terminal this campaign removes returns through the back door, and a client
-    reloading sees a failed run it cannot branch on.
-    """
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Reasonless failure",
-            repair_status="healthy",
-        )
-        await seed_create_action(session, thread.id)
-        await session.commit()
-
-    async with session_factory() as session:
-        await apply_dispatch_failure(
-            session,
-            thread.id,
-            failed_status=ThreadStatus.FAILED,
-        )
-        await session.commit()
-
-    async with session_factory() as session:
-        updated = await get_thread(session, thread.id)
-        assert updated is not None
-        assert updated.status == ThreadStatus.FAILED.value
-        assert updated.failure_reason is None
-        assert updated.provider_condition == ProviderCondition.UNKNOWN.value
-        # With no account of its own, the repair reason is the transition's.
-        assert updated.repair_reason == DISPATCH_FAILED_TRANSITION.reason
 
 
 async def _parked_permission_run(

@@ -147,6 +147,7 @@ from .permission_repository import (
     actionable_pending_permissions as actionable_pending_permissions,
 )
 from .permission_repository import append_permission_log as append_permission_log
+from .permission_repository import decode_allowed_options as decode_allowed_options
 from .permission_repository import (
     expire_pending_permission_requests as expire_pending_permission_requests,
 )
@@ -324,6 +325,7 @@ __all__ = [
     "count_queued_continuations",
     "create_control_action",
     "create_thread",
+    "decode_allowed_options",
     "delete_thread",
     "due_recovery_attempt_ids",
     "elect_thread_deleting",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -14,8 +14,6 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..control.permission_options import decode_allowed_options
-from ..graph.acp_options import valid_option_ids
 from ..thread.enums import (
     TERMINAL_STATUS_VALUES,
     InterruptType,
@@ -31,6 +29,7 @@ __all__ = [
     "PendingPermission",
     "actionable_pending_permissions",
     "append_permission_log",
+    "decode_allowed_options",
     "expire_pending_permission_requests",
     "get_pending_permission_requests",
     "get_permission_logs_by_thread",
@@ -59,20 +58,6 @@ class PendingPermission:
     request: PermissionRequestModel
     offered: list[object] | None
     checkpoint_unavailable: bool
-
-    @property
-    def option_ids(self) -> set[str]:
-        """The option ids a response to this request could name."""
-        return valid_option_ids(self.offered)
-
-    @property
-    def actionable(self) -> bool:
-        """Whether a response could still be addressed to this request.
-
-        It must offer a usable option, and its run must still have checkpoint
-        truth to resume from.
-        """
-        return bool(self.option_ids) and not self.checkpoint_unavailable
 
 
 _OUTSTANDING_PERMISSION_STATUSES: tuple[str, str] = (
@@ -144,6 +129,23 @@ async def record_permission_request(
     return await save_model(session, model)
 
 
+def decode_allowed_options(raw_options_json: str | None) -> list[object] | None:
+    """Decode the offered options of a durable permission row.
+
+    An absent column offered nothing, so it decodes to an empty list. A column
+    that is present but empty, malformed JSON, or not a JSON list is unreadable
+    and decodes to ``None``, so a caller that must fail closed on a broken row
+    can tell it apart from a row that offered nothing.
+    """
+    if raw_options_json is None:
+        return []
+    try:
+        decoded: object = json.loads(raw_options_json)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return cast("list[object]", decoded) if isinstance(decoded, list) else None
+
+
 async def get_permission_request(
     session: AsyncSession, request_id: str
 ) -> PermissionRequestModel | None:
@@ -201,10 +203,11 @@ async def actionable_pending_permissions(
 
     Every live request is returned with its options already read, and the
     surfaces keep their own stance on the ones that are not actionable: the team
-    status offers only ``actionable`` requests, while the run status degrades on
-    an unreadable one and the listing reads plan approvals alone. The run's
-    recorded checkpoint posture is judged by the team status only, because the
-    run status and the listing read their checkpoint afresh.
+    status offers only requests that offer a usable option on a run with
+    checkpoint truth, while the run status degrades on an unreadable one and the
+    listing reads plan approvals alone. The run's recorded checkpoint posture is
+    judged by the team status only, because the run status and the listing read
+    their checkpoint afresh.
     """
     stmt = (
         select(PermissionRequestModel, ThreadModel.repair_status)

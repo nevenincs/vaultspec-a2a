@@ -11,7 +11,12 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from ..database import read_latest_checkpoint
 from ..domain_config import domain_config
-from ..graph.acp_options import option_display_name, option_id_of, option_kind
+from ..graph.acp_options import (
+    APPROVAL_OPTIONS,
+    option_display_name,
+    option_id_of,
+    option_kind,
+)
 from ..graph.enums import AgentLifecycleState, PermissionOptionKind, PermissionType
 from ..thread import InterruptType, live_interrupts
 
@@ -225,17 +230,10 @@ async def _emit_approval_request(
 
 def _approval_options(subject: str) -> list[dict[str, Any]]:
     """Return the stable approve/reject pair for a plan or document decision."""
+    approve, reject = APPROVAL_OPTIONS
     return [
-        {
-            "option_id": "approve",
-            "name": f"Approve {subject}",
-            "kind": PermissionOptionKind.ALLOW_ONCE,
-        },
-        {
-            "option_id": "reject",
-            "name": f"Reject — Revise {subject}",
-            "kind": PermissionOptionKind.REJECT_ONCE,
-        },
+        {**approve, "name": f"Approve {subject}"},
+        {**reject, "name": f"Reject — Revise {subject}"},
     ]
 
 

@@ -1281,14 +1281,13 @@ def _worker_bridge_into(app: FastAPI) -> WorkerBridge:
 
 
 class TestNoFailedRunPersistsWithoutACondition:
-    """The invariant, swept across the two paths that fail a run without ingest.
+    """The invariant, asserted on the path that fails a run without ingest.
 
     A failed run carrying no condition is the blank terminal this campaign
-    exists to remove: a client sees ``failed`` and has nothing to act on. The
-    two paths that reach that state without a provider ever being engaged are a
-    dispatch that never left the gateway and a worker rejection before the graph
-    ran, so both are asserted here rather than only the ingest path that already
-    had coverage.
+    exists to remove: a client sees ``failed`` and has nothing to act on. A
+    worker rejection before the graph ran reaches that state without a provider
+    ever being engaged, so it is asserted here rather than only the ingest path
+    that already had coverage.
     """
 
     @pytest.mark.asyncio(loop_scope="function")
@@ -1348,76 +1347,3 @@ class TestNoFailedRunPersistsWithoutACondition:
             in record.getMessage()
             for record in caplog.records
         )
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_a_dispatch_failure_persists_a_condition(
-        self,
-        session_factory: SessionFactory,
-    ) -> None:
-        """A dispatch that never left the gateway fails the run with a condition."""
-        from ...control.repair_transitions import apply_dispatch_failure
-        from ...database.models import ThreadModel
-        from ...thread.enums import ThreadStatus
-
-        async with session_factory() as session:
-            await seed_accepted_thread(
-                session, thread_id="t-dispatch-failure", status="submitted"
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            await apply_dispatch_failure(
-                session,
-                "t-dispatch-failure",
-                failed_status=ThreadStatus.FAILED,
-                reason="the gateway worker is not reachable",
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            row = await session.get(ThreadModel, "t-dispatch-failure")
-            assert row is not None
-            assert row.status == "failed"
-            assert row.provider_condition is not None
-            assert row.failure_reason
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_an_undelivered_resume_is_not_a_failed_run_and_records_none(
-        self,
-        session_factory: SessionFactory,
-    ) -> None:
-        """The honest exception to the sweep above, asserted rather than glossed.
-
-        An undelivered permission resume settles the run to INPUT_REQUIRED: the
-        answer did not arrive, but the run is alive and still parked on its
-        question. It is NOT a failed run, so it correctly persists no condition
-        and no failure reason - stamping either would make a reloading client
-        report a failure that never happened. Its account survives on the repair
-        reason, which a still-live run can honestly carry.
-        """
-        from ...control.repair_transitions import apply_dispatch_failure
-        from ...database.models import ThreadModel
-        from ...thread.enums import ThreadStatus
-
-        async with session_factory() as session:
-            await seed_accepted_thread(
-                session, thread_id="t-undelivered-resume", status="submitted"
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            await apply_dispatch_failure(
-                session,
-                "t-undelivered-resume",
-                failed_status=ThreadStatus.INPUT_REQUIRED,
-                reason="the gateway worker is not reachable",
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            row = await session.get(ThreadModel, "t-undelivered-resume")
-            assert row is not None
-            assert row.status == ThreadStatus.INPUT_REQUIRED.value
-            assert row.provider_condition is None
-            assert row.failure_reason is None
-            assert row.repair_reason == "the gateway worker is not reachable"

@@ -1,4 +1,4 @@
-"""Tests for the durable permission-column adapter.
+"""Tests for the control layer's policy over a durable permission row's options.
 
 ``decode_allowed_options`` owns the one JSON decode of the
 ``allowed_options_json`` column; the valid ids and the rejection verdict are
@@ -20,14 +20,11 @@ import json
 
 import pytest
 
+from ...database import decode_allowed_options
 from ...graph.acp_options import valid_option_ids
 from ...thread.enums import PermissionRequestStatus
 from ...thread.permission_fsm import compute_permission_resolution_effects
-from ..permission_options import (
-    answer_is_rejection,
-    decode_allowed_options,
-    response_is_rejection,
-)
+from ..permission_options import answer_is_rejection, response_is_rejection
 
 # The options the plan and document approval gates actually mint: a bare
 # ``"reject"`` id whose kind is ``reject_once``.

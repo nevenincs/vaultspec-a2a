@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from ..database import actionable_pending_permissions
 from ..graph.enums import AgentLifecycleState
 from ..thread.snapshots import AgentData, build_agent_descriptor
+from .permission_options import pending_is_actionable
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,7 +77,7 @@ async def build_team_status(
             request_status=p.request.request_status,
         )
         for p in live_pending
-        if p.actionable
+        if pending_is_actionable(p)
     ]
     active_threads = sorted(
         set(heartbeat_threads)

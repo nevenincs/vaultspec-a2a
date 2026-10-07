@@ -202,12 +202,10 @@ class DispatchRequest(BaseModel):
 
     def require_graph_definition(self) -> FrozenGraphDefinition:
         """Require the accepted executable program before compiling or running."""
-        if not self.requires_graph_receipt or self.graph_definition is None:
+        definition = self.graph_definition
+        if not self.requires_graph_receipt or definition is None:
             raise ValueError("graph execution requires its accepted definition")
-        definition = FrozenGraphDefinition.model_validate(
-            self.graph_definition.model_dump(mode="json")
-        )
-        if definition.team["id"] != self.team_preset:
+        if definition.team_id != self.team_preset:
             raise ValueError("accepted graph definition does not match the run preset")
         return definition
 

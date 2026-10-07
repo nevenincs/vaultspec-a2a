@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
+    from pathlib import Path
 
     from langchain_core.language_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
@@ -32,7 +33,7 @@ from ..thread.state import (
     TeamState,  # noqa: TC001 - LangGraph inspects route annotations
 )
 from ._compiler_models import resolve_model_for_worker
-from ._compiler_prompts import compose_persona_prompt, lane_web_demonstrated
+from ._compiler_prompts import composed_worker_prompt
 from ._compiler_retry import _NODE_RETRY_POLICY, _SUBMIT_RETRY_POLICY
 from .compiler import (
     _agent_node_metadata,
@@ -61,8 +62,9 @@ from .nodes.phase_gate import (
     revision_granted,
 )
 from .nodes.worker import (
+    compose_worker_turn_model,
     create_worker_node,
-    resolve_effective_worker_model,
+    worker_turn_preamble,
 )
 from .run_context import run_thread_id
 from .web_locators import extract_web_locators
@@ -166,14 +168,23 @@ _RA_PLAN_SUBMIT = "plan_submit"
 _RA_PLAN_GATE = "plan_gate"
 
 
+@dataclass(frozen=True, slots=True)
+class _ResearchRole:
+    """One research_adr role's resolved model, node metadata and persona prompt."""
+
+    model: BaseChatModel
+    metadata: dict[str, str]
+    prompt: str
+
+
 def _resolve_research_adr_models(
     team_config: Any,
     agent_configs: dict[str, Any],
     options: _CompileResearchAdrOptions,
     *,
     researcher_branches: int = 1,
-) -> tuple[dict[str, tuple[BaseChatModel, dict[str, str]]], list[BaseChatModel]]:
-    """Resolve one model, and its node metadata, per required research_adr role.
+) -> tuple[dict[str, _ResearchRole], list[BaseChatModel]]:
+    """Resolve one model, its node metadata and its prompt per research_adr role.
 
     The researcher role is also resolved once per fan-out branch. The branches
     run in one superstep, and a provider model owns a single provider session
@@ -191,6 +202,13 @@ def _resolve_research_adr_models(
     frozen catalog model name for each role, and discarding them here - as this
     function used to - is exactly how research_adr's compiled graph ended up
     disclosing no agents at all.
+
+    The phase machine resolves one model per ROLE rather than per worker, so a
+    role's persona is composed, as every worker's is, against the lane of that
+    same model - the one the node will invoke and the one the tool composition
+    reads at invocation. Two roles on two lanes therefore receive two different
+    prompts in the same run, which is the point: web reach is proven per lane,
+    not per team.
     """
     cfg_by_role: dict[str, Any] = {}
     ref_by_role: dict[str, Any] = {}
@@ -219,12 +237,16 @@ def _resolve_research_adr_models(
             frozen_assignment=options.get("frozen_assignment"),
         )
 
-    resolved: dict[str, tuple[BaseChatModel, dict[str, str]]] = {}
+    resolved: dict[str, _ResearchRole] = {}
     for role in RESEARCH_ADR_ROLES:
         model, provider, model_name = resolve(role)
-        metadata = _agent_node_metadata(cfg_by_role[role], provider, model_name)
-        resolved[role] = (model, metadata)
-    researchers = [resolved["researcher"][0]] + [
+        cfg = cfg_by_role[role]
+        resolved[role] = _ResearchRole(
+            model=model,
+            metadata=_agent_node_metadata(cfg, provider, model_name),
+            prompt=composed_worker_prompt(cfg, model),
+        )
+    researchers = [resolved["researcher"].model] + [
         resolve("researcher")[0] for _ in range(researcher_branches - 1)
     ]
     return resolved, researchers
@@ -249,12 +271,12 @@ def _make_research_producer(
     no retry policy, and so would abort the run with no revision route - is
     unreachable from the production path.
 
-    The researcher is the fourth research_adr document persona, so its turn
-    receives the role-scoped document-authoring conventions the worker path
-    already injects: ``create_researcher_node`` is a lightweight producer node
-    that never routed through ``_build_worker_messages``, so a
-    conventions-blind researcher would author findings the synthesist then
-    folds into a non-conformant document.
+    The branch is a worker turn in everything but its output: its prompt opens
+    with the same :func:`worker_turn_preamble` and its model is composed by the
+    same :func:`compose_worker_turn_model` a worker node uses, so the researcher
+    receives the role-scoped document-authoring conventions, the harness
+    servers, the read floor and the native workspace grant every other document
+    role receives, rather than a copy of that wiring kept in step by hand.
 
     A supervised branch gets the human permission rung a supervised worker
     gets. Without it the provider decides the branch's tool calls with no
@@ -272,27 +294,13 @@ def _make_research_producer(
     ) -> dict[str, Any]:
         from langchain_core.messages import SystemMessage
 
-        from ..context.rules import (
-            DEFAULT_BUNDLED_RULES_DIR,
-            RuleManager,
+        messages = await asyncio.to_thread(
+            worker_turn_preamble,
+            state,
+            system_prompt=system_prompt,
+            workspace_root=workspace_root,
+            role="researcher",
         )
-
-        messages: list[Any] = [SystemMessage(content=system_prompt)]
-        effective_workspace_root = workspace_root or state.get("workspace_root")
-        if effective_workspace_root:
-            rules = await asyncio.to_thread(
-                RuleManager(
-                    Path(effective_workspace_root),
-                    bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR,
-                ).compile,
-                "researcher",
-            )
-            if rules:
-                messages.append(
-                    SystemMessage(
-                        content=f"## Project Coding Rules & Guidelines\n\n{rules}"
-                    )
-                )
         messages.append(
             SystemMessage(
                 content=(
@@ -303,56 +311,16 @@ def _make_research_producer(
             )
         )
         messages.extend(state.get("messages", []))
-        effective_model = resolve_effective_worker_model(
-            model=model,
-            autonomous=autonomous,
+        effective_model = compose_worker_turn_model(
+            model,
             answers=recorded_permission_answers(state),
-            answers_reach_the_node=False,
-        )
-        if harness_mcp_servers:
-            from ..providers._acp_mcp import (
-                compose_harness_mcp_servers,
-                harness_allowed_tool_names,
-            )
-
-            # Headless only: auto-permit the composed read tools so a surfaced rag
-            # tool is not blocked by a prompt, parallel to the worker composition
-            # site. The researcher producer is the primary target of the grounding
-            # feature, so its wiring must match the worker's.
-            #
-            # The lane is stated on BOTH calls, as the worker states it. Resolution
-            # gates the network-egress axis on the lane, and an unstated lane is
-            # refused rather than defaulted - correct as a fail-closed default, but
-            # wrong as a silent one HERE: it would deny this role an egressing
-            # server even on a lane carrying live-retrieval proof, and report the
-            # lane as unproven when the actual fault was the missing argument.
-            harness_lane = getattr(model, "provider", None)
-            harness_allowed = (
-                harness_allowed_tool_names(harness_mcp_servers, lane=harness_lane)
-                if autonomous
-                else None
-            )
-            # The run's project pins every harness server it surfaces. Without
-            # it a composed grounding server resolves its own project from the
-            # directory it inherits, which is the undeclared inheritance the pin
-            # replaces. Absent, composition stays unpinned rather than inventing
-            # a root - a default here would be that same inheritance, spelled
-            # invisibly.
-            effective_model = compose_harness_mcp_servers(
-                effective_model,
-                harness_mcp_servers,
-                allowed_tools=harness_allowed,
-                project_root=(
-                    str(effective_workspace_root) if effective_workspace_root else None
-                ),
-                lane=harness_lane,
-            )
-        from ..providers._runtime_identity import bind_model_runtime_identity
-
-        effective_model = bind_model_runtime_identity(
-            effective_model,
             thread_id=run_thread_id(state, None),
-            port=runtime_identity_port,
+            autonomous=autonomous,
+            role="researcher",
+            workspace_root=workspace_root,
+            harness_mcp_servers=harness_mcp_servers,
+            runtime_identity_port=runtime_identity_port,
+            answers_reach_the_node=False,
         )
         response = await effective_model.ainvoke(messages, config=config)
         claim = str(response.content)
@@ -418,11 +386,6 @@ def _count_review_revisions(review_node: WorkerNode, phase: str) -> WorkerNode:
     return accepting_runnable_config(_review_node_with_count)
 
 
-def _research_harness_servers(team_config: Any) -> list[str]:
-    harness = team_config.effective_harness()
-    return list(harness.mcp_servers) if harness is not None else []
-
-
 def _compile_research_adr(
     builder: StateGraph[Any, Any, Any, Any],
     team_config: Any,
@@ -482,33 +445,51 @@ def _compile_research_adr(
         spec.model_dump() for spec in team_config.topology.research_threads
     ] or [{"thread_id": "primary", "topic": "", "instructions": ""}]
 
-    models, researcher_models = _resolve_research_adr_models(
+    roles, researcher_models = _resolve_research_adr_models(
         team_config,
         agent_configs,
         options,
         researcher_branches=len(specs),
     )
-    researcher_model, researcher_metadata = models["researcher"]
-    synthesist_model, synthesist_metadata = models["synthesist"]
-    doc_reviewer_model, doc_reviewer_metadata = models["doc-reviewer"]
-    adr_author_model, adr_author_metadata = models["adr-author"]
-    plan_author_model, plan_author_metadata = models["plan-author"]
 
-    # The team-harness MCP servers are a flat, team-level declaration composed
-    # into every document-role model's ACP session (there is no per-role field
-    # on the harness schema today). Empty when no harness is declared.
-    harness_mcp_servers = _research_harness_servers(team_config)
+    autonomous = options.get("autonomous", False)
+    workspace_root = options.get("workspace_root")
+    feedback_reader = options.get("feedback_reader")
+    # One flat, team-level declaration composed into every document role's
+    # session; the harness schema carries no per-role server field.
+    harness_mcp_servers = team_config.harness_mcp_servers()
 
-    researcher_prompt = _composed_role_prompt(
-        team_config, agent_configs, "researcher", researcher_model
-    )
+    def document_worker(
+        role: str,
+        name: str,
+        *,
+        feedback: FeedbackContextReader | None = None,
+        joins_research_findings: bool = False,
+    ) -> WorkerNode:
+        """Build one document role's worker node on that role's resolved model."""
+        return create_worker_node(
+            roles[role].model,
+            roles[role].prompt,
+            name=name,
+            autonomous=autonomous,
+            workspace_root=workspace_root,
+            role=role,
+            harness_mcp_servers=harness_mcp_servers,
+            cost_port=options.get("cost_port"),
+            runtime_identity_port=options.get("runtime_identity_port"),
+            feedback_reader=feedback,
+            joins_research_findings=joins_research_findings,
+        )
+
+    # Every branch runs on the researcher's lane, so the prompt composed against
+    # the role's model holds for each branch's own instance of it.
     branch_producers = {
         id(spec): _make_research_producer(
             branch_model,
-            researcher_prompt,
-            workspace_root=options.get("workspace_root"),
+            roles["researcher"].prompt,
+            workspace_root=workspace_root,
             harness_mcp_servers=harness_mcp_servers,
-            autonomous=options.get("autonomous", False),
+            autonomous=autonomous,
             runtime_identity_port=options.get("runtime_identity_port"),
         )
         for spec, branch_model in zip(specs, researcher_models, strict=True)
@@ -522,143 +503,68 @@ def _compile_research_adr(
         make_researcher=lambda spec: create_researcher_node(
             spec, branch_producers[id(spec)]
         ),
-        researcher_metadata=researcher_metadata,
+        researcher_metadata=roles["researcher"].metadata,
     )
 
     add_graph_node(
         builder,
         _RA_SYNTHESIS,
-        create_worker_node(
-            synthesist_model,
-            _composed_role_prompt(
-                team_config, agent_configs, "synthesist", synthesist_model
-            ),
-            name=_RA_SYNTHESIS,
-            autonomous=options.get("autonomous", False),
-            workspace_root=options.get("workspace_root"),
-            role="synthesist",
-            harness_mcp_servers=harness_mcp_servers,
-            cost_port=options.get("cost_port"),
-            runtime_identity_port=options.get("runtime_identity_port"),
+        document_worker(
+            "synthesist",
+            _RA_SYNTHESIS,
             # This node IS the fan-out's join point, so every branch's finding
             # reaches its prompt. The branches write findings and nothing else,
             # so without this the stage synthesises research it never saw.
             joins_research_findings=True,
-            # Feedback-loop grounding: the research-doc writer revises against the
+            # Feedback-loop grounding: each document writer revises against the
             # reviewer's batch when a revision run carries a feedback_batch_id.
-            feedback_reader=options.get("feedback_reader"),
+            feedback=feedback_reader,
         ),
-        metadata=synthesist_metadata,
+        metadata=roles["synthesist"].metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     add_graph_node(
         builder,
         _RA_RESEARCH_REVIEW,
         _count_review_revisions(
-            create_worker_node(
-                doc_reviewer_model,
-                _composed_role_prompt(
-                    team_config, agent_configs, "doc-reviewer", doc_reviewer_model
-                ),
-                name=_RA_RESEARCH_REVIEW,
-                autonomous=options.get("autonomous", False),
-                workspace_root=options.get("workspace_root"),
-                role="doc-reviewer",
-                harness_mcp_servers=harness_mcp_servers,
-                cost_port=options.get("cost_port"),
-                runtime_identity_port=options.get("runtime_identity_port"),
-            ),
+            document_worker("doc-reviewer", _RA_RESEARCH_REVIEW),
             PipelinePhase.RESEARCH.value,
         ),
-        metadata=doc_reviewer_metadata,
+        metadata=roles["doc-reviewer"].metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     add_graph_node(
         builder,
         _RA_ADR_AUTHOR,
-        create_worker_node(
-            adr_author_model,
-            _composed_role_prompt(
-                team_config, agent_configs, "adr-author", adr_author_model
-            ),
-            name=_RA_ADR_AUTHOR,
-            autonomous=options.get("autonomous", False),
-            workspace_root=options.get("workspace_root"),
-            role="adr-author",
-            harness_mcp_servers=harness_mcp_servers,
-            # Feedback-loop grounding: the ADR writer revises against the
-            # reviewer's batch when a revision run carries a feedback_batch_id.
-            feedback_reader=options.get("feedback_reader"),
-            cost_port=options.get("cost_port"),
-            runtime_identity_port=options.get("runtime_identity_port"),
-        ),
-        metadata=adr_author_metadata,
+        document_worker("adr-author", _RA_ADR_AUTHOR, feedback=feedback_reader),
+        metadata=roles["adr-author"].metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     add_graph_node(
         builder,
         _RA_ADR_REVIEW,
         _count_review_revisions(
-            create_worker_node(
-                doc_reviewer_model,
-                _composed_role_prompt(
-                    team_config, agent_configs, "doc-reviewer", doc_reviewer_model
-                ),
-                name=_RA_ADR_REVIEW,
-                autonomous=options.get("autonomous", False),
-                workspace_root=options.get("workspace_root"),
-                role="doc-reviewer",
-                harness_mcp_servers=harness_mcp_servers,
-                cost_port=options.get("cost_port"),
-                runtime_identity_port=options.get("runtime_identity_port"),
-            ),
+            document_worker("doc-reviewer", _RA_ADR_REVIEW),
             PipelinePhase.ADR.value,
         ),
-        metadata=doc_reviewer_metadata,
+        metadata=roles["doc-reviewer"].metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     add_graph_node(
         builder,
         _RA_PLAN_AUTHOR,
-        create_worker_node(
-            plan_author_model,
-            _composed_role_prompt(
-                team_config, agent_configs, "plan-author", plan_author_model
-            ),
-            name=_RA_PLAN_AUTHOR,
-            autonomous=options.get("autonomous", False),
-            workspace_root=options.get("workspace_root"),
-            role="plan-author",
-            harness_mcp_servers=harness_mcp_servers,
-            # Feedback-loop grounding: the plan writer revises against the
-            # reviewer's batch when a revision run carries a feedback_batch_id.
-            feedback_reader=options.get("feedback_reader"),
-            cost_port=options.get("cost_port"),
-            runtime_identity_port=options.get("runtime_identity_port"),
-        ),
-        metadata=plan_author_metadata,
+        document_worker("plan-author", _RA_PLAN_AUTHOR, feedback=feedback_reader),
+        metadata=roles["plan-author"].metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     add_graph_node(
         builder,
         _RA_PLAN_REVIEW,
         _count_review_revisions(
-            create_worker_node(
-                doc_reviewer_model,
-                _composed_role_prompt(
-                    team_config, agent_configs, "doc-reviewer", doc_reviewer_model
-                ),
-                name=_RA_PLAN_REVIEW,
-                autonomous=options.get("autonomous", False),
-                workspace_root=options.get("workspace_root"),
-                role="doc-reviewer",
-                harness_mcp_servers=harness_mcp_servers,
-                cost_port=options.get("cost_port"),
-                runtime_identity_port=options.get("runtime_identity_port"),
-            ),
+            document_worker("doc-reviewer", _RA_PLAN_REVIEW),
             PipelinePhase.PLAN.value,
         ),
-        metadata=doc_reviewer_metadata,
+        metadata=roles["doc-reviewer"].metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
     # Each gate is split into a submit node (commits the proposal id to the
@@ -804,41 +710,4 @@ def _compile_research_adr(
             "dict[Hashable, str]",
             {_RA_PLAN_AUTHOR: _RA_PLAN_AUTHOR, _RA_PLAN_SUBMIT: _RA_PLAN_SUBMIT},
         ),
-    )
-
-
-def _composed_role_prompt(
-    team_config: Any,
-    agent_configs: dict[str, Any],
-    role: str,
-    model: BaseChatModel,
-) -> str:
-    """Return a research_adr role's persona, composed against its own lane.
-
-    The phase machine resolves one model per ROLE rather than per worker, so the
-    lane a role's persona is composed against is read off that same model - the one
-    the node will actually invoke and the one the tool composition will read at
-    invocation. Two roles on two lanes therefore receive two different prompts in
-    the same run, which is the point: web reach is proven per lane, not per team.
-    """
-    return compose_persona_prompt(
-        _agent_system_prompt(team_config, agent_configs, role),
-        role=role,
-        demonstrated=lane_web_demonstrated(model),
-    )
-
-
-def _agent_system_prompt(
-    team_config: Any,
-    agent_configs: dict[str, Any],
-    role: str,
-) -> str:
-    """Return the system prompt for the first worker with ``role``."""
-    for worker_ref in team_config.workers:
-        cfg = agent_configs.get(worker_ref.agent_id)
-        if cfg is not None and cfg.role == role:
-            return str(cfg.persona.system_prompt)
-    raise ConfigError(
-        f"research_adr topology for team {team_config.id!r} has no worker with "
-        f"role {role!r}."
     )

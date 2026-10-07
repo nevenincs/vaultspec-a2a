@@ -243,8 +243,12 @@ class ProcessContainment:
             raise
         return job
 
-    def _admit(self, process: subprocess.Popen[bytes]) -> None:
+    def admit(self, process: subprocess.Popen[bytes]) -> None:
         """Bind the exact root :func:`spawn_contained` started, then let it run.
+
+        The admission step of :func:`spawn_contained` and its async form, which
+        are the only callers: a root started any other way is not suspended, so
+        it would run instructions before this binds it.
 
         Windows assigns the ``CREATE_SUSPENDED`` root to the Job through the
         process handle ``Popen`` retains - never a reopened numeric pid, so an
@@ -713,7 +717,7 @@ def spawn_contained(
         containment.close()
         raise
     try:
-        containment._admit(process)
+        containment.admit(process)
     except BaseException as admission_error:
         try:
             _reap_unadmitted_root(process, containment)
@@ -790,7 +794,7 @@ async def spawn_contained_async(
         containment.close()
         raise
     try:
-        containment._admit(_retained_popen(process))
+        containment.admit(_retained_popen(process))
     except BaseException as admission_error:
         try:
             await _reap_unadmitted_root_async(process, containment)

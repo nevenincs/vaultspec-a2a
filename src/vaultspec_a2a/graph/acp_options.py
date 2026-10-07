@@ -193,11 +193,20 @@ def option_kind(option: object) -> PermissionOptionKind:
     back to the id's spelling, so a malformed kind degrades to the best reading
     available instead of reaching a durable column as an unreadable status.
     """
-    if isinstance(option, dict):
-        declared = cast("dict[str, object]", option).get("kind")
-        if isinstance(declared, str) and declared in _DECLARED_KINDS:
-            return _DECLARED_KINDS[declared]
+    declared = _declared_kind(option)
+    if declared is not None:
+        return declared
     return _map_acp_option_kind(option_id_of(option) or "")
+
+
+def _declared_kind(option: object) -> PermissionOptionKind | None:
+    """Return the option's own ``kind`` when it names a known kind, else None."""
+    if not isinstance(option, dict):
+        return None
+    declared = cast("dict[str, object]", option).get("kind")
+    if isinstance(declared, str):
+        return _DECLARED_KINDS.get(declared)
+    return None
 
 
 def is_approval(option: object) -> bool:

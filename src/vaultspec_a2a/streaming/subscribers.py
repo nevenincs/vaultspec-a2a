@@ -534,12 +534,13 @@ class RelayHub:
         Call :meth:`prepare_run` for the run first: this path is synchronous and
         cannot establish a number it has never read.
         """
-        delivered = project_run_progress(payload)
-        if self._retainable(delivered) and isinstance(delivered, Mapping):
+        projected = project_run_progress(payload)
+        delivered: object = projected
+        if self._retainable(projected) and isinstance(projected, Mapping):
             allocation = self._allocate(thread_id)
             if allocation is not None:
                 stamped: dict[str, object] = {
-                    **cast("Mapping[str, object]", delivered),
+                    **cast("Mapping[str, object]", projected),
                     "sequence": allocation.sequence,
                 }
                 self._record(allocation, stamped)

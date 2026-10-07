@@ -188,5 +188,6 @@ def refusal_responses(
         status_code: {"description": shared[status_code]}
         for status_code in sorted(shared)
     }
-    responses.update(described or {})
+    if described is not None:
+        responses.update(described.items())
     return responses

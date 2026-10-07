@@ -23,6 +23,7 @@ from ..thread import InterruptType, live_interrupts
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from ..database import Checkpointer
     from ..thread import LiveInterrupt
     from .emitters import EventEmitters
     from .types import StreamableGraph
@@ -99,8 +100,8 @@ async def _held_writes(thread_id: str, graph: StreamableGraph) -> tuple[object, 
     the snapshot's own reading, and the one that discloses a question rather
     than hiding one.
     """
-    checkpointer = getattr(graph, "checkpointer", None)
-    if not isinstance(checkpointer, BaseCheckpointSaver):
+    checkpointer: object = getattr(graph, "checkpointer", None)
+    if not _is_checkpointer(checkpointer):
         return ()
     stored = await read_latest_checkpoint(checkpointer, thread_id)
     if stored.checkpoint_tuple is None:
@@ -139,6 +140,15 @@ def _interrupt_emissions(
 def _is_payload(value: object) -> TypeGuard[dict[str, Any]]:
     """Narrow an untrusted graph payload to the mapping shape we project."""
     return isinstance(value, dict)
+
+
+def _is_checkpointer(value: object) -> TypeGuard[Checkpointer]:
+    """Narrow a graph's ``checkpointer`` attribute to a real saver.
+
+    The attribute also takes ``False`` (checkpointing off) and ``True`` (a
+    subgraph inheriting its parent's), neither of which holds any writes.
+    """
+    return isinstance(value, BaseCheckpointSaver)
 
 
 async def _emit_interrupt(

@@ -317,6 +317,46 @@ def test_changed_helper_is_refused_before_provider_work(tmp_path: Path) -> None:
     assert not marker.exists()
 
 
+def test_privileged_helper_is_refused_before_provider_work(tmp_path: Path) -> None:
+    """A ``chmod u+s`` staged helper is refused, content and closure untouched.
+
+    Distinct from the changed-content case above: the helper's bytes - and so
+    its pinned closure digest - are exactly what was staged. Only its mode bits
+    change, which is what proves the refusal below comes from
+    ``require_unprivileged_static_helper``'s own privileged-bits check rather
+    than from the closure attestation that already guards tampered content.
+    """
+    authority = _authority(tmp_path)
+    if sys.platform != "linux":
+        with pytest.raises(ProcessContainmentError, match="requires Linux"):
+            linux_isolated_launch(
+                authority, [sys.executable], cwd=str(tmp_path), environment={}
+            )
+        return
+    node = _install_runtime(authority)
+    helper = authority.capsule.path / "isolation" / "bin" / "bubblewrap"
+    helper.chmod(helper.stat().st_mode | 0o4000)  # setuid, content untouched
+    marker = authority.workspace.path / "started"
+    launch = linux_isolated_launch(
+        authority,
+        [str(node), "-e", "require('fs').writeFileSync('started','unsafe')"],
+        cwd=str(authority.workspace.path),
+        environment={},
+    )
+    completed = subprocess.run(
+        launch.command,
+        env=launch.environment,
+        cwd=launch.cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert completed.returncode != 0
+    assert "privileged mode bits" in completed.stderr
+    assert not marker.exists()
+
+
 def test_role_startup_hooks_execute_only_after_isolation(tmp_path: Path) -> None:
     authority = _authority(tmp_path)
     if sys.platform != "linux":

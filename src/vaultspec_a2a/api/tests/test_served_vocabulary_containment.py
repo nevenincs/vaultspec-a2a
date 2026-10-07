@@ -222,17 +222,8 @@ def test_node_phase_map_and_prefix_resolution_stay_inside_the_vocabulary() -> No
 
 def test_replay_contract_only_ever_writes_declared_members() -> None:
     """Drive every branch of the replay contract and check what it writes."""
-    from dataclasses import dataclass, field
-
-    from ...thread.snapshots import finalize_snapshot_replay_status
-
-    @dataclass
-    class _Snapshot:
-        replay_status: str = ReplayStatus.UNKNOWN.value
-        snapshot_complete: bool = True
-        degraded_reasons: list[str] = field(default_factory=list)
-        repair_status: str = RepairStatus.HEALTHY.value
-        execution_readiness: str = RepairStatus.HEALTHY.value
+    from ...control.projection import finalize_snapshot_replay_status
+    from ...thread.snapshots import ThreadStateData
 
     declared_replay = {member.value for member in ReplayStatus}
     declared_reasons = {member.value for member in DegradedReason}
@@ -243,7 +234,11 @@ def test_replay_contract_only_ever_writes_declared_members() -> None:
             for present in (True, False):
                 for status in ThreadStatus:
                     result = finalize_snapshot_replay_status(
-                        _Snapshot(),
+                        ThreadStateData(
+                            thread_id="replay-contract",
+                            status=status.value,
+                            last_sequence=0,
+                        ),
                         checkpoint_loaded=loaded,
                         checkpoint_error=error,
                         checkpoint_present=present,

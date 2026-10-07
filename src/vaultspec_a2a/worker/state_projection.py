@@ -661,9 +661,7 @@ class StateProjector:
             )
         except TimeoutError:
             payload = ExecutionStateProjectionPayload(
-                degraded_reasons=[
-                    DegradedReason.EXECUTION_STATE_PROJECTION_TIMEOUT.value
-                ]
+                degraded_reasons=[DegradedReason.EXECUTION_STATE_PROJECTION_TIMEOUT]
             )
         except Exception:
             logger.warning(
@@ -676,9 +674,7 @@ class StateProjector:
                 ),
             )
             payload = ExecutionStateProjectionPayload(
-                degraded_reasons=[
-                    DegradedReason.EXECUTION_STATE_PROJECTION_UNAVAILABLE.value
-                ]
+                degraded_reasons=[DegradedReason.EXECUTION_STATE_PROJECTION_UNAVAILABLE]
             )
         await self._bridge.send_event(thread_id, payload.model_dump(mode="json"))
 

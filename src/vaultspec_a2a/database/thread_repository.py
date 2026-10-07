@@ -34,6 +34,7 @@ from ..thread.enums import (
     NON_ACTIVE_STATUSES,
     ApprovalStatus,
     ControlActionType,
+    DegradedReason,
     RepairStatus,
     ThreadStatus,
 )
@@ -804,7 +805,7 @@ async def set_thread_approval_state(
 def _is_degraded_only_execution_state(
     checkpoint_fields: tuple[str | None, str | None, datetime | None],
     activity_fields: tuple[int, int, list[str], list[str], list[dict[str, object]]],
-    degraded_reasons: list[str],
+    degraded_reasons: list[DegradedReason],
 ) -> bool:
     checkpoint_id, parent_checkpoint_id, snapshot_created_at = checkpoint_fields
     task_count, interrupt_count, next_nodes, interrupt_types, tasks = activity_fields
@@ -831,7 +832,7 @@ class _ExecutionStateArgs(TypedDict):
     next_nodes: list[str]
     interrupt_types: list[str]
     tasks: list[dict[str, object]]
-    degraded_reasons: list[str]
+    degraded_reasons: list[DegradedReason]
 
 
 async def record_thread_execution_state(

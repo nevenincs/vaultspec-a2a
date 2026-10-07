@@ -17,9 +17,11 @@ from ..context.metadata import ThreadMetadata
 from ..control.projection import (
     apply_authoring_completion_check,
     apply_checkpoint_projection,
+    classify_transcript_availability,
     clear_permissions_without_checkpoint_truth,
     enrich_snapshot_from_durable_state,
     enrich_snapshot_from_execution_state,
+    finalize_snapshot_replay_status,
     mark_degraded,
     reconcile_checkpoint_permissions_with_durable_state,
 )
@@ -45,12 +47,7 @@ from ..thread.enums import (
     ThreadStatus,
     TranscriptAvailability,
 )
-from ..thread.snapshots import (
-    ThreadStateData,
-    classify_transcript_availability,
-    finalize_snapshot_replay_status,
-    project_checkpoint_tuple,
-)
+from ..thread.snapshots import ThreadStateData, project_checkpoint_tuple
 from ..utils.coercion import coerce_string_list, decode_json_object
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .graph_definition import read_accepted_graph_definition
@@ -372,24 +369,6 @@ async def _read_projected_checkpoint(
     )
 
 
-def _should_clear_permissions_without_checkpoint(
-    thread: ThreadModel,
-    snapshot: ThreadStateData,
-    *,
-    checkpoint_loaded: bool,
-    checkpoint_present: bool,
-) -> bool:
-    if checkpoint_loaded or checkpoint_present:
-        return False
-    return bool(
-        thread.status != "submitted"
-        or snapshot.pending_permissions
-        or snapshot.approval_status is not None
-        or snapshot.approval_request_id is not None
-        or snapshot.pause_cause is not None
-    )
-
-
 async def _served_last_sequence(
     db: AsyncSession, thread: ThreadModel, aggregator: EventAggregator
 ) -> int:
@@ -476,12 +455,7 @@ async def capture_thread_state(
     checkpoint_error = checkpoint_read.error
     captured_projection = checkpoint_read.captured_projection
 
-    if _should_clear_permissions_without_checkpoint(
-        thread,
-        snapshot,
-        checkpoint_loaded=checkpoint_loaded,
-        checkpoint_present=checkpoint_present,
-    ):
+    if not checkpoint_present:
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
 
     snapshot = await enrich_snapshot_from_execution_state(

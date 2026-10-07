@@ -27,10 +27,6 @@ from .enums import (
     TERMINAL_STATUS_VALUES,
     DegradedReason,
     InterruptType,
-    RepairStatus,
-    ReplayStatus,
-    ThreadStatus,
-    TranscriptAvailability,
 )
 from .models import PlanEntry
 
@@ -58,12 +54,10 @@ __all__ = [
     "build_agent_descriptor",
     "classify_message_role",
     "classify_permission_pause_reason",
-    "classify_transcript_availability",
     "coerce_provider",
     "derive_message_id",
     "extract_checkpoint_fields",
     "extract_message_timestamp",
-    "finalize_snapshot_replay_status",
     "fold_pending_writes",
     "is_permission_event",
     "is_terminal_event",
@@ -171,9 +165,11 @@ def is_terminal_event(payload: dict[str, Any]) -> bool:
     )
 
 
-#: The relayed event types that open a durable permission pause: a tool
-#: permission and the two approval gates. A clarification is the one interrupt
-#: type absent, because it parks the run without a permission row.
+#: The relayed event types that open a permission journal row: a tool
+#: permission and the two approval gates. Whether the run is parked on one is the
+#: checkpoint's to say, and the pause recorder owns the pause. A clarification is
+#: the one interrupt type absent, because it parks the run without a permission
+#: row.
 PERMISSION_REQUEST_EVENT_TYPES: frozenset[str] = frozenset(
     {
         InterruptType.PERMISSION_REQUEST.value,
@@ -900,97 +896,3 @@ def normalize_artifacts(artifacts_raw: list[Any]) -> list[dict[str, Any]]:
                 }
             )
     return normalized
-
-
-# The only statuses a run can hold before its first checkpoint exists: it is
-# marked running on dispatch, and can be cancelled during that same window. An
-# absent checkpoint in any OTHER status means the record was lost, not unwritten.
-_PRE_TRANSCRIPT_STATUSES: frozenset[str] = frozenset(
-    {
-        ThreadStatus.SUBMITTED.value,
-        ThreadStatus.RUNNING.value,
-        ThreadStatus.CANCELLING.value,
-    }
-)
-
-
-def classify_transcript_availability(
-    *,
-    checkpoint_loaded: bool,
-    checkpoint_present: bool,
-    checkpoint_error: bool,
-    thread_status: str,
-) -> TranscriptAvailability:
-    """Classify whether a run's conversation is readable from its checkpoint.
-
-    Takes the SAME four facts as :func:`finalize_snapshot_replay_status` and
-    sits beside it deliberately: both answer from one checkpoint read, and
-    splitting them across modules would let the replay verdict and the
-    transcript verdict drift out of agreement on the same run.
-
-    Distinct from the replay verdict rather than derived from it. Replay status
-    answers "can this run resume", which folds the not-yet-dispatched case and
-    an unreadable checkpoint store together under ``unknown``. Those are
-    opposite answers to "is the transcript lost": one is a run that has said
-    nothing yet, the other is a record we cannot read.
-
-    Absence is excused ONLY in the states a run can legitimately reach before
-    its first checkpoint write, and that window is real: a run is marked running
-    the moment it dispatches, well before the worker writes anything, and it can
-    be cancelled inside that window. Calling ordinary startup a loss would fire
-    the signal on healthy traffic and teach every reader to ignore it.
-
-    Every other state is held to owe a transcript, including the states that are
-    still "active". A run parked on an interrupt was checkpointed to park, and a
-    run in a recovery state advanced far enough for recovery to be needed, so an
-    absent checkpoint there is a loss and not a run that has yet to speak -
-    excusing those would soft-pedal exactly the cases most likely to BE the
-    loss.
-    """
-    if checkpoint_loaded:
-        return TranscriptAvailability.AVAILABLE
-    if checkpoint_error or checkpoint_present:
-        # ``checkpoint_present`` without ``checkpoint_loaded`` means the tuple
-        # was read but its projection raised: the record exists and this reader
-        # could not render it, which is unreadable, not missing.
-        return TranscriptAvailability.UNREADABLE
-    if thread_status in _PRE_TRANSCRIPT_STATUSES:
-        return TranscriptAvailability.NOT_YET_RECORDED
-    return TranscriptAvailability.MISSING
-
-
-def finalize_snapshot_replay_status(
-    snapshot: Any,
-    *,
-    checkpoint_loaded: bool,
-    checkpoint_present: bool,
-    checkpoint_error: bool,
-    thread_status: str,
-) -> Any:
-    """Apply the reconnect snapshot replay/degradation contract.
-
-    Works with any snapshot object that has ``replay_status``,
-    ``snapshot_complete``, and ``degraded_reasons`` attributes.
-    """
-    if checkpoint_loaded:
-        snapshot.replay_status = ReplayStatus.DURABLE.value
-    elif checkpoint_error:
-        snapshot.snapshot_complete = False
-        snapshot.replay_status = ReplayStatus.UNKNOWN.value
-    elif checkpoint_present:
-        snapshot.snapshot_complete = False
-        snapshot.replay_status = ReplayStatus.BEST_EFFORT.value
-    elif thread_status == ThreadStatus.SUBMITTED.value:
-        snapshot.snapshot_complete = True
-        snapshot.replay_status = ReplayStatus.UNKNOWN.value
-    else:
-        snapshot.snapshot_complete = False
-        if DegradedReason.CHECKPOINT_MISSING not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append(DegradedReason.CHECKPOINT_MISSING)
-        # The probe succeeded and found nothing, so the history a replay would
-        # rebuild from is provably absent: a replay gap, not the unknown that an
-        # unavailable checkpoint reports.
-        with contextlib.suppress(AttributeError):
-            record_repair_posture(snapshot, RepairStatus.REPLAY_GAP.value)
-        snapshot.replay_status = ReplayStatus.GAP_DETECTED.value
-    return snapshot

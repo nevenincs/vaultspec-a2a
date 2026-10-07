@@ -731,7 +731,10 @@ async def _handle_terminal_event(
     if not is_terminal_event(payload):
         return
     # Capture before the durable write and before relay hub state is pruned.
-    # ``None`` - nothing numbers this run - leaves the settled cursor unwritten.
+    # The relay has already numbered the terminal frame it is holding, so this
+    # mark IS that frame's own number and the cursor recorded below names the
+    # last frame the client receives. ``None`` - nothing numbers this run -
+    # leaves the settled cursor unwritten.
     last_sequence = (
         relay_hub.issued_sequence(thread_id) if relay_hub is not None else None
     )
@@ -745,7 +748,8 @@ async def _handle_terminal_event(
     )
     if disposition is not _TerminalDisposition.SETTLED:
         # A promoted turn or refused stale event did not end the run. Its
-        # frame takes no number and never enters the replay log.
+        # frame is never published, so it never enters the replay log and the
+        # relay gives its number back to the run.
         return
     _publish_terminal(thread_id, resolved.publish_terminal)
     if factory is None:

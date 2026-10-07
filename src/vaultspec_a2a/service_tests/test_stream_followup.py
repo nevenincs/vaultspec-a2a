@@ -19,7 +19,7 @@ from ._state import select_option_id, thread_state
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
     from .harness import ServiceStack
 
 

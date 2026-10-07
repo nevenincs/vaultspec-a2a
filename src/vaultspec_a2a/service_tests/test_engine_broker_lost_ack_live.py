@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
     from pathlib import Path
 
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
 
 _RUN_ID = "run-cross-repo-lost-ack"
 _MAX_RELAY_MESSAGE_BYTES = 4 * 1024 * 1024

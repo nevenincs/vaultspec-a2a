@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from ..testing import json_object, json_object_list
 
 if TYPE_CHECKING:
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
     from .harness import ServiceStack
 
 __all__ = ["select_option_id", "thread_state"]

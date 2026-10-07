@@ -99,7 +99,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from ..conftest import ExternalPrerequisiteRule
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
 
 logger = logging.getLogger(__name__)
 

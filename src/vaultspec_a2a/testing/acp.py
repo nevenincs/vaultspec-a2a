@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from ..providers._json_contract import JsonObject, JsonValue
+    from ..providers import JsonObject, JsonValue
 
 __all__ = [
     "ACP_PROTOCOL_VERSION",

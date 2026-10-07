@@ -62,6 +62,7 @@ from .cli_resolution import (
     ProviderRuntimeUnavailableError,
     ProviderRuntimeUnavailableReason,
     pin_claude_executable,
+    proof_cli_name,
 )
 from .codex_catalog import discover_codex_catalog
 from .execution_modes import (
@@ -182,8 +183,7 @@ def binary_proof_reason(
     proof = PROVEN_TURN_LANES.get(provider)
     if proof is None:
         return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
-    expected_binary = "claude" if provider in ACP_BACKEND_LANES else provider.value
-    if proof.binary != expected_binary:
+    if proof.binary != proof_cli_name(provider):
         return ProviderRuntimeUnavailableReason.BINARY_OUT_OF_PROOF_RANGE
     if native_authority is None and settings.desktop_profile_armed:
         try:

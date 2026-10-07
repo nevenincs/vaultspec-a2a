@@ -29,6 +29,8 @@ from .warmup import warm_model_imports as warm_model_imports
 
 if TYPE_CHECKING:
     from .acp_chat_model import AcpChatModel as AcpChatModel
+    from .cli_resolution import SYSTEM_CLI_LANES as SYSTEM_CLI_LANES
+    from .cli_resolution import proof_cli_name as proof_cli_name
     from .factory import ProviderFactory as ProviderFactory
     from .lane_registry import LanePluginError as LanePluginError
     from .lane_registry import LaneRegistration as LaneRegistration
@@ -43,6 +45,8 @@ _LAZY_IMPORTS = {
     "LaneRegistration": ".lane_registry",
     "LaneRegistry": ".lane_registry",
     "ProviderFactory": ".factory",
+    "SYSTEM_CLI_LANES": ".cli_resolution",
+    "proof_cli_name": ".cli_resolution",
 }
 
 
@@ -57,6 +61,7 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "SYSTEM_CLI_LANES",
     "AcpAuthError",
     "AcpChatModel",
     "AcpError",
@@ -71,5 +76,6 @@ __all__ = [
     "LaneRegistry",
     "ProviderCondition",
     "ProviderFactory",
+    "proof_cli_name",
     "warm_model_imports",
 ]

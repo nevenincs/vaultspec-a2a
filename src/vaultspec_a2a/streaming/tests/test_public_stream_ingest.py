@@ -21,7 +21,6 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
-import os
 import pathlib
 import subprocess
 import sys
@@ -46,7 +45,12 @@ from ...graph.events import (
 )
 from ...providers import ProviderFactory
 from ...team.team_config import load_agent_config
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    inherited_environment,
+    new_state_graph,
+)
 from ..aggregator import RunEventProducer
 from ._relay_capture import relayed_events
 
@@ -278,11 +282,12 @@ def test_a_park_survives_a_post_run_state_read_that_times_out() -> None:
     a real subprocess with the knob set below any real read's latency - the
     same recipe the state-projection knob's own test uses.
     """
-    env = {
-        **os.environ,
-        "VAULTSPEC_A2A_AGET_STATE_TIMEOUT_SECONDS": "0.000001",
-        "PYTHONPATH": str(_STREAMING_PACKAGE.parent.parent),
-    }
+    env = inherited_environment(
+        {
+            "VAULTSPEC_A2A_AGET_STATE_TIMEOUT_SECONDS": "0.000001",
+            "PYTHONPATH": str(_STREAMING_PACKAGE.parent.parent),
+        }
+    )
     result = subprocess.run(
         [sys.executable, "-c", _UNREADABLE_STATE_PROBE],
         capture_output=True,

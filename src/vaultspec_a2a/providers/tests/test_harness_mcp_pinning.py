@@ -39,7 +39,15 @@ import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from ...testing import free_port, session_scratch_dir
+from ...testing import (
+    ProgressDeadline,
+    ProgressStalledError,
+    free_port,
+    inherited_environment,
+    session_scratch_dir,
+    wait_for_async,
+    wait_until_async,
+)
 from ...thread.errors import ConfigError
 from ...utils._process_tree import port_has_listener_async
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
@@ -169,13 +177,10 @@ def _isolated_rag_service_state(
     requirement = _locked_rag_requirement(project_root)
     port = free_port()
     status_dir = sandbox / "service-status"
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("PYTEST_") and key != RAG_PIN_VARIABLE
-    }
-    env.update(
+    env = inherited_environment(
         {
+            **dict.fromkeys(name for name in os.environ if name.startswith("PYTEST_")),
+            RAG_PIN_VARIABLE: None,
             "VAULTSPEC_RAG_STATUS_DIR": str(status_dir),
             "VAULTSPEC_RAG_DATA_DIR": str(sandbox / "service-data"),
             "VAULTSPEC_RAG_QDRANT_STORAGE_DIR": str(sandbox / "qdrant-storage"),
@@ -377,16 +382,32 @@ async def _await_private_service_absent(
     owner: _OwnedRagService, *, absolute_deadline: float
 ) -> None:
     """Prove both the retained process identity and private listener are gone."""
-    while asyncio.get_running_loop().time() < absolute_deadline:
-        if not owner.process.is_running() and not await port_has_listener_async(
+    process_alive = True
+
+    async def _absent() -> bool | None:
+        nonlocal process_alive
+        process_alive = owner.process.is_running()
+        if process_alive:
+            return None
+        listening = await port_has_listener_async(
             owner.port, timeout=_PORT_PROBE_TIMEOUT_SECONDS
-        ):
-            return
-        await asyncio.sleep(0.05)
-    assert not owner.process.is_running(), "the owned private RAG process is alive"
-    assert not await port_has_listener_async(
-        owner.port, timeout=_PORT_PROBE_TIMEOUT_SECONDS
-    ), "the private RAG port is still open"
+        )
+        return None if listening else True
+
+    await wait_for_async(
+        _absent,
+        deadline=ProgressDeadline(
+            idle_window_s=max(
+                0.0, absolute_deadline - asyncio.get_running_loop().time()
+            )
+        ),
+        interval_s=0.05,
+        stalled=lambda: (
+            "the owned private RAG process is alive"
+            if process_alive
+            else f"the private RAG port is still open (port {owner.port})"
+        ),
+    )
 
 
 async def _cleanup_private_rag_service(
@@ -562,11 +583,18 @@ async def _isolated_rag_service(
             # The CLI control process can time out just before its detached
             # daemon atomically publishes identity. Fund a bounded discovery
             # window so that late-owned service is still reaped.
-            while (
-                not state.service_record_path.exists()
-                and asyncio.get_running_loop().time() < state.cleanup_start_deadline
-            ):
-                await asyncio.sleep(0.05)
+            with suppress(ProgressStalledError):
+                await wait_until_async(
+                    state.service_record_path.exists,
+                    deadline=ProgressDeadline(
+                        idle_window_s=max(
+                            0.0,
+                            state.cleanup_start_deadline
+                            - asyncio.get_running_loop().time(),
+                        )
+                    ),
+                    interval_s=0.05,
+                )
         if owner is None and (state.started or state.service_record_path.exists()):
             state.receipt.late_service_record_observed = True
             owner = _read_private_service_owner(

@@ -26,6 +26,7 @@ from ...providers._subprocess import (
     kill_process_tree,
     spawn_acp_process,
 )
+from ...testing import ProgressDeadline, wait_until_async
 from ...utils import ProcessContainment, ProcessContainmentError
 from ...utils._process_tree import pid_is_live, wait_pid_gone
 
@@ -139,9 +140,12 @@ async def test_containment_reaps_child_after_provider_root_exits() -> None:
         (await asyncio.wait_for(process.stdout.readline(), timeout=10.0)).strip()
     )
     try:
-        deadline = time.monotonic() + 10.0
-        while process.returncode is None and time.monotonic() < deadline:
-            await asyncio.sleep(0.05)
+        await wait_until_async(
+            lambda: process.returncode is not None,
+            deadline=ProgressDeadline(idle_window_s=10.0),
+            interval_s=0.05,
+            stalled=lambda: "the provider root never exited on its own",
+        )
         assert process.returncode == 0
         assert pid_is_live(grandchild_pid)
         await kill_process_tree(process)

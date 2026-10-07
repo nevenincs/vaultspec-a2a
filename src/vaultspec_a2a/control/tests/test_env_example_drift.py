@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from ...testing import inherited_environment
 from ._env_example import (
     DOCUMENTED_BUT_NOT_READ,
     INTEGRATION_EXAMPLE,
@@ -177,11 +178,11 @@ def _load_profiles(
 ) -> list[dict[str, object]]:
     """Load *profiles* in a child whose environment sets no setting at all."""
     unset = declared_names()
-    environment = {
-        name: value
-        for name, value in os.environ.items()
-        if name not in unset and not name.startswith("VAULTSPEC_")
-    }
+    environment = inherited_environment(
+        dict.fromkeys(
+            [*unset, *(name for name in os.environ if name.startswith("VAULTSPEC_"))]
+        )
+    )
     completed = subprocess.run(
         [sys.executable, "-m", "vaultspec_a2a.control.tests._example_profile_loader"],
         input=json.dumps({"profiles": profiles}),

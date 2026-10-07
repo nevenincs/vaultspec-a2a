@@ -19,7 +19,7 @@ from ..utils import bearer_header
 from .boot import DEFAULT_ATTACH_CREDENTIAL, LOOPBACK_TIMEOUT, desktop_workspace
 from .catalog import async_catalog_run_fields, fetch_in_process_selection_at
 from .polling import is_terminal, ok_body, wait_for_run_status
-from .verbs import RunVerbs, actor_tokens_body
+from .verbs import DEFAULT_RUN_MESSAGE, RunVerbs, actor_tokens_body
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -57,7 +57,7 @@ async def async_run_start_body(
     *,
     team_preset: str,
     tokens: Mapping[str, str],
-    message: str = "build it",
+    message: str = DEFAULT_RUN_MESSAGE,
     engine_bearer: str = "bearer",
 ) -> dict[str, object]:
     """A complete autonomous run-start body for the in-process gateway at *client*.

@@ -27,6 +27,7 @@ from vaultspec_a2a.control.settings_base import (
     PROJECT_ROOT_ENV,
     env_name,
 )
+from vaultspec_a2a.testing import inherited_environment
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -58,11 +59,9 @@ def _outside_environment() -> dict[str, str]:
     The suite declares settings of its own; a child that inherited them would
     prove nothing about what the scope handed it.
     """
-    return {
-        name: value
-        for name, value in os.environ.items()
-        if not name.startswith("VAULTSPEC_A2A_")
-    }
+    return inherited_environment(
+        dict.fromkeys(name for name in os.environ if name.startswith("VAULTSPEC_A2A_"))
+    )
 
 
 def test_the_name_the_scope_sets_is_the_one_the_settings_read() -> None:

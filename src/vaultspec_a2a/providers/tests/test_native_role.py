@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sys
 from typing import TYPE_CHECKING
 
@@ -13,7 +12,7 @@ from langchain_core.messages import HumanMessage
 
 from ...desktop.native_isolation import NativeWorkspaceAuthority
 from ...desktop.tests.test_native_isolation import _authority, _install_runtime
-from ...testing import armed_desktop_app_home
+from ...testing import armed_desktop_app_home, inherited_environment
 from ...utils import ProcessContainmentError
 from .._native_role import (
     bind_model_native_workspace,
@@ -85,10 +84,9 @@ async def test_prepared_role_contains_selected_channel_and_cleans_home(
     with pytest.raises(ProcessContainmentError, match="credential store"):
         async with prepare_acp_role(scope, environment={}, provider="claude"):
             raise AssertionError("unsupported store prepared a role")
-    environment = {
-        **os.environ,
-        "CLAUDE_CODE_OAUTH_TOKEN": "synthetic-selected-channel",
-    }
+    environment = inherited_environment(
+        {"CLAUDE_CODE_OAUTH_TOKEN": "synthetic-selected-channel"}
+    )
     async with prepare_acp_role(
         scope, environment=environment, provider="claude"
     ) as launch:

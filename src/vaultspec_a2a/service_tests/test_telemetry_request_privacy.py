@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 import pytest
 
-from ..testing import ProgressDeadline, free_port, wait_for
+from ..testing import ProgressDeadline, free_port, inherited_environment, wait_for
 from .harness import COMPOSE_FILE, REPO_ROOT, resolve_docker_executable
 
 if TYPE_CHECKING:
@@ -66,11 +66,12 @@ def jaeger_request_privacy(
     docker = resolve_docker_executable()
     project = "vaultspec-request-privacy-" + uuid.uuid4().hex[:10]
     ui_port, otlp_port = free_port(), free_port()
-    env = {
-        **os.environ,
-        "JAEGER_UI_PORT": str(ui_port),
-        "JAEGER_OTLP_PORT": str(otlp_port),
-    }
+    env = inherited_environment(
+        {
+            "JAEGER_UI_PORT": str(ui_port),
+            "JAEGER_OTLP_PORT": str(otlp_port),
+        }
+    )
     command = [
         docker,
         "compose",
@@ -138,15 +139,16 @@ def test_request_url_privacy_survives_export(
     """Export omits query content while handlers and W3C ancestry remain intact."""
     endpoint, query_url = jaeger_request_privacy
     trace_id = uuid.uuid4().hex
-    env = {
-        **os.environ,
-        "VAULTSPEC_A2A_OTEL_EXPORTER_OTLP_ENDPOINT": endpoint,
-        "VAULTSPEC_A2A_OTEL_EXPORTER_OTLP_INSECURE": "true",
-        "VAULTSPEC_A2A_OTEL_TRACES_EXPORTER": "otlp",
-        "VAULTSPEC_A2A_OTEL_METRICS_EXPORTER": "none",
-        "VAULTSPEC_A2A_OTEL_SDK_DISABLED": "false",
-        "VAULTSPEC_A2A_OTEL_EXPORTER_CONSOLE": "false",
-    }
+    env = inherited_environment(
+        {
+            "VAULTSPEC_A2A_OTEL_EXPORTER_OTLP_ENDPOINT": endpoint,
+            "VAULTSPEC_A2A_OTEL_EXPORTER_OTLP_INSECURE": "true",
+            "VAULTSPEC_A2A_OTEL_TRACES_EXPORTER": "otlp",
+            "VAULTSPEC_A2A_OTEL_METRICS_EXPORTER": "none",
+            "VAULTSPEC_A2A_OTEL_SDK_DISABLED": "false",
+            "VAULTSPEC_A2A_OTEL_EXPORTER_CONSOLE": "false",
+        }
+    )
     result = subprocess.run(
         [sys.executable, "-c", _REQUEST_PROBE, query, host, trace_id],
         env=env,

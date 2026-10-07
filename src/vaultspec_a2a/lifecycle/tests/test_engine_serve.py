@@ -14,12 +14,11 @@ import contextlib
 import shlex
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
 
-from ...testing import settings_override
+from ...testing import ProgressDeadline, settings_override, wait_until
 from ...utils._process_tree import kill_pid_tree_async, pid_is_live, wait_pid_gone
 from ..engine_serve import EngineSeatError, engine_command, resolve_data_seat, serve
 
@@ -134,9 +133,12 @@ def test_wrapper_termination_reaps_engine_and_descendant(tmp_path: Path) -> None
     marker = tmp_path / "pids"
     pids: list[int] = []
     try:
-        deadline = time.monotonic() + 15
-        while not marker.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
+        wait_until(
+            marker.exists,
+            deadline=ProgressDeadline(idle_window_s=15.0),
+            interval_s=0.01,
+            stalled=lambda: f"the engine child never wrote {marker}",
+        )
         pids = [int(value) for value in marker.read_text().split()]
         wrapper.terminate()
         wrapper.wait(timeout=30)

@@ -26,10 +26,11 @@ ignored the knob entirely, cannot satisfy both.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import textwrap
+
+from ...testing import inherited_environment
 
 # Alive and mute: it never writes a frame and never closes stdout, so the client
 # sees neither a notification nor EOF for the whole observation window.
@@ -95,8 +96,9 @@ def _run_probe(
     *, idle_limit: str, call_budget: float, observe_seconds: float
 ) -> dict[str, str]:
     """Run one scenario in its own process with the idle knob set in the env."""
-    env = os.environ.copy()
-    env["VAULTSPEC_A2A_ACP_TURN_IDLE_TIMEOUT_SECONDS"] = idle_limit
+    env = inherited_environment(
+        {"VAULTSPEC_A2A_ACP_TURN_IDLE_TIMEOUT_SECONDS": idle_limit}
+    )
     result = subprocess.run(
         [
             sys.executable,

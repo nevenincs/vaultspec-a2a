@@ -30,6 +30,7 @@ from ...lifecycle.singleton import (
     default_owner,
     singleton_record_path,
 )
+from ...testing import ProgressDeadline, wait_for
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -76,14 +77,16 @@ def _spawn_holder(
 
 def _await_file(path: Path, *, timeout: float = 20.0) -> str:
     """Block until *path* exists and return its text, or fail the test on timeout."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if path.exists():
-            text = path.read_text()
-            if text:
-                return text
-        time.sleep(0.05)
-    raise AssertionError(f"timed out waiting for {path}")
+
+    def _text() -> str | None:
+        return (path.read_text() if path.exists() else "") or None
+
+    return wait_for(
+        _text,
+        deadline=ProgressDeadline(idle_window_s=timeout),
+        interval_s=0.05,
+        stalled=lambda: f"{path} was never written (exists: {path.exists()})",
+    )
 
 
 def _await_exit(proc: subprocess.Popen[bytes], *, timeout: float = 20.0) -> int:

@@ -18,14 +18,18 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import time
 from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Any
 
 import psutil
 import pytest
 
-from ...testing import armed_lane_environment, inherited_environment
+from ...testing import (
+    ProgressDeadline,
+    armed_lane_environment,
+    inherited_environment,
+    wait_until,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -101,13 +105,14 @@ def _representative_cpu_load() -> Generator[list[psutil.Process]]:
     ]
     owners = [psutil.Process(process.pid) for process in processes]
     try:
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            if all(owner.cpu_times().user > 0.05 for owner in owners):
-                break
-            time.sleep(0.05)
-        assert all(owner.cpu_times().user > 0.05 for owner in owners), (
-            "the representative CPU load never became non-vacuous"
+        wait_until(
+            lambda: all(owner.cpu_times().user > 0.05 for owner in owners),
+            deadline=ProgressDeadline(idle_window_s=5.0),
+            interval_s=0.05,
+            stalled=lambda: (
+                "the representative CPU load never became non-vacuous (user "
+                f"seconds: {[owner.cpu_times().user for owner in owners]})"
+            ),
         )
         yield owners
     finally:

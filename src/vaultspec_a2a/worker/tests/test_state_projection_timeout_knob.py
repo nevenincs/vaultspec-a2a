@@ -30,11 +30,12 @@ unmodified production code.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import textwrap
 from typing import Any
+
+from ...testing import inherited_environment
 
 _PROBE = textwrap.dedent(
     """
@@ -135,8 +136,9 @@ _PROBE = textwrap.dedent(
 
 def _run_probe(*, timeout_env: str, sleep_seconds: float) -> dict[str, Any]:
     """Run the probe in a fresh process with the timeout knob set in the env."""
-    env = os.environ.copy()
-    env["VAULTSPEC_A2A_AGET_STATE_TIMEOUT_SECONDS"] = timeout_env
+    env = inherited_environment(
+        {"VAULTSPEC_A2A_AGET_STATE_TIMEOUT_SECONDS": timeout_env}
+    )
     result = subprocess.run(
         [sys.executable, "-c", _PROBE, str(sleep_seconds)],
         capture_output=True,

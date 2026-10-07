@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from ...control.state_layout import StateLayout
 from ...database import ThreadModel, create_thread
-from ...testing import DEFAULT_TEAM_PRESET, booted_gateway
+from ...testing import DEFAULT_TEAM_PRESET, booted_gateway, inherited_environment
 from ...tests._write_authority import (
     make_test_thread_authority_columns,
     make_test_write_authority,
@@ -48,8 +48,7 @@ async def _production_gateway(
     runtime_home = tmp_path / "a2a-home"
 
     def _environment(gateway_port: int, worker_port: int) -> dict[str, str]:
-        environment = os.environ.copy()
-        environment.update(
+        return inherited_environment(
             {
                 "VAULTSPEC_A2A_HOST": "127.0.0.1",
                 "VAULTSPEC_A2A_PORT": str(gateway_port),
@@ -67,7 +66,6 @@ async def _production_gateway(
                 "VAULTSPEC_A2A_GATEWAY_TOKEN": _SERVICE_TOKEN,
             }
         )
-        return environment
 
     with booted_gateway(
         _environment, log_path=tmp_path / "gateway.log", script=None

@@ -9,14 +9,13 @@ contract probe, so what is exercised is the launch a run actually performs.
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing import combined_output, run_child
+from ...testing import combined_output, inherited_environment, run_child
 from .._acp_mcp import codex_mcp_server_specs, resolve_harness_mcp_servers
 from .._harness_mcp_registry import (
     _KNOWN_MCP_SERVERS,
@@ -93,8 +92,9 @@ assert {_UV_INTERPRETER_ENV!r} not in os.environ, "the child kept an inherited p
 asyncio.run(verify_harness_mcp_contract(specs, env=dict(os.environ)))
 print("contract verified")
 """
-    env = {key: value for key, value in os.environ.items() if key != "UV_PYTHON"}
-    env["PYTHONPATH"] = str(_SOURCE_ROOT)
+    env = inherited_environment(
+        {_UV_INTERPRETER_ENV: None, "PYTHONPATH": str(_SOURCE_ROOT)}
+    )
 
     completed = run_child(
         [sys.executable, "-c", script],

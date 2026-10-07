@@ -65,6 +65,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -78,10 +79,9 @@ from ..team.team_config import load_team_config
 from ..testing import (
     fetch_provider_catalog,
     is_terminal,
-    ok_body,
     selection_from_served_catalog,
-    wait_for_run_status,
 )
+from ..testing.gateway_verbs import role_tokens
 from ..testing.payloads import (
     json_object,
     json_object_list,
@@ -102,11 +102,6 @@ if TYPE_CHECKING:
 # The preset that declares a questionnaire. Its questions are read from the
 # preset itself below, never restated here.
 _CLARIFY_PRESET = "vaultspec-adr-research-clarify"
-
-# Every role the document-authoring topology runs needs an actor token at
-# run-start; the roster is derived from the preset so a role added tomorrow is
-# carried automatically rather than falling behind a hardcoded list.
-_ENGINE_BEARER = "bearer"
 
 # A document-authoring preset is refused at the eligibility gate without a target
 # feature tag, before the graph is ever compiled. Naming it here keeps the run
@@ -212,6 +207,11 @@ def _declared_questions() -> list[JsonObject]:
 
 
 def _required_roles() -> list[str]:
+    """Every role the document-authoring topology runs, each needing a token.
+
+    Derived from the preset so a role added tomorrow is carried automatically
+    rather than falling behind a hardcoded list.
+    """
     return [worker.agent_id for worker in load_team_config(_CLARIFY_PRESET).workers]
 
 
@@ -235,8 +235,8 @@ def _await_parked(
             )
         return False
 
-    parked = wait_for_run_status(
-        lambda: ok_body(gateway.status(run_id)),
+    parked = gateway.wait_for_status(
+        run_id,
         _parked,
         timeout=budget,
         interval=1.0,
@@ -337,8 +337,8 @@ def _await_resumed_past_fan_out(
             )
         return False
 
-    advanced = wait_for_run_status(
-        lambda: ok_body(gateway.status(run_id)),
+    advanced = gateway.wait_for_status(
+        run_id,
         _advanced,
         timeout=budget,
         interval=1.0,
@@ -389,26 +389,23 @@ def _start_document_run(
     *,
     selection: JsonObject,
 ) -> httpx.Response:
-    """Start a run on the declaring preset with a token for every declared role."""
-    body: JsonObject = {
-        "team_preset": _CLARIFY_PRESET,
-        "stage": "start",
-        "run_id": run_id,
-        "message": "Plan a right-side monitor panel.",
-        "autonomous": True,
-        "feature_tag": _FEATURE_TAG,
-        "selection": selection,
-        "metadata": {
-            "feature_tag": _FEATURE_TAG,
-            "workspace_root": str(_WORKSPACE_ROOT),
-        },
-        "actor_tokens": {
-            "tokens": {role: f"tok-{role}" for role in _required_roles()},
-            "engine_bearer": _ENGINE_BEARER,
-        },
-    }
-    with gateway.client(timeout=90.0) as client:
-        return client.post("/v1/runs", json=body)
+    """Start a run on the declaring preset with a token for every declared role.
+
+    The target feature rides in the run metadata, which run-start reads when the
+    request names no top-level feature.
+    """
+    verbs = replace(
+        gateway.runs,
+        team_preset=_CLARIFY_PRESET,
+        workspace_root=str(_WORKSPACE_ROOT),
+        selection=lambda _workspace: selection,
+        tokens=role_tokens(_required_roles()),
+    )
+    return verbs.start(
+        run_id,
+        message="Plan a right-side monitor panel.",
+        metadata={"feature_tag": _FEATURE_TAG},
+    )
 
 
 def _history_state(gateway: CertifiedGateway, run_id: str) -> JsonObject:

@@ -44,12 +44,13 @@ from __future__ import annotations
 
 import tomllib
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from ..acceptance.tests._harness import certified_gateway
 from ..graph.enums import Provider
-from ..testing import ok_body, wait_for_run_status
+from ..testing.gateway_verbs import role_tokens
 
 # A star preset, so the run crosses the supervisor's routing turns as well as its
 # worker's; agreement is asserted for every role the freeze discloses.
@@ -90,38 +91,23 @@ def test_advertised_assignment_is_the_assignment_the_worker_executes(
         tmp_path,
         VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
-        workspace_root = str(tmp_path)
-        selection = gateway.served_in_process_selection(
-            workspace_root, prefer_provider_id=_PRESET_LANE
+        verbs = replace(
+            gateway.runs,
+            team_preset=_PRESET,
+            workspace_root=str(tmp_path),
+            selection=lambda workspace: gateway.served_in_process_selection(
+                workspace, prefer_provider_id=_PRESET_LANE
+            ),
+            tokens=role_tokens(roles),
         )
-        with gateway.client(timeout=90.0) as client:
-            started = client.post(
-                "/v1/runs",
-                json={
-                    "team_preset": _PRESET,
-                    "stage": "start",
-                    "run_id": run_id,
-                    "message": "Do the task and stop.",
-                    "autonomous": True,
-                    "selection": selection,
-                    "metadata": {"workspace_root": workspace_root},
-                    "actor_tokens": {
-                        "tokens": {role: f"tok-{role}" for role in roles},
-                        "engine_bearer": "bearer",
-                    },
-                },
-            )
+        started = verbs.start(run_id, message="Do the task and stop.")
         assert started.status_code == 201, started.text
         frozen = started.json()["frozen_assignment"]
         assert frozen, "run-start must disclose the freeze it dispatched"
 
         # The run must genuinely execute first, so a transport failure fails as
         # itself instead of being read as a disagreement.
-        snapshot = wait_for_run_status(
-            lambda: ok_body(gateway.status(run_id)),
-            timeout=180.0,
-            label=f"run {run_id}",
-        )
+        snapshot = gateway.wait_for_status(run_id, timeout=180.0)
         assert snapshot["status"] == "completed", snapshot
 
         history = gateway.thread_state(run_id)

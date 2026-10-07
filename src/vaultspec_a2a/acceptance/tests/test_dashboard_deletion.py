@@ -24,7 +24,6 @@ import sqlite3
 from typing import TYPE_CHECKING
 
 from ...desktop.profile import derive_state_paths
-from ...testing import ok_body, wait_for_run_status
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -79,7 +78,7 @@ def test_deletion_removes_the_run_from_control_and_checkpoint_stores(
     run_id = "run-deletion-cross-store"
     started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
-    wait_for_run_status(lambda: ok_body(gateway.status(run_id)), label=f"run {run_id}")
+    gateway.wait_for_status(run_id)
 
     # The run is durable in both stores before deletion.
     assert gateway.status(run_id).status_code == 200
@@ -114,7 +113,7 @@ def test_replayed_delete_converges_without_a_second_teardown(
     run_id = "run-deletion-replay"
     started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
-    wait_for_run_status(lambda: ok_body(gateway.status(run_id)), label=f"run {run_id}")
+    gateway.wait_for_status(run_id)
 
     first = gateway.delete_run(run_id)
     assert first.status_code == 204, first.text

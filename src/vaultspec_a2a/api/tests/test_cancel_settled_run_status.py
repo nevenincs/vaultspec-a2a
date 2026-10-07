@@ -39,11 +39,11 @@ from ...graph.nodes.action_completion import (
 from ...providers import ProviderCondition
 from ...testing import (
     add_test_node,
-    async_catalog_run_fields,
     compile_test_graph,
     new_state_graph,
     serve_on_loopback,
 )
+from ...testing.gateway_verbs import async_run_start_body
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import ThreadStatus
@@ -55,23 +55,6 @@ if TYPE_CHECKING:
 
 _PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
-
-
-async def _run_body(client: httpx.AsyncClient) -> dict[str, object]:
-    """A complete run-start body, including the now-required identity and selection.
-
-    The selection is derived from the catalog this gateway actually serves rather
-    than written out here, so these tests keep asserting about CANCEL rather than
-    quietly becoming a second copy of the selection-admission tests.
-    """
-    return {
-        "team_preset": _PRESET,
-        "message": "build it",
-        "autonomous": True,
-        "actor_tokens": {"tokens": {"coder": "tok-coder"}, "engine_bearer": "bearer"},
-        "run_id": f"cancel-settled-{next(_RUN_SEQ):02d}",
-        **await async_catalog_run_fields(client),
-    }
 
 
 def _terminal_envelope(run_id: str, status: str) -> dict[str, object]:
@@ -88,7 +71,16 @@ def _terminal_envelope(run_id: str, status: str) -> dict[str, object]:
 
 
 async def _start_run(client: httpx.AsyncClient) -> str:
-    resp = await client.post("/v1/runs", json=await _run_body(client))
+    # The selection is derived from the catalog this gateway actually serves
+    # rather than written out here, so these tests keep asserting about CANCEL
+    # rather than quietly becoming a second copy of the selection-admission tests.
+    body = await async_run_start_body(
+        client,
+        f"cancel-settled-{next(_RUN_SEQ):02d}",
+        team_preset=_PRESET,
+        tokens={"coder": "tok-coder"},
+    )
+    resp = await client.post("/v1/runs", json=body)
     assert resp.status_code == 201, resp.text
     return resp.json()["run_id"]
 

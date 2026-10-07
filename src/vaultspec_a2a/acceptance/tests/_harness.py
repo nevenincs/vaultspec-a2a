@@ -21,11 +21,12 @@ gateway contract - run creation, status, cancellation routing, streaming,
 deletion, and authentication all hold whether a run ultimately completes or
 fails - so those scenarios drive this stack without it.
 
-``CertifiedGateway`` is the authenticated handle scenarios drive. Its run-start
-verb is the shared :class:`~vaultspec_a2a.testing.RunVerbs` bound to this stack's
-preset, workspace and selection, so a scenario asserts on responses instead of
-re-deriving request bodies - no shadowed request logic spread across scenario
-files.
+``CertifiedGateway`` is the authenticated handle scenarios drive: the shared
+:class:`~vaultspec_a2a.testing.gateway_verbs.GatewayVerbs` reads and controls,
+plus a run-start verb that is the shared :class:`~vaultspec_a2a.testing.RunVerbs`
+bound to this stack's preset, workspace and selection, so a scenario asserts on
+responses instead of re-deriving request bodies - no shadowed request logic
+spread across scenario files.
 """
 
 from __future__ import annotations
@@ -34,10 +35,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import httpx
-
 from ...conftest import ExternalPrerequisiteRule
-from ...graph.enums import Provider
 from ...testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     DEFAULT_OWNERSHIP_CAPABILITY,
@@ -48,6 +46,12 @@ from ...testing import (
     fetch_in_process_selection,
     gateway_script,
     seat_app_home,
+)
+from ...testing.gateway_verbs import (
+    DEFAULT_PRESET_LANE,
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    GatewayVerbs,
 )
 
 if TYPE_CHECKING:
@@ -60,30 +64,18 @@ if TYPE_CHECKING:
 # other. Republishing it here would hand the next tier a second place to import it
 # from and start that again.
 __all__ = [
-    "DEFAULT_REQUIRED_ROLE",
-    "DEFAULT_TEAM_PRESET",
     "CertifiedGateway",
     "certified_gateway",
 ]
 
-# The bundled deterministic preset the stack certifies against. It ships only in
-# source and Compose environments; the gateway loads it from the checkout, never
-# a published wheel, which is why this harness is source-only.
-DEFAULT_TEAM_PRESET = "mock-success-single"
-DEFAULT_REQUIRED_ROLE = "mock-coder-success"
 
-# The in-process lane DEFAULT_TEAM_PRESET is pinned to. Every run this stack
-# drives presents ONE selection, so the preference is that preset's rather than a
-# verb's own team_preset default, which no caller overrides.
-_DEFAULT_PRESET_LANE = Provider.MOCK.value
-
-
-@dataclass(slots=True)
-class CertifiedGateway:
+@dataclass(frozen=True, slots=True)
+class CertifiedGateway(GatewayVerbs):
     """An authenticated handle to one running broker certification stack.
 
     Every request presents the real gateway service credential; none uses the
-    test-only authentication bypass.
+    test-only authentication bypass. The run reads, cancel, deletion and status
+    wait are the shared :class:`~vaultspec_a2a.testing.gateway_verbs.GatewayVerbs`.
 
     Run-start requires an explicit catalog selection revalidated against the
     catalog served for the run's workspace, so the run-bearing verbs resolve
@@ -93,15 +85,8 @@ class CertifiedGateway:
     stack should pay its cold catalog build once.
     """
 
-    base_url: str
-    attach_token: str
     app_home: Path
     workspace_root: Path
-
-    @property
-    def auth_header(self) -> dict[str, str]:
-        """The real gateway service Authorization header this client presents."""
-        return {"Authorization": f"Bearer {self.attach_token}"}
 
     # -- explicit catalog selection -------------------------------------------
 
@@ -146,22 +131,6 @@ class CertifiedGateway:
         except NoSelectableLaneError as exc:
             ExternalPrerequisiteRule().absent("in-process-lanes", str(exc))
 
-    def client(self, *, timeout: float = 30.0) -> httpx.Client:
-        """A synchronous authenticated client bound to the gateway base URL."""
-        return httpx.Client(
-            base_url=self.base_url, timeout=timeout, headers=self.auth_header
-        )
-
-    def async_client(self, *, timeout: float = 30.0) -> httpx.AsyncClient:
-        """An async authenticated client, for the streaming certification path."""
-        return httpx.AsyncClient(
-            base_url=self.base_url, timeout=timeout, headers=self.auth_header
-        )
-
-    def stream_path(self, run_id: str) -> str:
-        """The versioned public progress-stream path for *run_id*."""
-        return f"/v1/runs/{run_id}/stream"
-
     # -- versioned run-start verb (prepare / commit / release / start) --------
 
     @property
@@ -173,49 +142,15 @@ class CertifiedGateway:
         """
         return RunVerbs(
             base_url=self.base_url,
-            authorization=self.auth_header["Authorization"],
+            authorization=self.authorization,
             team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=str(self.workspace_root),
             selection=lambda workspace: self.served_in_process_selection(
-                workspace, prefer_provider_id=_DEFAULT_PRESET_LANE, cache=True
+                workspace, prefer_provider_id=DEFAULT_PRESET_LANE, cache=True
             ),
             tokens={DEFAULT_REQUIRED_ROLE: "tok-certification"},
             message="certify the assembled product",
         )
-
-    # -- versioned run reads and cancel ---------------------------------------
-
-    def status(self, run_id: str) -> httpx.Response:
-        """Read the authoritative run-status snapshot for *run_id*."""
-        with self.client(timeout=30.0) as client:
-            return client.get(f"/v1/runs/{run_id}")
-
-    def active_runs(self) -> httpx.Response:
-        """Discover the bounded set of durable non-terminal runs."""
-        with self.client(timeout=30.0) as client:
-            return client.get("/v1/runs")
-
-    def cancel(
-        self, run_id: str, *, idempotency_key: str | None = None
-    ) -> httpx.Response:
-        """Cancel *run_id* idempotently through the versioned public verb."""
-        headers = dict(self.auth_header)
-        if idempotency_key is not None:
-            headers["Idempotency-Key"] = idempotency_key
-        with self.client(timeout=30.0) as client:
-            return client.post(f"/v1/runs/{run_id}/cancel", headers=headers)
-
-    # -- versioned run history and deletion ------------------------------------
-
-    def thread_state(self, run_id: str) -> httpx.Response:
-        """Read a run whole through the versioned history verb."""
-        with self.client(timeout=30.0) as client:
-            return client.get(f"/v1/runs/{run_id}/history")
-
-    def delete_run(self, run_id: str) -> httpx.Response:
-        """Delete *run_id* through the durable cross-store deletion saga."""
-        with self.client(timeout=60.0) as client:
-            return client.delete(f"/v1/runs/{run_id}")
 
 
 @contextmanager
@@ -259,7 +194,7 @@ def certified_gateway(
     ) as gateway:
         running = CertifiedGateway(
             base_url=gateway.base_url,
-            attach_token=attach_token,
+            authorization=f"Bearer {attach_token}",
             app_home=app_home,
             workspace_root=workspace_root,
         )

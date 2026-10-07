@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,7 +29,12 @@ from ...authoring import AuthoringClient, AuthoringResponse, Denial, mint_actor_
 from ...control.config import setting_env, settings
 from ...control.run_start_policy import required_role_ids
 from ...team.team_config import load_team_config
-from ...testing import ok_body, wait_for_run_status
+from ...testing.gateway_verbs import actor_tokens_body
+from ...testing.progress import (
+    ProgressDeadline,
+    ProgressStalledError,
+    wait_for_async,
+)
 from ._harness import certified_gateway
 
 if TYPE_CHECKING:
@@ -244,20 +248,23 @@ async def _set_autonomous_mode(client: AuthoringClient, reviewer_token: str) -> 
 async def _await_materialized_documents(
     vault_root: Path, feature_tag: str, *, timeout: float
 ) -> dict[str, Path]:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    async def _materialized() -> dict[str, Path] | None:
         materialized: dict[str, Path] = {}
         for kind in ("research", "adr"):
             matches = sorted((vault_root / kind).glob(f"*{feature_tag}*.md"))
             if len(matches) == 1 and matches[0].is_file() and matches[0].stat().st_size:
                 materialized[kind] = matches[0]
-        if len(materialized) == 2:
-            return materialized
-        await asyncio.sleep(0.5)
-    raise AssertionError(
-        f"deterministic completion did not materialize research and ADR documents "
-        f"for feature {feature_tag!r} under {vault_root}"
-    )
+        return materialized if len(materialized) == 2 else None
+
+    try:
+        return await wait_for_async(
+            _materialized, deadline=ProgressDeadline(idle_window_s=timeout)
+        )
+    except ProgressStalledError as stalled:
+        raise AssertionError(
+            f"deterministic completion did not materialize research and ADR "
+            f"documents for feature {feature_tag!r} under {vault_root}"
+        ) from stalled
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,26 +330,26 @@ def _start_completion_run(
     tokens: dict[str, str],
 ) -> None:
     message = _required_text(plan.scenario.get("message"), at="scenario.message")
-    started = gateway.client(timeout=90.0).post(
-        "/v1/runs",
-        json={
-            "team_preset": plan.preset,
-            "stage": "start",
-            "run_id": plan.run_id,
-            "message": message,
-            "feature_tag": plan.feature_tag,
-            "metadata": {
-                "workspace_root": str(plan.vault_root.parent),
+    with gateway.client(timeout=90.0) as client:
+        started = client.post(
+            "/v1/runs",
+            json={
+                "team_preset": plan.preset,
+                "stage": "start",
+                "run_id": plan.run_id,
+                "message": message,
                 "feature_tag": plan.feature_tag,
-                "nickname": plan.run_id,
+                "metadata": {
+                    "workspace_root": str(plan.vault_root.parent),
+                    "feature_tag": plan.feature_tag,
+                    "nickname": plan.run_id,
+                },
+                "autonomous": True,
+                "actor_tokens": actor_tokens_body(
+                    tokens, engine_bearer=plan.endpoint.bearer_token
+                ),
             },
-            "autonomous": True,
-            "actor_tokens": {
-                "tokens": tokens,
-                "engine_bearer": plan.endpoint.bearer_token,
-            },
-        },
-    )
+        )
     assert started.status_code == 201, started.text
 
 
@@ -413,10 +420,7 @@ async def _run_completion(tmp_path: Path, plan: _CompletionPlan) -> _ReviewBundl
                 plan.vault_root, plan.feature_tag, timeout=180.0
             )
             terminal = await asyncio.to_thread(
-                wait_for_run_status,
-                lambda: ok_body(gateway.status(plan.run_id)),
-                timeout=180.0,
-                label=f"run {plan.run_id}",
+                gateway.wait_for_status, plan.run_id, timeout=180.0
             )
             assert terminal["status"] == "completed", terminal
             history = _read_completion_history(gateway, plan.run_id)

@@ -28,6 +28,7 @@ import pytest
 
 from ...database import get_thread
 from ...testing import async_catalog_run_fields, serve_on_loopback
+from ...testing.gateway_verbs import async_run_start_body
 from .conftest import SessionFactory, make_app
 from .test_gateway_live import _PRESET
 
@@ -333,17 +334,14 @@ async def test_run_start_persists_no_secrets_in_db_row(
     ):
         start = await client.post(
             "/v1/runs",
-            json={
-                "run_id": "evidence-no-secrets",
-                "team_preset": _PRESET,
-                "message": "go",
-                "autonomous": True,
-                "actor_tokens": {
-                    "tokens": {"coder": token_value},
-                    "engine_bearer": bearer_value,
-                },
-                **await async_catalog_run_fields(client),
-            },
+            json=await async_run_start_body(
+                client,
+                "evidence-no-secrets",
+                team_preset=_PRESET,
+                tokens={"coder": token_value},
+                message="go",
+                engine_bearer=bearer_value,
+            ),
         )
         assert start.status_code == 201, start.text
         run_id = start.json()["run_id"]

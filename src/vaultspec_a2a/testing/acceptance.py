@@ -91,7 +91,9 @@ from .catalog import (
     selection_from_served_catalog,
 )
 from .endpoints import resolve_gateway_url
+from .gateway_verbs import actor_tokens_body
 from .payloads import json_object, json_object_list
+from .progress import ProgressDeadline, ProgressStalledError, wait_for_async
 from .sse import SseFrame
 
 if TYPE_CHECKING:
@@ -742,7 +744,7 @@ class AcceptanceHarness:
             # Run-start requires this explicit selection and revalidates it
             # against the catalog served for this workspace.
             "selection": self.selection,
-            "actor_tokens": {"tokens": tokens, "engine_bearer": self.engine_bearer},
+            "actor_tokens": actor_tokens_body(tokens, engine_bearer=self.engine_bearer),
             "metadata": meta,
         }
         if self.overrides:
@@ -1186,26 +1188,37 @@ class AcceptanceHarness:
         # we wait for a gate; answer read-only ones inline so it progresses. Skipped
         # for deterministic/autonomous lanes (they never interrupt) to keep them fast.
         answer_permissions = is_live_lane(self.case) and not self.case.autonomous
-        while time.monotonic() < deadline:
+
+        async def _poll() -> JsonObject | None:
             await self._assert_not_terminal(hc)
             if answer_permissions:
                 await self._answer_pending_permissions(hc)
-            found = await find()
-            if found is not None:
-                # Per-transition wall time - the harness's own runtime profile.
-                # A throwaway overlay of this line attributed the 300-900s lane
-                # runtimes to since-fixed stalls (the healthy mixed lane runs in
-                # ~8s); keeping it at debug makes the next regression visible
-                # per-phase instead of as an opaque slow test.
-                logger.debug(
-                    "pw7 await %s: %.2fs (poll=%.1fs)",
-                    what,
-                    time.monotonic() - started,
-                    poll_seconds,
-                )
-                return found
-            await asyncio.sleep(poll_seconds)
-        raise AssertionError(f"timed out waiting for {what}; phases={self.phases_seen}")
+            return await find()
+
+        # The run's phases share one deadline, so this wait is bounded by
+        # whatever of it remains.
+        try:
+            found = await wait_for_async(
+                _poll,
+                deadline=ProgressDeadline(idle_window_s=deadline - started),
+                interval_s=poll_seconds,
+            )
+        except ProgressStalledError as stalled:
+            raise AssertionError(
+                f"timed out waiting for {what}; phases={self.phases_seen}"
+            ) from stalled
+        # Per-transition wall time - the harness's own runtime profile. A
+        # throwaway overlay of this line attributed the 300-900s lane runtimes to
+        # since-fixed stalls (the healthy mixed lane runs in ~8s); keeping it at
+        # debug makes the next regression visible per-phase instead of as an
+        # opaque slow test.
+        logger.debug(
+            "pw7 await %s: %.2fs (poll=%.1fs)",
+            what,
+            time.monotonic() - started,
+            poll_seconds,
+        )
+        return found
 
     # ------------------------------------------------------------------
     # Orchestration

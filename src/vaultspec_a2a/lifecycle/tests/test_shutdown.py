@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 
 from ...testing import loopback_uvicorn, uvicorn_started
-from ..shutdown import ShutdownDeadline, ShutdownServer
+from ..shutdown import ShutdownDeadline, ShutdownServer, build_shutdown_server
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -71,3 +71,23 @@ async def test_parked_sse_is_cancelled_inside_the_server_shutdown_clock() -> Non
     assert observed_remaining[0] < 2.5, (
         "lifespan received a reset deadline after the parked stream grace elapsed"
     )
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_built_server_stops_when_the_app_requests_its_owner_to() -> None:
+    app = FastAPI()
+    server = build_shutdown_server(app, host="127.0.0.1", port=0)
+    serving = asyncio.create_task(server.serve())
+    try:
+        await uvicorn_started(server, serving)
+        assert not server.should_exit
+
+        app.state.request_server_shutdown()
+        await asyncio.wait_for(serving, timeout=3.5)
+    finally:
+        server.should_exit = True
+        if not serving.done():
+            await asyncio.wait_for(serving, timeout=3.5)
+
+    assert server.should_exit
+    assert isinstance(app.state.shutdown_deadline, ShutdownDeadline)

@@ -37,10 +37,10 @@ __all__ = [
     "_build_worker_restart_detail",
     "_desktop_worker_port_clear",
     "_evict_stale_worker",
-    "_internal_auth_headers",
     "_read_log_tail",
     "_shared_worker_port_clear",
     "_worker_stderr_log_path",
+    "internal_auth_headers",
     "probe_worker_health",
     "sweep_orphan_worker_logs",
     "worker_liveness",
@@ -354,7 +354,7 @@ def _build_worker_restart_detail(
     return detail
 
 
-def _internal_auth_headers(token: str | None) -> dict[str, str] | None:
+def internal_auth_headers(token: str | None) -> dict[str, str] | None:
     """Return the worker-IPC bearer header for *token*, or none when it is unset.
 
     The gateway-worker pair authenticates every probe and command with the shared
@@ -407,7 +407,7 @@ async def probe_worker_health(
         if client is not None:
             return await _probe(client)
         async with httpx.AsyncClient(
-            headers=_internal_auth_headers(internal_token)
+            headers=internal_auth_headers(internal_token)
         ) as owned:
             return await _probe(owned)
     except Exception as exc:
@@ -541,7 +541,7 @@ async def _evict_stale_worker(
         async with httpx.AsyncClient() as client:
             await client.post(
                 f"{worker_url}/admin/shutdown",
-                headers=_internal_auth_headers(internal_token),
+                headers=internal_auth_headers(internal_token),
                 timeout=2.0,
             )
 

@@ -18,33 +18,22 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
+from ...testing import load_settings
 from ._env_example import SERVICE_SETTINGS, declaring_class, setting_field_by_name
 
 if TYPE_CHECKING:
     from pydantic_settings import BaseSettings
 
 
-class _SettingsFromDotenv(Protocol):
-    """A settings class called with pydantic-settings' private ``_env_file``."""
-
-    def __call__(self, *, _env_file: Path | None) -> BaseSettings: ...
-
-
-#: The one call the loader makes per class, typed once rather than at each use.
-_LOADERS = {
-    settings_cls: cast("_SettingsFromDotenv", settings_cls)
-    for settings_cls in SERVICE_SETTINGS
-}
-
-
 def _load_all(dotenv: Path | None) -> dict[type[BaseSettings], BaseSettings]:
     """Load every service settings class from one dotenv file, or from none."""
     return {
-        settings_cls: load(_env_file=dotenv) for settings_cls, load in _LOADERS.items()
+        settings_cls: load_settings(settings_cls, env_file=dotenv)
+        for settings_cls in SERVICE_SETTINGS
     }
 
 

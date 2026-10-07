@@ -62,7 +62,6 @@ from ...authoring import (
     mint_actor_token,
 )
 from ...control.accepted_input import freeze_accepted_input
-from ...control.config import settings
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...database import (
@@ -83,6 +82,7 @@ from ...testing import (
     current_execution_metadata,
     elect_status,
     new_state_graph,
+    settings_override,
 )
 from ...tests._write_authority import make_test_write_authority
 from ...thread.actor_tokens import ActorTokenBundle
@@ -103,6 +103,8 @@ from .test_verdict_subscriber_live import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -159,9 +161,10 @@ class _VerdictResumeContext:
 
 
 @pytest.fixture(autouse=True)
-def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+def _configure_test_dispatch_auth() -> Generator[None]:
     """Give both sides of real worker dispatch the current IPC credential."""
-    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
+    with settings_override(internal_token=_TEST_INTERNAL_TOKEN):
+        yield
 
 
 @pytest_asyncio.fixture

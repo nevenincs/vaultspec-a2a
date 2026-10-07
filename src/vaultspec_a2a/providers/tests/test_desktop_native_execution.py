@@ -56,14 +56,12 @@ async def test_desktop_native_read_is_refused_before_child_execution(
     private.write_text("synthetic-private-state", encoding="utf-8")
     marker = project / "child-started.txt"
     command = _command(project, private, marker)
-    with (
-        armed_desktop_app_home(home),
-        settings_override(
-            provider_identity_launcher=sys.executable if identity_configured else None,
-            provider_agent_uid=1002 if identity_configured else None,
-            provider_agent_gid=1002 if identity_configured else None,
-            openai_api_key="synthetic-openai-key",
-        ),
+    with armed_desktop_app_home(
+        home,
+        provider_identity_launcher=sys.executable if identity_configured else None,
+        provider_agent_uid=1002 if identity_configured else None,
+        provider_agent_gid=1002 if identity_configured else None,
+        openai_api_key="synthetic-openai-key",
     ):
         with pytest.raises(NativeExecutionRefusedError, match="OS isolation backend"):
             await spawn_acp_process(
@@ -118,7 +116,7 @@ async def test_desktop_terminal_refuses_before_creating_child(tmp_path: Path) ->
         session_id="terminal-refusal",
     )
     try:
-        with settings_override(desktop_app_home=home, provider_identity_launcher=None):
+        with armed_desktop_app_home(home, provider_identity_launcher=None):
             params: JsonObject = {
                 "sessionId": ctx.session_id,
                 "command": command[0],

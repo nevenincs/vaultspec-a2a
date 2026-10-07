@@ -16,7 +16,7 @@ from ...lifecycle.discovery import (
     service_json_path,
     write_desktop_discovery,
 )
-from ...testing import settings_override as _settings_override
+from ...testing import armed_desktop_app_home
 from ...utils import bearer_header
 
 if TYPE_CHECKING:
@@ -49,11 +49,7 @@ def test_desktop_credential_requires_matching_live_discovery(tmp_path: Path) -> 
     home.mkdir()
     a2a_home = tmp_path / "a2a-home"
     _seed_desktop_authority(home, a2a_home, port=8123)
-    with _settings_override(
-        desktop_app_home=home,
-        a2a_home=a2a_home,
-        gateway_service_token=None,
-    ):
+    with armed_desktop_app_home(home, a2a_home=a2a_home, gateway_service_token=None):
         assert gateway_auth_headers(
             "http://127.0.0.1:8123/v1/service"
         ) == bearer_header(_TOKEN)
@@ -65,11 +61,7 @@ def test_desktop_credential_is_not_sent_to_wrong_loopback_port(tmp_path: Path) -
     home.mkdir()
     a2a_home = tmp_path / "a2a-home"
     _seed_desktop_authority(home, a2a_home, port=8123)
-    with _settings_override(
-        desktop_app_home=home,
-        a2a_home=a2a_home,
-        gateway_service_token=None,
-    ):
+    with armed_desktop_app_home(home, a2a_home=a2a_home, gateway_service_token=None):
         assert gateway_auth_headers("http://127.0.0.1:8124/v1/service") == {}
 
 
@@ -79,11 +71,7 @@ def test_desktop_credential_is_not_sent_to_remote_origin(tmp_path: Path) -> None
     home.mkdir()
     a2a_home = tmp_path / "a2a-home"
     _seed_desktop_authority(home, a2a_home, port=8123)
-    with _settings_override(
-        desktop_app_home=home,
-        a2a_home=a2a_home,
-        gateway_service_token=None,
-    ):
+    with armed_desktop_app_home(home, a2a_home=a2a_home, gateway_service_token=None):
         assert gateway_auth_headers("https://gateway.example:8123/v1/service") == {}
 
 

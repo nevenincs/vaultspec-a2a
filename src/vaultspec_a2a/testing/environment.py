@@ -92,7 +92,7 @@ def settings_override(**updates: object) -> Generator[None]:
 
 
 @contextlib.contextmanager
-def armed_desktop_app_home(app_home: Path) -> Generator[None]:
+def armed_desktop_app_home(app_home: Path, **overrides: object) -> Generator[None]:
     """Arm the desktop profile on the shared ``settings`` singleton.
 
     ``desktop_profile_armed`` is a read-only property derived from
@@ -102,7 +102,10 @@ def armed_desktop_app_home(app_home: Path) -> Generator[None]:
 
     The desktop profile holds no plugin lane - the product refuses one named
     under it - so arming it also unseats any lane plugins this process holds.
+    *overrides* are further fields set for the same block, on the singleton that
+    owns each; naming ``desktop_app_home`` or ``lane_plugins`` there is a
+    ``TypeError``, since arming owns both.
     """
-    with settings_override(desktop_app_home=app_home, lane_plugins=()):
+    with settings_override(desktop_app_home=app_home, lane_plugins=(), **overrides):
         assert _settings.desktop_profile_armed is True
         yield

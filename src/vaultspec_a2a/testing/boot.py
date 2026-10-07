@@ -196,28 +196,30 @@ import sys
 
 logging.basicConfig(level=logging.INFO)
 import uvicorn
-from vaultspec_a2a.api.app import _bind_server_shutdown_owner, create_app
+from vaultspec_a2a.api.app import create_app
+from vaultspec_a2a.lifecycle.shutdown import bind_shutdown_owner
 
 port = int(sys.argv[1])
 app = create_app()
 server = uvicorn.Server(
     uvicorn.Config(app, host="127.0.0.1", port=port, log_level="info")
 )
-_bind_server_shutdown_owner(app, server)
+bind_shutdown_owner(app, server)
 server.run()
 """
 
 _GATEWAY_SCRIPT_QUIET = """
 import sys
 import uvicorn
-from vaultspec_a2a.api.app import _bind_server_shutdown_owner, create_app
+from vaultspec_a2a.api.app import create_app
+from vaultspec_a2a.lifecycle.shutdown import bind_shutdown_owner
 
 port = int(sys.argv[1])
 app = create_app()
 server = uvicorn.Server(
     uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
 )
-_bind_server_shutdown_owner(app, server)
+bind_shutdown_owner(app, server)
 server.run()
 """
 
@@ -320,14 +322,15 @@ import asyncio
 import logging
 import sys
 import uvicorn
-from vaultspec_a2a.api.app import _bind_server_shutdown_owner, _lifespan, create_app
+from vaultspec_a2a.api.app import _lifespan, create_app
+from vaultspec_a2a.lifecycle.shutdown import bind_shutdown_owner
 
 logging.basicConfig(level=logging.INFO)
 app = create_app()
 server = uvicorn.Server(uvicorn.Config(
     app, host="127.0.0.1", port=int(sys.argv[1]), log_level="info", lifespan="off"
 ))
-_bind_server_shutdown_owner(app, server)
+bind_shutdown_owner(app, server)
 
 async def main():
     async with _lifespan(app):

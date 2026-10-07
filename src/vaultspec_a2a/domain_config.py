@@ -1,15 +1,15 @@
-"""Define domain settings and the process-wide domain configuration.
+"""Define the domain settings and the process-wide domain configuration.
 
-:class:`vaultspec_a2a.domain_config.DomainConfig` represents resolved domain
-configuration. :class:`vaultspec_a2a.domain_config.DomainSettingsConfig`
-defines environment-based settings behavior.
+:class:`vaultspec_a2a.domain_config.DomainSettingsConfig` declares the
+behavioural knobs the domain, streaming, graph and worker layers consume, and
+reads them from the ``VAULTSPEC_A2A_``-prefixed environment and the operator's
+environment file.
 
-:data:`vaultspec_a2a.domain_config.domain_config` reads the environment-based
-settings the first time one of its values is read, not when this module is
-imported.
+:data:`vaultspec_a2a.domain_config.domain_config` reads those settings the
+first time one of its values is read, not when this module is imported.
 
-The settings govern :mod:`vaultspec_a2a.context`, :mod:`vaultspec_a2a.graph`,
-:mod:`vaultspec_a2a.streaming`, and :mod:`vaultspec_a2a.control.config`.
+The infrastructure settings in :mod:`vaultspec_a2a.control.config` declare none
+of these fields, so each knob has exactly one owner and one value in a process.
 """
 
 from pydantic import Field
@@ -24,15 +24,21 @@ from .control.settings_base import (
 from .thread.constants import MAX_SEED_TRANSCRIPT_MESSAGES
 
 
-class DomainConfig(ProjectSettings):
-    """Behavioural knobs consumed by Layer 1 (domain) modules.
+class DomainSettingsConfig(ProjectSettings):
+    """Behavioural knobs consumed by the domain, streaming, graph and worker layers.
 
-    Based on ``BaseSettings`` rather than ``BaseModel`` so that this class and
-    its env-reading subclass declare ``model_config`` with one and the same
-    type. Two pydantic bases that declare it differently are an unresolvable
-    conflict for a subclass of both, and nothing constructs this class directly:
-    the only instance is the ``DomainSettingsConfig`` singleton below.
+    Read through the :data:`domain_config` singleton, which shares its
+    environment and ``.env`` sources with the infrastructure settings without
+    sharing any field with them.
     """
+
+    model_config = SettingsConfigDict(
+        env_file=ProjectSettings.operator_env_file(),
+        env_file_encoding="utf-8",
+        env_prefix=ENV_PREFIX,
+        extra="ignore",
+        env_ignore_empty=True,
+    )
 
     # -- Event aggregator debounce / buffer --------------------------------
 
@@ -90,9 +96,8 @@ class DomainConfig(ProjectSettings):
             "caller. Zero disables the limit, which is a deliberate operator "
             "choice rather than the default. Declared here rather than beside "
             "the infrastructure fields because the subscriber registry that this "
-            "bounds lives in the domain layer and must enforce it directly; "
-            "``Settings`` inherits the field, so the operator-facing name and the "
-            "value both stay single-sourced."
+            "bounds lives in the domain layer and must enforce it directly; the "
+            "gateway's early refusal reads the same value from here."
         ),
     )
     aget_state_timeout_seconds: float = Field(
@@ -305,27 +310,10 @@ class DomainConfig(ProjectSettings):
     )
 
 
-class DomainSettingsConfig(DomainConfig):
-    """Env-reading subclass of DomainConfig.
-
-    Reads ``VAULTSPEC_A2A_``-prefixed environment variables and the project's
-    ``.env`` so that Layer 1 consumers get production values without importing
-    the full infrastructure ``Settings`` object from ``control.config``.
-    """
-
-    model_config = SettingsConfigDict(
-        env_file=ProjectSettings.operator_env_file(),
-        env_file_encoding="utf-8",
-        env_prefix=ENV_PREFIX,
-        extra="ignore",
-        env_ignore_empty=True,
-    )
-
-
-# Module-level singleton — Layer 1 modules import this directly. It is built
-# the first time one of its values is read, so importing this module cannot
-# fail on a configuration the settings refuse: that refusal belongs to the
-# process that starts the service, which renders it as one named error.
+# Layer 1 modules import this directly. It is built the first time one of its
+# values is read, so importing this module cannot fail on a configuration the
+# settings refuse: that refusal belongs to the process that starts the service,
+# which renders it as one named error.
 domain_config = built_at_first_use(lambda: read_configuration(DomainSettingsConfig))
 
 __all__ = ["DomainSettingsConfig", "domain_config"]

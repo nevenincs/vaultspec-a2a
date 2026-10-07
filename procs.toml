@@ -9,6 +9,9 @@
 
 [resident]
 # Fixed ports for the resident owner instances (never allocated by the registry).
+# gateway and worker are the service settings' `port` and `worker_port` defaults
+# (control/infra_config.py) and must equal them; the engine's port is the engine's
+# own, with no a2a setting behind it.
 engine = 8767
 gateway = 18000
 worker = 18001

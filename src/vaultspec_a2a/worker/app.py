@@ -38,7 +38,9 @@ from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 from vaultspec_core.config import ConfigurationError
 
 from ..control.config import settings
+from ..control.settings_base import build_now
 from ..database.checkpoints import open_checkpointer
+from ..domain_config import domain_config
 from ..ipc.body_limit import BoundedHttpBodyMiddleware, worker_body_limit
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..lifecycle.pairing import DispatchPairingStatus, resolve_worker_gateway_target
@@ -573,6 +575,9 @@ def _serve() -> None:
     """Configure the process and run the worker's server until shutdown."""
     reconfigure_console_utf8()
     configure_logging("service", settings=settings, service_name="worker")
+    # Built with the infrastructure settings, so a refused domain value is
+    # reported by the process that starts the service, not by the first reader.
+    build_now(domain_config)
     logger.info(
         "Worker main config: gateway_port=%d worker_host=%s"
         " worker_port=%d worker_url=%s",

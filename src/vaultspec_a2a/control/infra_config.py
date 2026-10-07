@@ -629,6 +629,9 @@ class InfraConfig(ProjectSettings):
         default="127.0.0.1",
         description="Bind host for the uvicorn server (VAULTSPEC_A2A_HOST).",
     )
+    # procs.toml's [resident] table repeats this default and worker_port's so the
+    # dev registry never allocates a port a resident instance holds; a settings
+    # test holds the two equal.
     port: int = Field(
         default=18000,
         description="Bind port for the uvicorn server (VAULTSPEC_A2A_PORT).",

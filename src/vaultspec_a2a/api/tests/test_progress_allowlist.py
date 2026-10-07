@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, cast
 import httpx
 import pytest
 
-from ...control.config import settings
+from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
 from ...testing import read_frame, serve_on_loopback
@@ -419,7 +419,7 @@ async def test_global_stream_quota_refuses_an_authenticated_caller_at_capacity(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """S160 (global): the connection cap holds even behind a valid bearer."""
-    limit = settings.max_stream_connections
+    limit = domain_config.max_stream_connections
     assert limit > 0, "the global stream limit must be enabled for this proof"
 
     aggregator = EventAggregator()
@@ -452,7 +452,7 @@ async def test_global_stream_quota_admits_the_authenticated_caller_below_capacit
     One slot below capacity the same authenticated request opens, proving the
     refusal above is the connection limit rather than an auth artefact.
     """
-    limit = settings.max_stream_connections
+    limit = domain_config.max_stream_connections
     aggregator = EventAggregator()
     for index in range(limit - 1):
         aggregator.add_subscriber(f"prefill-{index}")

@@ -53,6 +53,7 @@ from ..control.health import (
     probe_desktop_readiness,
 )
 from ..control.leased_dispatch import DispatchTransport
+from ..control.settings_base import build_now
 from ..control.verdict_subscriber import VerdictSubscriber
 from ..control.worker_management import LazyWorkerSpawner, WorkerWatchdog
 from ..database import (
@@ -65,6 +66,7 @@ from ..database import (
 from ..database.checkpoints import Checkpointer, open_checkpointer
 from ..database.reconciliation import reconcile_threads_on_startup
 from ..database.run_event_retention import sweep_replay_log_periodically
+from ..domain_config import domain_config
 from ..ipc.body_limit import BoundedHttpBodyMiddleware, gateway_body_limit
 from ..lifecycle.discovery import (
     HEARTBEAT_REFRESH_SECONDS,
@@ -862,6 +864,9 @@ def main() -> None:
     """
     reconfigure_console_utf8()
     configure_logging("service", settings=settings, service_name="gateway")
+    # Built with the infrastructure settings, so a refused domain value is
+    # reported by the process that starts the service, not by the first reader.
+    build_now(domain_config)
     app = create_app()
     config = uvicorn.Config(
         app,

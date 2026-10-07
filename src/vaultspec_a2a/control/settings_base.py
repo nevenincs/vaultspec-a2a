@@ -33,7 +33,6 @@ root would make the answer depend on which file was read first.
 """
 
 import os
-import re
 import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -66,6 +65,7 @@ from vaultspec_core.config import (
     resolve_credential,
 )
 
+from ..utils import is_secret_name, redact_text
 from .env_prefix import ENV_PREFIX
 from .env_registry import CREDENTIAL_VARIABLES, ENV_FILE_VARIABLE
 
@@ -500,18 +500,6 @@ def _field_behind(settings_cls: type[BaseSettings], location: object) -> str | N
     )
 
 
-#: Words that name a secret when they appear in a settings field's name. Read
-#: together with the field's type: an ``int`` called ``context_limit_tokens``
-#: is a size, and redacting it would cost the operator the one fact the
-#: message exists to carry.
-_SECRET_WORDS: Final = ("password", "secret", "token", "key", "credential")
-
-#: The userinfo of a URL, which is where a DSN carries its password. Matched
-#: on any scheme, because the value that must not be echoed is not always in a
-#: field this module can recognise as a credential.
-_URL_USERINFO: Final = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]*://)[^/\s@]*@")
-
-
 def _carries_text(annotation: object) -> bool:
     """Whether a field's declared type can hold a string, and so a secret."""
     origin = get_origin(annotation)
@@ -526,28 +514,17 @@ def _holds_a_secret(field_name: str, field: FieldInfo) -> bool:
     Four ways to be one, because no single one of them catches every field
     that holds a secret: the registry declares it a credential, the schema
     keeps it out of a repr, its type is a :class:`~pydantic.SecretStr`, or its
-    name says so and its type can hold a string.
+    name says so and its type can hold a string. The type is read with the
+    name because an ``int`` called ``context_limit_tokens`` is a size, and
+    redacting it would cost the operator the one fact the message exists to
+    carry.
     """
     return (
         field_name in CREDENTIAL_VARIABLES
         or field.repr is False
         or _shape_of(field.annotation) == SecretStr.__name__
-        or (
-            any(word in field_name for word in _SECRET_WORDS)
-            and _carries_text(field.annotation)
-        )
+        or (is_secret_name(field_name) and _carries_text(field.annotation))
     )
-
-
-def _without_userinfo(message: str) -> str:
-    """Strip the userinfo out of every URL in *message*.
-
-    A database URL is a plain string on a field no name test calls a secret,
-    and it routinely carries a password between the scheme and the host. The
-    host and the scheme are what the operator needs to see; the credential in
-    front of them is not, on any field and in any message.
-    """
-    return _URL_USERINFO.sub(r"\g<scheme>***@", message)
 
 
 def _refusal(settings_cls: type[BaseSettings], invalid: ValidationError) -> str:
@@ -571,7 +548,10 @@ def _refusal(settings_cls: type[BaseSettings], invalid: ValidationError) -> str:
             f"{field_env_names(settings_cls, field_name)[0]} must be "
             f"{_shape_of(field.annotation)}, got {shown}"
         )
-    return _without_userinfo("\n".join(dict.fromkeys(lines)))
+    # Masked as text whatever the field: a database URL is a plain string on a
+    # field no name test calls a secret, and it routinely carries a password
+    # between the scheme and the host.
+    return redact_text("\n".join(dict.fromkeys(lines)))
 
 
 def read_configuration[T: BaseSettings](settings_cls: type[T], **values: Any) -> T:

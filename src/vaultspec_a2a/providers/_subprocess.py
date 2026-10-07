@@ -2,27 +2,19 @@
 
 Provides platform-aware process spawning and tree killing for ACP agent
 subprocesses.  Used by ``acp_chat_model`` (production).
-
-Also home to :func:`redact_secrets`, the single masking rule for text a failed
-child wrote about itself. Every provider surface that retains a subprocess
-diagnostic shares one threat - a child reports its configuration when it fails,
-and configuration is where credentials live - so it shares one redactor rather
-than each deciding for itself. A per-module copy is how one such surface came to
-retain credentials verbatim while its neighbour masked them.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import subprocess
 import sys
 from contextlib import suppress
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
 from ..desktop.native_isolation import NativeLaunchAuthority
-from ..utils import kill_pid_tree_async
+from ..utils import kill_pid_tree_async, redact_text
 from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainment, ProcessContainmentError
 from ._provider_execution import provider_execution_launch
@@ -37,7 +29,6 @@ __all__ = [
     "kill_process_tree",
     "process_containment",
     "process_native_authority",
-    "redact_secrets",
     "spawn_acp_process",
 ]
 
@@ -62,48 +53,6 @@ class _SpawnOptions(_SpawnRequired, total=False):
     native_authority: NativeLaunchAuthority | None
 
 
-_SECRET_PATTERN = re.compile(
-    r"(?i)((?:[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)[A-Z0-9_]*)"
-    r"[\"']?\s*[=:]\s*"
-    r"|bearer\s+)"
-    r"(\"[^\"]*\"|'[^']*'|\S+)"
-)
-
-
-def redact_secrets(text: str) -> str:
-    """Mask credential-shaped values in diagnostic text.
-
-    Provider subprocesses report their configuration when they fail, and
-    configuration is where credentials live, so a retained diagnostic tail is a
-    plausible place for a token to surface. Matches on the NAME rather than the
-    value shape: a token has no reliable shape, but the thing introducing it -
-    an assignment to something called a token, secret, key, password or
-    credential, or a bearer prefix - does.
-
-    JSON is covered as well as ``NAME=value``. A provider that dumps its config
-    as JSON writes ``"apiKey": "sk-..."``, where a quote sits between the name
-    and its separator - and the earlier pattern, which expected only whitespace
-    there, passed the credential through untouched. That is the shape the Kimi
-    provider listing actually emits, so it was a live hole rather than a
-    hypothetical one. A quoted value keeps its quotes so the surrounding
-    structure still reads as JSON after masking.
-
-    Accepts a single line or a whole multi-line block. The separator between an
-    introducing name and its value spans newlines deliberately, so a value the
-    child wrote on the line after its name is masked too; an unquoted value is
-    non-whitespace and therefore never runs past its own line, and a quoted one
-    is bounded by its closing quote.
-    """
-
-    def _mask(match: re.Match[str]) -> str:
-        value = match.group(2)
-        quoted = len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]
-        replacement = f"{value[0]}<redacted>{value[0]}" if quoted else "<redacted>"
-        return f"{match.group(1)}{replacement}"
-
-    return _SECRET_PATTERN.sub(_mask, text)
-
-
 async def drain_stderr_into(
     stream: asyncio.StreamReader | None, tail: deque[str]
 ) -> None:
@@ -125,7 +74,7 @@ async def drain_stderr_into(
                 break
             text = line.decode("utf-8", errors="replace").rstrip()
             if text:
-                tail.append(redact_secrets(text))
+                tail.append(redact_text(text))
     except (OSError, ValueError, asyncio.CancelledError):
         return
 

@@ -15,9 +15,9 @@ OpenTelemetry instrumentation from day one. This module provides:
   a WebSocket JSON frame) so downstream consumers can reconstruct the trace.
   Context propagation over WebSockets requires manual injection.
 
-HTTP URL attributes omit user information, query strings, and fragments.
-Request headers and bodies are not recorded. Paths and caller-supplied
-WebSocket attributes remain diagnostic data.
+HTTP URL attributes mask user information and omit query strings and
+fragments. Request headers and bodies are not recorded. Paths and
+caller-supplied WebSocket attributes remain diagnostic data.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from opentelemetry import propagate, trace
 from opentelemetry.trace import SpanKind, StatusCode
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from ..utils import redact_url
 from .instrumentation import get_tracer, telemetry_settings
 
 if TYPE_CHECKING:
@@ -86,7 +87,8 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
     Recorded span attributes (OTel Semantic Conventions v1.23+):
         http.request.method: GET, POST, etc.
         http.route: Full request path.
-        url.full: Request URL without user information, query, or fragment.
+        url.full: Request URL with user information masked, and no query or
+            fragment.
         http.response.status_code: Response status code.
         server.address: Server hostname.
 
@@ -137,16 +139,9 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
             ) as span:
                 # use OTel semantic conventions v1.23+ attribute names.
                 span.set_attribute("http.request.method", request.method)
-                url = request.url
                 span.set_attribute(
                     "url.full",
-                    str(
-                        url.replace(
-                            netloc=url.netloc.rsplit("@", 1)[-1],
-                            query="",
-                            fragment="",
-                        )
-                    ),
+                    redact_url(str(request.url.replace(query="", fragment=""))),
                 )
                 span.set_attribute("http.route", request.url.path)
                 span.set_attribute("server.address", request.url.hostname or "")

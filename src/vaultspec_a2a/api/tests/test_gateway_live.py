@@ -1225,7 +1225,6 @@ async def test_presets_list_is_truthful_and_resilient(
         # The document-authoring preset reports its capability and roles.
         authoring = by_id["vaultspec-adr-research"]
         assert authoring["loadable"] is True
-        assert authoring["is_mock"] is False
         assert authoring["authoring_capability"] == "document_authoring"
         assert "vaultspec-researcher" in authoring["required_roles"]
 

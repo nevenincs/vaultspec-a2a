@@ -20,11 +20,8 @@ class PresetOrigin(StrEnum):
     ``WORKSPACE`` outranks ``BUNDLED`` for the same id, because a workspace
     definition shadows the shipped one; the origin therefore reports where the
     preset a caller would actually get was found, not merely where a file
-    exists. ``TEST_MOCK`` is a shipped preset that follows the mock naming
-    convention, kept a separate member rather than folded into ``BUNDLED`` so
-    the product layer can exclude fixtures without matching on the id.
+    exists.
     """
 
     BUNDLED = "bundled"
     WORKSPACE = "workspace"
-    TEST_MOCK = "test_mock"

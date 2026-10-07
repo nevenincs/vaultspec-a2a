@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any, assert_never
 from fastapi import HTTPException
 
 from ..thread.dispatch_policy import FailureType
-from ..thread.enums import ThreadStatus
 from .schemas.gateway import RunMessageRefusalCode, RunMessageRefusalDetail
 
 if TYPE_CHECKING:
@@ -33,9 +32,8 @@ __all__ = [
     "CODED_REFUSALS",
     "DISPATCH_FAILURES",
     "refusal_responses",
-    "refused_action",
-    "refused_cancel",
     "refused_dispatch",
+    "refused_outcome",
 ]
 
 
@@ -48,6 +46,7 @@ class _ServedRefusal:
 
 
 _NOT_FOUND = _ServedRefusal(404, "No such run.")
+_RUN_NOT_FOUND = "Run not found"
 # Each says the run cannot take the work now and nothing was applied, so they
 # share one status and are told apart by the typed code in the body rather than
 # by parsing the message.
@@ -138,58 +137,38 @@ def refused_dispatch(failure_type: FailureType, detail: str | None) -> HTTPExcep
     return HTTPException(status_code=status_code, detail=detail)
 
 
-def refused_action(
-    detail: str,
-    *,
-    guard_status: int | None,
-    failure_type: FailureType | None,
-) -> HTTPException:
-    """Serve a refused answer: a guard's own status, else the dispatch mapping.
+def refused_outcome(
+    outcome: ControlActionOutcome, *, fallback_detail: str | None = None
+) -> HTTPException | None:
+    """Serve a run-control outcome's refusal, or ``None`` when the verb holds.
 
-    The guards a verb applies before anything is dispatched each name their own
-    status, because they are about this request rather than about reaching the
-    worker. Everything that got as far as a dispatch carries only its typed
-    failure and is served by the shared mapping.
+    Every run-control verb ends in the same record, so one reading serves them
+    all. A guard a verb applied before anything was dispatched names its own
+    status, because it is about this request rather than about reaching the
+    worker; everything that got as far as a dispatch carries only its typed
+    failure and is served by the shared mapping. A run that is not there is
+    served as such whichever service phrased it.
+
+    A terminal outcome that is also applied is not a refusal. Cancelling a run
+    that is already cancelled leaves the state the caller asked for in force, so
+    the verb answers with the run's status rather than failing a second cancel
+    purely for being second.
+
+    *fallback_detail* is the reason served when the service left a refusal none
+    of its own.
     """
-    if guard_status is not None:
-        return HTTPException(status_code=guard_status, detail=detail)
-    if failure_type is not None:
-        return refused_dispatch(failure_type, detail)
-    return HTTPException(status_code=500, detail=detail)
-
-
-def refused_cancel(result: ControlActionOutcome) -> HTTPException | None:
-    """Serve a cancel outcome's refusal, or ``None`` when the cancel holds.
-
-    Cancelling a run that is already cancelled is not a refusal. The verb is
-    idempotent and the state the caller asked for is the state that holds, so
-    the route answers with the run's terminal status and ``applied`` set;
-    refusing here would fail a second cancel purely for being second. The
-    discriminant is the run's own status rather than ``applied``, which carries
-    a different meaning on the success path.
-    """
-    failure_type = result.failure_type
+    if outcome.error_status_code is not None:
+        return HTTPException(
+            status_code=outcome.error_status_code, detail=outcome.error_detail
+        )
+    failure_type = outcome.failure_type
     if failure_type is None or (
-        failure_type is FailureType.TERMINAL
-        and result.thread_status == ThreadStatus.CANCELLED.value
+        failure_type is FailureType.TERMINAL and outcome.applied
     ):
         return None
-    return refused_dispatch(failure_type, _cancel_refusal_detail(result, failure_type))
-
-
-def _cancel_refusal_detail(
-    result: ControlActionOutcome, failure_type: FailureType
-) -> str:
-    """Name a cancel refusal, preferring a reason the service already phrased."""
     if failure_type is FailureType.NOT_FOUND:
-        return "Run not found"
-    if result.error_detail:
-        return result.error_detail
-    if failure_type is FailureType.TERMINAL:
-        # Naming the state tells the caller to re-read the run rather than to
-        # retry a request that can never succeed.
-        return f"Run is in {result.thread_status!r} state and cannot be cancelled"
-    return "Cancel dispatch failed"
+        return refused_dispatch(failure_type, _RUN_NOT_FOUND)
+    return refused_dispatch(failure_type, outcome.error_detail or fallback_detail)
 
 
 def refusal_responses(

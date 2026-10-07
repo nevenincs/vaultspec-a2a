@@ -3315,7 +3315,6 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uvicorn" },
     { name = "vaultspec-core" },
-    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -3357,8 +3356,6 @@ all = [
     { name = "tomlkit" },
     { name = "ty" },
     { name = "types-jsonschema" },
-    { name = "vulture" },
-    { name = "websockets" },
     { name = "zstandard" },
 ]
 dev = [
@@ -3387,8 +3384,6 @@ dev = [
     { name = "tomlkit" },
     { name = "ty" },
     { name = "types-jsonschema" },
-    { name = "vulture" },
-    { name = "websockets" },
     { name = "zstandard" },
 ]
 docs = [
@@ -3423,8 +3418,6 @@ tooling = [
     { name = "tomlkit" },
     { name = "ty" },
     { name = "types-jsonschema" },
-    { name = "vulture" },
-    { name = "websockets" },
     { name = "zstandard" },
 ]
 
@@ -3463,7 +3456,6 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.41.0" },
     { name = "vaultspec-core", specifier = ">=0.3.2" },
     { name = "vaultspec-rag", extras = ["mcp"], marker = "extra == 'rag'", specifier = ">=0.5.3" },
-    { name = "websockets", specifier = ">=16.0" },
 ]
 provides-extras = ["server", "rag"]
 
@@ -3495,8 +3487,6 @@ all = [
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "ty", specifier = ">=0.0.15" },
     { name = "types-jsonschema", specifier = ">=4.26" },
-    { name = "vulture", specifier = ">=2.16" },
-    { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },
 ]
 dev = [
@@ -3525,8 +3515,6 @@ dev = [
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "ty", specifier = ">=0.0.15" },
     { name = "types-jsonschema", specifier = ">=4.26" },
-    { name = "vulture", specifier = ">=2.16" },
-    { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },
 ]
 docs = [{ name = "sphinx", specifier = ">=8.2" }]
@@ -3557,8 +3545,6 @@ tooling = [
     { name = "tomlkit", specifier = ">=0.15.0" },
     { name = "ty", specifier = ">=0.0.15" },
     { name = "types-jsonschema", specifier = ">=4.26" },
-    { name = "vulture", specifier = ">=2.16" },
-    { name = "websockets", specifier = ">=16.0" },
     { name = "zstandard", specifier = ">=0.25.0" },
 ]
 
@@ -3617,15 +3603,6 @@ wheels = [
 [package.optional-dependencies]
 mcp = [
     { name = "mcp" },
-]
-
-[[package]]
-name = "vulture"
-version = "2.16"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/66/3e/4d08c5903b2c0c70cad583c170cc4a663fc6a61e2ad00b711fcda61358cd/vulture-2.16.tar.gz", hash = "sha256:f8d9f6e2af03011664a3c6c240c9765b3f392917d3135fddca6d6a68d359f717", size = 52680, upload-time = "2026-03-25T14:41:27.141Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/be/f935130312330614811dae2ea9df3f395f6d63889eb6c2e68c14507152ee/vulture-2.16-py3-none-any.whl", hash = "sha256:6e0f1c312cef1c87856957e5c2ca9608834a7c794c2180477f30bf0e4cc58eee", size = 26993, upload-time = "2026-03-25T14:41:26.21Z" },
 ]
 
 [[package]]

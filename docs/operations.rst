@@ -228,6 +228,16 @@ fails. The ``setup`` verb initialises fresh stores for a new install through the
 same authority via
 :func:`vaultspec_a2a.desktop.migration.initialize_fresh_stores`.
 
+``vaultspec-a2a migrate --compact`` is the operator's way to return disk space.
+After the schema work it truncates the primary store's write-ahead log and runs
+``VACUUM``, the only path that hands freed pages back to the operating system.
+Stop the service first: the verb refuses at the ``lock`` stage, before touching
+any store, while anything listens on the configured gateway or worker port,
+whether or not that listener would answer an unauthenticated request. A
+checkpoint that an open read transaction blocks fails the ``compact`` stage,
+leaves the log as it was, and skips ``VACUUM``; the result's ``detail`` says how
+much of the log was written back.
+
 Active-run discovery
 --------------------
 

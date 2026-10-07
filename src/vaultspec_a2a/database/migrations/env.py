@@ -76,9 +76,9 @@ _MISSING_URL_MESSAGE = (
     "stale default happens to name. Name the target explicitly:\n"
     "    alembic -x sqlalchemy_url=sqlite+aiosqlite:///path/to/vaultspec.db "
     "upgrade head\n"
-    "or use the administrative entry point, which resolves the configured "
-    "store for you:\n"
-    "    python -m vaultspec_a2a.database.admin migrate"
+    "or use the product entry point, which migrates the application home's "
+    "stores for you:\n"
+    "    vaultspec-a2a migrate"
 )
 
 

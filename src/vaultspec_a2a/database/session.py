@@ -72,8 +72,8 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 # ``auto_vacuum`` is
 # fixed for the life of the file - a later pragma is accepted and silently leaves
 # it at NONE. Changing it on an existing install demands a whole-file VACUUM
-# rewrite, which is what ``admin migrate --fix`` already offers as an explicit,
-# operator-timed act. INCREMENTAL would not earn the trade either: measured
+# rewrite, which is what ``vaultspec-a2a migrate --compact`` already offers as an
+# explicit, operator-timed act. INCREMENTAL would not earn the trade either: measured
 # against a store whose rows had all been deleted, ``incremental_vacuum``
 # returned a single 4 KiB page where a full VACUUM returned essentially the whole
 # 8 MiB file. Returning space to the operating system therefore stays an

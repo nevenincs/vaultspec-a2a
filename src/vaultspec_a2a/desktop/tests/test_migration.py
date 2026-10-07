@@ -18,6 +18,7 @@ from ...database import (
     CHECKPOINT_SCHEMA_DIGEST,
     CHECKPOINT_SCHEMA_VERSION,
 )
+from ...testing import free_port, settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
 from .._platform_acl import path_is_owner_restricted
 from ..migration import (
@@ -34,6 +35,24 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
+
+
+def _freelist_count(db_path: Path) -> int:
+    """Pages the store holds but no longer uses; a VACUUM returns them to the OS."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute("PRAGMA freelist_count").fetchone()
+    finally:
+        conn.close()
+    return 0 if row is None else int(row[0])
+
+
+def _delete_all_rows(db_path: Path, table: str) -> None:
+    conn = sqlite3.connect(str(db_path), isolation_level=None)
+    try:
+        conn.execute(f"DELETE FROM {table}")
+    finally:
+        conn.close()
 
 
 def _table_present(db_path: Path, table: str) -> bool:
@@ -153,6 +172,61 @@ class TestMigrateStores:
             stored = await checkpointer.aget_tuple(stored_config)
         assert stored is not None
         assert stored.checkpoint["channel_values"]["vault_index"] == {}
+
+
+class TestCompaction:
+    @pytest.mark.asyncio
+    async def test_compact_reclaims_both_stores_not_just_the_primary(
+        self, tmp_path: Path
+    ) -> None:
+        """``--compact`` returns freed pages to the OS for EVERY store it migrates.
+
+        The checkpoint store is the one that grows: it holds a row per graph step
+        per run, and pruning a finished run frees pages the file keeps until a
+        VACUUM rewrites it. An operator who ran compaction to reclaim disk and got
+        only the much smaller run store back has not had their disk returned.
+
+        Real stores throughout: the rows are written through the production
+        LangGraph saver and deleted through SQL, which is what leaves a freelist
+        and a populated write-ahead log behind. ``freelist_count`` is the
+        discriminating reading - a WAL checkpoint alone writes the log back
+        without returning a single free page, so only a VACUUM takes it to zero.
+        """
+        home = tmp_path / "app"
+        state = derive_state_paths(home)
+        assert (await migrate_stores(home)).status == "succeeded"
+
+        config: RunnableConfig = {
+            "configurable": {"thread_id": "compaction-thread", "checkpoint_ns": ""}
+        }
+        async with AsyncSqliteSaver.from_conn_string(
+            str(state.checkpoint_path)
+        ) as checkpointer:
+            for index in range(200):
+                checkpoint = await real_checkpoint()
+                checkpoint["id"] = f"compaction-{index:04d}"
+                checkpoint["channel_values"] = {"messages": [], "filler": "x" * 4096}
+                await checkpointer.aput(config, checkpoint, {}, {})
+        _delete_all_rows(state.checkpoint_path, "checkpoints")
+
+        before = _freelist_count(state.checkpoint_path)
+        assert before > 0, (
+            "the deleted checkpoint rows left no free pages, so this test could "
+            "not tell a VACUUM from a no-op"
+        )
+
+        # Pin the probe ports at unused ones: the compaction refusal is about a
+        # live service, and the developer's own resident gateway must not decide
+        # whether this test about reclaimed pages runs.
+        with settings_override(port=free_port(), worker_port=free_port()):
+            compacted = await migrate_stores(home, compact=True)
+
+        assert compacted.status == "succeeded", compacted
+        assert _freelist_count(state.checkpoint_path) == 0
+        assert _freelist_count(state.database_path) == 0
+        for store in (state.database_path, state.checkpoint_path):
+            wal = store.with_name(f"{store.name}-wal")
+            assert not wal.exists() or wal.stat().st_size == 0
 
 
 class TestRefusals:

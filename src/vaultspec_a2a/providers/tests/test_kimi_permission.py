@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from .._acp_rpc_handlers import _autonomous_option_id, on_request_permission
+from .._acp_rpc_handlers import on_request_permission
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
 from .._json_contract import JsonObject, JsonValue
 
@@ -84,6 +84,7 @@ async def _decide(
     return option_id
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "title",
     [
@@ -92,13 +93,14 @@ async def _decide(
         "get_code_file",
     ],
 )
-def test_autonomous_kimi_auto_approves_its_declared_reads(title: str) -> None:
+async def test_autonomous_kimi_auto_approves_its_declared_reads(
+    acp_session_context: AcpSessionContext, title: str
+) -> None:
     cfg = _config(acp_family="kimi")
-    assert (
-        _autonomous_option_id(title, cfg, _OPTIONS, args={}, locations=[]) == "approve"
-    )
+    assert await _decide(title, cfg, acp_session_context) == "approve"
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "title",
     [
@@ -114,11 +116,11 @@ def test_autonomous_kimi_auto_approves_its_declared_reads(title: str) -> None:
         "TotallyUnknownTool",
     ],
 )
-def test_autonomous_kimi_rejects_everything_else(title: str) -> None:
+async def test_autonomous_kimi_rejects_everything_else(
+    acp_session_context: AcpSessionContext, title: str
+) -> None:
     cfg = _config(acp_family="kimi")
-    assert (
-        _autonomous_option_id(title, cfg, _OPTIONS, args={}, locations=[]) == "reject"
-    )
+    assert await _decide(title, cfg, acp_session_context) == "reject"
 
 
 @pytest.mark.asyncio

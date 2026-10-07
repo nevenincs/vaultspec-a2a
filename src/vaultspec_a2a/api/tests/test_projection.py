@@ -589,7 +589,7 @@ async def test_degraded_only_projection_keeps_the_prior_lineage(
             next_nodes=[],
             interrupt_types=[],
             tasks=[],
-            degraded_reasons=["execution_state_projection_unavailable"],
+            degraded_reasons=[DegradedReason.EXECUTION_STATE_PROJECTION_UNAVAILABLE],
         )
         await session.commit()
 

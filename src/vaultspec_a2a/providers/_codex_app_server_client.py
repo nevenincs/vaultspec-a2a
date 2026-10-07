@@ -159,23 +159,6 @@ class _CodexAppServerClient:
             self._lifecycle.stderr_task = asyncio.create_task(self._drain_stderr())
 
     @property
-    def _process(self) -> asyncio.subprocess.Process:
-        """Keep the subprocess inspection seam used by lifecycle tests."""
-        return self._transport.process
-
-    @property
-    def _reader_task(self) -> asyncio.Task[None]:
-        """Keep the reader-task inspection seam used by lifecycle tests."""
-        task = self._lifecycle.reader_task
-        assert task is not None
-        return task
-
-    @property
-    def _stderr_task(self) -> asyncio.Task[None] | None:
-        """Keep the stderr-task inspection seam used by lifecycle tests."""
-        return self._lifecycle.stderr_task
-
-    @property
     def pending_interrupt(self) -> BaseException | None:
         return self._session.pending_interrupt
 

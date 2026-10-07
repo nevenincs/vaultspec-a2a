@@ -46,9 +46,9 @@ from ._compiler_prompts import (
 from ._compiler_retry import _NODE_RETRY_POLICY
 from .compiler import (
     _ROLE_TO_PHASE,
-    _add_node,
     _compile_worker_node,
     _route_from_supervisor,
+    add_graph_node,
 )
 from .nodes._config_contract import accepting_runnable_config
 from .nodes.action_completion import GRAPH_COMPLETION_NODE
@@ -175,7 +175,7 @@ def _compile_star(
         {"provider": sv_provider.value, "model_name": sv_model_name},
     )
 
-    _add_node(
+    add_graph_node(
         builder,
         "supervisor",
         create_supervisor_node(
@@ -212,7 +212,7 @@ def _compile_star(
             runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),
         )
-        _add_node(
+        add_graph_node(
             builder,
             agent_cfg.id,
             worker_node,
@@ -222,7 +222,7 @@ def _compile_star(
         builder.add_edge(agent_cfg.id, "supervisor")
         # Insert mount node between supervisor routing and worker invocation.
         mount_fn = create_mount_node(options.get("workspace_root"))
-        _add_node(builder, f"mount_{agent_cfg.id}", mount_fn)
+        add_graph_node(builder, f"mount_{agent_cfg.id}", mount_fn)
         builder.add_edge(f"mount_{agent_cfg.id}", agent_cfg.id)
         compiled_worker_ids.append(agent_cfg.id)
 
@@ -237,7 +237,7 @@ def _compile_star(
     # The dedicated approval node owns the plan-approval
     # interrupt; the supervisor only marks approval_status="pending". The node
     # is replay-safe because nothing before its interrupt() has side effects.
-    _add_node(
+    add_graph_node(
         builder,
         "plan_approval",
         create_plan_approval_node(compiled_worker_ids, worker_phase_map or None),
@@ -345,8 +345,8 @@ def _compile_pipeline(
         # Insert mount node between pipeline stages.
         mount_fn = create_mount_node(options.get("workspace_root"))
         mount_id = f"mount_{agent_cfg.id}"
-        _add_node(builder, mount_id, mount_fn)
-        _add_node(
+        add_graph_node(builder, mount_id, mount_fn)
+        add_graph_node(
             builder,
             agent_cfg.id,
             worker_node,
@@ -499,8 +499,8 @@ def _compile_pipeline_loop(
         # Insert mount node before each worker.
         mount_id = f"mount_{agent_cfg.id}"
         mount_fn = create_mount_node(options.get("workspace_root"))
-        _add_node(builder, mount_id, mount_fn)
-        _add_node(
+        add_graph_node(builder, mount_id, mount_fn)
+        add_graph_node(
             builder,
             agent_cfg.id,
             worker_node,

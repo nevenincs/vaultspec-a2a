@@ -35,9 +35,9 @@ from ._compiler_models import resolve_model_for_worker
 from ._compiler_prompts import compose_persona_prompt, lane_web_demonstrated
 from ._compiler_retry import _NODE_RETRY_POLICY, _SUBMIT_RETRY_POLICY
 from .compiler import (
-    _add_node,
     _agent_node_metadata,
     _wire_diverge_stage,
+    add_graph_node,
 )
 from .enums import PipelinePhase
 from .nodes._config_contract import accepting_runnable_config
@@ -525,7 +525,7 @@ def _compile_research_adr(
         researcher_metadata=researcher_metadata,
     )
 
-    _add_node(
+    add_graph_node(
         builder,
         _RA_SYNTHESIS,
         create_worker_node(
@@ -551,7 +551,7 @@ def _compile_research_adr(
         metadata=synthesist_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
-    _add_node(
+    add_graph_node(
         builder,
         _RA_RESEARCH_REVIEW,
         _count_review_revisions(
@@ -573,7 +573,7 @@ def _compile_research_adr(
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
-    _add_node(
+    add_graph_node(
         builder,
         _RA_ADR_AUTHOR,
         create_worker_node(
@@ -595,7 +595,7 @@ def _compile_research_adr(
         metadata=adr_author_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
-    _add_node(
+    add_graph_node(
         builder,
         _RA_ADR_REVIEW,
         _count_review_revisions(
@@ -617,7 +617,7 @@ def _compile_research_adr(
         metadata=doc_reviewer_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
-    _add_node(
+    add_graph_node(
         builder,
         _RA_PLAN_AUTHOR,
         create_worker_node(
@@ -639,7 +639,7 @@ def _compile_research_adr(
         metadata=plan_author_metadata,
         retry_policy=_NODE_RETRY_POLICY,
     )
-    _add_node(
+    add_graph_node(
         builder,
         _RA_PLAN_REVIEW,
         _count_review_revisions(
@@ -671,7 +671,7 @@ def _compile_research_adr(
     # a conformance refusal sends the writer round again, and a refusal that
     # spent nothing looped the phase until the recursion limit.
     max_revisions = team_config.topology.max_review_revisions
-    _add_node(
+    add_graph_node(
         builder,
         _RA_RESEARCH_SUBMIT,
         create_phase_submit_node(
@@ -684,7 +684,7 @@ def _compile_research_adr(
         destinations=(_RA_RESEARCH_GATE, _RA_SYNTHESIS),
         retry_policy=_SUBMIT_RETRY_POLICY,
     )
-    _add_node(
+    add_graph_node(
         builder,
         _RA_RESEARCH_GATE,
         create_phase_gate_node(
@@ -694,7 +694,7 @@ def _compile_research_adr(
         ),
         destinations=(_RA_ADR_AUTHOR, _RA_SYNTHESIS),
     )
-    _add_node(
+    add_graph_node(
         builder,
         _RA_ADR_SUBMIT,
         create_phase_submit_node(
@@ -707,7 +707,7 @@ def _compile_research_adr(
         destinations=(_RA_ADR_GATE, _RA_ADR_AUTHOR),
         retry_policy=_SUBMIT_RETRY_POLICY,
     )
-    _add_node(
+    add_graph_node(
         builder,
         _RA_ADR_GATE,
         create_phase_gate_node(
@@ -717,7 +717,7 @@ def _compile_research_adr(
         ),
         destinations=(_RA_PLAN_AUTHOR, _RA_ADR_AUTHOR),
     )
-    _add_node(
+    add_graph_node(
         builder,
         _RA_PLAN_SUBMIT,
         create_phase_submit_node(
@@ -730,7 +730,7 @@ def _compile_research_adr(
         destinations=(_RA_PLAN_GATE, _RA_PLAN_AUTHOR),
         retry_policy=_SUBMIT_RETRY_POLICY,
     )
-    _add_node(
+    add_graph_node(
         builder,
         _RA_PLAN_GATE,
         create_phase_gate_node(
@@ -745,7 +745,7 @@ def _compile_research_adr(
     if clarification_producer is None:
         builder.add_edge(START, _RA_DISPATCH)
     else:
-        _add_node(
+        add_graph_node(
             builder,
             _RA_CLARIFY_REQUEST,
             create_clarification_request_node(
@@ -755,7 +755,7 @@ def _compile_research_adr(
             ),
             destinations=(_RA_CLARIFY_GATE, _RA_DISPATCH),
         )
-        _add_node(
+        add_graph_node(
             builder,
             _RA_CLARIFY_GATE,
             create_clarification_gate_node(proceed_target=_RA_DISPATCH),

@@ -26,24 +26,27 @@ idempotent verb must not fail a request purely for being the second one.
 from __future__ import annotations
 
 import itertools
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import httpx
 import pytest
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
-from ...graph.compiler import _add_node, _compile_graph
 from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
     record_graph_completion,
 )
 from ...providers import ProviderCondition
-from ...testing import async_catalog_run_fields
+from ...testing import (
+    add_test_node,
+    async_catalog_run_fields,
+    compile_test_graph,
+    new_state_graph,
+)
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import ThreadStatus
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
-from ...thread.state import TeamState
 from .conftest import SessionFactory, _InProcessWorker, make_app
 from .test_gateway_live import _live_server
 
@@ -93,15 +96,12 @@ async def _start_run(client: httpx.AsyncClient) -> str:
 async def _complete_checkpoint(
     checkpointer: AsyncSqliteSaver, receipt: GraphActionReceipt
 ) -> None:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
-    _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
+    builder = new_state_graph()
+    add_test_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(START, GRAPH_COMPLETION_NODE)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
-    graph = _compile_graph(
-        builder,
-        checkpointer=checkpointer,
-        interrupt_before=None,
-        name="cancel-settled-probe",
+    graph = compile_test_graph(
+        builder, checkpointer=checkpointer, name="cancel-settled-probe"
     )
     await graph.ainvoke(
         {

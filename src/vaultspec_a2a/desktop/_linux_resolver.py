@@ -11,6 +11,10 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from ._linux_helper import PRIVILEGED_MODE_BITS
+
+__all__ = ["RESOLVER_TARGET", "ResolverData", "host_resolver_data", "parse_resolver"]
+
 RESOLVER_TARGET = PurePosixPath("/etc/resolv.conf")
 _MAX_BYTES = 16384
 _ROOT_OWNER = frozenset({0})
@@ -206,7 +210,7 @@ def _read_snapshot(descriptor: int, *, owners: frozenset[int] = _ROOT_OWNER) -> 
     before = os.fstat(descriptor)
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
         raise ValueError("native resolver requires a regular single-link source")
-    if before.st_mode & (0o022 | stat.S_ISUID | stat.S_ISGID):
+    if before.st_mode & (0o022 | PRIVILEGED_MODE_BITS):
         raise ValueError("native resolver source has unsafe permissions")
     if before.st_uid not in owners:
         raise ValueError("native resolver source is not host-owned")

@@ -22,7 +22,7 @@ import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vaultspec_a2a.desktop._linux_helper import require_static_helper
+from vaultspec_a2a.desktop._linux_helper import require_unprivileged_static_helper
 from vaultspec_a2a.desktop.native_isolation import (
     LinuxRuntimeClosure,
     RuntimeFile,
@@ -52,16 +52,12 @@ def stage_linux_isolation_assets(
     """
     source_helper = helper.resolve(strict=True)
     metadata = source_helper.stat()
-    if (
-        not stat.S_ISREG(metadata.st_mode)
-        or metadata.st_nlink != 1
-        or metadata.st_mode & (stat.S_ISUID | stat.S_ISGID)
-    ):
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
         raise ValueError(
             "native helper build input must be an unprivileged regular file"
         )
     with source_helper.open("rb") as stream:
-        require_static_helper(stream.fileno())
+        require_unprivileged_static_helper(stream.fileno())
     version = subprocess.run(
         [str(source_helper), "--version"],
         check=True,

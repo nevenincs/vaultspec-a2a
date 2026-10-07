@@ -45,6 +45,7 @@ from ...database.models import (
     ThreadModel,
 )
 from ...streaming.aggregator import EventAggregator
+from ...testing import catalog_run_fields
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
@@ -57,7 +58,7 @@ from ...thread.idempotency import (
     permission_response_action_key,
     thread_create_action_key,
 )
-from .conftest import catalog_run_fields, make_app
+from .conftest import make_app
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 type JsonValue = str | int | float | bool | list[JsonValue] | JsonObject | None

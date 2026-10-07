@@ -76,21 +76,22 @@ from ..acceptance.tests._harness import certified_gateway
 from ..authoring.discovery import resolve_engine_with_retry
 from ..control.config import setting_env, settings
 from ..team.team_config import load_team_config
-from ..testing import is_terminal, ok_body, wait_for_run_status
-from ..testing.tests._support.catalog_selection import (
+from ..testing import (
+    LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     NoSelectableLaneError,
+    fetch_provider_catalog,
     in_process_selection,
+    is_terminal,
+    live_provider_catalog_selector_is_configured,
+    ok_body,
+    selection_from_served_catalog,
+    wait_for_run_status,
 )
 from ..testing.tests._support.payloads import (
     json_object,
     json_object_list,
     required_bool,
     required_text,
-)
-from ._provider_catalog_live import (
-    LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
-    live_provider_catalog_selector_is_configured,
-    selection_from_served_catalog,
 )
 
 if TYPE_CHECKING:
@@ -406,12 +407,10 @@ def _read_frame(lines: Iterable[str], *, wanted: str, deadline: float) -> JsonOb
 def _served_catalog(gateway: CertifiedGateway) -> JsonObject:
     """Read the gateway's own served catalog for the run's workspace."""
     with gateway.client(timeout=120.0) as client:
-        response = client.get(
-            "/v1/provider-catalog",
-            params={"workspace_root": str(_WORKSPACE_ROOT)},
+        return json_object(
+            fetch_provider_catalog(client, str(_WORKSPACE_ROOT)),
+            at="served provider catalog",
         )
-    assert response.status_code == 200, response.text
-    return json_object(response.json(), at="served provider catalog")
 
 
 def _served_in_process_selection(gateway: CertifiedGateway) -> JsonObject:

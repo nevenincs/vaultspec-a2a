@@ -45,7 +45,6 @@ from ...database import create_thread
 from ...providers.factory import ProviderCatalogRegistration, ProviderFactory
 from ...providers.in_process_catalog import served_in_process_lanes
 from ...streaming.aggregator import EventAggregator
-from ...testing.tests._support.catalog_selection import in_process_selection
 from ...tests._write_authority import make_test_write_authority
 from ..app import create_app
 
@@ -395,95 +394,6 @@ def make_app(
     app.state.db_session_factory = session_factory
 
     return app, aggregator, worker, checkpointer
-
-
-_CATALOG_FIELD_CACHE: dict[str, dict[str, Any]] = {}
-
-
-def catalog_run_fields(
-    client: Any, *, workspace_root: str | None = None
-) -> dict[str, Any]:
-    """Return the run-start fields an explicit catalog selection now requires.
-
-    Run-start refuses a body without a ``selection``, and revalidates that
-    selection against the catalog SERVED FOR ITS WORKSPACE - so a hand-written
-    reference is refused even when its shape is perfect. The reference is read
-    from the live served catalog the way a real client must, through the shared
-    selection mechanism, which returns an IN-PROCESS lane and refuses to return
-    any other. These suites assert on gateway plumbing, so the lane that answers
-    must be the one that bills nothing.
-
-    A canned literal would be the tempting shortcut and would be wrong twice
-    over: it would break whenever the catalog's revision moved, and it would let
-    a test assert against a lane the gateway would never serve. Reading keeps
-    the fixture honest about what the gateway is offering at that moment.
-
-    ``workspace_root`` is returned alongside because the same gate refuses a
-    selection with no existing workspace to anchor it in.
-    """
-    root = workspace_root or str(Path.cwd())
-    cached = _CATALOG_FIELD_CACHE.get(root)
-    if cached is not None:
-        return {
-            "selection": dict(cached["selection"]),
-            "metadata": dict(cached["metadata"]),
-        }
-    response = client.get("/v1/provider-catalog", params={"workspace_root": root})
-    assert response.status_code == 200, response.text
-    fields: dict[str, Any] = {
-        "selection": in_process_selection(response.json()),
-        "metadata": {"workspace_root": root},
-    }
-    _CATALOG_FIELD_CACHE[root] = fields
-    return {
-        "selection": dict(fields["selection"]),
-        "metadata": dict(fields["metadata"]),
-    }
-
-
-async def async_catalog_run_fields(
-    client: Any, *, workspace_root: str | None = None
-) -> dict[str, Any]:
-    """The async twin of :func:`catalog_run_fields`, for httpx.AsyncClient callers.
-
-    Deliberately a twin rather than a shared core: the sync and async clients do
-    not share a request method, and the alternative - threading a maybe-awaitable
-    through one function - reads worse than two short ones that each do the
-    obvious thing. Both consume the same cache, so whichever runs first pays for
-    the catalog and the other does not.
-    """
-    root = workspace_root or str(Path.cwd())
-    cached = _CATALOG_FIELD_CACHE.get(root)
-    if cached is None:
-        # Read on a budget of its OWN. Callers build clients with short timeouts
-        # to assert the gateway answers promptly; the first catalog read in a
-        # process also probes every provider lane and legitimately outlasts that.
-        # Borrowing the caller's budget made a cold probe look like an
-        # unresponsive gateway. Later reads come from the cache above.
-        #
-        # The budget is widened PER REQUEST rather than by building a second
-        # client. A second client keeps only the caller's base_url and silently
-        # drops its TRANSPORT, so every in-process caller - anything on
-        # ``httpx.ASGITransport``, whose base_url is an unroutable name like
-        # ``http://test`` - resolved that name against real DNS and died with
-        # ``getaddrinfo failed``. Those callers only ever passed when an earlier
-        # real-socket test had already warmed the cache above, so the failure
-        # moved with test order. Reusing the caller's client keeps its transport.
-        response = await client.get(
-            "/v1/provider-catalog",
-            params={"workspace_root": root},
-            timeout=180.0,
-        )
-        assert response.status_code == 200, response.text
-        cached = {
-            "selection": in_process_selection(response.json()),
-            "metadata": {"workspace_root": root},
-        }
-        _CATALOG_FIELD_CACHE[root] = cached
-    return {
-        "selection": dict(cached["selection"]),
-        "metadata": dict(cached["metadata"]),
-    }
 
 
 @asynccontextmanager

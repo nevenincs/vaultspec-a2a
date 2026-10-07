@@ -25,13 +25,14 @@ from sqlalchemy.ext.asyncio import (
 
 from ...control.drain import DrainGate
 from ...database import get_control_action_by_dispatch_id, get_thread
+from ...testing import async_catalog_run_fields
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ..routes.gateway import admission_gate
-from .conftest import SessionFactory, async_catalog_run_fields, make_app
+from .conftest import SessionFactory, make_app
 from .test_gateway_live import _live_server
 
 if TYPE_CHECKING:

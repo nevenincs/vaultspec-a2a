@@ -41,7 +41,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...control.config import settings
 from ...graph.enums import Provider
-from ...service_tests._provider_catalog_live import declared_lane_model_value
+from ...testing import declared_lane_model_value
 from .._acp_mcp import harness_allowed_tool_names, resolve_harness_mcp_servers
 from .._subprocess import kill_process_tree
 from ..acp_chat_model import AcpChatModel

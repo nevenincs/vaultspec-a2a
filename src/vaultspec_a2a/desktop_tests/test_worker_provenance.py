@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from ..testing import fetch_in_process_selection_at
 from ..testing.ports import free_port
 from ..tests.gateway_boot import (
     armed_gateway_env,
@@ -44,7 +45,6 @@ from ..tests.gateway_boot import (
     worker_lifecycle_gateway_script,
 )
 from ..utils._process_tree import pid_is_live
-from ._catalog import catalog_selection
 from .test_run_admission import _ATTACH, _OWNERSHIP
 
 if TYPE_CHECKING:
@@ -178,7 +178,13 @@ def _prepare(base: str, auth: str, run_id: str) -> tuple[int, dict[str, Any]]:
                 # The workspace anchors the selection, which run start
                 # revalidates against the catalog served for it.
                 "metadata": {"workspace_root": workspace},
-                "selection": catalog_selection(base, auth, workspace),
+                "selection": fetch_in_process_selection_at(
+                    base,
+                    workspace,
+                    headers={"Authorization": auth},
+                    prefer_provider_id="mock",
+                    cache=True,
+                ),
             },
         )
     try:

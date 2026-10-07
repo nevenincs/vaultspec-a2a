@@ -27,14 +27,19 @@ from ...graph.nodes.clarification import (
     create_clarification_gate_node,
     create_clarification_request_node,
 )
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    async_catalog_run_fields,
+    compile_test_graph,
+    new_state_graph,
+)
 from ...thread.clarification import (
     MAX_ANSWER_CHARS,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
 )
-from .conftest import SessionFactory, async_catalog_run_fields, make_app
+from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver

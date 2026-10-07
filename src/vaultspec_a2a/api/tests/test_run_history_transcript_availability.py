@@ -21,9 +21,10 @@ import httpx
 import pytest
 
 from ...database import update_thread_status
+from ...testing import async_catalog_run_fields
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus, TranscriptAvailability
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import make_app
 from .test_gateway_drain import _relay_terminal, _RelayContext
 from .test_gateway_live import _live_server
 

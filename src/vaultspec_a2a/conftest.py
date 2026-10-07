@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 import pytest
 import pytest_asyncio
 
-from .service_tests._provider_catalog_live import (
+from .testing import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     live_provider_catalog_selector_is_configured,
 )

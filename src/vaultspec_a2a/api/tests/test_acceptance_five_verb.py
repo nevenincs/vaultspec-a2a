@@ -38,7 +38,12 @@ from ...database.thread_repository import create_thread
 from ...ipc.schemas import DispatchRequest
 from ...providers.team_selection import model_assignment_digest
 from ...team.team_config import load_team_config
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    async_catalog_run_fields,
+    compile_test_graph,
+    new_state_graph,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import (
     GraphActionReceipt,
@@ -49,7 +54,7 @@ from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
-from .conftest import SessionFactory, async_catalog_run_fields, make_app
+from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator

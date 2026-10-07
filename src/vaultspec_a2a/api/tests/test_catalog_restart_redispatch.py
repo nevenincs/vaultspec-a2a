@@ -53,8 +53,7 @@ from ...providers.team_selection import (
     model_assignment_digest,
 )
 from ...team.team_config import load_team_config
-from ...testing import wait_for_run_status
-from ...testing.tests._support.catalog_selection import in_process_selection
+from ...testing import fetch_in_process_selection, wait_for_run_status
 from ...tests._write_authority import make_test_write_authority
 from ...tests.gateway_boot import (
     broker_gateway_env,
@@ -363,11 +362,7 @@ def _await_terminal(
 def _assert_restart_runs(
     client: httpx.Client, case: _RestartCase, log_path: Path
 ) -> None:
-    catalog = client.get(
-        "/v1/provider-catalog", params={"workspace_root": str(case.workspace)}
-    )
-    assert catalog.status_code == 200, catalog.text
-    live_selection = in_process_selection(catalog.json())
+    live_selection = fetch_in_process_selection(client, str(case.workspace))
     assert live_selection["catalog_revision"] != case.frozen_revision
 
     # A real start is the production dispatch-demand edge. It starts the

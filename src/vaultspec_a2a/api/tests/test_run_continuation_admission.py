@@ -27,10 +27,11 @@ from httpx import ASGITransport
 
 from ...database import create_thread, get_thread, record_permission_request
 from ...database.models import ControlActionModel
+from ...testing import async_catalog_run_fields
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import make_app
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver

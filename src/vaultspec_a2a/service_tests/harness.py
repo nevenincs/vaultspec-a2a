@@ -19,11 +19,8 @@ from sqlalchemy.engine import make_url
 
 from ..control.config import settings
 from ..lifecycle.manager import tree_kill
+from ..testing import NoSelectableLaneError, fetch_in_process_selection
 from ..testing.ports import free_port
-from ..testing.tests._support.catalog_selection import (
-    NoSelectableLaneError,
-    in_process_selection,
-)
 from ..tests.gateway_boot import GatewayBootError
 from ..utils._process_tree import detached_spawn_kwargs
 
@@ -280,12 +277,6 @@ class ServiceStack:
     _worker_log: Any | None = field(default=None, init=False, repr=False)
     _mock_paused: bool = field(default=False, init=False, repr=False)
     _stopped: bool = field(default=False, init=False, repr=False)
-    # One served selection per (workspace, preset). The first catalog read on a
-    # gateway builds it cold across every registered lane, so it is paid once per
-    # session rather than once per run.
-    _selection_cache: dict[str, dict[str, Any]] = field(
-        default_factory=dict, init=False, repr=False
-    )
 
     def __post_init__(self) -> None:
         # Resolve only. Creating the directory here meant constructing a stack -
@@ -809,34 +800,21 @@ class ServiceStack:
         provider session this would otherwise quietly send certification traffic
         to a billable lane, which is a worse failure than not running.
         """
-        cache_key = f"{workspace_root}|{team_preset}"
-        cached = self._selection_cache.get(cache_key)
-        if cached is not None:
-            return dict(cached)
-
-        # A first read builds the catalog cold, probing every registered lane.
-        with self._client(timeout=240.0) as client:
-            resp = client.get(
-                "/v1/provider-catalog", params={"workspace_root": workspace_root}
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-
         # The lane the preset is pinned to, so a mock preset keeps replaying its
         # tape rather than being answered by the deterministic lane. Refusing a
-        # non-in-process lane is the mechanism's own guarantee now, not this
-        # file's: it will not hand back a billable lane even if one is the only
-        # selectable thing this stack serves.
+        # non-in-process lane is the mechanism's own guarantee: it will not hand
+        # back a billable lane even if one is the only selectable thing this
+        # stack serves. The choice is cached because the first catalog read on a
+        # gateway builds it cold across every registered lane.
         try:
-            selection = in_process_selection(payload, prefer_provider_id="mock")
+            with self._client(timeout=240.0) as client:
+                return fetch_in_process_selection(
+                    client, workspace_root, prefer_provider_id="mock", cache=True
+                )
         except NoSelectableLaneError as exc:
             raise GatewayBootError(
                 f"a {team_preset!r} run cannot present a valid selection: {exc}"
             ) from exc
-        self._selection_cache[cache_key] = selection
-        # Copied per call so a caller mutating its body cannot reach the cache
-        # and silently change what every later run in the session selects.
-        return dict(selection)
 
     def create_thread(
         self,

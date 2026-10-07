@@ -52,10 +52,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from ..acceptance.tests._harness import certified_gateway
-from ..testing import ok_body, wait_for_run_status
-from ..testing.tests._support.catalog_selection import (
+from ..testing import (
     NoSelectableLaneError,
-    in_process_selection,
+    fetch_in_process_selection,
+    ok_body,
+    wait_for_run_status,
 )
 from ._net import tape_server_listening
 
@@ -109,13 +110,11 @@ def _served_in_process_selection(
     never a run that quietly spends on whichever external lane the host happens
     to have installed.
     """
-    with gateway.client(timeout=120.0) as client:
-        response = client.get(
-            "/v1/provider-catalog", params={"workspace_root": workspace_root}
-        )
-    assert response.status_code == 200, response.text
     try:
-        return in_process_selection(response.json(), prefer_provider_id="mock")
+        with gateway.client(timeout=120.0) as client:
+            return fetch_in_process_selection(
+                client, workspace_root, prefer_provider_id="mock"
+            )
     except NoSelectableLaneError as exc:
         pytest.skip(f"a deterministic certification run cannot be selected here: {exc}")
 

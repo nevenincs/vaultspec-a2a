@@ -36,7 +36,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ...control.config import settings
 from ...graph.enums import Provider
-from ...service_tests._provider_catalog_live import declared_lane_model_value
+from ...testing import declared_lane_model_value
 from .._factory_commands import _classify_acp_command, claude_acp_entry
 from .._subprocess import kill_process_tree
 from ..acp_chat_model import AcpChatModel

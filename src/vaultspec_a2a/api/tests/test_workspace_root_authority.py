@@ -13,11 +13,11 @@ from ...context.metadata import ThreadMetadata
 from ...control.config import settings
 from ...control.state_layout import state_layout
 from ...database import create_thread
-from ...testing import settings_override
+from ...testing import async_catalog_run_fields, settings_override
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..routes._gateway_run_start import _require_settled_predecessor
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import make_app
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -31,16 +31,14 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from vaultspec_a2a.service_tests._provider_catalog_live import (
-    LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
-)
+from vaultspec_a2a.testing import LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON
 
 if TYPE_CHECKING:
     from vaultspec_a2a.providers.provider_catalog import ProviderCatalog
 
 #: The five identifiers one live proof lane is declared with. Imported from the
-#: suite that consumes them rather than restated, so a rename cannot leave this
-#: reporter emitting a block nothing reads.
+#: test-support package that reads them rather than restated, so a rename cannot
+#: leave this reporter emitting a block nothing reads.
 _SELECTION_NAMES = LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON
 
 #: Discovery spawns real provider subprocesses; a wedged CLI must not hang a

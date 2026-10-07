@@ -11,8 +11,7 @@ from uuid import uuid4
 import pytest
 
 from ..control.action_lease import CONTROL_ACTION_LEASE_TTL
-from ..testing import wait_for_run_status
-from ..testing.tests._support.catalog_selection import in_process_selection
+from ..testing import fetch_in_process_selection, wait_for_run_status
 from ..testing.tests._support.payloads import json_object, required_bool, required_text
 from ._state import thread_state
 from .harness import _spawn_process, _wait_for, build_service_stack
@@ -150,11 +149,9 @@ def _deterministic_selection(
 ) -> dict[str, object]:
     """Read the served catalog and choose only the real deterministic lane."""
     with service_stack.gateway_client(timeout=240.0) as client:
-        response = client.get(
-            "/v1/provider-catalog", params={"workspace_root": workspace_root}
+        return fetch_in_process_selection(
+            client, workspace_root, prefer_provider_id="deterministic"
         )
-        response.raise_for_status()
-        return in_process_selection(response.json(), prefer_provider_id="deterministic")
 
 
 def test_blocked_deterministic_stream_cancellation_settles_terminally(

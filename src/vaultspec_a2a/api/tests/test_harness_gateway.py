@@ -23,7 +23,8 @@ import pytest
 
 from ...cli.provision import provision_workspace
 from ...team.team_config import load_team_config
-from .conftest import SessionFactory, async_catalog_run_fields, make_app
+from ...testing import async_catalog_run_fields
+from .conftest import SessionFactory, make_app
 from .test_gateway_live import _live_server
 
 if TYPE_CHECKING:

@@ -19,8 +19,8 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
-from ...testing.tests._support.catalog_selection import named_lane_selection
-from .conftest import catalog_run_fields, make_app
+from ...testing import catalog_run_fields, fetch_provider_catalog, named_lane_selection
+from .conftest import make_app
 
 
 def _multi_entry_lane(
@@ -34,11 +34,7 @@ def _multi_entry_lane(
     a caller's behalf - the thing the production resolver refuses to do. The
     lane is returned whole so both selections below are built from one record.
     """
-    response = client.get(
-        "/v1/provider-catalog", params={"workspace_root": workspace_root}
-    )
-    assert response.status_code == 200, response.text
-    payload = response.json()
+    payload = fetch_provider_catalog(client, workspace_root)
     lane = next(
         (
             item

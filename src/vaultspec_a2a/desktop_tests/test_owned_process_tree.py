@@ -35,6 +35,7 @@ from ..providers._acp_rpc_terminal_handlers import release_owned_terminal
 from ..providers._acp_types import AcpModelConfig, AcpSessionContext
 from ..providers._subprocess import kill_process_tree, spawn_acp_process
 from ..providers.tests._terminal_process import retain_terminal_process
+from ..testing import fetch_in_process_selection_at
 from ..tests.gateway_boot import (
     armed_gateway_env,
     desktop_workspace,
@@ -48,7 +49,6 @@ from ..tests.gateway_boot import (
 from ..utils import kill_pid_tree_async
 from ..utils._process_tree import pid_is_live
 from ..utils.process import ProcessContainment
-from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -311,8 +311,12 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
                     # The workspace anchors the selection, which run start
                     # revalidates against the catalog served for it.
                     "metadata": {"workspace_root": _workspace},
-                    "selection": catalog_selection(
-                        base, auth["Authorization"], _workspace
+                    "selection": fetch_in_process_selection_at(
+                        base,
+                        _workspace,
+                        headers=auth,
+                        prefer_provider_id="mock",
+                        cache=True,
                     ),
                     "actor_tokens": {
                         "tokens": {"coder": "tok-coder"},

@@ -29,14 +29,19 @@ from ...graph.nodes.clarification import (
     create_clarification_request_node,
 )
 from ...streaming.transformer import emit_interrupt_events
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    async_catalog_run_fields,
+    compile_test_graph,
+    new_state_graph,
+)
 from ...testing.tests._support.sse import read_frame
 from ...thread.clarification import (
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
 )
-from .conftest import SessionFactory, _live_server, async_catalog_run_fields, make_app
+from .conftest import SessionFactory, _live_server, make_app
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig

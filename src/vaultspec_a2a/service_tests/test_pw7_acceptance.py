@@ -92,18 +92,18 @@ from ..authoring.discovery import resolve_engine
 from ..control.run_start_policy import required_role_ids
 from ..graph.enums import PermissionOptionKind, ToolKind
 from ..team.team_config import load_team_config
-from ..testing import resolve_gateway_url, settings_override
-from ..testing.tests._support.catalog_selection import (
-    NoSelectableLaneError,
-    in_process_selection,
-)
-from ._provider_catalog_live import (
+from ..testing import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON,
+    NoSelectableLaneError,
+    async_fetch_provider_catalog,
+    in_process_selection,
     live_provider_catalog_selector_is_configured,
     live_provider_override_selector_is_configured,
     override_selection_from_served_catalog,
+    resolve_gateway_url,
     selection_from_served_catalog,
+    settings_override,
 )
 
 # A doc-authoring role may only ever need read-only research tools; any other
@@ -488,18 +488,11 @@ async def _served_catalog(gateway_url: str, workspace_root: str) -> JsonObject:
     and network calls, so this carries its own generous timeout rather than the
     status-poll one.
     """
-    async with httpx.AsyncClient() as hc:
-        response = await hc.get(
-            f"{gateway_url}/v1/provider-catalog",
-            params={"workspace_root": workspace_root},
-            headers=_GATEWAY_AUTH_HEADERS,
-            timeout=240.0,
-        )
-    assert response.status_code == 200, (
-        f"the stack could not serve its provider catalog: "
-        f"{response.status_code} {response.text}"
-    )
-    return _json_object(response.json(), at="gateway provider-catalog response")
+    async with httpx.AsyncClient(
+        base_url=gateway_url, headers=_GATEWAY_AUTH_HEADERS
+    ) as hc:
+        payload = await async_fetch_provider_catalog(hc, workspace_root)
+    return _json_object(payload, at="gateway provider-catalog response")
 
 
 def _deterministic_selection(catalog: JsonObject) -> JsonObject:

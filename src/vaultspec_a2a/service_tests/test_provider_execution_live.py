@@ -29,8 +29,7 @@ from langchain_core.messages import HumanMessage
 from ..graph.enums import Provider
 from ..providers.factory import ProviderFactory
 from ..providers.lane_admission import PROVEN_TURN_LANES
-from ..testing import session_scratch_dir
-from ._provider_catalog_live import declared_lane_model_value
+from ..testing import declared_lane_model_value, session_scratch_dir
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule

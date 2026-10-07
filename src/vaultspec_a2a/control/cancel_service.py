@@ -16,6 +16,7 @@ from ..control.accepted_input import freeze_accepted_input
 from ..control.action_lease import (
     ControlActionClaim,
     ControlActionClaimRequest,
+    ControlActionOutcome,
     DispatchFailureDisposition,
     prepare_control_action_claim,
 )
@@ -52,25 +53,9 @@ if TYPE_CHECKING:
     from ..thread.cancel_policy import CancelEligibility
     from .leased_dispatch import DispatchTransport
 
-__all__ = ["CancelResult", "cancel_thread"]
+__all__ = ["cancel_thread"]
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class CancelResult:
-    """Outcome of a cancel-thread service call."""
-
-    action_id: str | None
-    thread_id: str
-    cancelled: bool
-    thread_status: str
-    error_detail: str | None = None
-    accepted: bool = False
-    applied: bool = False
-    action_status: str = ControlActionResultStatus.REJECTED_INVALID_STATE.value
-    idempotency_key: str | None = None
-    failure_type: FailureType | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,29 +76,22 @@ class _CancelPreflight:
 
 async def _cancel_preflight(
     db: AsyncSession, thread_id: str
-) -> _CancelPreflight | CancelResult:
+) -> _CancelPreflight | ControlActionOutcome:
     thread = await get_thread(db, thread_id)
     if thread is None:
-        return CancelResult(
-            action_id=None,
+        return ControlActionOutcome(
             thread_id=thread_id,
-            cancelled=False,
-            thread_status="",
             error_detail="Thread not found",
             failure_type=FailureType.NOT_FOUND,
         )
 
     eligibility = can_cancel(thread.status)
     if not eligibility.allowed:
-        return CancelResult(
-            action_id=None,
+        return ControlActionOutcome(
             thread_id=thread_id,
-            cancelled=False,
             thread_status=thread.status,
             error_detail=eligibility.reason,
-            accepted=False,
             applied=eligibility.already_cancelled,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             failure_type=FailureType.TERMINAL,
         )
 
@@ -127,19 +105,15 @@ async def _cancel_preflight(
         dispatch_id=expectation.authority.action_receipt_id,
     )
     if owning_action is None or owning_action.recovery_deadline_at is None:
-        return CancelResult(
-            action_id=None,
+        return ControlActionOutcome(
             thread_id=thread_id,
-            cancelled=False,
             thread_status=thread_status,
             error_detail="The accepted run carries no recovery deadline",
             failure_type=FailureType.INCOMPATIBLE_STATE,
         )
     if owning_action.recovery_deadline_at <= datetime.now(UTC):
-        return CancelResult(
-            action_id=None,
+        return ControlActionOutcome(
             thread_id=thread_id,
-            cancelled=False,
             thread_status=thread_status,
             error_detail="The accepted run deadline has expired",
             failure_type=FailureType.DEADLINE_EXCEEDED,
@@ -158,14 +132,14 @@ class _ClaimedCancel:
 
 async def _claim_cancel(
     db: AsyncSession, thread_id: str, idempotency_key: str
-) -> _ClaimedCancel | CancelResult:
+) -> _ClaimedCancel | ControlActionOutcome:
     """Claim one cancellation under the write lock, or refuse having written none."""
     # The preflight reads before the claim writes, so the acceptance transaction
     # has to hold the write lock from its first statement to wait for a racing
     # canceller instead of failing on its commit.
     await begin_write_transaction(db)
     preflight = await _cancel_preflight(db, thread_id)
-    if isinstance(preflight, CancelResult):
+    if isinstance(preflight, ControlActionOutcome):
         # A refusal wrote nothing; release the write lock before returning.
         await db.rollback()
         return preflight
@@ -193,10 +167,10 @@ async def cancel_thread(
     thread_id: str,
     idempotency_key: str | None,
     transport: DispatchTransport,
-) -> CancelResult:
+) -> ControlActionOutcome:
     """Execute the cancel-thread workflow.
 
-    Returns a :class:`CancelResult` describing what happened.  Commits the
+    Returns a :class:`ControlActionOutcome` describing what happened.  Commits the
     session before returning — the service owns its transaction boundary.
     """
     # Cancellation is a resource transition, so one thread has one durable
@@ -208,7 +182,7 @@ async def cancel_thread(
     claimed = await retry_write_contention(
         db, lambda: _claim_cancel(db, thread_id, resolved_idempotency_key)
     )
-    if isinstance(claimed, CancelResult):
+    if isinstance(claimed, ControlActionOutcome):
         return claimed
     thread = claimed.preflight.thread
     thread_status = claimed.preflight.thread_status
@@ -244,12 +218,11 @@ async def _existing_cancel_claim(
     thread_id: str,
     thread_status: str,
     response_idempotency_key: str,
-) -> CancelResult | None:
+) -> ControlActionOutcome | None:
     if not claim.payload_matches:
-        return CancelResult(
+        return ControlActionOutcome(
             action_id=claim.action_id,
             thread_id=thread_id,
-            cancelled=False,
             thread_status=thread_status,
             error_detail="Idempotency key is already bound to a different action",
             idempotency_key=response_idempotency_key,
@@ -258,14 +231,10 @@ async def _existing_cancel_claim(
     if not claim.acquired:
         current_thread = await db.get(ThreadModel, thread_id, populate_existing=True)
         if current_thread is None:
-            return CancelResult(
+            return ControlActionOutcome(
                 action_id=claim.action_id,
                 thread_id=thread_id,
-                cancelled=False,
-                thread_status="",
                 error_detail="Thread disappeared while cancellation was leased",
-                accepted=False,
-                applied=False,
                 action_status=claim.result_status,
                 idempotency_key=response_idempotency_key,
                 failure_type=FailureType.NOT_FOUND,
@@ -273,7 +242,7 @@ async def _existing_cancel_claim(
         if not _cancel_authority_already_owned(
             thread_write_expectation(current_thread), claim.dispatch_id
         ):
-            return CancelResult(
+            return ControlActionOutcome(
                 action_id=claim.action_id,
                 thread_id=thread_id,
                 cancelled=current_thread.status == ThreadStatus.CANCELLED.value,
@@ -281,13 +250,12 @@ async def _existing_cancel_claim(
                 error_detail=(
                     "Cancellation action is leased but does not own thread authority"
                 ),
-                accepted=False,
                 applied=current_thread.status == ThreadStatus.CANCELLED.value,
                 action_status=claim.result_status,
                 idempotency_key=response_idempotency_key,
                 failure_type=FailureType.CONFLICT,
             )
-        return CancelResult(
+        return ControlActionOutcome(
             action_id=claim.action_id,
             thread_id=thread_id,
             cancelled=True,
@@ -330,7 +298,7 @@ async def _elect_cancel_authority(
     claim: ControlActionClaim,
     expectation: ThreadWriteExpectation,
     context: _CancelContext,
-) -> CancelResult | None:
+) -> ControlActionOutcome | None:
     thread_id = context.thread_id
     thread_status = context.thread_status
     response_idempotency_key = context.response_idempotency_key
@@ -350,39 +318,32 @@ async def _elect_cancel_authority(
     if election is not None and election.outcome is not ThreadStatusElectionOutcome.WON:
         await db.rollback()
         if election.outcome is ThreadStatusElectionOutcome.NOT_FOUND:
-            return CancelResult(
+            return ControlActionOutcome(
                 action_id=claim.action_id,
                 thread_id=thread_id,
-                cancelled=False,
-                thread_status="",
                 error_detail="Thread disappeared during cancellation election",
-                accepted=False,
                 idempotency_key=response_idempotency_key,
                 failure_type=FailureType.NOT_FOUND,
             )
         if election.outcome is ThreadStatusElectionOutcome.RECEIPT_MISMATCH:
-            return CancelResult(
+            return ControlActionOutcome(
                 action_id=claim.action_id,
                 thread_id=thread_id,
-                cancelled=False,
                 thread_status=thread_status,
                 error_detail="Cancellation receipt does not match its durable action",
-                accepted=False,
                 idempotency_key=response_idempotency_key,
                 failure_type=FailureType.CONFLICT,
             )
         await db.refresh(thread)
         eligibility = can_cancel(thread.status)
         failure_type, error_detail = _cancel_election_conflict(eligibility)
-        return CancelResult(
+        return ControlActionOutcome(
             action_id=claim.action_id,
             thread_id=thread_id,
             cancelled=eligibility.already_cancelled,
             thread_status=thread.status,
             error_detail=error_detail,
-            accepted=False,
             applied=eligibility.already_cancelled,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             idempotency_key=response_idempotency_key,
             failure_type=failure_type,
         )
@@ -401,7 +362,7 @@ async def _dispatch_cancellation(
     claim: ControlActionClaim,
     dispatch: DispatchRequest,
     context: _CancelContext,
-) -> CancelResult:
+) -> ControlActionOutcome:
     thread_id = context.thread_id
     response_idempotency_key = context.response_idempotency_key
     logger.info(
@@ -426,20 +387,19 @@ async def _dispatch_cancellation(
             # rejection here would contradict the journal and invite the caller
             # to submit a competing action.
             await db.commit()
-            return CancelResult(
+            return ControlActionOutcome(
                 action_id=claim.action_id,
                 thread_id=thread_id,
                 cancelled=True,
                 thread_status=ThreadStatus.CANCELLING.value,
                 accepted=True,
-                applied=False,
                 action_status=ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value,
                 idempotency_key=response_idempotency_key,
             )
         if settlement is DispatchFailureDisposition.APPLICATION_WON:
             await db.refresh(thread)
             await db.commit()
-            return CancelResult(
+            return ControlActionOutcome(
                 action_id=claim.action_id,
                 thread_id=thread_id,
                 cancelled=True,
@@ -455,14 +415,10 @@ async def _dispatch_cancellation(
         }:
             await db.refresh(thread)
             await db.commit()
-            return CancelResult(
+            return ControlActionOutcome(
                 action_id=claim.action_id,
                 thread_id=thread_id,
-                cancelled=False,
                 thread_status=thread.status,
-                accepted=False,
-                applied=False,
-                action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
                 idempotency_key=response_idempotency_key,
                 error_detail=(
                     "Cancellation authority changed before failure settlement"
@@ -486,26 +442,21 @@ async def _dispatch_cancellation(
         )
         await record_undelivered_dispatch(db, thread_id, reason=failure.detail)
         await db.commit()
-        return CancelResult(
+        return ControlActionOutcome(
             action_id=claim.action_id,
             thread_id=thread_id,
-            cancelled=False,
             thread_status=ThreadStatus.CANCELLING.value,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             idempotency_key=response_idempotency_key,
             failure_type=failure.failure_type,
         )
 
     await db.commit()
-    return CancelResult(
+    return ControlActionOutcome(
         action_id=claim.action_id,
         thread_id=thread_id,
         cancelled=True,
         thread_status=ThreadStatus.CANCELLING.value,
         accepted=True,
-        applied=False,
         action_status=ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value,
         idempotency_key=response_idempotency_key,
     )

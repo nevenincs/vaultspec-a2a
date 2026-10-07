@@ -27,7 +27,7 @@ from .schemas.gateway import RunMessageRefusalCode, RunMessageRefusalDetail
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
-    from ..control.cancel_service import CancelResult
+    from ..control.action_lease import ControlActionOutcome
 
 __all__ = [
     "CODED_REFUSALS",
@@ -158,7 +158,7 @@ def refused_action(
     return HTTPException(status_code=500, detail=detail)
 
 
-def refused_cancel(result: CancelResult) -> HTTPException | None:
+def refused_cancel(result: ControlActionOutcome) -> HTTPException | None:
     """Serve a cancel outcome's refusal, or ``None`` when the cancel holds.
 
     Cancelling a run that is already cancelled is not a refusal. The verb is
@@ -177,7 +177,9 @@ def refused_cancel(result: CancelResult) -> HTTPException | None:
     return refused_dispatch(failure_type, _cancel_refusal_detail(result, failure_type))
 
 
-def _cancel_refusal_detail(result: CancelResult, failure_type: FailureType) -> str:
+def _cancel_refusal_detail(
+    result: ControlActionOutcome, failure_type: FailureType
+) -> str:
     """Name a cancel refusal, preferring a reason the service already phrased."""
     if failure_type is FailureType.NOT_FOUND:
         return "Run not found"

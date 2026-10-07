@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import os
 import time
@@ -13,12 +11,23 @@ from typing import TYPE_CHECKING
 
 from ...desktop._platform_acl import harden_credential_path
 from ...testing import JsonReplyHandler, serve_handler
+from .._engine_trust import (
+    CHALLENGE_HEADER,
+    ENGINE_PRODUCER,
+    ENGINE_RECORD_VERSION,
+    PID_HEADER,
+    PROOF_HEADER,
+    STARTED_MS_HEADER,
+    TrustedEngineRecord,
+    proof_digest,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
 TEST_BEARER = "test-engine-bearer-0123456789abcdef0123456789abcdef"
+_STARTED_MS = 1
 
 
 def write_engine_record(path: Path, port: int, bearer: str = TEST_BEARER) -> None:
@@ -26,11 +35,11 @@ def write_engine_record(path: Path, port: int, bearer: str = TEST_BEARER) -> Non
     path.write_text(
         json.dumps(
             {
-                "version": 1,
-                "producer": "vaultspec-engine",
+                "version": ENGINE_RECORD_VERSION,
+                "producer": ENGINE_PRODUCER,
                 "port": port,
                 "pid": os.getpid(),
-                "started_ms": 1,
+                "started_ms": _STARTED_MS,
                 "service_token": bearer,
                 "last_heartbeat": int(time.time() * 1000),
             }
@@ -42,10 +51,8 @@ def write_engine_record(path: Path, port: int, bearer: str = TEST_BEARER) -> Non
 
 def health_proof(port: int, bearer: str, challenge: str) -> str:
     """Sign the peer's own listener/process identity, never caller-supplied identity."""
-    message = f"vaultspec-engine:1\n{port}\n{os.getpid()}\n1\n{challenge}"
-    return hmac.new(
-        bearer.encode("ascii"), message.encode("ascii"), hashlib.sha256
-    ).hexdigest()
+    record = TrustedEngineRecord(port, os.getpid(), _STARTED_MS, bearer)
+    return proof_digest(bearer, record.proof_message(challenge))
 
 
 def reply_health_proof(handler: BaseHTTPRequestHandler, bearer: str) -> None:
@@ -53,15 +60,15 @@ def reply_health_proof(handler: BaseHTTPRequestHandler, bearer: str) -> None:
     assert isinstance(handler.server, ThreadingHTTPServer)
     handler.send_response(200)
     handler.send_header(
-        "x-vaultspec-engine-proof",
+        PROOF_HEADER,
         health_proof(
             handler.server.server_port,
             bearer,
-            handler.headers.get("x-vaultspec-engine-challenge", ""),
+            handler.headers.get(CHALLENGE_HEADER, ""),
         ),
     )
-    handler.send_header("x-vaultspec-engine-pid", str(os.getpid()))
-    handler.send_header("x-vaultspec-engine-started-ms", "1")
+    handler.send_header(PID_HEADER, str(os.getpid()))
+    handler.send_header(STARTED_MS_HEADER, str(_STARTED_MS))
     handler.send_header("Content-Length", "0")
     handler.end_headers()
 

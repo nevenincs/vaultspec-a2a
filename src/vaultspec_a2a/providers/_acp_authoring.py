@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, override
 from urllib.parse import urlparse
 
-from ..authoring import ACTOR_TOKEN_HEADER, BEARER_HEADER
+from ..authoring import ACTOR_TOKEN_HEADER
 from ..authoring._tool_calls import tool_call_journal_path
 from ..authoring.catalog import snapshot_to_catalog_payload
 from ..protocols.mcp.authoring_stdio import (
@@ -80,6 +80,7 @@ from ..protocols.mcp.authoring_stdio import (
 )
 from ..protocols.mcp.authoring_stdio import AuthoringBridgeSettings
 from ..thread.errors import ConfigError
+from ..utils import bearer_header
 from ..utils.runtime_exec import is_module_invocation, module_command
 
 if TYPE_CHECKING:
@@ -336,8 +337,11 @@ def build_authoring_mcp_servers(
             "binding carries only the stdio transport"
         )
     headers: list[JsonValue] = [
-        {"name": BEARER_HEADER, "value": f"Bearer {binding.bearer_token}"},
-        {"name": ACTOR_TOKEN_HEADER, "value": binding.actor_token},
+        {"name": name, "value": value}
+        for name, value in (
+            *bearer_header(binding.bearer_token).items(),
+            (ACTOR_TOKEN_HEADER, binding.actor_token),
+        )
     ]
     entry: JsonObject = {
         "name": AUTHORING_MCP_SERVER_NAME,

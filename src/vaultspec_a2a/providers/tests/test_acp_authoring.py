@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import SecretStr, TypeAdapter
 
-from ...authoring import ACTOR_TOKEN_HEADER, BEARER_HEADER, AgentTool, CatalogSnapshot
+from ...authoring import ACTOR_TOKEN_HEADER, AgentTool, CatalogSnapshot
 from ...authoring.catalog import parse_catalog, snapshot_to_catalog_payload
 from ...protocols.mcp.authoring_stdio import (
     ENV_ACTOR_TOKEN,
@@ -189,7 +189,7 @@ class TestBuildMcpServers:
             assert isinstance(name, str)
             assert isinstance(value, str)
             headers[name] = value
-        assert headers[BEARER_HEADER] == "Bearer mb"
+        assert headers["Authorization"] == "Bearer mb"
         assert headers[ACTOR_TOKEN_HEADER] == "at"
 
     def test_tool_names_expose_no_write_path(self) -> None:

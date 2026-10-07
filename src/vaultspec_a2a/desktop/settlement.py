@@ -26,6 +26,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..utils import bearer_header
+
 if TYPE_CHECKING:
     import httpx
 
@@ -139,7 +141,7 @@ async def emit_run_settlement(
     body = TerminalSettlement(
         run_id=run_id, lease_id=lease_id, terminal_status=terminal_status
     )
-    headers = {"Authorization": f"Bearer {attach_credential}"}
+    headers = bearer_header(attach_credential)
     payload = body.model_dump(mode="json")
 
     owned_client = client is None

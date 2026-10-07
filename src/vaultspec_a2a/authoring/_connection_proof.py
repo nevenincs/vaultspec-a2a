@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import secrets
 from typing import TYPE_CHECKING
@@ -12,7 +11,14 @@ import h11
 import httpcore
 import httpx
 
-from ._engine_trust import CHALLENGE_HEADER, PROOF_HEADER, TrustedEngineRecord
+from ._engine_trust import (
+    CHALLENGE_HEADER,
+    PID_HEADER,
+    PROOF_HEADER,
+    STARTED_MS_HEADER,
+    TrustedEngineRecord,
+    proof_digest,
+)
 from ._errors import AuthoringError
 
 if TYPE_CHECKING:
@@ -22,7 +28,6 @@ __all__ = [
     "EngineConnectionError",
     "ProofMessage",
     "authenticated_client",
-    "proof_digest",
 ]
 
 #: Builds the bytes a listener's proof signs from its reported
@@ -32,11 +37,6 @@ type ProofMessage = Callable[[int, int, int, str, str], bytes]
 
 class EngineConnectionError(AuthoringError):
     """The connected listener has not proved possession of the engine key."""
-
-
-def proof_digest(key: str, message: bytes) -> str:
-    """Return the HMAC a listener holding *key* answers a proof *message* with."""
-    return hmac.new(key.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
 async def _prove_stream(
@@ -86,8 +86,8 @@ async def _prove_stream(
         )
     headers = httpx.Headers(response.headers)
     try:
-        pid = int(headers.get("x-vaultspec-engine-pid", ""))
-        started = int(headers.get("x-vaultspec-engine-started-ms", ""))
+        pid = int(headers.get(PID_HEADER, ""))
+        started = int(headers.get(STARTED_MS_HEADER, ""))
         if pid <= 0 or started <= 0:
             raise ValueError("invalid lifecycle")
         message = (

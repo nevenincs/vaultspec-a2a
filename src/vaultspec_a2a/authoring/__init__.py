@@ -31,7 +31,6 @@ from .catalog import CatalogSnapshot as CatalogSnapshot
 from .catalog import execute_agent_tool as execute_agent_tool
 from .catalog import fetch_catalog as fetch_catalog
 from .client import ACTOR_TOKEN_HEADER as ACTOR_TOKEN_HEADER
-from .client import BEARER_HEADER as BEARER_HEADER
 from .client import AuthoringClient as AuthoringClient
 from .discovery import EngineEndpoint as EngineEndpoint
 from .discovery import resolve_engine as resolve_engine
@@ -117,7 +116,6 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "ACTOR_TOKEN_HEADER",
-    "BEARER_HEADER",
     "CATALOG_SCHEMA_VERSION",
     "MAX_ID_BYTES",
     "REVIEW_DECISION_APPROVE",

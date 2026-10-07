@@ -24,7 +24,7 @@ import httpx
 
 from ..lifecycle.discovery import write_service_json
 from ..testing import DEFAULT_ATTACH_CREDENTIAL, json_object, reap_contained
-from ..utils import ProcessContainment, spawn_contained
+from ..utils import ProcessContainment, bearer_header, spawn_contained
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -128,7 +128,7 @@ def _wait_for_engine(
                 raise KeyError("service_token")
             response = httpx.get(
                 f"{base_url}/status",
-                headers={"Authorization": f"Bearer {token}"},
+                headers=bearer_header(token),
                 timeout=2,
             )
             if response.status_code == HTTPStatus.OK:
@@ -149,7 +149,7 @@ def _shutdown_engine(
     try:
         response = httpx.post(
             f"{base_url}/shutdown",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=bearer_header(token),
             json={},
             timeout=5,
         )

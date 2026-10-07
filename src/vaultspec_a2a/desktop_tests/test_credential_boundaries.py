@@ -39,6 +39,7 @@ from ..testing import (
     read_worker_ipc_secret,
     seat_app_home,
 )
+from ..utils import bearer_header
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -70,15 +71,12 @@ def _assert_credential_planes(
     # --- Attach plane: only the attach credential authenticates ---
     assert client.get("/v1/service").status_code == 401
     assert (
-        client.get(
-            "/v1/service", headers={"Authorization": f"Bearer {worker_ipc}"}
-        ).status_code
-        == 401
+        client.get("/v1/service", headers=bearer_header(worker_ipc)).status_code == 401
     )
     assert (
         client.get(
             "/v1/service",
-            headers={"Authorization": f"Bearer {DEFAULT_OWNERSHIP_CAPABILITY}"},
+            headers=bearer_header(DEFAULT_OWNERSHIP_CAPABILITY),
         ).status_code
         == 401
     )
@@ -97,7 +95,7 @@ def _assert_credential_planes(
     )
     worker_ok = client.get(
         "/internal/health",
-        headers={"Authorization": f"Bearer {worker_ipc}"},
+        headers=bearer_header(worker_ipc),
     )
     assert worker_ok.status_code == 200
 

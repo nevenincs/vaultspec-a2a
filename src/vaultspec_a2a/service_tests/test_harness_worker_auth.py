@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..service_tests.harness import _INTERNAL_TOKEN, ServiceStack
+from ..utils import bearer_header
 
 _PORTS = {
     "gateway": 18000,
@@ -16,7 +17,10 @@ def test_worker_probe_presents_the_internal_bearer() -> None:
     """The harness worker client carries the worker IPC bearer the surface requires."""
     stack = ServiceStack(project_name="harness-unit-probe", ports=dict(_PORTS))
     with stack._worker_client() as client:
-        assert client.headers["authorization"] == f"Bearer {_INTERNAL_TOKEN}"
+        assert (
+            client.headers["authorization"]
+            == bearer_header(_INTERNAL_TOKEN)["Authorization"]
+        )
 
 
 def test_worker_env_and_probe_share_one_token() -> None:

@@ -30,6 +30,7 @@ from pydantic import PrivateAttr
 from ....authoring import FeedbackContextReader
 from ....graph.nodes.worker import create_worker_node
 from ....thread.actor_tokens import ActorTokenBundle
+from ....utils import bearer_header
 from ....worker.token_store import RunTokenStore
 
 if TYPE_CHECKING:
@@ -80,7 +81,7 @@ class _RecordingModel(BaseChatModel):
 def _post(
     base: str, path: str, bearer: str, actor: str | None, body: dict[str, Any]
 ) -> dict[str, Any]:
-    headers = {"Authorization": f"Bearer {bearer}", "content-type": "application/json"}
+    headers = {**bearer_header(bearer), "content-type": "application/json"}
     if actor is not None:
         headers["x-authoring-actor-token"] = actor
     resp = httpx.post(f"{base}{path}", headers=headers, json=body, timeout=10.0)

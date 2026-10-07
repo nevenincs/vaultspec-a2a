@@ -21,6 +21,12 @@ from ...testing import (
     serve_handler,
     settings_override,
 )
+from .._engine_trust import (
+    CHALLENGE_HEADER,
+    PID_HEADER,
+    PROOF_HEADER,
+    STARTED_MS_HEADER,
+)
 from ..discovery import resolve_engine
 from ._engine_peer import (
     TEST_BEARER,
@@ -47,9 +53,9 @@ def attacker_listener(
         def do_GET(self) -> None:
             requests.append(dict(self.headers.items()))
             self.send_response(200)
-            self.send_header("x-vaultspec-engine-proof", proof)
-            self.send_header("x-vaultspec-engine-pid", "1")
-            self.send_header("x-vaultspec-engine-started-ms", "1")
+            self.send_header(PROOF_HEADER, proof)
+            self.send_header(PID_HEADER, "1")
+            self.send_header(STARTED_MS_HEADER, "1")
             self.send_header("Content-Length", "0")
             self.end_headers()
 
@@ -101,7 +107,7 @@ def test_stale_port_listener_gets_only_a_challenge(
         with settings_override(engine_service_json=path):
             assert resolve_engine(liveness_timeout=0.5) is None
         assert len(requests) == 1
-        assert "x-vaultspec-engine-challenge" in requests[0]
+        assert CHALLENGE_HEADER in requests[0]
         assert "Authorization" not in requests[0]
         assert "x-authoring-actor-token" not in requests[0]
         assert TEST_BEARER not in str(requests)
@@ -115,7 +121,7 @@ def test_old_valid_proof_cannot_be_replayed(secure_engine_dir: Path) -> None:
         write_engine_record(path, port)
         with settings_override(engine_service_json=path):
             assert resolve_engine(liveness_timeout=0.5) is None
-        assert requests[0]["x-vaultspec-engine-challenge"] != "0" * 64
+        assert requests[0][CHALLENGE_HEADER] != "0" * 64
 
 
 @pytest.mark.parametrize(

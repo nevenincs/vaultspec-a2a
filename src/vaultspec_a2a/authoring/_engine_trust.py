@@ -24,8 +24,11 @@ __all__ = [
     "CHALLENGE_HEADER",
     "ENGINE_PRODUCER",
     "ENGINE_RECORD_VERSION",
+    "PID_HEADER",
     "PROOF_HEADER",
+    "STARTED_MS_HEADER",
     "TrustedEngineRecord",
+    "proof_digest",
     "prove_engine_identity",
     "read_engine_record",
 ]
@@ -34,6 +37,8 @@ ENGINE_RECORD_VERSION = 1
 ENGINE_PRODUCER = "vaultspec-engine"
 CHALLENGE_HEADER = "x-vaultspec-engine-challenge"
 PROOF_HEADER = "x-vaultspec-engine-proof"
+PID_HEADER = "x-vaultspec-engine-pid"
+STARTED_MS_HEADER = "x-vaultspec-engine-started-ms"
 _MAX_RECORD_BYTES = 65_536
 
 
@@ -128,14 +133,15 @@ def read_engine_record(
         return None
 
 
+def proof_digest(key: str, message: bytes) -> str:
+    """Return the HMAC a listener holding *key* answers a proof *message* with."""
+    return hmac.new(key.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
 def prove_engine_identity(record: TrustedEngineRecord, *, timeout: float) -> bool:
     """Authenticate a fresh health challenge without disclosing either credential."""
     challenge = secrets.token_hex(32)
-    expected = hmac.new(
-        record.bearer_token.encode("ascii"),
-        record.proof_message(challenge),
-        hashlib.sha256,
-    ).hexdigest()
+    expected = proof_digest(record.bearer_token, record.proof_message(challenge))
     try:
         response = httpx.get(
             f"{record.base_url}/health",

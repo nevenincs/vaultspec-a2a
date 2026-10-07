@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from ...control.config import Settings
+from ...utils import bearer_header
 from .conftest import SEATED_ATTACH_TOKEN, make_app
 
 _ROUTE_CLASSES: tuple[tuple[str, str, dict[str, Any], int], ...] = (
@@ -46,7 +47,7 @@ async def test_every_v1_route_class_accepts_discovery_bearer(
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway.test",
-        headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+        headers=bearer_header(SEATED_ATTACH_TOKEN),
     ) as client:
         response = await client.request(method, path, **kwargs)
 
@@ -55,16 +56,15 @@ async def test_every_v1_route_class_accepts_discovery_bearer(
 
 @pytest.mark.asyncio(loop_scope="function")
 @pytest.mark.parametrize("route_case", _ROUTE_CLASSES)
-@pytest.mark.parametrize("authorization", [None, "Bearer wrong-token"])
+@pytest.mark.parametrize("headers", [{}, bearer_header("wrong-token")])
 async def test_every_v1_route_class_rejects_missing_or_wrong_bearer(
     session_factory: Any,
     checkpointer: Any,
     route_case: tuple[str, str, dict[str, Any], int],
-    authorization: str | None,
+    headers: dict[str, str],
 ) -> None:
     method, path, kwargs, _expected = route_case
     app = _secured_app(session_factory, checkpointer)
-    headers = {"Authorization": authorization} if authorization is not None else {}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://gateway.test",

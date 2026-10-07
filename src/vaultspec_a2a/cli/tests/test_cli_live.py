@@ -30,6 +30,7 @@ from ...testing import (
     run_cli,
     serve_on_loopback_in_thread,
 )
+from ...utils import bearer_header
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -52,7 +53,7 @@ def _in_process_lane_arguments(base: str) -> dict[str, str]:
     selection = fetch_in_process_selection_at(
         base,
         str(Path.cwd()),
-        headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+        headers=bearer_header(SEATED_ATTACH_TOKEN),
     )
     return {
         key: str(selection[key])

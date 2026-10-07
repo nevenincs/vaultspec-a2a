@@ -26,10 +26,10 @@ from sqlalchemy import select
 
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.direct_control_recovery import redrive_direct_control_actions
+from ...control.leased_dispatch import DispatchTransport
 from ...control.thread_service import (
     ThreadCreationRequest,
     ThreadCreationResult,
-    ThreadDispatchRuntime,
     create_and_dispatch_thread,
 )
 from ...control.worker_management import LazyWorkerSpawner
@@ -42,7 +42,6 @@ from ...database import (
     thread_write_expectation,
 )
 from ...database.models import ControlActionModel, ThreadModel
-from ...domain_config import domain_config
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
@@ -118,7 +117,7 @@ async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
                     metadata_json=None,
                     workspace_root=Path("relative-project"),
                 ),
-                runtime=ThreadDispatchRuntime(
+                transport=DispatchTransport(
                     circuit_breaker=WorkerCircuitBreaker(
                         failure_threshold=1, recovery_timeout=1.0
                     ),
@@ -126,7 +125,6 @@ async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
                         worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
                     ),
                     worker_client=client,
-                    recursion_limit=20,
                     trace_headers=None,
                 ),
             )
@@ -271,11 +269,10 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
                 workspace_root=tmp_path,
                 actor_tokens=bundle,
             ),
-            runtime=ThreadDispatchRuntime(
+            transport=DispatchTransport(
                 circuit_breaker=circuit_breaker,
                 worker_spawner=spawner,
                 worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
                 trace_headers=None,
             ),
         )
@@ -347,13 +344,12 @@ async def test_early_terminal_initial_dispatch_cannot_be_reopened(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            runtime=ThreadDispatchRuntime(
+            transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=1, recovery_timeout=1.0
                 ),
                 worker_spawner=spawner,
                 worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
                 trace_headers=None,
             ),
         )
@@ -398,13 +394,12 @@ async def test_initial_dispatch_reports_missing_row_without_refresh_failure(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            runtime=ThreadDispatchRuntime(
+            transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=1, recovery_timeout=1.0
                 ),
                 worker_spawner=spawner,
                 worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
                 trace_headers=None,
             ),
         )
@@ -450,13 +445,12 @@ async def test_lost_initial_ack_yields_to_early_terminal_authority(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            runtime=ThreadDispatchRuntime(
+            transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=1, recovery_timeout=1.0
                 ),
                 worker_spawner=spawner,
                 worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
                 trace_headers=None,
             ),
         )
@@ -496,13 +490,12 @@ async def test_definite_initial_rejection_survives_a_different_winning_action(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            runtime=ThreadDispatchRuntime(
+            transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=1, recovery_timeout=1.0
                 ),
                 worker_spawner=spawner,
                 worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
                 trace_headers=None,
             ),
         )
@@ -576,11 +569,10 @@ async def test_initial_ingest_keeps_its_fresh_lease_during_a_real_recovery_pass(
                         metadata_json=None,
                         workspace_root=tmp_path,
                     ),
-                    runtime=ThreadDispatchRuntime(
+                    transport=DispatchTransport(
                         circuit_breaker=breaker,
                         worker_spawner=spawner,
                         worker_client=worker_client,
-                        recursion_limit=domain_config.graph_recursion_limit,
                         trace_headers=None,
                     ),
                 )
@@ -648,13 +640,12 @@ async def test_ambiguous_initial_dispatch_retains_its_fresh_lease(
                 metadata_json=None,
                 workspace_root=tmp_path,
             ),
-            runtime=ThreadDispatchRuntime(
+            transport=DispatchTransport(
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=1, recovery_timeout=1.0
                 ),
                 worker_spawner=spawner,
                 worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
                 trace_headers=None,
             ),
         )

@@ -22,7 +22,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from ..database import begin_write_transaction, outstanding_permission_pause
-from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.dispatch_policy import FailureType
 from ..thread.enums import ControlActionType, PermissionRequestStatus, ThreadStatus
 from ..thread.message_policy import (
@@ -30,10 +29,8 @@ from ..thread.message_policy import (
     PauseAnswerability,
     can_send_followup,
 )
-from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import freeze_accepted_input
-from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
-from .graph_definition import read_accepted_graph_definition
+from .leased_dispatch import DispatchRefusal, build_followon_dispatch
 from .repositories.continuation_queue import (
     QueuedContinuationDisposition,
     QueuedContinuationRequest,
@@ -216,40 +213,25 @@ async def send_followup_message(
         len(options["content"]),
     )
 
-    # The losing reservation path rolls its transaction back, which expires ORM
-    # state. Snapshot every value needed afterwards before entering the queue
-    # repository so a concurrent replay or conflict never triggers implicit
-    # async I/O.
-    thread_metadata = thread.thread_metadata
-    try:
-        graph_definition = await read_accepted_graph_definition(
-            db, options["thread_id"]
-        )
-        execution_authority = resolve_execution_authority(thread_metadata)
-    except (ExecutionAuthorityError, ValueError) as exc:
+    # -- The accepted envelope the promoted turn is rebuilt from ----------
+    # Complete and frozen at admission: the turn was offered against this
+    # program and must run under this one, including its recursion budget,
+    # which is decided now rather than read from a service-wide default at
+    # some later moment. A follow-up inherits the active project the run was
+    # created with; it is never re-derived and never defaulted, so a run that
+    # names none is refused rather than sited wherever the worker started.
+    dispatch = await build_followon_dispatch(
+        db,
+        thread_id=options["thread_id"],
+        thread_metadata=thread.thread_metadata,
+        action=ControlActionType.INGEST,
+        agent_id=options["agent_id"],
+        content=options["content"],
+    )
+    if isinstance(dispatch, DispatchRefusal):
         await db.rollback()
         return _refused(
-            options["thread_id"],
-            thread_status,
-            FailureType.INCOMPATIBLE_STATE,
-            str(exc),
-        )
-
-    # -- Metadata extraction ---------------------------------------------
-    # A follow-up inherits the active project the run was created with; it is
-    # never re-derived and never defaulted. Degrading an unreadable or absent
-    # workspace root to None here used to dispatch the turn anyway, and the
-    # provider layer then sited the agent - and its filesystem sandbox - in
-    # whatever directory the worker was started in. Refuse instead.
-    workspace_root = dispatchable_workspace_root(thread_metadata)
-    if workspace_root is None:
-        await db.rollback()
-        return _refused(
-            options["thread_id"],
-            thread_status,
-            FailureType.NO_ACTIVE_PROJECT,
-            "run carries no active project: its stored metadata names no "
-            "workspace_root, so a follow-up cannot be sited. Start a new run.",
+            options["thread_id"], thread_status, dispatch.failure_type, dispatch.reason
         )
 
     lifetime_deadline_at = run_lifetime_deadline(created_at)
@@ -266,23 +248,6 @@ async def send_followup_message(
             "The run's total lifetime is spent, so it can take no further "
             "turn. Start a new run naming this one as its predecessor.",
         )
-
-    # -- The accepted envelope the promoted turn is rebuilt from ----------
-    # Complete and frozen at admission: the turn was offered against this
-    # program and must run under this one, including its recursion budget,
-    # which comes from the run's own accepted graph definition rather than
-    # from a service-wide default read at some later moment.
-    dispatch = DispatchRequest(
-        action=to_dispatch_action(ControlActionType.INGEST),
-        thread_id=options["thread_id"],
-        agent_id=options["agent_id"],
-        content=options["content"],
-        team_preset=graph_definition.team_id,
-        graph_definition=graph_definition,
-        workspace_root=workspace_root,
-        recursion_limit=graph_definition.recursion_limit,
-        model_assignment=execution_authority.model_assignment,
-    )
 
     # -- Durable reservation, with no receipt, writer or dispatch ---------
     reserved = await reserve_queued_continuation(

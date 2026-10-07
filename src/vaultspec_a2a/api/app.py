@@ -49,6 +49,7 @@ from ..control.health import (
     build_sqlite_fallback_diagnostics,
     probe_desktop_readiness,
 )
+from ..control.leased_dispatch import DispatchTransport
 from ..control.verdict_subscriber import VerdictSubscriber
 from ..control.worker_management import LazyWorkerSpawner, WorkerWatchdog
 from ..database import (
@@ -61,7 +62,6 @@ from ..database import (
 from ..database.checkpoints import Checkpointer, open_checkpointer
 from ..database.reconciliation import reconcile_threads_on_startup
 from ..database.run_event_retention import sweep_replay_log_periodically
-from ..domain_config import domain_config
 from ..ipc.body_limit import BoundedHttpBodyMiddleware, gateway_body_limit
 from ..lifecycle.discovery import (
     HEARTBEAT_REFRESH_SECONDS,
@@ -647,7 +647,6 @@ def _start_verdict_subscriber(
             circuit_breaker=circuit_breaker,
             worker_spawner=worker_spawner,
             endpoint_provider=resolve_engine,
-            recursion_limit=domain_config.graph_recursion_limit,
             trace_headers_fn=trace_headers,
             poll_interval_seconds=settings.authoring_subscriber_poll_interval_seconds,
             reconnect_base_seconds=settings.authoring_subscriber_reconnect_base_seconds,
@@ -739,11 +738,12 @@ def _start_gateway_recovery(
                 get_session_factory(),
                 runtime=ClarificationRuntime(
                     checkpointer,
-                    worker_client,
-                    circuit_breaker,
-                    worker_spawner,
-                    domain_config.graph_recursion_limit,
-                    trace_headers(),
+                    DispatchTransport(
+                        worker_client=worker_client,
+                        circuit_breaker=circuit_breaker,
+                        worker_spawner=worker_spawner,
+                        trace_headers=trace_headers(),
+                    ),
                 ),
             )
         except asyncio.CancelledError:

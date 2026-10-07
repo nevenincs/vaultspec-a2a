@@ -52,9 +52,7 @@ from ..database import (
     thread_write_expectation,
     update_thread_status,
 )
-from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread import ApprovalVerdict
-from ..thread.dispatch_policy import evaluate_dispatch_failure
 from ..thread.enums import (
     VERDICT_APPROVED,
     VERDICT_REJECTED,
@@ -67,18 +65,14 @@ from ..thread.idempotency import (
     authoring_verdict_action_key,
 )
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
-from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import freeze_accepted_input
-from .action_lease import (
-    ControlActionClaimRequest,
-    finalize_control_action_acceptance,
-    prepare_control_action_claim,
-    record_dispatch_failure,
+from .action_lease import ControlActionClaimRequest, prepare_control_action_claim
+from .leased_dispatch import (
+    DispatchRefusal,
+    DispatchTransport,
+    build_followon_dispatch,
+    dispatch_leased,
 )
-from .dispatch import safe_dispatch
-from .dispatch_receipts import bind_graph_action_receipt
-from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
-from .graph_definition import read_accepted_graph_definition
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -88,7 +82,6 @@ if TYPE_CHECKING:
     from ..authoring import EngineEndpoint
     from ..database import ControlActionModel
     from ..thread import ThreadWriteExpectation
-    from ..thread.executable_graph import FrozenGraphDefinition
     from ._verdict_subscriber_config import VerdictSubscriberConfig
 
 __all__ = [
@@ -118,11 +111,10 @@ class _RecoveryProposal(TypedDict):
 
 @dataclass(frozen=True, slots=True)
 class _VerdictSetup:
-    dispatch: DispatchRequest
+    thread_metadata: str | None
     write_expectation: ThreadWriteExpectation
     current_gate: str
     resume_value: dict[str, object]
-    graph_definition: FrozenGraphDefinition
 
 
 async def settle_verdict_dispatch_receipt(
@@ -494,26 +486,9 @@ class VerdictSubscriber:
         async with self._dependencies.session_factory() as db:
             thread = await get_thread(db, thread_id)
             if thread is None:
-                return
-            team_preset = thread.team_preset
+                return None
             thread_metadata = thread.thread_metadata
             write_expectation = thread_write_expectation(thread)
-            workspace_root = dispatchable_workspace_root(thread_metadata)
-            if workspace_root is None:
-                logger.warning(
-                    "Refusing verdict resume: accepted project unavailable",
-                    extra={"thread_id": thread_id, "failure_type": "no_active_project"},
-                )
-                return
-            try:
-                graph_definition = await read_accepted_graph_definition(db, thread_id)
-                team_preset = graph_definition.team_id
-                execution_authority = resolve_execution_authority(thread_metadata)
-            except (ExecutionAuthorityError, ValueError) as exc:
-                logger.warning(
-                    "Refusing verdict resume for thread %s: %s", thread_id, exc
-                )
-                return
 
         # Gate-precision: the verdict must answer the gate the run's checkpoint is
         # CURRENTLY parked at, not a superseded earlier gate.
@@ -526,23 +501,23 @@ class VerdictSubscriber:
                 current_gate,
                 sorted(correlated_ids),
             )
-            return
+            return None
 
         resume_value = ApprovalVerdict(
             request_id=current_gate, verdict=verdict, notes=notes
         ).as_resume_value()
-        dispatch = DispatchRequest(
-            action=to_dispatch_action(ControlActionType.RESUME),
-            thread_id=thread_id,
-            option_id=resume_value,
-            team_preset=team_preset,
-            graph_definition=graph_definition,
-            workspace_root=workspace_root,
-            recursion_limit=self._execution.recursion_limit,
-            model_assignment=execution_authority.model_assignment,
-        )
         return _VerdictSetup(
-            dispatch, write_expectation, current_gate, resume_value, graph_definition
+            thread_metadata, write_expectation, current_gate, resume_value
+        )
+
+    def _transport(self) -> DispatchTransport:
+        """The worker connection one resume travels over, traced as it is sent."""
+        trace_headers_fn = self._execution.trace_headers_fn
+        return DispatchTransport(
+            worker_client=self._dependencies.worker_client,
+            circuit_breaker=self._dependencies.circuit_breaker,
+            worker_spawner=self._dependencies.worker_spawner,
+            trace_headers=trace_headers_fn() if trace_headers_fn else None,
         )
 
     async def _resume_with_verdict(
@@ -580,9 +555,26 @@ class VerdictSubscriber:
         )
         if setup is None:
             return
-        dispatch = setup.dispatch
         async with self._dependencies.session_factory() as db:
             await begin_write_transaction(db)
+            dispatch = await build_followon_dispatch(
+                db,
+                thread_id=thread_id,
+                thread_metadata=setup.thread_metadata,
+                action=ControlActionType.RESUME,
+                option_id=setup.resume_value,
+            )
+            if isinstance(dispatch, DispatchRefusal):
+                logger.warning(
+                    "Refusing verdict resume for thread %s: %s",
+                    thread_id,
+                    dispatch.reason,
+                    extra={
+                        "thread_id": thread_id,
+                        "failure_type": dispatch.failure_type.value,
+                    },
+                )
+                return
             claim = await prepare_control_action_claim(
                 db,
                 request=ControlActionClaimRequest(
@@ -593,7 +585,9 @@ class VerdictSubscriber:
                     request_id=setup.current_gate,
                     payload=freeze_accepted_input(dispatch, intent=setup.resume_value),
                     dispatch_id=dispatch.dispatch_id,
-                    recovery_timeout_seconds=setup.graph_definition.run_timeout_seconds,
+                    recovery_timeout_seconds=(
+                        dispatch.require_graph_definition().run_timeout_seconds
+                    ),
                 ),
             )
             if not claim.authority_matches:
@@ -616,44 +610,21 @@ class VerdictSubscriber:
                     claim.applied,
                 )
                 return
-            await finalize_control_action_acceptance(db, claim)
-        if claim.claim_token is None:
-            raise RuntimeError("acquired verdict lease has no claim token")
-
-        dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
-        trace_headers_fn = self._execution.trace_headers_fn
-        trace_headers = trace_headers_fn() if trace_headers_fn else None
-        logger.info(
-            "Resuming thread %s with verdict=%s (dispatch_id=%s)",
-            thread_id,
-            verdict,
-            dispatch.dispatch_id,
-        )
-        async with self._dependencies.session_factory() as db:
-            dispatch = await bind_graph_action_receipt(db, dispatch)
-        outcome = await safe_dispatch(
-            self._dependencies.worker_client,
-            dispatch,
-            self._dependencies.circuit_breaker,
-            self._dependencies.worker_spawner,
-            trace_headers=trace_headers,
-        )
-        if not outcome.success:
-            _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
-            async with self._dependencies.session_factory() as db:
-                if failure_type is None:
-                    raise RuntimeError("failed dispatch carries no failure type")
-                await begin_write_transaction(db)
-                await record_dispatch_failure(
-                    db, claim, failure_type, detail=outcome.detail
-                )
-                await db.commit()
-            logger.warning(
-                "Verdict resume dispatch failed for thread %s: %s",
+            logger.info(
+                "Resuming thread %s with verdict=%s (dispatch_id=%s)",
                 thread_id,
-                outcome.detail,
+                verdict,
+                claim.dispatch_id,
             )
-            return
+            failure = await dispatch_leased(db, claim, dispatch, self._transport())
+            if failure is not None:
+                await db.commit()
+                logger.warning(
+                    "Verdict resume dispatch failed for thread %s: %s",
+                    thread_id,
+                    failure.detail,
+                )
+                return
 
         # Receipt-driven settlement occurs in the worker-event handler. Keeping the
         # lease fresh here prevents an HTTP acknowledgement from masquerading as

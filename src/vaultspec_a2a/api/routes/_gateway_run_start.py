@@ -22,6 +22,7 @@ from ...control._worker_health import worker_liveness
 from ...control.admission import AdmissionBroker
 from ...control.config import settings
 from ...control.execution_authority import read_frozen_team_selection
+from ...control.leased_dispatch import DispatchTransport
 from ...control.provider_execution import native_execution_refusal_reason
 from ...control.run_start_policy import (
     evaluate_execution_eligibility,
@@ -31,7 +32,6 @@ from ...control.run_start_policy import (
 from ...control.thread_service import (
     ThreadCreationRequest,
     ThreadCreationResult,
-    ThreadDispatchRuntime,
     create_and_dispatch_thread,
     process_metadata,
     successor_seed_transcript,
@@ -331,11 +331,10 @@ async def _attempt_thread_creation(
             return await create_and_dispatch_thread(
                 db,
                 request,
-                runtime=ThreadDispatchRuntime(
+                transport=DispatchTransport(
+                    worker_client=runtime.worker_client,
                     circuit_breaker=runtime.circuit_breaker,
                     worker_spawner=runtime.worker_spawner,
-                    worker_client=runtime.worker_client,
-                    recursion_limit=domain_config.graph_recursion_limit,
                     trace_headers=trace_headers(),
                 ),
             )

@@ -27,17 +27,15 @@ from sqlalchemy.exc import OperationalError
 
 from ...conftest import SqlitePosture
 from ...control import cancel_service
-from ...control._permission_response_contract import (
-    PermissionInput,
-    PermissionRuntime,
-)
+from ...control._permission_response_contract import PermissionInput
 from ...control.accepted_input import freeze_accepted_input
 from ...control.action_lease import prepare_control_action_claim
-from ...control.cancel_service import CancelResult, CancelRuntime, cancel_thread
+from ...control.cancel_service import CancelResult, cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
+from ...control.leased_dispatch import DispatchTransport
 from ...control.message_service import send_followup_message
 from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
@@ -307,13 +305,18 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
         _checkpointer,
     ):
         async with session_factory() as db:
+            pending = await get_permission_request(db, request_id)
+            assert pending is not None
             result = await respond_to_permission(
                 db,
+                permission=pending,
                 response=PermissionInput(
                     request_id, "allow_once", "permission-client-retry"
                 ),
-                runtime=PermissionRuntime(
-                    _circuit_breaker(), _spawner(), worker_client, 25, None
+                transport=DispatchTransport(
+                    worker_client=worker_client,
+                    circuit_breaker=_circuit_breaker(),
+                    worker_spawner=_spawner(),
                 ),
             )
         assert result.accepted is True
@@ -392,11 +395,16 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
         httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.2) as no_worker,
         session_factory() as db,
     ):
+        definite_permission = await get_permission_request(db, definite_request)
+        assert definite_permission is not None
         definite = await respond_to_permission(
             db,
+            permission=definite_permission,
             response=PermissionInput(definite_request, "allow_once", "definite-retry"),
-            runtime=PermissionRuntime(
-                shut, _spawner("http://127.0.0.1:1"), no_worker, 25, None
+            transport=DispatchTransport(
+                worker_client=no_worker,
+                circuit_breaker=shut,
+                worker_spawner=_spawner("http://127.0.0.1:1"),
             ),
         )
     assert definite.failure_type is FailureType.CIRCUIT_OPEN
@@ -405,17 +413,18 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
         httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.2) as unreachable,
         session_factory() as db,
     ):
+        ambiguous_permission = await get_permission_request(db, ambiguous_request)
+        assert ambiguous_permission is not None
         ambiguous = await respond_to_permission(
             db,
+            permission=ambiguous_permission,
             response=PermissionInput(
                 ambiguous_request, "allow_once", "ambiguous-retry"
             ),
-            runtime=PermissionRuntime(
-                _circuit_breaker(),
-                _spawner("http://127.0.0.1:1"),
-                unreachable,
-                25,
-                None,
+            transport=DispatchTransport(
+                worker_client=unreachable,
+                circuit_breaker=_circuit_breaker(),
+                worker_spawner=_spawner("http://127.0.0.1:1"),
             ),
         )
     assert ambiguous.failure_type is FailureType.UNREACHABLE
@@ -548,8 +557,10 @@ async def test_cancel_retries_sqlite_lock_before_claim(
                 db,
                 thread_id=thread_id,
                 idempotency_key=None,
-                runtime=CancelRuntime(
-                    _circuit_breaker(), _spawner(), worker_client, 25
+                transport=DispatchTransport(
+                    worker_client=worker_client,
+                    circuit_breaker=_circuit_breaker(),
+                    worker_spawner=_spawner(),
                 ),
             )
         assert result.accepted
@@ -578,8 +589,10 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
                     db,
                     thread_id=thread_id,
                     idempotency_key=label,
-                    runtime=CancelRuntime(
-                        _circuit_breaker(), _spawner(), worker_client, 25
+                    transport=DispatchTransport(
+                        worker_client=worker_client,
+                        circuit_breaker=_circuit_breaker(),
+                        worker_spawner=_spawner(),
                     ),
                 )
 
@@ -625,11 +638,10 @@ async def test_ambiguous_cancel_preserves_durable_cancelling_intent(
             db,
             thread_id=thread_id,
             idempotency_key="desktop-cancel-attempt",
-            runtime=CancelRuntime(
-                _circuit_breaker(),
-                _spawner("http://127.0.0.1:1"),
-                unreachable_client,
-                25,
+            transport=DispatchTransport(
+                worker_client=unreachable_client,
+                circuit_breaker=_circuit_breaker(),
+                worker_spawner=_spawner("http://127.0.0.1:1"),
             ),
         )
 
@@ -675,7 +687,11 @@ async def test_definite_cancel_non_delivery_never_rolls_back_lifecycle_authority
             db,
             thread_id=thread_id,
             idempotency_key="definite-cancel-attempt",
-            runtime=CancelRuntime(_circuit_breaker(), _spawner(), worker_client, 25),
+            transport=DispatchTransport(
+                worker_client=worker_client,
+                circuit_breaker=_circuit_breaker(),
+                worker_spawner=_spawner(),
+            ),
         )
     assert result.cancelled is False
     assert result.accepted is False
@@ -719,8 +735,10 @@ async def test_terminal_state_before_cancel_prevents_dispatch_reservation(
             db,
             thread_id=thread_id,
             idempotency_key="too-late",
-            runtime=CancelRuntime(
-                _circuit_breaker(), _spawner("http://127.0.0.1:1"), worker_client, 25
+            transport=DispatchTransport(
+                worker_client=worker_client,
+                circuit_breaker=_circuit_breaker(),
+                worker_spawner=_spawner("http://127.0.0.1:1"),
             ),
         )
     assert result.accepted is False
@@ -782,8 +800,10 @@ async def test_cancel_waits_for_a_concurrent_writer_rather_than_failing(
                     db,
                     thread_id=thread_id,
                     idempotency_key="contended-cancel",
-                    runtime=CancelRuntime(
-                        _circuit_breaker(), _spawner(), worker_client, 25
+                    transport=DispatchTransport(
+                        worker_client=worker_client,
+                        circuit_breaker=_circuit_breaker(),
+                        worker_spawner=_spawner(),
                     ),
                 )
 

@@ -102,7 +102,6 @@ def _make_subscriber(
                 worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
             ),
             endpoint_provider=lambda: None,
-            recursion_limit=25,
         )
     )
 

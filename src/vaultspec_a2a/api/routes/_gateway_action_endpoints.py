@@ -19,12 +19,9 @@ from fastapi import (
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...control._permission_response_contract import (
-    PermissionInput,
-    PermissionRuntime,
-)
+from ...control._permission_response_contract import PermissionInput
 from ...control._worker_health import worker_liveness
-from ...control.cancel_service import CancelRuntime, cancel_thread
+from ...control.cancel_service import cancel_thread
 from ...control.clarification_service import (
     ClarificationRuntime,
     respond_to_clarification,
@@ -36,6 +33,7 @@ from ...control.health import (
     build_full_health,
     probe_engine_discovery_freshness,
 )
+from ...control.leased_dispatch import DispatchTransport
 from ...control.message_service import send_followup_message
 from ...control.permission_service import respond_to_permission
 from ...control.run_start_policy import (
@@ -120,6 +118,15 @@ class _ActionEndpointDependencies:
     worker_client: httpx.AsyncClient
     circuit_breaker: Any
     worker_spawner: Any
+
+    def transport(self) -> DispatchTransport:
+        """The worker connection this request's dispatch travels over."""
+        return DispatchTransport(
+            worker_client=self.worker_client,
+            circuit_breaker=self.circuit_breaker,
+            worker_spawner=self.worker_spawner,
+            trace_headers=trace_headers(),
+        )
 
 
 def _get_action_endpoint_dependencies(
@@ -427,16 +434,11 @@ async def run_permission_respond_endpoint(
 
     result = await respond_to_permission(
         db=dependencies.db,
+        permission=permission,
         response=PermissionInput(
             request_id, body.option_id, context.idempotency_key, body.notes
         ),
-        runtime=PermissionRuntime(
-            dependencies.circuit_breaker,
-            dependencies.worker_spawner,
-            dependencies.worker_client,
-            domain_config.graph_recursion_limit,
-            trace_headers(),
-        ),
+        transport=dependencies.transport(),
     )
 
     if result.dispatched:
@@ -517,14 +519,7 @@ async def run_clarification_respond_endpoint(
         thread_id=run_id,
         request_id=request_id,
         resolution=resolution,
-        runtime=ClarificationRuntime(
-            context.checkpointer,
-            dependencies.worker_client,
-            dependencies.circuit_breaker,
-            dependencies.worker_spawner,
-            domain_config.graph_recursion_limit,
-            trace_headers(),
-        ),
+        runtime=ClarificationRuntime(context.checkpointer, dependencies.transport()),
     )
     if result.error_status_code is not None or result.failure_type is not None:
         raise refused_action(
@@ -578,13 +573,7 @@ async def run_cancel_endpoint(
         db=dependencies.db,
         thread_id=run_id,
         idempotency_key=context.idempotency_key,
-        runtime=CancelRuntime(
-            dependencies.circuit_breaker,
-            dependencies.worker_spawner,
-            dependencies.worker_client,
-            domain_config.graph_recursion_limit,
-            trace_headers(),
-        ),
+        transport=dependencies.transport(),
     )
 
     refusal = refused_cancel(result)

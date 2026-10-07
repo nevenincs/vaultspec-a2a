@@ -38,6 +38,7 @@ from ..thread.snapshots import (
     classify_permission_pause_reason,
     is_permission_event,
     is_terminal_event,
+    wire_event_type,
 )
 from ..utils.coercion import coerce_object_mapping, decode_json_object
 from ._event_application import (
@@ -913,8 +914,7 @@ async def _handle_permission_event(
     """
     if not is_permission_event(payload):
         return
-    event_value = payload.get("type")
-    event_type = event_value if isinstance(event_value, str) else ""
+    event_type = wire_event_type(payload)
     from ..database import begin_write_transaction
 
     factory = _session_factory(session_factory)

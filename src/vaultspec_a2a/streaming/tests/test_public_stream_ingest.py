@@ -162,7 +162,11 @@ def _parking_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
     async def gate(state: _State) -> dict[str, Any]:
         del state
         answer = interrupt(
-            {"type": "permission_request", "tool_name": "fs/write_text_file"}
+            {
+                "type": "permission_request",
+                "request_id": "perm-parked-1",
+                "tool_name": "fs/write_text_file",
+            }
         )
         return {"note": str(answer)}
 
@@ -222,7 +226,9 @@ _UNREADABLE_STATE_PROBE = textwrap.dedent(
 
 
     async def gate(state: S) -> dict[str, Any]:
-        answer = interrupt({"type": "permission_request", "tool_name": "deep"})
+        answer = interrupt(
+        {"type": "permission_request", "request_id": "perm-deep-1", "tool_name": "deep"}
+    )
         return {"note": str(answer)}
 
 

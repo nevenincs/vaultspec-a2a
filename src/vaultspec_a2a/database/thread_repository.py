@@ -19,9 +19,11 @@ if TYPE_CHECKING:
 
     from sqlalchemy.engine import CursorResult
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.orm import QueryableAttribute
     from sqlalchemy.sql import Select
     from sqlalchemy.sql.elements import ColumnElement
 
+from ..thread import RunWriteAuthority, ThreadWriteExpectation
 from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
 from ..thread.enums import (
     ACTIVE_STATUSES,
@@ -45,7 +47,6 @@ from ._helpers import (
 )
 from .models import (
     ControlActionModel,
-    RunWriteAuthority,
     ThreadExecutionStateModel,
     ThreadModel,
 )
@@ -57,7 +58,6 @@ __all__ = [
     "ActiveThreadProjection",
     "ThreadStatusElectionOutcome",
     "ThreadStatusElectionResult",
-    "ThreadWriteExpectation",
     "create_thread",
     "delete_thread",
     "elect_thread_deleting",
@@ -73,7 +73,7 @@ __all__ = [
     "record_thread_execution_state",
     "set_thread_approval_state",
     "set_thread_repair_state",
-    "successor_thread_write_authority",
+    "thread_owned_by",
     "thread_write_expectation",
     "update_thread_status",
 ]
@@ -87,27 +87,6 @@ class ActiveThreadProjection:
     status: str
     feature_tag: str | None
     created_at: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class ThreadWriteExpectation:
-    """Exact durable state and authority a lifecycle writer observed."""
-
-    status: ThreadStatus
-    authority: RunWriteAuthority
-
-    def __post_init__(self) -> None:
-        """Refuse a partially typed election witness.
-
-        These fields carry static types, but the checks defend against callers
-        that construct this value from untrusted data and bypass the type
-        checker entirely; `cast(object, ...)` only changes what the checker
-        infers, not what runs.
-        """
-        if not isinstance(cast("object", self.status), ThreadStatus):
-            raise TypeError("status must be a ThreadStatus")
-        if not isinstance(cast("object", self.authority), RunWriteAuthority):
-            raise TypeError("authority must be a RunWriteAuthority")
 
 
 class ThreadStatusElectionOutcome(StrEnum):
@@ -139,30 +118,32 @@ def thread_write_expectation(thread: ThreadModel) -> ThreadWriteExpectation:
     )
 
 
-def successor_thread_write_authority(
-    expectation: ThreadWriteExpectation,
+def thread_owned_by(
+    action_type: ControlActionType | QueryableAttribute[str],
+    action_receipt_id: str | QueryableAttribute[str | None],
     *,
-    action_type: ControlActionType,
-    action_receipt_id: str,
-) -> RunWriteAuthority:
-    """Build the exact next authority from an observed durable receipt."""
-    if not isinstance(cast("object", expectation), ThreadWriteExpectation):
-        raise TypeError("expectation must be a ThreadWriteExpectation")
-    if not isinstance(cast("object", action_type), ControlActionType):
-        raise TypeError("action_type must be a ControlActionType")
-    current = expectation.authority
-    same_action = (
-        action_type is current.action_type
-        and action_receipt_id == current.action_receipt_id
+    writer_generation: int | None = None,
+    run_revision: int | None = None,
+) -> ColumnElement[bool]:
+    """Return the SQL form of ``RunWriteAuthority.owned_by`` over ``threads``.
+
+    The action identity is either bound values or a joined row's columns, so
+    one predicate serves both an exact observed witness and a scan for runs
+    whose current writer is the joined action. Generation and revision are
+    pinned only when given.
+    """
+    writer_type = (
+        action_type.value if isinstance(action_type, ControlActionType) else action_type
     )
-    return RunWriteAuthority(
-        run_revision=current.run_revision + 1,
-        writer_generation=(
-            current.writer_generation if same_action else current.writer_generation + 1
-        ),
-        action_type=action_type,
-        action_receipt_id=action_receipt_id,
-    )
+    clauses = [
+        ThreadModel.writer_action_type == writer_type,
+        ThreadModel.writer_action_receipt_id == action_receipt_id,
+    ]
+    if writer_generation is not None:
+        clauses.append(ThreadModel.writer_generation == writer_generation)
+    if run_revision is not None:
+        clauses.append(ThreadModel.run_revision == run_revision)
+    return and_(*clauses)
 
 
 def path_safe_run_id_clause() -> ColumnElement[bool]:
@@ -530,38 +511,9 @@ def _capped_single_line(text: str) -> str:
     return encoded[:budget].decode("utf-8", errors="ignore") + _TRUNCATION_MARK
 
 
-def _validate_successor_authority(
-    expectation: ThreadWriteExpectation,
-    successor: RunWriteAuthority,
-) -> None:
-    """Validate the only two current authority-advance shapes."""
-    current = expectation.authority
-    if successor.run_revision != current.run_revision + 1:
-        raise ValueError("successor run_revision must advance by exactly one")
-
-    same_action = (
-        successor.action_type is current.action_type
-        and successor.action_receipt_id == current.action_receipt_id
-    )
-    expected_generation = (
-        current.writer_generation if same_action else current.writer_generation + 1
-    )
-    if successor.writer_generation != expected_generation:
-        relation = "remain unchanged" if same_action else "advance by exactly one"
-        raise ValueError(f"successor writer_generation must {relation}")
-
-
-def _validate_election_inputs(
-    expectation: ThreadWriteExpectation,
-    status: ThreadStatus,
-    successor: RunWriteAuthority,
-) -> None:
+def _validate_expectation(expectation: ThreadWriteExpectation) -> None:
     if not isinstance(cast("object", expectation), ThreadWriteExpectation):
         raise TypeError("expectation must be a ThreadWriteExpectation")
-    if not isinstance(cast("object", status), ThreadStatus):
-        raise TypeError("status must be a ThreadStatus")
-    if not isinstance(cast("object", successor), RunWriteAuthority):
-        raise TypeError("successor must be a RunWriteAuthority")
 
 
 class _ElectionOptional(TypedDict, total=False):
@@ -572,7 +524,8 @@ class _ElectionOptional(TypedDict, total=False):
 class _ElectionArgs(_ElectionOptional):
     expectation: ThreadWriteExpectation
     status: ThreadStatus
-    successor: RunWriteAuthority
+    action_type: ControlActionType
+    action_receipt_id: str
 
 
 async def elect_thread_status(
@@ -582,28 +535,95 @@ async def elect_thread_status(
 
     The update predicate contains the observed state and every authority field.
     Database lock rechecks therefore choose one winner even when two sessions
-    carry the same stale snapshot. The successor receipt must already identify
-    a same-thread, same-action journal row; absence is a typed refusal and never
+    carry the same stale snapshot. The elected action's successor authority is
+    derived from the witness here, and its receipt must already identify a
+    same-thread, same-action journal row; absence is a typed refusal and never
     causes authority to be invented.
     """
     expectation = kwargs["expectation"]
     status = kwargs["status"]
-    successor = kwargs["successor"]
     failure_reason = kwargs.get("failure_reason")
     provider_condition = kwargs.get("provider_condition")
-    _validate_election_inputs(expectation, status, successor)
+    _validate_expectation(expectation)
+    successor = expectation.authority.successor(
+        action_type=kwargs["action_type"],
+        action_receipt_id=kwargs["action_receipt_id"],
+    )
+    if not isinstance(cast("object", status), ThreadStatus):
+        raise TypeError("status must be a ThreadStatus")
     validate_transition(expectation.status, status, thread_id=thread_id)
-    _validate_successor_authority(expectation, successor)
-    current = expectation.authority
-    if (
-        status is expectation.status
-        and successor.action_type is current.action_type
-        and successor.action_receipt_id == current.action_receipt_id
+    if status is expectation.status and expectation.authority.owned_by(
+        successor.action_type, successor.action_receipt_id
     ):
         raise ValueError(
             "an election must advance state or install a new action identity"
         )
 
+    values: dict[str, object] = {
+        "status": status.value,
+        "is_active": status in ACTIVE_STATUSES,
+        "updated_at": _utcnow(),
+    }
+    if failure_reason:
+        values["failure_reason"] = _capped_single_line(failure_reason)
+    if provider_condition:
+        values["provider_condition"] = provider_condition
+    return await _compare_and_set_thread(
+        session,
+        thread_id,
+        expectation=expectation,
+        successor=successor,
+        values=values,
+    )
+
+
+async def elect_thread_deleting(
+    session: AsyncSession,
+    thread_id: str,
+    *,
+    expectation: ThreadWriteExpectation,
+) -> ThreadStatusElectionResult:
+    """Atomically enter the out-of-band deletion sink from an exact witness.
+
+    Deletion retains the current action identity because it has no control-action
+    receipt of its own.  This narrow operation cannot target any other state and
+    ordinary lifecycle elections still cannot enter or leave ``DELETING``.
+    """
+    _validate_expectation(expectation)
+    eligibility = can_delete(expectation.status.value)
+    if not eligibility.allowed:
+        raise ValueError(eligibility.reason)
+    current = expectation.authority
+    return await _compare_and_set_thread(
+        session,
+        thread_id,
+        expectation=expectation,
+        successor=current.successor(
+            action_type=current.action_type,
+            action_receipt_id=current.action_receipt_id,
+        ),
+        values={
+            "status": ThreadStatus.DELETING.value,
+            "is_active": False,
+            "updated_at": _utcnow(),
+        },
+    )
+
+
+async def _compare_and_set_thread(
+    session: AsyncSession,
+    thread_id: str,
+    *,
+    expectation: ThreadWriteExpectation,
+    successor: RunWriteAuthority,
+    values: dict[str, object],
+) -> ThreadStatusElectionResult:
+    """Install *successor* with *values* only while *expectation* still holds.
+
+    The successor's receipt must name a journal row of this thread and action;
+    a write that misses resolves to the typed reason it missed.
+    """
+    current = expectation.authority
     receipt_exists = exists(
         select(ControlActionModel.id).where(
             ControlActionModel.thread_id == thread_id,
@@ -611,32 +631,26 @@ async def elect_thread_status(
             ControlActionModel.dispatch_id == successor.action_receipt_id,
         )
     )
-    values: dict[str, object] = {
-        "status": status.value,
-        "is_active": status in ACTIVE_STATUSES,
-        "updated_at": _utcnow(),
-        "run_revision": successor.run_revision,
-        "writer_generation": successor.writer_generation,
-        "writer_action_type": successor.action_type.value,
-        "writer_action_receipt_id": successor.action_receipt_id,
-    }
-    if failure_reason:
-        values["failure_reason"] = _capped_single_line(failure_reason)
-    if provider_condition:
-        values["provider_condition"] = provider_condition
-
     statement = (
         update(ThreadModel)
         .where(
             ThreadModel.id == thread_id,
             ThreadModel.status == expectation.status.value,
-            ThreadModel.run_revision == current.run_revision,
-            ThreadModel.writer_generation == current.writer_generation,
-            ThreadModel.writer_action_type == current.action_type.value,
-            ThreadModel.writer_action_receipt_id == current.action_receipt_id,
+            thread_owned_by(
+                current.action_type,
+                current.action_receipt_id,
+                writer_generation=current.writer_generation,
+                run_revision=current.run_revision,
+            ),
             receipt_exists,
         )
-        .values(**values)
+        .values(
+            **values,
+            run_revision=successor.run_revision,
+            writer_generation=successor.writer_generation,
+            writer_action_type=successor.action_type.value,
+            writer_action_receipt_id=successor.action_receipt_id,
+        )
         .execution_options(synchronize_session=False)
     )
     result = cast("CursorResult[object]", await session.execute(statement))
@@ -659,83 +673,6 @@ async def elect_thread_status(
         return ThreadStatusElectionResult(ThreadStatusElectionOutcome.NOT_FOUND)
 
     matching_receipt = await session.scalar(select(receipt_exists))
-    if not matching_receipt:
-        return ThreadStatusElectionResult(ThreadStatusElectionOutcome.RECEIPT_MISMATCH)
-    return ThreadStatusElectionResult(ThreadStatusElectionOutcome.LOST)
-
-
-async def elect_thread_deleting(
-    session: AsyncSession,
-    thread_id: str,
-    *,
-    expectation: ThreadWriteExpectation,
-) -> ThreadStatusElectionResult:
-    """Atomically enter the out-of-band deletion sink from an exact witness.
-
-    Deletion retains the current action identity because it has no control-action
-    receipt of its own.  This narrow operation cannot target any other state and
-    ordinary lifecycle elections still cannot enter or leave ``DELETING``.
-    """
-    if not isinstance(cast("object", expectation), ThreadWriteExpectation):
-        raise TypeError("expectation must be a ThreadWriteExpectation")
-    eligibility = can_delete(expectation.status.value)
-    if not eligibility.allowed:
-        raise ValueError(eligibility.reason)
-    current = expectation.authority
-    successor = successor_thread_write_authority(
-        expectation,
-        action_type=current.action_type,
-        action_receipt_id=current.action_receipt_id,
-    )
-    statement = (
-        update(ThreadModel)
-        .where(
-            ThreadModel.id == thread_id,
-            ThreadModel.status == expectation.status.value,
-            ThreadModel.run_revision == current.run_revision,
-            ThreadModel.writer_generation == current.writer_generation,
-            ThreadModel.writer_action_type == current.action_type.value,
-            ThreadModel.writer_action_receipt_id == current.action_receipt_id,
-            exists(
-                select(ControlActionModel.id).where(
-                    ControlActionModel.thread_id == thread_id,
-                    ControlActionModel.action_type == current.action_type.value,
-                    ControlActionModel.dispatch_id == current.action_receipt_id,
-                )
-            ),
-        )
-        .values(
-            status=ThreadStatus.DELETING.value,
-            is_active=False,
-            updated_at=_utcnow(),
-            run_revision=successor.run_revision,
-        )
-        .execution_options(synchronize_session=False)
-    )
-    result = cast("CursorResult[object]", await session.execute(statement))
-    if result.rowcount == 1:
-        await session.scalar(
-            select(ThreadModel)
-            .where(ThreadModel.id == thread_id)
-            .execution_options(populate_existing=True)
-        )
-        return ThreadStatusElectionResult(ThreadStatusElectionOutcome.WON)
-    if (
-        await session.scalar(select(ThreadModel.id).where(ThreadModel.id == thread_id))
-        is None
-    ):
-        return ThreadStatusElectionResult(ThreadStatusElectionOutcome.NOT_FOUND)
-    matching_receipt = await session.scalar(
-        select(
-            exists(
-                select(ControlActionModel.id).where(
-                    ControlActionModel.thread_id == thread_id,
-                    ControlActionModel.action_type == current.action_type.value,
-                    ControlActionModel.dispatch_id == current.action_receipt_id,
-                )
-            )
-        )
-    )
     if not matching_receipt:
         return ThreadStatusElectionResult(ThreadStatusElectionOutcome.RECEIPT_MISMATCH)
     return ThreadStatusElectionResult(ThreadStatusElectionOutcome.LOST)

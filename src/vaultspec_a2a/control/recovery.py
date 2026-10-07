@@ -8,12 +8,13 @@ from uuid import uuid4
 
 from sqlalchemy import exists, or_, select, update
 
+from ..database import thread_owned_by
 from ..database.models import (
     ControlActionModel,
     RecoveryAttemptModel,
-    RunWriteAuthority,
     ThreadModel,
 )
+from ..thread import RunWriteAuthority
 from ..thread.enums import RECOVERY_ACTION_TYPES, ControlActionType, RecoveryCondition
 
 if TYPE_CHECKING:
@@ -106,10 +107,12 @@ async def record_recovery_failure(
         .where(
             ThreadModel.id == thread_id,
             ThreadModel.is_active.is_(True),
-            ThreadModel.run_revision == authority.run_revision,
-            ThreadModel.writer_generation == authority.writer_generation,
-            ThreadModel.writer_action_type == authority.action_type.value,
-            ThreadModel.writer_action_receipt_id == authority.action_receipt_id,
+            thread_owned_by(
+                authority.action_type,
+                authority.action_receipt_id,
+                writer_generation=authority.writer_generation,
+                run_revision=authority.run_revision,
+            ),
         )
         .with_for_update()
     )
@@ -194,10 +197,12 @@ async def record_recovery_deadline(
         select(ThreadModel)
         .where(
             ThreadModel.id == thread_id,
-            ThreadModel.run_revision == authority.run_revision,
-            ThreadModel.writer_generation == authority.writer_generation,
-            ThreadModel.writer_action_type == authority.action_type.value,
-            ThreadModel.writer_action_receipt_id == authority.action_receipt_id,
+            thread_owned_by(
+                authority.action_type,
+                authority.action_receipt_id,
+                writer_generation=authority.writer_generation,
+                run_revision=authority.run_revision,
+            ),
         )
         .with_for_update()
     )
@@ -264,8 +269,9 @@ async def seed_recovery_attempts(
                 ThreadModel.is_active.is_(True),
                 ThreadModel.run_revision >= 0,
                 ThreadModel.writer_generation >= 1,
-                ThreadModel.writer_action_type == ControlActionModel.action_type,
-                ThreadModel.writer_action_receipt_id == ControlActionModel.dispatch_id,
+                thread_owned_by(
+                    ControlActionModel.action_type, ControlActionModel.dispatch_id
+                ),
                 ~exists(
                     select(RecoveryAttemptModel.id).where(
                         RecoveryAttemptModel.thread_id == ThreadModel.id,

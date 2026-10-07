@@ -44,11 +44,10 @@ from ...database import (
     record_permission_request,
     record_permission_response_submission,
     set_thread_approval_state,
-    successor_thread_write_authority,
     thread_write_expectation,
     update_thread_status,
 )
-from ...database.models import ControlActionModel, RunWriteAuthority, ThreadModel
+from ...database.models import ControlActionModel, ThreadModel
 from ...database.session import configure_sqlite_transactions
 from ...database.tests._backends import BACKENDS, migrated_session_factory
 from ...graph.enums import ServerEventType
@@ -56,6 +55,7 @@ from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
+from ...thread import RunWriteAuthority
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
@@ -151,11 +151,8 @@ async def _seed_unapplied_leased_action(
         thread_id,
         expectation=expectation,
         status=expectation.status,
-        successor=successor_thread_write_authority(
-            expectation,
-            action_type=spec.action_type,
-            action_receipt_id=dispatch_id,
-        ),
+        action_type=spec.action_type,
+        action_receipt_id=dispatch_id,
     )
     assert election.outcome is ThreadStatusElectionOutcome.WON
     receipt = await prepare_graph_action_receipt(
@@ -965,11 +962,8 @@ async def test_stale_permission_creation_replay_cannot_reclaim_newer_authority(
             thread_id,
             expectation=expectation,
             status=ThreadStatus.RUNNING,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-                action_receipt_id=response.dispatch_id,
-            ),
+            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+            action_receipt_id=response.dispatch_id,
         )
         assert election.outcome is ThreadStatusElectionOutcome.WON
         await session.commit()

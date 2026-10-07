@@ -27,11 +27,12 @@ from ...database import (
     mark_control_action_applied,
     thread_write_expectation,
 )
-from ...database.models import Base, RecoveryAttemptModel, RunWriteAuthority
+from ...database.models import Base, RecoveryAttemptModel
 from ...database.session import configure_sqlite_transactions
 from ...database.thread_repository import ThreadStatusElectionOutcome
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...thread import RunWriteAuthority
 from ...thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
@@ -369,7 +370,8 @@ async def test_older_accepted_action_loses_to_newer_exact_authority(
             old.thread_id,
             expectation=expectation,
             status=ThreadStatus.CANCELLING,
-            successor=RunWriteAuthority(1, 2, ControlActionType.CANCEL, "newer-cancel"),
+            action_type=ControlActionType.CANCEL,
+            action_receipt_id="newer-cancel",
         )
         assert elected.outcome is ThreadStatusElectionOutcome.WON
         await db.commit()

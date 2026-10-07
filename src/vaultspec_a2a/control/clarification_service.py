@@ -27,7 +27,6 @@ from ..database import (
     get_thread,
     mark_control_action_applied,
     settle_control_action_lease,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
@@ -806,11 +805,8 @@ async def reconcile_clarification_pause(
             thread_id,
             expectation=expectation,
             status=ThreadStatus.INPUT_REQUIRED if parked else ThreadStatus.RUNNING,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=expectation.authority.action_type,
-                action_receipt_id=expectation.authority.action_receipt_id,
-            ),
+            action_type=expectation.authority.action_type,
+            action_receipt_id=expectation.authority.action_receipt_id,
         )
         if election.outcome is ThreadStatusElectionOutcome.WON:
             await db.commit()

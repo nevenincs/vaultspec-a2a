@@ -12,7 +12,7 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...database import create_control_action, create_thread, get_thread
-from ...database.models import Base, RunWriteAuthority
+from ...database.models import Base
 from ...database.reconciliation import reconcile_threads_on_startup
 from ...database.session import configure_sqlite_transactions
 from ...graph.compiler import CompiledTeamGraph, _add_node, _compile_graph
@@ -22,6 +22,7 @@ from ...graph.nodes.action_completion import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...thread import RunWriteAuthority
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.checkpoint_evidence import (
     CheckpointEvidenceKind,

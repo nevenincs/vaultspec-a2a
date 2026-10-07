@@ -80,7 +80,8 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..authoring import EngineEndpoint
-    from ..database import ControlActionModel, ThreadWriteExpectation
+    from ..database import ControlActionModel
+    from ..thread import ThreadWriteExpectation
     from ..thread.executable_graph import FrozenGraphDefinition
     from ._verdict_subscriber_config import VerdictSubscriberConfig
 

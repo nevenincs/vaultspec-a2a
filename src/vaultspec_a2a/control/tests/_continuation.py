@@ -27,7 +27,6 @@ from ...database import (
     create_thread,
     get_control_action_by_dispatch_id,
 )
-from ...database.models import ControlActionModel, RunWriteAuthority
 from ...database.tests._backends import migrated_session_factory
 from ...graph.compiler import CompiledTeamGraph, _add_node, _compile_graph
 from ...graph.nodes.action_completion import (
@@ -36,6 +35,7 @@ from ...graph.nodes.action_completion import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ...thread.state import TeamState
@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from ...database.models import ControlActionModel
     from ...thread.action_receipts import GraphActionReceipt
 
 RUN = "promotion-run"

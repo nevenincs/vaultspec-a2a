@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, cast
 
+from ..thread import RECEIPT_ID_MAX_LENGTH
 from ..thread.enums import ControlActionType
 from ._write_authority_check_parser import (
     extract_named_check_predicates as extract_named_check_predicates,
@@ -17,7 +18,7 @@ WRITE_AUTHORITY_COLUMNS = {
     "run_revision": "INTEGER",
     "writer_generation": "INTEGER",
     "writer_action_type": "VARCHAR(32)",
-    "writer_action_receipt_id": "VARCHAR(64)",
+    "writer_action_receipt_id": f"VARCHAR({RECEIPT_ID_MAX_LENGTH})",
 }
 WRITE_ACTION_TYPES = tuple(action.value for action in ControlActionType)
 WRITE_ACTION_SQL_VALUES = ", ".join(repr(value) for value in WRITE_ACTION_TYPES)
@@ -29,7 +30,7 @@ WRITE_AUTHORITY_CHECKS = {
     ),
     "ck_threads_writer_action_receipt_id_bounded": (
         "length(trim(writer_action_receipt_id)) >= 1 "
-        "AND length(writer_action_receipt_id) <= 64"
+        f"AND length(writer_action_receipt_id) <= {RECEIPT_ID_MAX_LENGTH}"
     ),
 }
 WRITE_AUTHORITY_RECEIPT_INDEX = "ux_threads_writer_action_receipt_id"

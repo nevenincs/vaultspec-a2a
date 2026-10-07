@@ -27,7 +27,6 @@ from ..database import (
     get_control_action_by_dispatch_id,
     get_session_factory,
     list_threads,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
 from ..ipc.schemas import (
@@ -409,11 +408,8 @@ async def _refuse_incompatible_authority(
         thread.id,
         expectation=expectation,
         status=ThreadStatus.FAILED,
-        successor=successor_thread_write_authority(
-            expectation,
-            action_type=expectation.authority.action_type,
-            action_receipt_id=expectation.authority.action_receipt_id,
-        ),
+        action_type=expectation.authority.action_type,
+        action_receipt_id=expectation.authority.action_receipt_id,
         failure_reason=(
             f"stored execution authority is incompatible ({exc.reason.value})"
         ),
@@ -453,11 +449,8 @@ async def _refuse_missing_project(
         thread.id,
         expectation=expectation,
         status=ThreadStatus.FAILED,
-        successor=successor_thread_write_authority(
-            expectation,
-            action_type=expectation.authority.action_type,
-            action_receipt_id=expectation.authority.action_receipt_id,
-        ),
+        action_type=expectation.authority.action_type,
+        action_receipt_id=expectation.authority.action_receipt_id,
         failure_reason=(
             "run carries no active project: its stored metadata "
             "names no workspace_root, so it cannot be re-sited"

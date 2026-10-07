@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .enums import ControlActionType
+from .write_authority import RECEIPT_ID_MAX_LENGTH
 
 __all__ = [
     "GraphActionReceipt",
@@ -19,7 +20,9 @@ __all__ = [
     "merge_graph_completion_receipts",
 ]
 
-_Identity = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^\S+$")]
+_Identity = Annotated[
+    str, Field(min_length=1, max_length=RECEIPT_ID_MAX_LENGTH, pattern=r"^\S+$")
+]
 _Fingerprint = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 
 

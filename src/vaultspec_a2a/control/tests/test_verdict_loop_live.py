@@ -397,7 +397,6 @@ async def _resume_live_verdict_run(
                 worker_url="http://worker", worker_port=1, auto_spawn=False
             ),
             endpoint_provider=lambda: None,
-            recursion_limit=10,
         )
     )
 

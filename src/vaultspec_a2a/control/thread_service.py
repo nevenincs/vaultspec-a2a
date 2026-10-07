@@ -23,13 +23,7 @@ from ..control.accepted_input import freeze_accepted_input
 from ..control.action_lease import (
     ControlActionClaim,
     ControlActionClaimRequest,
-    finalize_control_action_acceptance,
     prepare_control_action_claim,
-    record_dispatch_failure,
-)
-from ..control.dispatch import DispatchOutcome, safe_dispatch
-from ..control.dispatch_receipts import (
-    bind_graph_action_receipt,
 )
 from ..control.repair_transitions import (
     mark_ingest_requested,
@@ -53,7 +47,7 @@ from ..ipc.schemas import (
 from ..team.team_config import load_team_config
 from ..thread import RunWriteAuthority
 from ..thread.creation import resolve_autonomous
-from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
+from ..thread.dispatch_policy import FailureType
 from ..thread.enums import (
     CleanupKind,
     ControlActionType,
@@ -64,6 +58,7 @@ from ..thread.executable_graph import freeze_graph_definition
 from ..thread.idempotency import thread_create_action_key
 from ..thread.lifecycle_guards import can_archive, can_delete
 from .cleanup import build_cleanup_manifest, execute_cleanup_manifest
+from .leased_dispatch import accepted_recursion_budget, dispatch_leased
 from .repositories import (
     CleanupItemResult,
     advance_deletion_cleanup_item,
@@ -76,20 +71,17 @@ from .workspace import require_admitted_workspace_root
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database.checkpoints import Checkpointer
     from ..providers.team_selection import FrozenLaneAssignment
     from ..thread.actor_tokens import ActorTokenBundle
-    from .circuit_breaker import WorkerCircuitBreaker
-    from .worker_management import LazyWorkerSpawner
+    from .leased_dispatch import DispatchTransport, SettledDispatchFailure
 
 __all__ = [
     "DeleteResult",
     "ThreadCreationRequest",
     "ThreadCreationResult",
-    "ThreadDispatchRuntime",
     "archive_thread",
     "create_and_dispatch_thread",
     "delete_thread_service",
@@ -132,15 +124,6 @@ class ThreadCreationResult:
     dispatched: bool
     error_detail: str | None
     failure_type: FailureType | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ThreadDispatchRuntime:
-    circuit_breaker: WorkerCircuitBreaker
-    worker_spawner: LazyWorkerSpawner
-    worker_client: httpx.AsyncClient
-    recursion_limit: int
-    trace_headers: dict[str, str] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,7 +211,7 @@ async def successor_seed_transcript(
 
 
 def _initial_dispatch(
-    req: ThreadCreationRequest, *, dispatch_id: str, recursion_limit: int
+    req: ThreadCreationRequest, *, dispatch_id: str
 ) -> DispatchRequest:
     """Resolve the accepted graph input before acquiring a database write lock."""
     context_preamble: str | None = None
@@ -256,7 +239,7 @@ def _initial_dispatch(
         content=req.initial_message,
         context_preamble=context_preamble,
         seed_transcript=req.seed_transcript,
-        recursion_limit=recursion_limit,
+        recursion_limit=accepted_recursion_budget(graph_definition),
         active_feature=feature_tag,
         feedback_batch_id=(
             (req.metadata.feedback_batch_id or None) if req.metadata else None
@@ -274,22 +257,13 @@ def _initial_dispatch(
 
 
 async def _failed_initial_dispatch(
-    db: AsyncSession, context: _CreationDispatchContext, outcome: DispatchOutcome
+    db: AsyncSession,
+    context: _CreationDispatchContext,
+    failure: SettledDispatchFailure,
 ) -> ThreadCreationResult:
     req = context.request
     thread = context.thread
-    claim = context.claim
-    action_receipt_id = claim.dispatch_id
-    _policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-    if typed_failure is None:
-        raise RuntimeError("failed initial dispatch carries no failure type")
-    await begin_write_transaction(db)
-    await record_dispatch_failure(
-        db,
-        claim,
-        typed_failure,
-        detail=outcome.detail,
-    )
+    action_receipt_id = context.claim.dispatch_id
     await db.commit()
     current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
     if current_thread is None:
@@ -321,8 +295,8 @@ async def _failed_initial_dispatch(
         status=current_thread.status,
         nickname=req.nickname,
         dispatched=False,
-        error_detail=outcome.detail,
-        failure_type=typed_failure,
+        error_detail=failure.detail,
+        failure_type=failure.failure_type,
     )
 
 
@@ -330,7 +304,7 @@ async def create_and_dispatch_thread(
     db: AsyncSession,
     req: ThreadCreationRequest,
     *,
-    runtime: ThreadDispatchRuntime,
+    transport: DispatchTransport,
 ) -> ThreadCreationResult:
     """Create a thread row, build dispatch payload, and dispatch to worker.
 
@@ -345,9 +319,7 @@ async def create_and_dispatch_thread(
     action_receipt_id = uuid4().hex
     if not req.thread_id.strip():
         raise ValueError("run admission requires an allocated thread identity")
-    dispatch = _initial_dispatch(
-        req, dispatch_id=action_receipt_id, recursion_limit=runtime.recursion_limit
-    )
+    dispatch = _initial_dispatch(req, dispatch_id=action_receipt_id)
     accepted_input = freeze_accepted_input(
         dispatch, intent={"initial_message": req.initial_message}
     )
@@ -409,7 +381,6 @@ async def create_and_dispatch_thread(
         await db.rollback()
         raise ValueError("initial action could not establish graph receipt authority")
     await mark_ingest_requested(db, thread.id)
-    await finalize_control_action_acceptance(db, claim)
 
     logger.info(
         "Dispatching ingest dispatch_id=%s for thread %s",
@@ -424,21 +395,12 @@ async def create_and_dispatch_thread(
         },
     )
 
-    dispatch = await bind_graph_action_receipt(db, dispatch)
-    # -- Dispatch via safe_dispatch (non-raising) ------------------------------
-    outcome = await safe_dispatch(
-        runtime.worker_client,
-        dispatch,
-        runtime.circuit_breaker,
-        runtime.worker_spawner,
-        trace_headers=runtime.trace_headers,
-    )
-
-    if not outcome.success:
+    failure = await dispatch_leased(db, claim, dispatch, transport)
+    if failure is not None:
         return await _failed_initial_dispatch(
             db,
             _CreationDispatchContext(req, thread, claim),
-            outcome,
+            failure,
         )
 
     # -- Success ---------------------------------------------------------------

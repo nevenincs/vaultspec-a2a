@@ -27,7 +27,7 @@ from ..database import (
     thread_write_expectation,
 )
 from ..thread.action_receipts import GRAPH_ACTION_VERB
-from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
+from ..thread.dispatch_policy import FailureType
 from ..thread.enums import (
     NON_ACTIVE_STATUSES,
     RECOVERY_ACTION_TYPES,
@@ -47,11 +47,9 @@ from .action_lease import (
     DEFINITE_NON_DELIVERY,
     ControlActionClaim,
     ControlActionClaimRequest,
-    finalize_control_action_acceptance,
     prepare_control_action_claim,
 )
-from .dispatch import DispatchOutcome, safe_dispatch
-from .dispatch_receipts import bind_graph_action_receipt
+from .leased_dispatch import DispatchRefusal, DispatchTransport, deliver_leased
 from .recovery import (
     RecoveryAttemptClaim,
     acquire_due_recovery_attempts,
@@ -70,6 +68,7 @@ if TYPE_CHECKING:
     from ..ipc.schemas import DispatchRequest
     from ..thread import RunWriteAuthority
     from .circuit_breaker import WorkerCircuitBreaker
+    from .leased_dispatch import DispatchFailure
     from .worker_management import LazyWorkerSpawner
 
 __all__ = ["DirectControlRecoverySummary", "redrive_direct_control_actions"]
@@ -86,14 +85,6 @@ class _RecoveryOutcome(StrEnum):
     CONFLICTED = "conflicted"
     REFUSED = "refused"
     APPLIED = "applied"
-
-
-@dataclass(frozen=True, slots=True)
-class _RecoveryRuntime:
-    worker_client: httpx.AsyncClient
-    circuit_breaker: WorkerCircuitBreaker
-    worker_spawner: LazyWorkerSpawner
-    trace_headers: dict[str, str] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +145,7 @@ async def _expire_overdue_actions(
         if row.dispatch_id is not None and row.recovery_deadline_at is not None
     ]
     await db.rollback()
-    refusal = _Refusal(
+    refusal = DispatchRefusal(
         FailureType.DEADLINE_EXCEEDED,
         "accepted run deadline expired before application",
     )
@@ -189,21 +180,6 @@ class DirectControlRecoverySummary:
 
 
 @dataclass(frozen=True, slots=True)
-class _Refusal:
-    """A stored action that must not be dispatched, and the typed reason why.
-
-    Recovery reconstructs a dispatch from durable rows, so every way that can
-    fail is a property of what was stored - never a transport outcome. Returning
-    this instead of a bare ``None`` keeps the reason typed at the point it is
-    known, which is what lets an absent active project be reported as itself
-    rather than folded into a generic rejection at the provider seam.
-    """
-
-    failure_type: FailureType
-    reason: str
-
-
-@dataclass(frozen=True, slots=True)
 class _StoredActionIdentity:
     dispatch_id: str
     request_id: str | None
@@ -234,21 +210,23 @@ async def _reconstruct_dispatch(
     action: _StoredAction,
     *,
     dispatch_id: str,
-) -> DispatchRequest | _Refusal:
+) -> DispatchRequest | DispatchRefusal:
     thread = await get_thread(db, action.thread_id)
     if thread is None:
-        return _Refusal(FailureType.NOT_FOUND, "the accepted run no longer exists")
+        return DispatchRefusal(
+            FailureType.NOT_FOUND, "the accepted run no longer exists"
+        )
     try:
         accepted = AcceptedActionInput.model_validate(action.payload)
         dispatch = restore_accepted_dispatch(accepted, dispatch_id=dispatch_id)
     except ActorCredentialsRequiredError as exc:
-        return _Refusal(FailureType.CREDENTIALS_REQUIRED, str(exc))
+        return DispatchRefusal(FailureType.CREDENTIALS_REQUIRED, str(exc))
     except WorkspaceUnavailableError:
-        return _Refusal(
+        return DispatchRefusal(
             FailureType.NO_ACTIVE_PROJECT, "accepted project is unavailable"
         )
     except ValueError as exc:
-        return _Refusal(FailureType.INCOMPATIBLE_STATE, str(exc))
+        return DispatchRefusal(FailureType.INCOMPATIBLE_STATE, str(exc))
     action_type = ControlActionType(action.action_type)
     expected_action = (
         "cancel"
@@ -256,13 +234,13 @@ async def _reconstruct_dispatch(
         else GRAPH_ACTION_VERB.get(action_type)
     )
     if dispatch.thread_id != action.thread_id or dispatch.action != expected_action:
-        return _Refusal(
+        return DispatchRefusal(
             FailureType.INCOMPATIBLE_STATE, "accepted input identity mismatch"
         )
     if dispatch.action != "cancel" and (
         dispatch.workspace_root is None or not Path(dispatch.workspace_root).is_dir()
     ):
-        return _Refusal(
+        return DispatchRefusal(
             FailureType.NO_ACTIVE_PROJECT, "accepted project is unavailable"
         )
     return dispatch
@@ -297,7 +275,7 @@ async def _restore_requested_state(
 async def _settle_permanent_refusal(
     db: AsyncSession,
     action: _StoredAction,
-    refusal: _Refusal,
+    refusal: DispatchRefusal,
     *,
     deadline_observed_at: datetime | None = None,
 ) -> bool:
@@ -367,7 +345,7 @@ async def _settle_orphaned_refusal(
     *,
     thread_id: str,
     authority: RunWriteAuthority,
-    refusal: _Refusal,
+    refusal: DispatchRefusal,
 ) -> bool:
     """Quarantine exact authority whose accepted action row disappeared."""
     thread = await db.scalar(
@@ -409,7 +387,7 @@ async def _settle_action_refusal(
     db: AsyncSession,
     recovery_claim: RecoveryAttemptClaim,
     action: _StoredAction,
-    refusal: _Refusal,
+    refusal: DispatchRefusal,
     condition: RecoveryCondition,
 ) -> _RecoveryOutcome:
     if await _settle_permanent_refusal(db, action, refusal):
@@ -432,7 +410,7 @@ async def _settle_missing_action(
     row: ControlActionModel | None,
     payload: dict[str, object] | None,
 ) -> _RecoveryOutcome:
-    refusal = _Refusal(
+    refusal = DispatchRefusal(
         FailureType.INCOMPATIBLE_STATE,
         "accepted recovery input is absent or inconsistent",
     )
@@ -480,19 +458,14 @@ async def _settle_delivery_failure(
     db: AsyncSession,
     recovery_claim: RecoveryAttemptClaim,
     prepared: _PreparedRecovery,
-    outcome: DispatchOutcome,
+    failure: DispatchFailure,
 ) -> _RecoveryOutcome:
     action = prepared.action
     claim = prepared.claim
-    _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
-    if failure_type is None:
-        raise RuntimeError("failed dispatch carries no failure type")
+    failure_type = failure.failure_type
     await begin_write_transaction(db)
     if failure_type is FailureType.INCOMPATIBLE_STATE:
-        refusal = _Refusal(
-            failure_type,
-            outcome.detail or "worker refused dispatch authority",
-        )
+        refusal = DispatchRefusal(failure_type, failure.detail)
         return await _settle_action_refusal(
             db,
             recovery_claim,
@@ -520,8 +493,8 @@ async def _settle_delivery_failure(
     # The later of the two wins, so the hint can bring a retry no earlier than
     # the curve already allows and can only hold one back.
     delay = _retry_delay(recovery_claim.attempt_count)
-    if outcome.retry_after_seconds is not None:
-        delay = max(delay, timedelta(seconds=outcome.retry_after_seconds))
+    if failure.retry_after_seconds is not None:
+        delay = max(delay, timedelta(seconds=failure.retry_after_seconds))
     retry_at = failure_observed_at + delay
     retry_at = min(retry_at, recovery_claim.deadline_at)
     await reschedule_recovery_attempt(
@@ -530,7 +503,7 @@ async def _settle_delivery_failure(
         condition=RecoveryCondition(failure_type.value),
         observed_at=failure_observed_at,
         next_eligible_at=retry_at,
-        detail=outcome.detail,
+        detail=failure.detail,
     )
     await db.commit()
     return _RecoveryOutcome.DEFERRED
@@ -540,7 +513,7 @@ async def _dispatch_prepared_claim(
     db: AsyncSession,
     recovery_claim: RecoveryAttemptClaim,
     prepared: _PreparedRecovery,
-    runtime: _RecoveryRuntime,
+    transport: DispatchTransport,
 ) -> _RecoveryOutcome:
     action = prepared.action
     claim = prepared.claim
@@ -550,7 +523,7 @@ async def _dispatch_prepared_claim(
         action,
         dispatch_id=claim.dispatch_id,
     )
-    if isinstance(dispatch, _Refusal):
+    if isinstance(dispatch, DispatchRefusal):
         # Refusal aborts this prepared acceptance. The durable retry
         # coordinator owns classification and later scheduling.
         logger.warning(
@@ -581,17 +554,9 @@ async def _dispatch_prepared_claim(
         await settle_recovery_attempt(db, recovery_claim, settled_at=datetime.now(UTC))
         await db.commit()
         return _RecoveryOutcome.CONFLICTED
-    await finalize_control_action_acceptance(db, claim)
-    dispatch = await bind_graph_action_receipt(db, dispatch)
-    outcome = await safe_dispatch(
-        runtime.worker_client,
-        dispatch,
-        runtime.circuit_breaker,
-        runtime.worker_spawner,
-        trace_headers=runtime.trace_headers,
-    )
-    if not outcome.success:
-        return await _settle_delivery_failure(db, recovery_claim, prepared, outcome)
+    failure = await deliver_leased(db, claim, dispatch, transport)
+    if failure is not None:
+        return await _settle_delivery_failure(db, recovery_claim, prepared, failure)
     await begin_write_transaction(db)
     delivered_at = datetime.now(UTC)
     if delivered_at >= recovery_claim.deadline_at:
@@ -665,7 +630,7 @@ async def _prepare_recovery_action(
         await db.commit()
         return outcome
     if not claim.payload_matches:
-        refusal = _Refusal(
+        refusal = DispatchRefusal(
             FailureType.INCOMPATIBLE_STATE,
             "accepted recovery payload changed after acceptance",
         )
@@ -704,7 +669,7 @@ async def _prepare_recovery_action(
 async def _redrive_one_claim(
     session_factory: async_sessionmaker[AsyncSession],
     recovery_claim: RecoveryAttemptClaim,
-    runtime: _RecoveryRuntime,
+    transport: DispatchTransport,
 ) -> _RecoveryOutcome:
     async with session_factory() as db:
         await begin_write_transaction(db)
@@ -729,7 +694,7 @@ async def _redrive_one_claim(
         prepared = await _prepare_recovery_action(db, recovery_claim, row, payload)
         if isinstance(prepared, _RecoveryOutcome):
             return prepared
-        return await _dispatch_prepared_claim(db, recovery_claim, prepared, runtime)
+        return await _dispatch_prepared_claim(db, recovery_claim, prepared, transport)
 
 
 async def redrive_direct_control_actions(
@@ -759,7 +724,7 @@ async def redrive_direct_control_actions(
         )
         await db.commit()
 
-    runtime = _RecoveryRuntime(
+    transport = DispatchTransport(
         worker_client=worker_client,
         circuit_breaker=circuit_breaker,
         worker_spawner=worker_spawner,
@@ -767,7 +732,7 @@ async def redrive_direct_control_actions(
     )
     outcomes: dict[_RecoveryOutcome, int] = {}
     for recovery_claim in recovery_claims:
-        outcome = await _redrive_one_claim(session_factory, recovery_claim, runtime)
+        outcome = await _redrive_one_claim(session_factory, recovery_claim, transport)
         outcomes[outcome] = outcomes.get(outcome, 0) + 1
 
     summary = DirectControlRecoverySummary(

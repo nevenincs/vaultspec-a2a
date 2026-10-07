@@ -27,6 +27,7 @@ import pytest
 
 from ...database import get_thread
 from ...database.models import ControlActionModel
+from ...domain_config import domain_config
 from ...testing.catalog_authority import current_execution_metadata
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionResultStatus, ThreadStatus
@@ -251,9 +252,10 @@ async def test_a_queued_turn_carries_its_runs_own_recursion_budget(
 ) -> None:
     """The envelope is frozen complete at admission, budget included.
 
-    Read off the run's own accepted graph definition rather than a
-    service-wide default, which could have moved between the moment the turn
-    was offered and the moment it is promoted.
+    The budget is the operator ceiling lowered to the run's own accepted preset
+    budget, decided when the turn is offered rather than when it is promoted,
+    so a ceiling that moves in between cannot change the turn, and a preset
+    that declares more than the ceiling cannot escape it.
     """
     async with busy_run_state(tmp_path, backend="postgres") as run:
         await _site_the_run(run)
@@ -267,7 +269,9 @@ async def test_a_queued_turn_carries_its_runs_own_recursion_budget(
     definition = FrozenGraphDefinition.model_validate(
         accepted.dispatch["graph_definition"]
     )
-    assert accepted.dispatch["recursion_limit"] == definition.recursion_limit
+    assert accepted.dispatch["recursion_limit"] == min(
+        domain_config.graph_recursion_limit, definition.recursion_limit
+    )
     assert accepted.dispatch["action"] == "ingest"
     assert accepted.intent == {
         "content": "second turn",

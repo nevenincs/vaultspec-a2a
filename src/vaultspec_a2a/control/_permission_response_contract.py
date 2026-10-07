@@ -9,34 +9,32 @@ from typing import TYPE_CHECKING, TypeIs
 from ..graph.enums import PermissionType
 from ..thread.enums import ApprovalStatus, PermissionRequestStatus
 from ..thread.permission_fsm import response_is_rejection
-from .accepted_input import AcceptedActionInput
 from .permission_options import extract_allowed_option_ids
 
 if TYPE_CHECKING:
-    import httpx
-
     from ..database import PermissionRequestModel, ThreadModel
     from ..ipc.schemas import DispatchRequest
     from ..thread.dispatch_policy import FailureType
     from .action_lease import ControlActionClaim
-    from .circuit_breaker import WorkerCircuitBreaker
-    from .worker_management import LazyWorkerSpawner
+
+__all__ = [
+    "AuthorizedPermission",
+    "PermissionInput",
+    "PermissionResult",
+    "PermissionTransition",
+    "RejectedResponse",
+    "allowed_option_ids",
+    "audited_tool_name",
+    "existing_rejection_error",
+    "rejected_payload",
+    "rejected_permission_error",
+    "response_payload",
+    "response_verdict",
+]
 
 
 def response_payload(option_id: str, notes: str | None) -> dict[str, object]:
     return {"option_id": option_id, "notes": notes}
-
-
-def action_payload_matches(action: object, option_id: str, notes: str | None) -> bool:
-    raw = getattr(action, "payload_json", None)
-    if not isinstance(raw, str):
-        return False
-    try:
-        return AcceptedActionInput.model_validate_json(raw).intent == response_payload(
-            option_id, notes
-        )
-    except ValueError:
-        return False
 
 
 def _is_json_object(value: object) -> TypeIs[dict[str, object]]:
@@ -153,15 +151,6 @@ class PermissionInput:
     option_id: str
     idempotency_key: str | None
     notes: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class PermissionRuntime:
-    circuit_breaker: WorkerCircuitBreaker
-    worker_spawner: LazyWorkerSpawner
-    worker_client: httpx.AsyncClient
-    recursion_limit: int
-    trace_headers: dict[str, str] | None
 
 
 @dataclass(frozen=True, slots=True)

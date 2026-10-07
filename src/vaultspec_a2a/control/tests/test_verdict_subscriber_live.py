@@ -512,7 +512,6 @@ async def test_live_verdict_round_trip_parks_and_resumes(
                     worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
                 ),
                 endpoint_provider=lambda: None,
-                recursion_limit=25,
             )
         )
         await _assert_verdict_round_trip(
@@ -802,7 +801,6 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
                         worker_url="http://worker", worker_port=1, auto_spawn=False
                     ),
                     endpoint_provider=lambda: live_engine,
-                    recursion_limit=25,
                 )
             )
 
@@ -942,7 +940,6 @@ async def _run_clobbered_reconcile(
                         worker_url="http://worker", worker_port=1, auto_spawn=False
                     ),
                     endpoint_provider=lambda: live_engine,
-                    recursion_limit=25,
                 )
             )
 

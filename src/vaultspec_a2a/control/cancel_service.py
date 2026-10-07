@@ -22,11 +22,8 @@ from ..control.action_lease import (
     ControlActionClaim,
     ControlActionClaimRequest,
     DispatchFailureDisposition,
-    finalize_control_action_acceptance,
     prepare_control_action_claim,
-    record_dispatch_failure,
 )
-from ..control.dispatch import safe_dispatch
 from ..control.repair_transitions import (
     mark_cancel_requested,
     record_undelivered_dispatch,
@@ -42,24 +39,23 @@ from ..database import (
 from ..database.models import ThreadModel
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.cancel_policy import can_cancel
-from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
+from ..thread.dispatch_policy import FailureType
 from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
     ThreadStatus,
 )
 from ..thread.idempotency import default_cancel_key
+from .leased_dispatch import accepted_recursion_budget, dispatch_leased
 
 if TYPE_CHECKING:
-    import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..control.circuit_breaker import WorkerCircuitBreaker
-    from ..control.worker_management import LazyWorkerSpawner
     from ..thread import ThreadWriteExpectation
     from ..thread.cancel_policy import CancelEligibility
+    from .leased_dispatch import DispatchTransport
 
-__all__ = ["CancelResult", "CancelRuntime", "cancel_thread"]
+__all__ = ["CancelResult", "cancel_thread"]
 
 logger = logging.getLogger(__name__)
 
@@ -196,17 +192,8 @@ class CancelResult:
 
 
 @dataclass(frozen=True, slots=True)
-class CancelRuntime:
-    circuit_breaker: WorkerCircuitBreaker
-    worker_spawner: LazyWorkerSpawner
-    worker_client: httpx.AsyncClient
-    recursion_limit: int
-    trace_headers: dict[str, str] | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class _CancelContext:
-    runtime: CancelRuntime
+    transport: DispatchTransport
     thread_id: str
     response_idempotency_key: str
     thread_status: str
@@ -284,7 +271,7 @@ async def cancel_thread(
     *,
     thread_id: str,
     idempotency_key: str | None,
-    runtime: CancelRuntime,
+    transport: DispatchTransport,
     _busy_retries: int = 0,
 ) -> CancelResult:
     """Execute the cancel-thread workflow.
@@ -314,7 +301,7 @@ async def cancel_thread(
     dispatch = DispatchRequest(
         action=to_dispatch_action(ControlActionType.CANCEL),
         thread_id=thread_id,
-        recursion_limit=runtime.recursion_limit,
+        recursion_limit=accepted_recursion_budget(None),
     )
     try:
         claim = await prepare_control_action_claim(
@@ -341,7 +328,7 @@ async def cancel_thread(
             db,
             thread_id=thread_id,
             idempotency_key=idempotency_key,
-            runtime=runtime,
+            transport=transport,
             _busy_retries=_busy_retries + 1,
         )
     replay = await _existing_cancel_claim(
@@ -350,7 +337,7 @@ async def cancel_thread(
     if replay is not None:
         return replay
     context = _CancelContext(
-        runtime, thread_id, response_idempotency_key, thread_status
+        transport, thread_id, response_idempotency_key, thread_status
     )
     election_result = await _elect_cancel_authority(
         db, thread, claim, expectation, context
@@ -517,7 +504,6 @@ async def _elect_cancel_authority(
         )
     if election is not None:
         await mark_cancel_requested(db, thread_id)
-    await finalize_control_action_acceptance(db, claim)
     return None
 
 
@@ -528,37 +514,22 @@ async def _dispatch_cancellation(
     dispatch: DispatchRequest,
     context: _CancelContext,
 ) -> CancelResult:
-    runtime = context.runtime
     thread_id = context.thread_id
     response_idempotency_key = context.response_idempotency_key
-    dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
     logger.info(
         "Dispatching cancel dispatch_id=%s for thread %s",
-        dispatch.dispatch_id,
+        claim.dispatch_id,
         thread_id,
         extra={
             "thread_id": thread_id,
-            "dispatch_id": dispatch.dispatch_id,
+            "dispatch_id": claim.dispatch_id,
             "action": dispatch.action,
         },
     )
 
-    outcome = await safe_dispatch(
-        runtime.worker_client,
-        dispatch,
-        runtime.circuit_breaker,
-        runtime.worker_spawner,
-        trace_headers=runtime.trace_headers,
-    )
-
-    if not outcome.success:
-        _policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-        if typed_failure is None:
-            raise RuntimeError("failed dispatch carries no failure type")
-        await begin_write_transaction(db)
-        settlement = await record_dispatch_failure(
-            db, claim, typed_failure, detail=outcome.detail
-        )
+    failure = await dispatch_leased(db, claim, dispatch, context.transport)
+    if failure is not None:
+        settlement = failure.disposition
         if settlement is DispatchFailureDisposition.AMBIGUOUS_DELIVERY:
             # UNREACHABLE is ambiguous: the worker may have scheduled the
             # cancellation before the acknowledgement was lost.  Keep both the
@@ -621,15 +592,11 @@ async def _dispatch_cancellation(
             thread_id,
             extra={
                 "thread_id": thread_id,
-                "dispatch_id": dispatch.dispatch_id,
+                "dispatch_id": claim.dispatch_id,
                 "action": dispatch.action,
             },
         )
-        await record_undelivered_dispatch(
-            db,
-            thread_id,
-            reason=outcome.detail or "Cancel dispatch was not delivered",
-        )
+        await record_undelivered_dispatch(db, thread_id, reason=failure.detail)
         await db.commit()
         return CancelResult(
             action_id=claim.action_id,
@@ -640,7 +607,7 @@ async def _dispatch_cancellation(
             applied=False,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             idempotency_key=response_idempotency_key,
-            failure_type=typed_failure,
+            failure_type=failure.failure_type,
         )
 
     await db.commit()

@@ -32,7 +32,6 @@ class _VerdictSubscriberDependencies:
 
 @dataclass(frozen=True, slots=True)
 class _VerdictSubscriberExecution:
-    recursion_limit: int
     trace_headers_fn: Callable[[], dict[str, str]] | None
 
 
@@ -53,7 +52,6 @@ _VERDICT_CONFIG_SIGNATURE = Signature(
         Parameter("circuit_breaker", Parameter.POSITIONAL_OR_KEYWORD),
         Parameter("worker_spawner", Parameter.POSITIONAL_OR_KEYWORD),
         Parameter("endpoint_provider", Parameter.POSITIONAL_OR_KEYWORD),
-        Parameter("recursion_limit", Parameter.POSITIONAL_OR_KEYWORD),
         Parameter("trace_headers_fn", Parameter.POSITIONAL_OR_KEYWORD, default=None),
         Parameter(
             "poll_interval_seconds", Parameter.POSITIONAL_OR_KEYWORD, default=3.0
@@ -100,7 +98,6 @@ def _split_verdict_config_args(
             ),
         ),
         _VerdictSubscriberExecution(
-            recursion_limit=cast("int", values["recursion_limit"]),
             trace_headers_fn=cast(
                 "Callable[[], dict[str, str]] | None", values["trace_headers_fn"]
             ),
@@ -164,10 +161,6 @@ class VerdictSubscriberConfig:
     @property
     def endpoint_provider(self) -> Callable[[], EngineEndpoint | None]:
         return self._dependencies.endpoint_provider
-
-    @property
-    def recursion_limit(self) -> int:
-        return self._execution.recursion_limit
 
     @property
     def trace_headers_fn(self) -> Callable[[], dict[str, str]] | None:

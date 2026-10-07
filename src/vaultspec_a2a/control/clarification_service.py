@@ -31,7 +31,6 @@ from ..database import (
     settle_control_action_lease,
     thread_write_expectation,
 )
-from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread.clarification import (
     ClarificationAnswers,
     ClarificationRequest,
@@ -41,7 +40,7 @@ from ..thread.clarification import (
     pending_clarification,
     validate_clarification_answers,
 )
-from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
+from ..thread.dispatch_policy import FailureType
 from ..thread.enums import (
     NON_ACTIVE_STATUSES,
     ControlActionResultStatus,
@@ -52,29 +51,22 @@ from ..thread.idempotency import (
     CLARIFICATION_RESPONSE_KEY_PREFIX,
     clarification_response_action_key,
 )
-from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import AcceptedActionInput, freeze_accepted_input
 from .action_lease import (
     ControlActionClaim,
     ControlActionClaimRequest,
     DispatchFailureDisposition,
-    finalize_control_action_acceptance,
     prepare_control_action_claim,
-    record_dispatch_failure,
 )
-from .dispatch import safe_dispatch
-from .dispatch_receipts import bind_graph_action_receipt
-from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
-from .graph_definition import read_accepted_graph_definition
+from .leased_dispatch import DispatchRefusal, build_followon_dispatch, dispatch_leased
 from .repair_transitions import record_undelivered_dispatch
 
 if TYPE_CHECKING:
-    import httpx
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..database.checkpoints import Checkpointer
-    from .circuit_breaker import WorkerCircuitBreaker
-    from .worker_management import LazyWorkerSpawner
+    from ..ipc.schemas import DispatchRequest
+    from .leased_dispatch import DispatchTransport
 
 __all__ = [
     "ClarificationRuntime",
@@ -240,11 +232,7 @@ class ClarificationRecoverySummary:
 @dataclass(frozen=True, slots=True)
 class ClarificationRuntime:
     checkpointer: Checkpointer
-    worker_client: httpx.AsyncClient
-    circuit_breaker: WorkerCircuitBreaker
-    worker_spawner: LazyWorkerSpawner
-    recursion_limit: int
-    trace_headers: dict[str, str] | None
+    transport: DispatchTransport
 
 
 @dataclass(frozen=True, slots=True)
@@ -550,45 +538,26 @@ async def _claim_and_dispatch(
     thread_status = thread.status
     write_expectation = thread_write_expectation(thread)
     worker_generation = thread.repair_generation
-    team_preset = thread.team_preset
-    workspace_root = dispatchable_workspace_root(thread.thread_metadata)
-    if workspace_root is None:
+    dispatch = await build_followon_dispatch(
+        db,
+        thread_id=context.thread_id,
+        thread_metadata=thread.thread_metadata,
+        action=ControlActionType.RESUME,
+        option_id=context.payload,
+    )
+    if isinstance(dispatch, DispatchRefusal):
+        # Nothing was claimed, so the refusal carries its typed failure alone
+        # and the one protocol mapping serves it, as it does for every verb.
         return ClarificationResult(
             request_id=context.request_id,
             thread_id=context.thread_id,
             accepted=False,
             applied=False,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            error_detail="The accepted run's project is unavailable",
-            error_status_code=409,
-            failure_type=FailureType.NO_ACTIVE_PROJECT,
-        )
-    try:
-        graph_definition = await read_accepted_graph_definition(db, context.thread_id)
-        team_preset = graph_definition.team_id
-        execution_authority = resolve_execution_authority(thread.thread_metadata)
-    except (ExecutionAuthorityError, ValueError) as exc:
-        return ClarificationResult(
-            request_id=context.request_id,
-            thread_id=context.thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            error_detail=str(exc),
-            error_status_code=409,
-            failure_type=FailureType.INCOMPATIBLE_STATE,
+            error_detail=dispatch.reason,
+            failure_type=dispatch.failure_type,
         )
 
-    dispatch = DispatchRequest(
-        action=to_dispatch_action(ControlActionType.RESUME),
-        thread_id=context.thread_id,
-        option_id=context.payload,
-        team_preset=team_preset,
-        graph_definition=graph_definition,
-        workspace_root=workspace_root,
-        recursion_limit=context.runtime.recursion_limit,
-        model_assignment=execution_authority.model_assignment,
-    )
     claim = await prepare_control_action_claim(
         db,
         request=ControlActionClaimRequest(
@@ -600,7 +569,9 @@ async def _claim_and_dispatch(
             payload=freeze_accepted_input(dispatch, intent=context.payload),
             dispatch_id=dispatch.dispatch_id,
             worker_generation=worker_generation,
-            recovery_timeout_seconds=graph_definition.run_timeout_seconds,
+            recovery_timeout_seconds=(
+                dispatch.require_graph_definition().run_timeout_seconds
+            ),
         ),
     )
     if not claim.authority_matches:
@@ -679,26 +650,9 @@ async def _dispatch_claimed(
     dispatch: DispatchRequest,
     context: _DispatchContext,
 ) -> ClarificationResult:
-    dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
-    await finalize_control_action_acceptance(db, claim)
-    dispatch = await bind_graph_action_receipt(db, dispatch)
-    outcome = await safe_dispatch(
-        context.runtime.worker_client,
-        dispatch,
-        context.runtime.circuit_breaker,
-        context.runtime.worker_spawner,
-        trace_headers=context.runtime.trace_headers,
-    )
-    if not outcome.success:
-        _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
-        detail = outcome.detail or "Worker dispatch failed"
-        if failure_type is None:
-            raise RuntimeError("failed dispatch carries no failure type")
-        await begin_write_transaction(db)
-        settlement = await record_dispatch_failure(
-            db, claim, failure_type, detail=detail
-        )
-        if settlement is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
+    failure = await dispatch_leased(db, claim, dispatch, context.runtime.transport)
+    if failure is not None:
+        if failure.disposition is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
             # A released claim means the worker certainly scheduled no task, so
             # the answer demonstrably did not reach the parked node. The run is
             # untouched by that - it is still parked on the same questionnaire,
@@ -709,13 +663,16 @@ async def _dispatch_claimed(
             await record_undelivered_dispatch(
                 db,
                 context.thread_id,
-                reason=f"Clarification resume not delivered: {detail}",
+                reason=f"Clarification resume not delivered: {failure.detail}",
             )
         await db.commit()
         # No status is chosen here. A dispatch outcome carries its typed failure
         # and nothing else, so the one protocol mapping decides what every verb
         # that met the same outcome serves for it.
-        return _result(action, error=_ResultError(detail, failure_type=failure_type))
+        return _result(
+            action,
+            error=_ResultError(failure.detail, failure_type=failure.failure_type),
+        )
 
     # A very fast worker may already have checkpointed the receipt before its HTTP
     # acknowledgement reaches us. Settle opportunistically, but never infer

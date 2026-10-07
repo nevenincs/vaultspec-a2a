@@ -21,10 +21,7 @@ from sqlalchemy.ext.asyncio import (
 
 from ...api.tests.clarification_harness import park_clarification
 from ...conftest import materialize_schema
-from ...control._permission_response_contract import (
-    PermissionInput,
-    PermissionRuntime,
-)
+from ...control._permission_response_contract import PermissionInput
 from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.clarification_service import (
@@ -34,6 +31,7 @@ from ...control.clarification_service import (
 from ...control.config import settings
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
+from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
 from ...control.repair_transitions import apply_dispatch_failure
 from ...control.worker_management import LazyWorkerSpawner
@@ -311,7 +309,12 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
                     answers={"provider": "codex"},
                 ),
                 runtime=ClarificationRuntime(
-                    checkpointer, client, circuit_breaker, spawner, 1, None
+                    checkpointer,
+                    DispatchTransport(
+                        worker_client=client,
+                        circuit_breaker=circuit_breaker,
+                        worker_spawner=spawner,
+                    ),
                 ),
             )
 
@@ -435,15 +438,18 @@ async def test_a_saturated_worker_leaves_the_parked_run_answerable(
         _saturated_worker(tmp_path / "capacity-checkpoints.db") as worker_client,
         session_factory() as session,
     ):
+        pending = await get_permission_request(session, request_id)
+        assert pending is not None
         result = await respond_to_permission(
             session,
+            permission=pending,
             response=PermissionInput(request_id, "allow_once", "capacity-retry"),
-            runtime=PermissionRuntime(
-                WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30.0),
-                _permission_spawner(),
-                worker_client,
-                25,
-                None,
+            transport=DispatchTransport(
+                worker_client=worker_client,
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=3, recovery_timeout=30.0
+                ),
+                worker_spawner=_permission_spawner(),
             ),
         )
 
@@ -491,15 +497,18 @@ async def test_an_unreachable_worker_leaves_the_parked_run_answerable(
         httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as worker_client,
         session_factory() as session,
     ):
+        pending = await get_permission_request(session, request_id)
+        assert pending is not None
         result = await respond_to_permission(
             session,
+            permission=pending,
             response=PermissionInput(request_id, "allow_once", "unreachable-retry"),
-            runtime=PermissionRuntime(
-                WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30.0),
-                _permission_spawner("http://127.0.0.1:9"),
-                worker_client,
-                25,
-                None,
+            transport=DispatchTransport(
+                worker_client=worker_client,
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=3, recovery_timeout=30.0
+                ),
+                worker_spawner=_permission_spawner("http://127.0.0.1:9"),
             ),
         )
 

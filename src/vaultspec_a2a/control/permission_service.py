@@ -13,19 +13,16 @@ from typing import TYPE_CHECKING
 
 from ..database import (
     append_permission_log,
-    begin_write_transaction,
     create_control_action,
     get_control_action_by_idempotency_key,
     get_pending_permission_requests,
-    get_permission_request,
     get_thread,
     record_permission_response_submission,
     reset_permission_response_submission,
     set_thread_approval_state,
 )
-from ..ipc.schemas import DispatchRequest, to_dispatch_action
 from ..thread import permission_resume_value
-from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
+from ..thread.dispatch_policy import FailureType
 from ..thread.enums import (
     TERMINAL_STATUSES,
     ControlActionResultStatus,
@@ -49,16 +46,12 @@ from ._permission_response_contract import (
 from ._permission_response_contract import (
     PermissionInput,
     PermissionResult,
-    PermissionRuntime,
 )
 from ._permission_response_contract import (
     PermissionTransition as _PermissionTransition,
 )
 from ._permission_response_contract import (
     RejectedResponse as _RejectedResponse,
-)
-from ._permission_response_contract import (
-    action_payload_matches as _action_payload_matches,
 )
 from ._permission_response_contract import (
     allowed_option_ids as _allowed_option_ids,
@@ -79,19 +72,13 @@ from ._permission_response_contract import (
     response_payload as _response_payload,
 )
 from ._permission_transition_context import permission_transition_context
-from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import freeze_accepted_input
 from .action_lease import (
     ControlActionClaimRequest,
     DispatchFailureDisposition,
-    finalize_control_action_acceptance,
     prepare_control_action_claim,
-    record_dispatch_failure,
 )
-from .dispatch import DispatchOutcome, safe_dispatch
-from .dispatch_receipts import bind_graph_action_receipt
-from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
-from .graph_definition import read_accepted_graph_definition
+from .leased_dispatch import DispatchRefusal, build_followon_dispatch, dispatch_leased
 from .repair_transitions import (
     apply_dispatch_failure,
     mark_permission_response_requested,
@@ -106,6 +93,7 @@ if TYPE_CHECKING:
         PermissionRequestModel,
         ThreadModel,
     )
+    from .leased_dispatch import DispatchTransport, SettledDispatchFailure
 
 __all__ = [
     "respond_to_permission",
@@ -162,10 +150,14 @@ async def _journal_rejection(
 async def respond_to_permission(
     db: AsyncSession,
     *,
+    permission: PermissionRequestModel,
     response: PermissionInput,
-    runtime: PermissionRuntime,
+    transport: DispatchTransport,
 ) -> PermissionResult:
     """Execute the permission-response state machine.
+
+    *permission* is the request row the caller already resolved and scoped to
+    its run; the service answers that row and never resolves the request again.
 
     Returns a :class:`PermissionResult` describing the outcome.  Commits the
     session before returning — the service owns its transaction boundary.
@@ -177,27 +169,19 @@ async def respond_to_permission(
     """
     request_id = response.request_id
     option_id = response.option_id
-    idempotency_key = response.idempotency_key
-    notes = response.notes
     logger.info(
         "Permission response: request_id=%s, option_id=%s",
         request_id,
         option_id,
         extra={
             "request_id": request_id,
-            "thread_id": (request_id.split(":", 1)[0] if ":" in request_id else None),
+            "thread_id": permission.thread_id,
             "action": "permission_response",
             "option_id": option_id,
         },
     )
 
-    authorization = await _authorize_permission_response(
-        db,
-        request_id=request_id,
-        option_id=option_id,
-        idempotency_key=idempotency_key,
-        notes=notes,
-    )
+    authorization = await _authorize_permission_response(db, permission, response)
     if isinstance(authorization, PermissionResult):
         return authorization
 
@@ -205,10 +189,7 @@ async def respond_to_permission(
     # 5. Record the transition, then 6-7 dispatch the resume
     # ------------------------------------------------------------------
     transition = await _record_permission_transition(
-        db,
-        authorized=authorization,
-        response=response,
-        recursion_limit=runtime.recursion_limit,
+        db, authorized=authorization, response=response
     )
     if isinstance(transition, PermissionResult):
         return transition
@@ -217,7 +198,7 @@ async def respond_to_permission(
         authorized=authorization,
         transition=transition,
         response=response,
-        runtime=runtime,
+        transport=transport,
     )
 
 
@@ -230,7 +211,6 @@ async def _deduplicate_permission_response(
 ) -> PermissionResult | _AuthorizedPermission | None:
     request_id = response.request_id
     option_id = response.option_id
-    notes = response.notes
     thread_id = thread_record.id
     existing_action = await get_control_action_by_idempotency_key(
         db,
@@ -275,42 +255,15 @@ async def _deduplicate_permission_response(
 
     # The request, not a caller-selected retry header, owns the accepted body.
     # This check deliberately precedes permission-status rejection so an
-    # identical retry can replay or redrive an answered/applied request.
+    # identical retry can replay or redrive an answered/applied request. The
+    # claim the transition takes decides which: a competing body conflicts, an
+    # applied or freshly leased action replays, and an expired lease redrives.
     winning_action = await get_control_action_by_idempotency_key(
         db,
         thread_id=thread_id,
         idempotency_key=permission_response_action_key(request_id),
     )
     if winning_action is not None:
-        if not _action_payload_matches(winning_action, option_id, notes):
-            return PermissionResult(
-                request_id=request_id,
-                thread_id=thread_id,
-                accepted=False,
-                applied=False,
-                action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-                idempotency_key=resolved_idempotency_key,
-                approval_status=thread_record.approval_status,
-                error_detail="Permission request already has a different response",
-                error_status_code=409,
-                failure_type=FailureType.CONFLICT,
-            )
-        claim_is_fresh = (
-            winning_action.claim_token is not None
-            and winning_action.claim_expires_at is not None
-            and winning_action.claim_expires_at > datetime.now(UTC)
-        )
-        if winning_action.applied_at is not None or claim_is_fresh:
-            return PermissionResult(
-                request_id=request_id,
-                thread_id=thread_id,
-                accepted=True,
-                applied=winning_action.applied_at is not None,
-                action_status=winning_action.result_status,
-                action_id=winning_action.id,
-                idempotency_key=resolved_idempotency_key,
-                approval_status=thread_record.approval_status,
-            )
         return _AuthorizedPermission(
             permission=permission,
             thread_record=thread_record,
@@ -358,38 +311,24 @@ def _document_approval_refusal(
 
 async def _authorize_permission_response(
     db: AsyncSession,
-    *,
-    request_id: str,
-    option_id: str,
-    idempotency_key: str | None,
-    notes: str | None,
+    permission: PermissionRequestModel,
+    response: PermissionInput,
 ) -> PermissionResult | _AuthorizedPermission:
-    """Resolve and authorize a permission response before any state change.
+    """Authorize a response to a resolved permission request before any change.
 
-    Runs every read-side guard the state machine imposes - request/thread
-    resolution, idempotency dedup, permission-status and terminal checks, the
+    Runs every read-side guard the state machine imposes - thread resolution,
+    idempotency dedup, permission-status and terminal checks, the
     active-interrupt guard, and option validation. Returns a
     :class:`PermissionResult` for any rejection, duplicate, or already-applied
     outcome (committing the rejection journal action where the machine records
     one), or an :class:`_AuthorizedPermission` when the response is admitted and
     the transition may proceed.
     """
+    request_id = response.request_id
     # ------------------------------------------------------------------
-    # 1. Resolve permission request and thread
+    # 1. Resolve the thread the request belongs to
     # ------------------------------------------------------------------
-    permission = await get_permission_request(db, request_id)
-    thread_id = permission.thread_id if permission is not None else ""
-    if not thread_id and ":" in request_id:
-        thread_id, _ = request_id.split(":", 1)
-    if not thread_id:
-        return PermissionResult(
-            request_id=request_id,
-            thread_id="",
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-        )
-
+    thread_id = permission.thread_id
     thread_record = await get_thread(db, thread_id)
     if thread_record is None:
         return PermissionResult(
@@ -400,16 +339,6 @@ async def _authorize_permission_response(
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             error_detail="Thread not found",
             error_status_code=404,
-        )
-    if permission is None:
-        return PermissionResult(
-            request_id=request_id,
-            thread_id=thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            error_detail="Permission request is not durably pending",
-            error_status_code=409,
         )
 
     # ------------------------------------------------------------------
@@ -428,25 +357,18 @@ async def _authorize_permission_response(
     # ------------------------------------------------------------------
     # 2. Idempotency deduplication
     # ------------------------------------------------------------------
-    resolved_idempotency_key = idempotency_key or default_permission_response_key(
-        request_id, option_id
+    resolved_idempotency_key = (
+        response.idempotency_key
+        or default_permission_response_key(request_id, response.option_id)
     )
     replay = await _deduplicate_permission_response(
-        db,
-        permission,
-        thread_record,
-        PermissionInput(request_id, option_id, idempotency_key, notes),
-        resolved_idempotency_key,
+        db, permission, thread_record, response, resolved_idempotency_key
     )
     if replay is not None:
         return replay
 
     return await _authorize_pending_permission(
-        db,
-        permission,
-        thread_record,
-        PermissionInput(request_id, option_id, idempotency_key, notes),
-        resolved_idempotency_key,
+        db, permission, thread_record, response, resolved_idempotency_key
     )
 
 
@@ -697,68 +619,24 @@ async def _record_permission_transition(
     *,
     authorized: _AuthorizedPermission,
     response: PermissionInput,
-    recursion_limit: int,
 ) -> PermissionResult | _PermissionTransition:
     """Write the durable pre-dispatch transition for an authorized response.
 
     Creates the submitted control action, records the response submission, audits
     the decision, and - for a plan-approval pause - stamps the thread's approval
-    state. Returns the action plus the resume value and routing fields the
-    dispatch stage carries to the worker.
+    state. Returns the claim plus the resume dispatch the dispatch stage carries
+    to the worker.
 
-    The transition is committed here, before any network call, so the decision
-    survives a worker that never answers. It is therefore NOT rolled back by a
-    failed dispatch: the dispatch stage compensates instead, releasing the claim
-    and resetting the response submission so the request can be re-answered. The
-    audit row is deliberately left standing by that compensation - a decision the
-    operator really made is a fact about the run even when its delivery failed,
-    and a re-answer appends a second row rather than rewriting the first.
+    The transition commits with the claimed acceptance, before any network call,
+    so the decision survives a worker that never answers. It is therefore NOT
+    rolled back by a failed dispatch: the dispatch stage compensates instead,
+    releasing the claim and resetting the response submission so the request can
+    be re-answered. The audit row is deliberately left standing by that
+    compensation - a decision the operator really made is a fact about the run
+    even when its delivery failed, and a re-answer appends a second row rather
+    than rewriting the first.
     """
     context = permission_transition_context(authorized, response)
-
-    team_preset: str | None = context.thread_record.team_preset
-    # The stored value is validated, not merely fetched. This is the workspace a
-    # resumed run executes in, and the sibling that reads it for dispatch records
-    # what a bad one costs: degrading it used to dispatch the turn anyway and let
-    # the provider layer site the agent - and its filesystem sandbox - in whatever
-    # directory the worker happened to start in. The annotation here said
-    # ``str | None`` while the read admitted any JSON value, so a stored number or
-    # object flowed through untouched and only failed further downstream, if at
-    # all.
-    workspace_root = dispatchable_workspace_root(context.thread_record.thread_metadata)
-    if workspace_root is None:
-        return PermissionResult(
-            request_id=context.request_id,
-            thread_id=context.thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            idempotency_key=context.resolved_idempotency_key,
-            approval_status=context.replay_approval_status,
-            error_detail="The accepted run's project is unavailable",
-            error_status_code=409,
-            failure_type=FailureType.NO_ACTIVE_PROJECT,
-        )
-
-    try:
-        graph_definition = await read_accepted_graph_definition(db, context.thread_id)
-        team_preset = graph_definition.team_id
-        execution_authority = resolve_execution_authority(
-            context.thread_record.thread_metadata
-        )
-    except (ExecutionAuthorityError, ValueError) as exc:
-        return PermissionResult(
-            request_id=context.request_id,
-            thread_id=context.thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            idempotency_key=context.resolved_idempotency_key,
-            approval_status=context.replay_approval_status,
-            error_detail=str(exc),
-            error_status_code=409,
-            failure_type=FailureType.INCOMPATIBLE_STATE,
-        )
 
     resume_value = permission_resume_value(
         context.permission.pause_reason_type,
@@ -766,17 +644,27 @@ async def _record_permission_transition(
         context.notes,
         request_id=context.request_id,
     )
-
-    dispatch = DispatchRequest(
-        action=to_dispatch_action(ControlActionType.RESUME),
+    dispatch = await build_followon_dispatch(
+        db,
         thread_id=context.thread_id,
+        thread_metadata=context.thread_record.thread_metadata,
+        action=ControlActionType.RESUME,
         option_id=resume_value,
-        team_preset=team_preset,
-        graph_definition=graph_definition,
-        workspace_root=workspace_root,
-        recursion_limit=recursion_limit,
-        model_assignment=execution_authority.model_assignment,
     )
+    if isinstance(dispatch, DispatchRefusal):
+        # Nothing was claimed, so the refusal carries its typed failure alone
+        # and the one protocol mapping serves it, as it does for every verb.
+        return PermissionResult(
+            request_id=context.request_id,
+            thread_id=context.thread_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            idempotency_key=context.resolved_idempotency_key,
+            approval_status=context.replay_approval_status,
+            error_detail=dispatch.reason,
+            failure_type=dispatch.failure_type,
+        )
 
     claim = await prepare_control_action_claim(
         db,
@@ -790,7 +678,9 @@ async def _record_permission_transition(
                 dispatch, intent=_response_payload(context.option_id, context.notes)
             ),
             dispatch_id=dispatch.dispatch_id,
-            recovery_timeout_seconds=graph_definition.run_timeout_seconds,
+            recovery_timeout_seconds=(
+                dispatch.require_graph_definition().run_timeout_seconds
+            ),
         ),
     )
     if not claim.authority_matches:
@@ -843,7 +733,8 @@ async def _record_permission_transition(
     # one decision produces exactly one row. Writing it at the route would log
     # attempts rather than decisions; writing it after dispatch would lose the
     # record of a decision the operator really made whenever the worker was
-    # unreachable. No commit here - the durability boundary below owns it.
+    # unreachable. No commit here - the acceptance the dispatch stage finalizes
+    # owns it.
     await append_permission_log(
         db,
         thread_id=context.thread_id,
@@ -866,11 +757,10 @@ async def _record_permission_transition(
             approval_response_action_id=claim.action_id,
         )
     await mark_permission_response_requested(db, context.thread_id)
-    await finalize_control_action_acceptance(db, claim)
 
     return _PermissionTransition(
         claim=claim,
-        dispatch=dispatch.model_copy(update={"dispatch_id": claim.dispatch_id}),
+        dispatch=dispatch,
         approval_status=context.submitted_approval_status,
     )
 
@@ -880,23 +770,13 @@ async def _failed_permission_dispatch(
     authorized: _AuthorizedPermission,
     transition: _PermissionTransition,
     response: PermissionInput,
-    outcome: DispatchOutcome,
+    failure: SettledDispatchFailure,
 ) -> PermissionResult:
     request_id = response.request_id
     thread_id = authorized.thread_id
-    resolved_idempotency_key = authorized.resolved_idempotency_key
-    claim = transition.claim
-    policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-    if typed_failure is None:
-        raise RuntimeError("failed dispatch carries no failure type")
-    detail = outcome.detail or "Worker dispatch failed"
-    await begin_write_transaction(db)
-    settlement = await record_dispatch_failure(
-        db, claim, typed_failure, detail=outcome.detail
-    )
-    if settlement is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
+    if failure.disposition is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
         await reset_permission_response_submission(db, request_id=request_id)
-    if policy.should_mark_failed and settlement in {
+    if failure.should_mark_failed and failure.disposition in {
         DispatchFailureDisposition.DEFINITE_NON_DELIVERY,
         DispatchFailureDisposition.AMBIGUOUS_DELIVERY,
     }:
@@ -904,7 +784,7 @@ async def _failed_permission_dispatch(
             db,
             thread_id,
             failed_status=ThreadStatus.INPUT_REQUIRED,
-            reason=detail,
+            reason=failure.detail,
         )
 
     await db.commit()
@@ -914,14 +794,14 @@ async def _failed_permission_dispatch(
         accepted=False,
         applied=False,
         action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-        action_id=claim.action_id,
-        idempotency_key=resolved_idempotency_key,
+        action_id=transition.claim.action_id,
+        idempotency_key=authorized.resolved_idempotency_key,
         approval_status=transition.approval_status,
         # No status is chosen here. A dispatch outcome carries its typed failure
         # and nothing else, so the one protocol mapping decides what every verb
         # that met the same outcome serves for it.
-        error_detail=detail,
-        failure_type=typed_failure,
+        error_detail=failure.detail,
+        failure_type=failure.failure_type,
     )
 
 
@@ -931,7 +811,7 @@ async def _dispatch_permission_resume(
     authorized: _AuthorizedPermission,
     transition: _PermissionTransition,
     response: PermissionInput,
-    runtime: PermissionRuntime,
+    transport: DispatchTransport,
 ) -> PermissionResult:
     """Dispatch the resume to the worker and settle the response.
 
@@ -941,39 +821,28 @@ async def _dispatch_permission_resume(
     resolves the aggregator and moves the thread to running.
     """
     request_id = response.request_id
-    option_id = response.option_id
     thread_id = authorized.thread_id
     resolved_idempotency_key = authorized.resolved_idempotency_key
     claim = transition.claim
 
-    dispatch = transition.dispatch
-
     logger.info(
         "Dispatching resume dispatch_id=%s for thread %s (request_id=%s)",
-        dispatch.dispatch_id,
+        claim.dispatch_id,
         thread_id,
         request_id,
         extra={
             "thread_id": thread_id,
-            "dispatch_id": dispatch.dispatch_id,
+            "dispatch_id": claim.dispatch_id,
             "request_id": request_id,
-            "action": dispatch.action,
-            "option_id": option_id,
+            "action": transition.dispatch.action,
+            "option_id": response.option_id,
         },
     )
 
-    dispatch = await bind_graph_action_receipt(db, dispatch)
-    outcome = await safe_dispatch(
-        runtime.worker_client,
-        dispatch,
-        runtime.circuit_breaker,
-        runtime.worker_spawner,
-        trace_headers=runtime.trace_headers,
-    )
-
-    if not outcome.success:
+    failure = await dispatch_leased(db, claim, transition.dispatch, transport)
+    if failure is not None:
         return await _failed_permission_dispatch(
-            db, authorized, transition, response, outcome
+            db, authorized, transition, response, failure
         )
 
     return PermissionResult(

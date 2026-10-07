@@ -97,7 +97,9 @@ def _invocation_config(req: DispatchRequest, *, action: str) -> dict[str, Any]:
     """
     return {
         "configurable": {"thread_id": req.thread_id},
-        "recursion_limit": _recursion_limit(req),
+        # Decided once, when the gateway accepted this dispatch, and frozen into
+        # its accepted input, so a recovered dispatch runs under the same budget.
+        "recursion_limit": req.recursion_limit,
         "run_name": f"vaultspec-a2a {action}",
         "metadata": {
             "thread_id": req.thread_id,
@@ -106,19 +108,6 @@ def _invocation_config(req: DispatchRequest, *, action: str) -> dict[str, Any]:
         },
         "tags": ["vaultspec-a2a", f"action:{action}"],
     }
-
-
-def _recursion_limit(req: DispatchRequest) -> int:
-    """The tighter of the operator's ceiling and the accepted preset's own budget.
-
-    The gateway sends the operator-wide ceiling on every dispatch; the limit a
-    preset declares rides its frozen graph definition, so a run is held to the
-    preset's budget without ever exceeding the operator's.
-    """
-    definition = req.graph_definition
-    if definition is None:
-        return req.recursion_limit
-    return min(req.recursion_limit, definition.recursion_limit)
 
 
 def _addressed_resume(resume_value: object, admission: ResumeAdmission) -> object:

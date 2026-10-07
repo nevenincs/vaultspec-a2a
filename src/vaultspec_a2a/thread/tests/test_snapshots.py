@@ -2,28 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import UTC, datetime
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ...graph.enums import AgentLifecycleState, Provider
-from ..clarification import (
-    ClarificationKind,
-    ClarificationQuestion,
-    ClarificationRequest,
-)
+from ..enums import RepairStatus, ThreadStatus
 from ..models import PlanEntry
 from ..snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
-    AgentData,
-    ArtifactData,
-    ExecutionTaskData,
-    MessageData,
-    PermissionData,
-    PermissionOptionData,
     ThreadStateData,
-    ToolCallData,
     build_agent_descriptor,
     classify_message_role,
     classify_permission_pause_reason,
@@ -33,6 +22,7 @@ from ..snapshots import (
     is_terminal_event,
     normalize_artifacts,
     normalize_plan_entries,
+    record_repair_posture,
     stamp_message_created_at,
 )
 
@@ -217,124 +207,40 @@ def test_plan_approval_pause_causes_contains_both_variants() -> None:
 
 
 # ---------------------------------------------------------------------------
-# dataclass round-trip: dataclass -> asdict -> Pydantic model_validate
+# record_repair_posture
 # ---------------------------------------------------------------------------
 
 
-def test_message_data_round_trip() -> None:
-    from ...api.schemas.snapshots import MessageSnapshot
-
-    data = MessageData(
-        message_id="m1",
-        role="user",
-        content="hi",
-        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
-    )
-    pydantic_obj = MessageSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.message_id == "m1"
-    assert pydantic_obj.role == "user"
+def _snapshot() -> ThreadStateData:
+    return ThreadStateData(thread_id="t1", status=ThreadStatus.RUNNING, last_sequence=0)
 
 
-def test_tool_call_data_round_trip() -> None:
-    from ...api.schemas.snapshots import ToolCallSnapshot
-
-    data = ToolCallData(
-        tool_call_id="tc1",
-        title="bash",
-        kind="execute",
-        status="pending",
-    )
-    pydantic_obj = ToolCallSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.tool_call_id == "tc1"
+def test_record_repair_posture_writes_the_posture_and_its_readiness_together() -> None:
+    snapshot = _snapshot()
+    record_repair_posture(snapshot, "needs_reconciliation")
+    assert snapshot.repair_status is RepairStatus.NEEDS_RECONCILIATION
+    assert snapshot.execution_readiness is RepairStatus.NEEDS_RECONCILIATION
 
 
-def test_artifact_data_round_trip() -> None:
-    from ...api.schemas.snapshots import ArtifactSnapshot
-
-    data = ArtifactData(
-        artifact_id="a1",
-        filename="test.py",
-        content="print('hello')",
-        complete=True,
-    )
-    pydantic_obj = ArtifactSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.artifact_id == "a1"
+def test_record_repair_posture_clears_both_fields_for_no_posture() -> None:
+    snapshot = _snapshot()
+    record_repair_posture(snapshot, RepairStatus.REPLAY_GAP)
+    record_repair_posture(snapshot, None)
+    assert snapshot.repair_status is None
+    assert snapshot.execution_readiness is None
 
 
-def test_permission_data_round_trip() -> None:
-    from ...api.schemas.snapshots import PermissionSnapshot
-
-    data = PermissionData(
-        request_id="r1",
-        description="approve this",
-        options=[
-            PermissionOptionData(
-                option_id="allow_once",
-                name="Allow Once",
-                kind="allow_once",
-            )
-        ],
-        tool_call="bash",
-        tool_kind="execute",
-    )
-    pydantic_obj = PermissionSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.request_id == "r1"
-    assert len(pydantic_obj.options) == 1
-    assert pydantic_obj.tool_kind == "execute"
+def test_record_repair_posture_refuses_a_posture_outside_the_vocabulary() -> None:
+    snapshot = _snapshot()
+    with pytest.raises(ValueError, match="not a valid RepairStatus"):
+        record_repair_posture(snapshot, "bogus")
+    assert snapshot.repair_status is None
+    assert snapshot.execution_readiness is None
 
 
-def test_pending_clarification_round_trips_as_the_canonical_model() -> None:
-    from ...api.schemas.snapshots import ThreadStateSnapshot
-
-    request = ClarificationRequest(
-        request_id="clarify-1",
-        questions=[
-            ClarificationQuestion(
-                id="provider",
-                prompt="Which provider?",
-                kind=ClarificationKind.CHOICE,
-                options=["codex", "zai"],
-            ),
-            ClarificationQuestion(
-                id="scope",
-                prompt="Which module?",
-                kind=ClarificationKind.TEXT,
-                required=False,
-            ),
-        ],
-    )
-    data = ThreadStateData(
-        thread_id="t1",
-        status="input_required",
-        last_sequence=0,
-        pending_clarification=request,
-    )
-    pydantic_obj = ThreadStateSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.pending_clarification == request
-    wire = pydantic_obj.model_dump(mode="json")["pending_clarification"]
-    assert wire == request.as_interrupt_payload()
-    # A text question carries no options at all, not an empty choice list.
-    assert wire["questions"][1]["options"] is None
-
-
-def test_agent_data_round_trip() -> None:
-    from ...api.schemas.snapshots import AgentSnapshot
-
-    data = AgentData(
-        thread_id="thread-1",
-        agent_id="agent-1",
-        node_name="supervisor",
-        state=AgentLifecycleState.IDLE,
-        provider=Provider.CLAUDE,
-        model_name="catalog-model",
-        role="manager",
-    )
-    pydantic_obj = AgentSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.agent_id == "agent-1"
-    # The descriptor is the wire model's only source, so an added field must
-    # survive the asdict projection rather than falling back to its default.
-    assert pydantic_obj.provider is Provider.CLAUDE
-    assert pydantic_obj.model_name == "catalog-model"
+# ---------------------------------------------------------------------------
+# build_agent_descriptor
+# ---------------------------------------------------------------------------
 
 
 def test_build_agent_descriptor_reads_provider_and_model_from_node_metadata() -> None:
@@ -376,38 +282,3 @@ def test_build_agent_descriptor_rejects_an_unrecognised_provider() -> None:
         thread_id="thread-1",
     )
     assert descriptor.provider is None
-
-
-def test_execution_task_data_round_trip() -> None:
-    from ...api.schemas.snapshots import ExecutionTaskSnapshot
-
-    data = ExecutionTaskData(
-        task_id="task-1",
-        name="supervisor",
-        path=["supervisor"],
-        has_error=False,
-    )
-    pydantic_obj = ExecutionTaskSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.task_id == "task-1"
-
-
-def test_thread_state_data_round_trip() -> None:
-    from ...api.schemas.snapshots import ThreadStateSnapshot
-
-    data = ThreadStateData(
-        thread_id="t1",
-        status="running",
-        last_sequence=42,
-        messages=[
-            MessageData(
-                message_id="m1",
-                role="user",
-                content="hi",
-                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
-            )
-        ],
-    )
-    pydantic_obj = ThreadStateSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.thread_id == "t1"
-    assert pydantic_obj.last_sequence == 42
-    assert len(pydantic_obj.messages) == 1

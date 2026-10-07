@@ -437,6 +437,13 @@ class TestListThreads:
         """Thread summaries must resolve pending approval from live durable rows."""
 
         async def _seed_live_plan_thread() -> None:
+            await checkpointer.setup()
+            await checkpointer.aput(
+                _checkpoint_config("thread-list-live-plan", ""),
+                await real_checkpoint(),
+                {"source": "loop", "step": 1, "parents": {}},
+                {},
+            )
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
@@ -471,6 +478,13 @@ class TestListThreads:
         """Thread summaries must not let stale rejected state hide live approval."""
 
         async def _seed_live_plan_thread() -> None:
+            await checkpointer.setup()
+            await checkpointer.aput(
+                _checkpoint_config("thread-list-rejected-live-plan", ""),
+                await real_checkpoint(),
+                {"source": "loop", "step": 1, "parents": {}},
+                {},
+            )
             async with session_factory() as session:
                 thread = await create_thread(
                     session,
@@ -859,7 +873,7 @@ class TestThreadState:
     def test_returns_snapshot_for_existing_thread(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Returns a ThreadStateSnapshot for a known thread."""
+        """Returns the run snapshot for a known thread."""
         app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:

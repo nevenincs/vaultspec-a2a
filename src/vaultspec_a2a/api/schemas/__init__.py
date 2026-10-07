@@ -1,39 +1,13 @@
 """Frontend-backend wire contract schema models.
 
-Facade re-exporting all public types from the ``vaultspec_a2a.api.schemas`` subpackage.
-Consumers should import from this module rather than reaching into
-sub-modules directly::
+Each model is imported from the module that declares it (``schemas.gateway``,
+``schemas.provider_catalog``); this package root re-exports nothing.
 
-    from vaultspec_a2a.api.schemas import ThreadStateSnapshot
-
-Only types this subpackage OWNS are re-exported. Domain types that these models
-merely carry as field types are not, however visible they are on the wire:
-``PlanEntry`` is serialized inside ``ThreadStateSnapshot`` yet belongs to
-``vaultspec_a2a.thread.models``, exactly as ``ThreadStatus``, ``ToolKind``, and
-``Provider`` do to their own modules. Re-exporting one here would give it a
-second declared home. Import them from theirs.
+The run read model is not declared here. Run-history serves the Layer-1
+dataclass ``vaultspec_a2a.thread.snapshots.ThreadStateData`` directly, so the
+snapshot has one declaration rather than a wire mirror. Domain types a wire
+model merely carries as field types, ``PlanEntry`` among them, belong to their
+own modules and are never given a second home here.
 """
 
-from .snapshots import ArtifactSnapshot as ArtifactSnapshot
-from .snapshots import ExecutionTaskSnapshot as ExecutionTaskSnapshot
-from .snapshots import MessageSnapshot as MessageSnapshot
-from .snapshots import ThreadStateSnapshot as ThreadStateSnapshot
-from .snapshots import ToolCallContent as ToolCallContent
-from .snapshots import ToolCallContentDiff as ToolCallContentDiff
-from .snapshots import ToolCallContentTerminal as ToolCallContentTerminal
-from .snapshots import ToolCallContentText as ToolCallContentText
-from .snapshots import ToolCallLocation as ToolCallLocation
-from .snapshots import ToolCallSnapshot as ToolCallSnapshot
-
-__all__ = [
-    "ArtifactSnapshot",
-    "ExecutionTaskSnapshot",
-    "MessageSnapshot",
-    "ThreadStateSnapshot",
-    "ToolCallContent",
-    "ToolCallContentDiff",
-    "ToolCallContentTerminal",
-    "ToolCallContentText",
-    "ToolCallLocation",
-    "ToolCallSnapshot",
-]
+__all__: list[str] = []

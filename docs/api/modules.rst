@@ -387,17 +387,17 @@ Persistence
 .. py:module:: vaultspec_a2a.database.migrations
    :synopsis: Database schema migrations.
 
-.. py:module:: vaultspec_a2a.database.artifact_repository
-   :synopsis: Artifact persistence operations.
-
 .. py:module:: vaultspec_a2a.database.authoring_cursor_repository
    :synopsis: Authoring cursor persistence operations.
 
 .. py:module:: vaultspec_a2a.database.control_action_repository
    :synopsis: Control-action journal, lease and continuation-queue persistence.
 
+.. py:module:: vaultspec_a2a.database.cost_repository
+   :synopsis: Cost tracking persistence operations.
+
 .. py:module:: vaultspec_a2a.database.permission_repository
-   :synopsis: Permission persistence operations.
+   :synopsis: Permission request and decision-log persistence operations.
 
 .. py:module:: vaultspec_a2a.database.thread_repository
    :synopsis: Thread persistence operations.

@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#workspace-root-authority'
 date: '2026-10-04'
-modified: '2026-10-06'
+modified: '2026-10-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:210de1a66d9dc48f3fb8285d2676f2056175404934b6bca04f8bd3b2d9e9c2a1'
+body_hash: 'sha256:8cce2d792b74ee7d16954d8f0b5a3bb6f8b217cde06cbc2b54e832a3ad02f02b'
 related:
   - "[[2026-10-04-workspace-root-authority-audit]]"
   - "[[2026-07-18-desktop-product-profile-adr]]"
@@ -51,3 +51,11 @@ Desktop health and lifecycle remain usable, but native agent runs are unavailabl
 ## Amendment: ACP terminal isolation, 2026-10-06
 
 The user's explicit instruction to fix the latest scan's two high findings authorizes closure of the unisolated ACP terminal route documented in 2026-10-06-security-cloud-remediation-audit. The earlier default-development exception continues for ordinary provider launch, but no longer permits ACP terminal/create without the session process's validated native launch authority bound to the configured project. A terminal capability declaration alone cannot grant host execution. Initialize advertises terminal support only when that authority exists and validates; create independently revalidates before acquisition. Missing, stale or mismatched authority refuses before child execution. General interpreters remain usable inside the existing isolated runtime, project and selected role-home grants. This adds no target eligibility and no new isolation backend. Output, wait, kill, release and cleanup for retained terminals remain available. The compatibility cost is explicit: unisolated development terminals are unavailable; they do not fall back to same-user execution.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+`2026-10-04-container-release-native-production-adr` retires the application Compose topology, so the Consequences clause "Development and Compose keep their existing execution contracts" names a retired half. Historical: the Compose half; no application container profile remains to keep an execution contract.
+
+Still binding: the Development half, unchanged in code. `native_execution_refusal_reason` (`control/provider_execution.py:8-23`) refuses native execution only `if settings.desktop_profile_armed`; every other profile - a checkout or development host - returns `None` and is not refused by this record's policy. `desktop_profile_armed` (`control/config.py:347-355`) is armed exactly when an explicit application home is configured, so an unarmed (development) host keeps exactly the execution contract this record describes, with no Compose-specific branch anywhere in that seam. The 2026-10-06 ACP terminal isolation amendment's own "default-development exception" is this same unarmed path and is unaffected.

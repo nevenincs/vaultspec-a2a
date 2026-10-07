@@ -4,7 +4,7 @@ tags:
   - '#codebase-health'
 date: '2026-07-24'
 modified: '2026-10-07'
-body_hash: 'sha256:88d459f2c0f17ab2b8f1ad708c1f6697beab6f73124ea89ea88cab5516f499a7'
+body_hash: 'sha256:267fc21c12a6bd13ec278be03592b57f5e3c460d37a32047f4edeb44fc8d486e'
 related:
   - '[[2026-07-19-codebase-health-audit]]'
   - '[[2026-07-19-codebase-health-plan]]'
@@ -128,3 +128,11 @@ Superseded Constraint: "The unarmed paths must remain byte-for-byte behavior-com
 The same narrowing applies to three more clauses: "unarmed it keeps the declared gateway-URL comparison" in Implementation, "dev/Compose keep working unchanged" in Considered options, and "Dev and Compose behavior is unchanged, so the lenient signal survives there" in Consequences. The gateway-URL comparison now runs only for a descendant occupant. A worker attached with `auto_spawn_worker=False` keeps its trust model, and the armed verdict logic is unchanged.
 
 "Compose-managed" is corrected to "registry-managed or externally attached". `2026-10-04-container-release-native-production-adr` retired application Compose, so no Compose-managed worker exists. The wording appears in Considered options, "Breaks every registry- and Compose-managed worker (all UNIDENTIFIED)", and in Considerations, "workers managed by the dev process registry or Compose". An externally attached worker is one a gateway attaches to with `auto_spawn_worker=False` (`src/vaultspec_a2a/control/infra_config.py:689`). `2026-10-07-codebase-remediation-process-introspection-adr` uses the same wording in its Constraints. In Consequences, the "Compose profile regression proof" named among the audit's remaining findings has no subject, because no Compose profile exists to regress.
+
+## Amendment (2026-10-07, correction): the unarmed descendant-ownership gate has not landed in `_worker_health.py`
+
+This corrects a factual claim in the reconciliation amendment above, not the decision. That amendment's first bullet states "This ends the unarmed foreign-orphan eviction (`src/vaultspec_a2a/control/_worker_health.py:626-680`)." Verified against the current integration code, it does not: `_shared_worker_port_clear` (`control/_worker_health.py:628-685`, called from the unarmed branch of `control/worker_management.py:109`) still evicts a worker-port occupant reporting a foreign `gateway_url` on a bare string match (`_same_gateway`, compared at `:647-656`, eviction at `:669`), and `worker_ready_and_ours`'s unarmed branch (`:532`) still adopts on the same declared match. Neither calls `classify_listener_ownership` (`utils/_process_tree.py:334`), which `2026-10-07-codebase-remediation-process-introspection-adr` names as the descendant-ownership gate for exactly this path; that function is wired only into the post-spawn readiness wait (`lifecycle/manager.py:787-791`), not into this pre-spawn occupant check. `_evict_stale_worker` (`:535-560`) still sends the worker-IPC bearer through `_internal_auth_headers()` (`:558`) to that unverified occupant before any ownership check - the credential leak the process-introspection ADR's Considerations names as still open at these same lines.
+
+This is also the resolution of this record's apparent tension with `2026-07-19-codebase-health-adr`'s own 2026-10-07 reconciliation, which cites the same code region and says only that unarmed adoption and eviction "are not ruled here" - the more accurate statement of the two. No contradiction exists in the two records' substance: both correctly historicize the Compose references in their own text, and neither's core decision (the authenticated pairing verdict governing armed adoption) conflicts with the other.
+
+Decision authority is unaffected: `2026-10-07-codebase-remediation-process-introspection-adr`'s decision to narrow the unarmed path stands, and acceptance of a decision is not proof of its rollout. This note records that the rollout for this specific clause had not landed as of this curation pass, so a reader must not treat the superseded-constraint bullet above as a description of current behavior until `control/_worker_health.py`'s unarmed path is verified to call the ownership gate.

@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#workspace-root-authority'
 date: '2026-10-04'
-modified: '2026-10-04'
+modified: '2026-10-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:67cf20ebec272ac1bbce385e6e5e75a9cb5515149c03bcc9c99092e6a285ab6a'
+body_hash: 'sha256:108466715de5f37bd3a70735d52f6980010b41064c2781165e786bb6817df334'
 related:
   - "[[2026-10-04-workspace-root-authority-audit]]"
   - "[[2026-09-21-workspace-root-authority-compose-provider-boundary-adr]]"
@@ -45,3 +45,14 @@ The existing lifecycle-derived root closes the reported delegation error without
 ## Consequences
 
 Desktop clients that supplied arbitrary project paths must place their projects within application-home `workspaces/`; links to outside projects do not grant authority. A future external-project capability needs its own decision. Accepted 2026-10-04 under the user's explicit request to fix the supplied finding, whose remediation authorizes an explicit desktop workspace allowlist. This authorizes implementation but does not imply verification has completed.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+`2026-10-04-container-release-native-production-adr` retires the application Compose topology, and `2026-09-21-workspace-root-authority-compose-provider-boundary-adr`'s own 2026-10-07 reconciliation amendment records that Compose provider execution, the subject it continued to govern, is itself retired. Two clauses of this record name that now-historical subject and are historical in turn:
+
+- Constraints, "Existing configured Compose containment and unconfigured development behavior remain compatible." No Compose profile remains to be compatible with; unconfigured development behavior is unaffected.
+- Constraints, "This decision replaces only the unrestricted desktop-project exception in `2026-09-21-workspace-root-authority-compose-provider-boundary-adr`; that record continues to govern Compose process isolation." The referent's Compose process isolation is retired; what continues to bind from that cross-reference is the non-Compose workspace-admission boundary the 09-21 record's own reconciliation names (`control/workspace.py:56-84`), which is this record's own subject and is unaffected by the historicization.
+
+Still binding and unchanged: this record's own Implementation and Constraints otherwise stand. The desktop allowlist is derived from the application's lifecycle-derived `workspaces/` tree (`control/workspace.py:49-62,65-86`; the desktop boundary is armed by `settings.desktop_app_home`), and `2026-10-04-workspace-root-authority-desktop-native-admission-adr` governs native execution separately, as this record's Constraints already state.

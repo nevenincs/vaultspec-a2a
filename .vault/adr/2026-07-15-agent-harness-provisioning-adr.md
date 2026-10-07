@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#agent-harness-provisioning'
 date: '2026-07-15'
-modified: '2026-10-01'
-body_hash: 'sha256:111002be584a9db1ec9afae94d4d34b5543f1f27ce37c69dbd5084bee1f5988f'
+modified: '2026-10-07'
+body_hash: 'sha256:6d89091ff9b1ac5372c5175877dcb61ee08c5da0461f75ca6197483b18210850'
 related:
   - '[[2026-07-14-adr-authoring-orchestration-adr]]'
   - '[[2026-07-15-model-profiles-adr]]'
@@ -201,3 +201,13 @@ never offered is refused rather than substituted. The approval-shape decision th
 deferred is made in `2026-10-01-tool-permission-model-adr`, which also keeps the deleted
 projection channel closed: per-tool approval is enforced by withholding a rule from
 pre-approval, never by re-admitting a CLI setting source.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+`2026-10-04-container-release-native-production-adr` retires the application Compose topology, and `2026-10-01-provider-binary-policy-adr`'s own 2026-10-07 reconciliation amendment already names this record's wording as sharing its historical referent and leaves this record to own its reconciliation. This section does that.
+
+Historical: the "Amendment - provider-binary-policy (2026-10-01)" paragraph above, "the image-pinned binary under Compose", names a retired profile. No image installs a Claude CLI; no application Dockerfile remains under `service/docker/`.
+
+Still binding, the same one-seam resolution the superseded clause described, verified in the current resolver: `pin_claude_executable` (`providers/cli_resolution.py:167-209`) tries, in order, a capsule asset under an armed desktop capsule (`:174-176`), the explicit `claude_cli_executable` setting (`:177-179`), the inherited `CLAUDE_CODE_EXECUTABLE` child-environment value (`:180-182`), the service's own installed CLI resolved off this process's PATH (`:183-185`), and the lock-vendored binary under the install root as the explicit last resort (`:186-190`). The paragraph's final sentence, "The version in force is recorded per run, not fixed by this record," is unaffected and stays binding.

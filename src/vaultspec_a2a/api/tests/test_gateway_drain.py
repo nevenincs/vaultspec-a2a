@@ -25,7 +25,8 @@ from sqlalchemy.ext.asyncio import (
 
 from ...control.drain import DrainGate
 from ...database import get_control_action_by_dispatch_id, get_thread
-from ...testing import async_catalog_run_fields, serve_on_loopback
+from ...testing import serve_on_loopback
+from ...testing.gateway_verbs import async_run_start_body
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
@@ -60,21 +61,19 @@ _RUN_SEQ = itertools.count(1)
 
 async def _run_body(
     client: httpx.AsyncClient, *, run_id: str | None = None
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """One run-start body, carrying the selection run-start now requires.
 
     Takes an explicit *run_id* where a caller posts twice on purpose - a replay
     must send the SAME id and the same body to be a replay at all - and mints a
     fresh one otherwise, so two unrelated tests never collide on one run.
     """
-    return {
-        "team_preset": _PRESET,
-        "message": "build it",
-        "autonomous": True,
-        "actor_tokens": {"tokens": {"coder": "tok-coder"}, "engine_bearer": "bearer"},
-        "run_id": run_id or f"drain-{next(_RUN_SEQ):02d}",
-        **await async_catalog_run_fields(client),
-    }
+    return await async_run_start_body(
+        client,
+        run_id or f"drain-{next(_RUN_SEQ):02d}",
+        team_preset=_PRESET,
+        tokens={"coder": "tok-coder"},
+    )
 
 
 def _terminal_envelope(run_id: str, status: str = "completed") -> dict[str, Any]:

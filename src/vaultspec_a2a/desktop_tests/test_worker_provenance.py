@@ -32,11 +32,9 @@ import httpx
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     FOREIGN_WORKER_PROGRAM,
-    RunVerbs,
     armed_gateway_env,
     await_gateway_ready,
     booted_gateway,
-    desktop_workspace,
     foreign_worker,
     reap_process,
     reap_tree,
@@ -46,6 +44,7 @@ from ..testing import (
     unvalidated_selection,
     worker_lifecycle_gateway_script,
 )
+from ..testing.gateway_verbs import gateway_run_verbs
 from ..testing.ports import free_port
 from ..utils._process_tree import pid_is_live
 
@@ -89,11 +88,9 @@ def _worker_ready(base: str, auth: str) -> bool:
 
 
 def _prepare(base: str, auth: str, run_id: str) -> tuple[int, dict[str, Any]]:
-    verbs = RunVerbs(
-        base_url=base,
+    verbs = gateway_run_verbs(
+        base,
         authorization=auth,
-        team_preset="mock-success-single",
-        workspace_root=desktop_workspace(base),
         # Desktop execution is refused before run start reads the catalog, so a
         # well-formed selection is all the request needs.
         selection=lambda _workspace: unvalidated_selection(),

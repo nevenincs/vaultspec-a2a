@@ -1554,6 +1554,13 @@ def _install_gated_graph(executor: Executor, request: DispatchRequest) -> None:
     executor.register_compiled_graph(request.thread_id, cache_key, graph)
 
 
+# The tokens both settle paths hold until their terminal lands. The bundle is
+# frozen, so the ingest and resume proofs share one value.
+_SETTLE_TOKENS = ActorTokenBundle(
+    tokens={"vaultspec-synthesist": "settle-token"}, engine_bearer="settle-bearer"
+)
+
+
 class TestSettleOrdering:
     """The settle epilogue keeps its load-bearing order on both dispatch paths.
 
@@ -1641,12 +1648,7 @@ class TestSettleOrdering:
             holder["executor"] = executor
             try:
                 req = _current_ingest_dispatch(thread_id).model_copy(
-                    update={
-                        "actor_tokens": ActorTokenBundle(
-                            tokens={"vaultspec-synthesist": "settle-token"},
-                            engine_bearer="settle-bearer",
-                        )
-                    }
+                    update={"actor_tokens": _SETTLE_TOKENS}
                 )
                 _install_completing_graph(executor, req)
                 await executor.handle_dispatch(req)
@@ -1686,12 +1688,8 @@ class TestSettleOrdering:
             executor = Executor(checkpointer=cp, bridge=bridge)
             holder["executor"] = executor
             try:
-                bundle = ActorTokenBundle(
-                    tokens={"vaultspec-synthesist": "settle-token"},
-                    engine_bearer="settle-bearer",
-                )
                 ingest = _current_ingest_dispatch(thread_id).model_copy(
-                    update={"actor_tokens": bundle}
+                    update={"actor_tokens": _SETTLE_TOKENS}
                 )
                 _install_gated_graph(executor, ingest)
                 await executor.handle_dispatch(ingest)

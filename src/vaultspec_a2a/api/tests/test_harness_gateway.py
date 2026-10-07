@@ -23,6 +23,7 @@ import pytest
 from ...cli.provision import provision_workspace
 from ...team.team_config import load_team_config
 from ...testing import async_catalog_run_fields, serve_on_loopback
+from ...testing.gateway_verbs import actor_tokens_body, role_tokens
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
@@ -53,12 +54,9 @@ def _require_core(external_prerequisite: ExternalPrerequisiteRule) -> None:
     external_prerequisite("vaultspec-core")
 
 
-def _full_bundle() -> dict[str, Any]:
+def _full_bundle() -> dict[str, object]:
     """A complete per-role actor-token bundle so only the harness can refuse."""
-    return {
-        "tokens": {role: f"tok-{role}" for role in _authoring_roles()},
-        "engine_bearer": "bearer",
-    }
+    return actor_tokens_body(role_tokens(_authoring_roles()))
 
 
 async def _run_start_body(

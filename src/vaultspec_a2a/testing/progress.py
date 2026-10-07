@@ -20,6 +20,7 @@ last-resort guard against test code that stops polling entirely.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -34,7 +35,7 @@ from ..lifecycle import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Awaitable, Callable, Sequence
     from pathlib import Path
 
 __all__ = [
@@ -44,6 +45,7 @@ __all__ = [
     "ResourceDiedError",
     "registry_watch",
     "wait_for",
+    "wait_for_async",
 ]
 
 
@@ -165,10 +167,41 @@ def wait_for[T](
         result = poll()
         if result is not None:
             return result
-        if fingerprint is not None:
-            current = fingerprint()
-            if current != last_print:
-                last_print = current
-                deadline.touch()
-        deadline.check()
+        last_print = _observe(deadline, fingerprint, last_print)
         time.sleep(interval_s)
+
+
+async def wait_for_async[T](
+    poll: Callable[[], Awaitable[T | None]],
+    *,
+    deadline: ProgressDeadline,
+    fingerprint: Callable[[], object] | None = None,
+    interval_s: float = 0.5,
+) -> T:
+    """Await *poll* until it returns a value; the coroutine twin of :func:`wait_for`.
+
+    Progress, the idle window and the liveness watches mean exactly what they
+    mean there; only the poll and the sleep between polls are awaited.
+    """
+    last_print: object = object()
+    while True:
+        result = await poll()
+        if result is not None:
+            return result
+        last_print = _observe(deadline, fingerprint, last_print)
+        await asyncio.sleep(interval_s)
+
+
+def _observe(
+    deadline: ProgressDeadline,
+    fingerprint: Callable[[], object] | None,
+    last_print: object,
+) -> object:
+    """Touch *deadline* on a changed fingerprint, check it, and return the print."""
+    if fingerprint is not None:
+        current = fingerprint()
+        if current != last_print:
+            last_print = current
+            deadline.touch()
+    deadline.check()
+    return last_print

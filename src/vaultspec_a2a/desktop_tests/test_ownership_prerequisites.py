@@ -62,18 +62,16 @@ from ..lifecycle.singleton import (
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     DEFAULT_OWNERSHIP_CAPABILITY,
-    RunVerbs,
     armed_gateway_env,
     booted_gateway,
     broker_gateway_env,
-    desktop_workspace,
-    fetch_in_process_selection_at,
     reap_process,
     run_cli,
     seat_app_home,
     spawn_logged,
     status_and_json,
 )
+from ..testing.gateway_verbs import gateway_run_verbs
 from ..testing.ports import free_port
 
 if TYPE_CHECKING:
@@ -81,8 +79,6 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
-_PRESET = "mock-success-single"
-_AUTH = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
 # Raised by the runtime singleton when a second gateway contends one home.
 _CONFLICT_REFUSAL = "refusing to start a second gateway on one application home"
 
@@ -126,20 +122,7 @@ def _worker_ipc_secret(app_home: Path) -> str:
 
 def _prepare(base: str, run_id: str) -> tuple[int, dict[str, Any]]:
     """Drive one authenticated prepare, which spawns the gateway-owned worker."""
-    verbs = RunVerbs(
-        base_url=base,
-        authorization=_AUTH,
-        team_preset=_PRESET,
-        workspace_root=desktop_workspace(base),
-        selection=lambda workspace: fetch_in_process_selection_at(
-            base,
-            workspace,
-            headers={"Authorization": _AUTH},
-            prefer_provider_id="mock",
-            cache=True,
-        ),
-    )
-    return status_and_json(verbs.prepare(run_id))
+    return status_and_json(gateway_run_verbs(base).prepare(run_id))
 
 
 def _spawn_stray_worker(

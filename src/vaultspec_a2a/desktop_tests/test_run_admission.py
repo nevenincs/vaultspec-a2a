@@ -39,15 +39,16 @@ import httpx
 
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
-    LOOPBACK_TIMEOUT,
-    RunVerbs,
     booted_gateway,
     broker_gateway_env,
-    desktop_workspace,
-    fetch_in_process_selection_at,
     gateway_script,
     seat_app_home,
     status_and_json,
+)
+from ..testing.gateway_verbs import (
+    DEFAULT_REQUIRED_ROLE,
+    GatewayVerbs,
+    gateway_run_verbs,
 )
 from ..testing.progress import ProgressDeadline, wait_for
 
@@ -55,8 +56,8 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
-_PRESET = "mock-success-single"
-_REQUIRED_ROLE = "mock-coder-success"
+    from ..testing import RunVerbs
+
 _SPAWN_LINE = "Auto-spawning worker on port"
 
 
@@ -82,21 +83,8 @@ def _running_gateway(
         script=gateway_script(log_level="info"),
         detached=True,
     ) as gateway:
-        base = gateway.base_url
-        auth = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
-        yield RunVerbs(
-            base_url=base,
-            authorization=auth,
-            team_preset=_PRESET,
-            workspace_root=desktop_workspace(base),
-            selection=lambda workspace: fetch_in_process_selection_at(
-                base,
-                workspace,
-                headers={"Authorization": auth},
-                prefer_provider_id="mock",
-                cache=True,
-            ),
-            tokens={_REQUIRED_ROLE: "tok-coder"},
+        yield gateway_run_verbs(
+            gateway.base_url, tokens={DEFAULT_REQUIRED_ROLE: "tok-coder"}
         )
 
 
@@ -135,23 +123,23 @@ def _admitted_prepare(verbs: RunVerbs, run_id: str) -> int | None:
     return status if status != 503 else None
 
 
+def _reads(verbs: RunVerbs) -> GatewayVerbs:
+    """The run reads of the gateway *verbs* starts runs on, under its credential."""
+    return GatewayVerbs(base_url=verbs.base_url, authorization=verbs.authorization)
+
+
 def _run_exists(verbs: RunVerbs, run_id: str) -> bool:
     """Return whether the gateway has a durable run under *run_id*.
 
     Uses run-status, which returns a run whether it is still active or already
     terminal - robust against a fast mock run completing before the check.
     """
-    with httpx.Client(base_url=verbs.base_url, timeout=LOOPBACK_TIMEOUT) as client:
-        resp = client.get(
-            f"/v1/runs/{run_id}", headers={"Authorization": verbs.authorization}
-        )
-    return resp.status_code == 200
+    return _reads(verbs).status(run_id).status_code == 200
 
 
 def _active_run_count(verbs: RunVerbs) -> int:
     """Return the number of active (non-terminal) runs the gateway discovers."""
-    with httpx.Client(base_url=verbs.base_url, timeout=LOOPBACK_TIMEOUT) as client:
-        resp = client.get("/v1/runs", headers={"Authorization": verbs.authorization})
+    resp = _reads(verbs).active_runs()
     assert resp.status_code == 200, resp.text
     return len(resp.json()["runs"])
 
@@ -206,7 +194,7 @@ def test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound(
             # no run identity and no token - it creates no durable run. The
             # lease is non-secret coordination metadata bound before commit.
             assert body["stage"] == "prepared"
-            assert body["required_roles"] == [_REQUIRED_ROLE]
+            assert body["required_roles"] == [DEFAULT_REQUIRED_ROLE]
             assert "run_id" not in body
             assert "actor_tokens" not in body
             assert body["lease_id"].startswith("lease-")
@@ -303,7 +291,7 @@ def _prepare_exact_reservation(verbs: RunVerbs) -> tuple[str, str]:
     extra = verbs.commit(
         run_id,
         reservation_id,
-        tokens={_REQUIRED_ROLE: "tok-coder", "unexpected-role": "tok-extra"},
+        tokens={DEFAULT_REQUIRED_ROLE: "tok-coder", "unexpected-role": "tok-extra"},
     )
     assert extra.status_code == 409
     assert _active_run_count(verbs) == 0
@@ -325,10 +313,7 @@ def _assert_exact_replay_and_release(
     assert len({body["run_id"] for body in bodies}) == 1
     assert len({body["lease_id"] for body in bodies}) == 1
 
-    with httpx.Client(base_url=verbs.base_url, timeout=LOOPBACK_TIMEOUT) as client:
-        response = client.get(
-            f"/v1/runs/{run_id}", headers={"Authorization": verbs.authorization}
-        )
+    response = _reads(verbs).status(run_id)
     assert response.status_code == 200, response.text
     assert response.json()["lease_id"] == bodies[0]["lease_id"]
     assert response.json()["reservation_id"] == reservation_id
@@ -451,10 +436,7 @@ def test_gateway_restart_recovers_durable_lease_and_exact_commit_replay(
         lease_id = committed["lease_id"]
 
     with _running_gateway(tmp_path, app_home, log_name="gateway-second.log") as verbs:
-        with httpx.Client(base_url=verbs.base_url, timeout=LOOPBACK_TIMEOUT) as client:
-            status_response = client.get(
-                f"/v1/runs/{run_id}", headers={"Authorization": verbs.authorization}
-            )
+        status_response = _reads(verbs).status(run_id)
         assert status_response.status_code == 200, status_response.text
         assert status_response.json()["lease_id"] == lease_id
 

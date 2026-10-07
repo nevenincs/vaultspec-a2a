@@ -33,20 +33,17 @@ import httpx
 
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
-    RunVerbs,
     booted_gateway,
     broker_gateway_env,
-    desktop_workspace,
-    fetch_in_process_selection_at,
     gateway_script,
     seat_app_home,
 )
+from ..testing.gateway_verbs import gateway_run_verbs
 from ..utils._process_tree import port_has_listener
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PRESET = "mock-success-single"
 _SPAWN_LINE = "Auto-spawning worker on port"
 
 
@@ -94,23 +91,14 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
         # --- Concurrent first demand: exactly one real worker. ---
         # Resolve the catalog once before the race. Parallel catalog refreshes
         # would add an unrelated cold-start load to this worker-spawn proof.
-        selection: dict[str, object] = fetch_in_process_selection_at(
+        verbs = gateway_run_verbs(
             base,
-            desktop_workspace(base),
-            headers=auth,
-            prefer_provider_id="mock",
-            cache=True,
-        )
-        assert _worker_state(base, auth) == "cold"
-        assert _SPAWN_LINE not in log_path.read_text(encoding="utf-8", errors="replace")
-        verbs = RunVerbs(
-            base_url=base,
             authorization=auth["Authorization"],
-            team_preset=_PRESET,
-            workspace_root=desktop_workspace(base),
-            selection=lambda _workspace: selection,
             tokens={"coder": "tok-coder"},
         )
+        verbs.selection(verbs.workspace_root)
+        assert _worker_state(base, auth) == "cold"
+        assert _SPAWN_LINE not in log_path.read_text(encoding="utf-8", errors="replace")
 
         # Four real, parallel, authenticated run-starts race into the single-flight
         # worker start. Each blocks until the worker is ready, so all resolve 201.

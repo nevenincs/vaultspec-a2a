@@ -43,6 +43,12 @@ from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
 from ...testing import async_catalog_run_fields, read_frame, serve_on_loopback
 from ...testing.catalog_authority import current_execution_metadata
+from ...testing.gateway_verbs import actor_tokens_body, async_run_start_body
+from ...testing.progress import (
+    ProgressDeadline,
+    ProgressStalledError,
+    wait_for_async,
+)
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionType, ThreadStatus
@@ -604,18 +610,25 @@ async def _await_probe_backed_ready(
     last-resort give-up bound, not the proof: a stack that is genuinely not ready
     never satisfies *is_ready* and fails with its last body attached.
     """
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + idle_window_s
     body: JsonObject = {}
-    while True:
+
+    async def _ready() -> JsonObject | None:
+        nonlocal body
         response = await client.get(path)
         assert response.status_code == 200, response.text
         body = response.json()
-        if is_ready(body):
-            return body
-        if loop.time() >= deadline:
-            raise AssertionError(f"{what} never became probe-ready; last: {body}")
-        await asyncio.sleep(0.1)
+        return body if is_ready(body) else None
+
+    try:
+        return await wait_for_async(
+            _ready,
+            deadline=ProgressDeadline(idle_window_s=idle_window_s),
+            interval_s=0.1,
+        )
+    except ProgressStalledError as stalled:
+        raise AssertionError(
+            f"{what} never became probe-ready; last: {body}"
+        ) from stalled
 
 
 def _health_worker_status(body: JsonObject) -> object:
@@ -641,13 +654,18 @@ async def _wait_until(
     predicate: Callable[[], bool], *, what: str, timeout: float = 10.0
 ) -> None:
     """Poll *predicate* until true, failing the test rather than racing on."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while loop.time() < deadline:
-        if predicate():
-            return
-        await asyncio.sleep(0.005)
-    raise AssertionError(f"timed out waiting for {what}")
+
+    async def _satisfied() -> bool | None:
+        return True if predicate() else None
+
+    try:
+        await wait_for_async(
+            _satisfied,
+            deadline=ProgressDeadline(idle_window_s=timeout),
+            interval_s=0.005,
+        )
+    except ProgressStalledError as stalled:
+        raise AssertionError(f"timed out waiting for {what}") from stalled
 
 
 async def _run_same_id_insert_race(
@@ -697,17 +715,9 @@ async def _exercise_five_verbs(
 
     start = await client.post(
         "/v1/runs",
-        json={
-            "run_id": "gwlive-06",
-            "team_preset": _PRESET,
-            "message": "build it",
-            "autonomous": True,
-            "actor_tokens": {
-                "tokens": {"coder": "tok-coder"},
-                "engine_bearer": "bearer",
-            },
-            **await async_catalog_run_fields(client),
-        },
+        json=await async_run_start_body(
+            client, "gwlive-06", team_preset=_PRESET, tokens={"coder": "tok-coder"}
+        ),
     )
     assert start.status_code == 201
     stbody = start.json()
@@ -1436,10 +1446,7 @@ async def test_run_start_refusals_over_live_socket(
                 "team_preset": "vaultspec-adr-research",
                 "message": "research it",
                 "feature_tag": "edge-feature",
-                "actor_tokens": {
-                    "tokens": {"vaultspec-researcher": "tok-r"},
-                    "engine_bearer": "bearer",
-                },
+                "actor_tokens": actor_tokens_body({"vaultspec-researcher": "tok-r"}),
                 **await async_catalog_run_fields(client),
             },
         )
@@ -1606,11 +1613,11 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
 
         # Wait for the SSE handler to register its subscriber, then emit an
         # event into the same aggregator the live server is serving from.
-        for _ in range(200):
-            if agg.subscriber_count() > 0:
-                break
-            await asyncio.sleep(0.01)
-        assert agg.subscriber_count() > 0, "SSE subscriber never registered"
+        await _wait_until(
+            lambda: agg.subscriber_count() > 0,
+            what="the SSE subscriber to register",
+            timeout=2.0,
+        )
 
         agg.relay_payload(
             run_id,
@@ -1668,11 +1675,11 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
     ):
         assert resp.status_code == 200
         lines = resp.aiter_lines()
-        for _ in range(200):
-            if agg.subscriber_count() > 0:
-                break
-            await asyncio.sleep(0.01)
-        assert agg.subscriber_count() > 0
+        await _wait_until(
+            lambda: agg.subscriber_count() > 0,
+            what="the SSE subscriber to register",
+            timeout=2.0,
+        )
 
         # A progress frame naming a research_adr node is stamped with the phase.
         agg.relay_payload(
@@ -1764,11 +1771,11 @@ async def test_run_stream_verb_reserves_versioned_frames(
         assert resp.headers["content-type"].startswith("text/event-stream")
         lines = resp.aiter_lines()
 
-        for _ in range(200):
-            if agg.subscriber_count() > 0:
-                break
-            await asyncio.sleep(0.01)
-        assert agg.subscriber_count() > 0, "run-stream subscriber never registered"
+        await _wait_until(
+            lambda: agg.subscriber_count() > 0,
+            what="the run-stream subscriber to register",
+            timeout=2.0,
+        )
 
         agg.relay_payload(
             run_id,
@@ -1976,10 +1983,9 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
             "team_preset": _PRESET,
             "message": "go",
             "run_id": "rid-body-conflict",
-            "actor_tokens": {
-                "tokens": {"coder": "tok-minted"},
-                "engine_bearer": "bearer-minted",
-            },
+            "actor_tokens": actor_tokens_body(
+                {"coder": "tok-minted"}, engine_bearer="bearer-minted"
+            ),
         }
         first = await client.post(
             "/v1/runs",
@@ -1992,10 +1998,9 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
             "/v1/runs",
             json={
                 **payload,
-                "actor_tokens": {
-                    "tokens": {"coder": "tok-rotated"},
-                    "engine_bearer": "bearer-rotated",
-                },
+                "actor_tokens": actor_tokens_body(
+                    {"coder": "tok-rotated"}, engine_bearer="bearer-rotated"
+                ),
                 **await async_catalog_run_fields(client),
             },
         )
@@ -2009,10 +2014,9 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
             json={
                 **payload,
                 "message": "a different intention",
-                "actor_tokens": {
-                    "tokens": {"coder": "tok-rotated"},
-                    "engine_bearer": "bearer-rotated",
-                },
+                "actor_tokens": actor_tokens_body(
+                    {"coder": "tok-rotated"}, engine_bearer="bearer-rotated"
+                ),
                 **await async_catalog_run_fields(client),
             },
         )

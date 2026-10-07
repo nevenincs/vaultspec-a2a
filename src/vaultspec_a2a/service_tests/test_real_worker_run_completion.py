@@ -53,7 +53,6 @@ from typing import TYPE_CHECKING
 
 from ..acceptance.tests._harness import certified_gateway
 from ..team import load_team_config
-from ..testing import ok_body, wait_for_run_status
 from ..testing.lanes import UNATTENDED_REPLY
 from ..testing.payloads import json_object, json_object_list
 
@@ -98,11 +97,7 @@ def test_real_worker_run_reaches_terminal_state_with_scripted_content(
         started = verbs.start(run_id, message="Complete the task and stop.")
         assert started.status_code == 201, started.text
 
-        snapshot = wait_for_run_status(
-            lambda: ok_body(gateway.status(run_id)),
-            timeout=180.0,
-            label=f"run {run_id}",
-        )
+        snapshot = gateway.wait_for_status(run_id, timeout=180.0)
         assert snapshot.get("status") == "completed", snapshot
 
         history = gateway.thread_state(run_id)

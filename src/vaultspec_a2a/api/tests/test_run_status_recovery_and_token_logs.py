@@ -41,6 +41,7 @@ from ...testing import (
     serve_on_loopback,
 )
 from ...testing.catalog_authority import current_execution_metadata
+from ...testing.gateway_verbs import actor_tokens_body
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import (
     GraphActionReceipt,
@@ -342,10 +343,9 @@ async def test_run_start_carries_no_token_into_logs(
 ) -> None:
     """No actor token appears in captured logs across a dispatched run-start."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
-    bundle = {
-        "tokens": {"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
-        "engine_bearer": _BEARER,
-    }
+    bundle = actor_tokens_body(
+        {"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN}, engine_bearer=_BEARER
+    )
     async with (
         serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base) as client,

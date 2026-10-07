@@ -735,7 +735,7 @@ class ServiceStack:
         resp = verbs.start(
             run_id,
             message=initial_message,
-            metadata={**(metadata or {}), "workspace_root": workspace_root},
+            metadata=metadata,
             title=title,
             autonomous=autonomous,
         )

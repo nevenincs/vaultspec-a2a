@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...testing import ok_body, read_frame, wait_for_run_status
+from ...testing import read_frame
 from ...thread.enums import TERMINAL_STATUS_VALUES
 
 if TYPE_CHECKING:
@@ -60,9 +60,7 @@ async def test_terminal_replay_is_idempotent_across_reconnects_and_reconciles(
     run_id = "run-stream-terminal"
     started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
-    authoritative = wait_for_run_status(
-        lambda: ok_body(gateway.status(run_id)), label=f"run {run_id}"
-    )
+    authoritative = gateway.wait_for_status(run_id)
 
     statuses: list[str] = []
     for _ in range(2):

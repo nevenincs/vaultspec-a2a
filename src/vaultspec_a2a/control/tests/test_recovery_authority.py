@@ -9,12 +9,12 @@ import pytest
 import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ...conftest import SqlitePosture
 from ...database import create_control_action, create_thread, get_thread
-from ...database.models import Base, RunWriteAuthority
+from ...database.models import RunWriteAuthority
 from ...database.reconciliation import reconcile_threads_on_startup
-from ...database.session import configure_sqlite_transactions
 from ...graph.compiler import CompiledTeamGraph, _add_node, _compile_graph
 from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
@@ -41,7 +41,6 @@ from ..recovery_authority import (
 from ..run_discovery_service import discover_active_runs
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
@@ -51,16 +50,17 @@ DurableRun = tuple[
 ]
 
 
+pytestmark = pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS)
+
+
 @pytest_asyncio.fixture
 async def durable_run(
-    tmp_path: Path, request: pytest.FixtureRequest
-) -> AsyncIterator[DurableRun]:
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'runs.db'}")
-    configure_sqlite_transactions(engine)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
-    async with sessions() as db:
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> DurableRun:
+    async with session_factory() as db:
         await create_thread(
             db,
             thread_id="run",
@@ -99,9 +99,7 @@ async def durable_run(
         )
         assert receipt is not None
         await db.commit()
-    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "graph.db")) as saver:
-        yield sessions, saver, receipt
-    await engine.dispose()
+    return session_factory, checkpointer, receipt
 
 
 @pytest.mark.asyncio

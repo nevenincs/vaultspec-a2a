@@ -17,14 +17,10 @@ production path rather than a hand-set snapshot field.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...conftest import materialize_schema
 from ...control.thread_state_service import capture_thread_state
 from ...database import create_thread
 from ...streaming.aggregator import EventAggregator
@@ -34,15 +30,10 @@ from ...thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...thread.snapshots import ThreadStateData
-
-
-@pytest.fixture
-def _case_dirs(tmp_path: Path) -> tuple[Path, Path]:
-    case_dir = tmp_path / "authoring-completion-check"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    return case_dir / "test.db", case_dir / "checkpoints.db"
 
 
 async def _snapshot(
@@ -106,7 +97,8 @@ async def _seed_completed_thread(
 
 @pytest.mark.asyncio
 async def test_a_completed_doc_editor_run_with_no_artifact_is_flagged(
-    _case_dirs: tuple[Path, Path],
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The reported gap: completed, healthy, and produced nothing - now caught.
 
@@ -115,32 +107,24 @@ async def test_a_completed_doc_editor_run_with_no_artifact_is_flagged(
     ``authoring_proposal_ids`` / ``authoring_changeset_ids`` at all, so this
     snapshot reported ``degraded_reasons: []`` for a run that produced nothing.
     """
-    db_file, checkpoints_file = _case_dirs
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
+    await _seed_completed_thread(
+        session_factory,
+        checkpointer,
+        _ThreadSeed(
+            thread_id="doc-editor-empty",
+            team_preset="vaultspec-doc-editor",
+            proposal_ids=[],
+            changeset_ids=[],
+        ),
     )
 
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await _seed_completed_thread(
-            session_factory,
-            checkpointer,
-            _ThreadSeed(
-                thread_id="doc-editor-empty",
-                team_preset="vaultspec-doc-editor",
-                proposal_ids=[],
-                changeset_ids=[],
-            ),
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="doc-editor-empty",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
         )
-
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="doc-editor-empty",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
 
     assert snapshot is not None
     assert snapshot.status == ThreadStatus.COMPLETED.value
@@ -149,12 +133,11 @@ async def test_a_completed_doc_editor_run_with_no_artifact_is_flagged(
     assert "authoring_run_produced_no_proposal" in snapshot.degraded_reasons
     assert snapshot.snapshot_complete is False
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_a_completed_doc_editor_run_that_did_propose_is_not_flagged(
-    _case_dirs: tuple[Path, Path],
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Companion negative: a real proposal id must clear the new gate.
 
@@ -162,32 +145,24 @@ async def test_a_completed_doc_editor_run_that_did_propose_is_not_flagged(
     run would also pass the test above - this pins the condition to actual
     emptiness of the checkpointed id lists.
     """
-    db_file, checkpoints_file = _case_dirs
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
+    await _seed_completed_thread(
+        session_factory,
+        checkpointer,
+        _ThreadSeed(
+            thread_id="doc-editor-proposed",
+            team_preset="vaultspec-doc-editor",
+            proposal_ids=["prop-1"],
+            changeset_ids=[],
+        ),
     )
 
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await _seed_completed_thread(
-            session_factory,
-            checkpointer,
-            _ThreadSeed(
-                thread_id="doc-editor-proposed",
-                team_preset="vaultspec-doc-editor",
-                proposal_ids=["prop-1"],
-                changeset_ids=[],
-            ),
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="doc-editor-proposed",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
         )
-
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="doc-editor-proposed",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
 
     assert snapshot is not None
     assert snapshot.status == ThreadStatus.COMPLETED.value
@@ -196,7 +171,8 @@ async def test_a_completed_doc_editor_run_that_did_propose_is_not_flagged(
 
 @pytest.mark.asyncio
 async def test_a_completed_coder_run_with_no_authoring_ids_is_not_flagged(
-    _case_dirs: tuple[Path, Path],
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A coding preset never produces a document proposal; it must not be flagged.
 
@@ -206,73 +182,54 @@ async def test_a_completed_coder_run_with_no_authoring_ids_is_not_flagged(
     harness flag - a topology- or harness-only predicate would misclassify
     this preset as well.
     """
-    db_file, checkpoints_file = _case_dirs
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
+    await _seed_completed_thread(
+        session_factory,
+        checkpointer,
+        _ThreadSeed(
+            thread_id="coder-empty",
+            team_preset="vaultspec-solo-coder",
+            proposal_ids=[],
+            changeset_ids=[],
+        ),
     )
 
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await _seed_completed_thread(
-            session_factory,
-            checkpointer,
-            _ThreadSeed(
-                thread_id="coder-empty",
-                team_preset="vaultspec-solo-coder",
-                proposal_ids=[],
-                changeset_ids=[],
-            ),
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="coder-empty",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
         )
-
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="coder-empty",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
 
     assert snapshot is not None
     assert "authoring_run_produced_no_proposal" not in snapshot.degraded_reasons
-
-    await engine.dispose()
 
 
 @pytest.mark.asyncio
 async def test_a_still_running_doc_editor_thread_is_not_flagged(
-    _case_dirs: tuple[Path, Path],
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A run still in flight has not failed to produce anything - it just hasn't yet."""
-    db_file, checkpoints_file = _case_dirs
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
+    await _seed_completed_thread(
+        session_factory,
+        checkpointer,
+        _ThreadSeed(
+            thread_id="doc-editor-running",
+            team_preset="vaultspec-doc-editor",
+            proposal_ids=[],
+            changeset_ids=[],
+            status=ThreadStatus.RUNNING,
+        ),
     )
 
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await _seed_completed_thread(
-            session_factory,
-            checkpointer,
-            _ThreadSeed(
-                thread_id="doc-editor-running",
-                team_preset="vaultspec-doc-editor",
-                proposal_ids=[],
-                changeset_ids=[],
-                status=ThreadStatus.RUNNING,
-            ),
+    async with session_factory() as session:
+        snapshot = await _snapshot(
+            session,
+            thread_id="doc-editor-running",
+            aggregator=EventAggregator(),
+            checkpointer=checkpointer,
         )
-
-        async with session_factory() as session:
-            snapshot = await _snapshot(
-                session,
-                thread_id="doc-editor-running",
-                aggregator=EventAggregator(),
-                checkpointer=checkpointer,
-            )
 
     assert snapshot is not None
     assert "authoring_run_produced_no_proposal" not in snapshot.degraded_reasons
-
-    await engine.dispose()

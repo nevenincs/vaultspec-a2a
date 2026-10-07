@@ -17,7 +17,6 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -82,31 +81,6 @@ EXPECTED_TABLES = {"artifacts", "cost_tracking", "permission_logs", "threads"}
 # from the repository so these assertions measure the production cap against the
 # requirement it exists to satisfy instead of against itself.
 _CONSUMER_REASON_BYTES = 500
-
-
-@pytest_asyncio.fixture
-async def engine() -> AsyncGenerator[AsyncEngine]:
-    """Create a fresh in-memory async engine with tables."""
-    eng = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
-    """Provide a fresh async session for each test."""
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with factory() as sess:
-        yield sess
-        await sess.rollback()
-
-
-@pytest_asyncio.fixture
-async def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    """Provide the session factory for durability and multi-session tests."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 # ---------------------------------------------------------------------------

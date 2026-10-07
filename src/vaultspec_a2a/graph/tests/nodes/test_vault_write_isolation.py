@@ -9,21 +9,16 @@ duration and must observe none — not a no-write-path argument.
 
 import threading
 import time
-from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
-import pytest_asyncio
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
-from ....conftest import materialize_schema
 from ....database import create_thread, seed_task_queue
 from ....tests._write_authority import make_test_write_authority
 from ....thread.state import TeamState, merge_vault_index
@@ -89,24 +84,6 @@ class _VaultWriteWatcher:
             self._thread.join(timeout=5.0)
         # Final reconcile in case a write landed between the last poll and stop.
         self._diff(self._snapshot())
-
-
-@pytest_asyncio.fixture
-async def file_engine(tmp_path: Path) -> AsyncGenerator[AsyncEngine]:
-    """File-backed async engine (shared across the port's separate sessions)."""
-    db_file = tmp_path / "service.db"
-    materialize_schema(Path(db_file.as_posix()))
-    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file.as_posix()}")
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    file_engine: AsyncEngine,
-) -> async_sessionmaker[AsyncSession]:
-    """Session factory bound to the file-backed engine."""
-    return async_sessionmaker(file_engine, class_=AsyncSession, expire_on_commit=False)
 
 
 def _make_workspace(tmp_path: Path) -> Path:

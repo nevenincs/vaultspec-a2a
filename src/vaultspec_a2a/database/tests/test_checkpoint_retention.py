@@ -17,7 +17,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
@@ -26,7 +25,8 @@ from ._checkpoint_history import config_for, stored_history
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from pathlib import Path
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from ...conftest import ExternalPrerequisiteRule
     from ..checkpoints import Checkpointer
@@ -151,25 +151,18 @@ async def _prove_a_failed_thread_keeps_its_error_writes(saver: Checkpointer) -> 
         await saver.adelete_thread(thread_id)
 
 
-@pytest_asyncio.fixture
-async def sqlite_saver(tmp_path: Path) -> AsyncIterator[AsyncSqliteSaver]:
-    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "cp.db")) as saver:
-        await saver.setup()
-        yield saver
-
-
 @pytest.mark.asyncio
 async def test_sqlite_keeps_only_the_latest_checkpoint_of_a_settled_thread(
-    sqlite_saver: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
-    await _prove_a_settled_thread_keeps_only_its_latest(sqlite_saver)
+    await _prove_a_settled_thread_keeps_only_its_latest(checkpointer)
 
 
 @pytest.mark.asyncio
 async def test_sqlite_keeps_the_error_writes_of_a_failed_thread(
-    sqlite_saver: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
-    await _prove_a_failed_thread_keeps_its_error_writes(sqlite_saver)
+    await _prove_a_failed_thread_keeps_its_error_writes(checkpointer)
 
 
 async def _write_count(saver: AsyncSqliteSaver, thread_id: str) -> int:
@@ -183,7 +176,7 @@ async def _write_count(saver: AsyncSqliteSaver, thread_id: str) -> int:
 
 @pytest.mark.asyncio
 async def test_a_failed_sqlite_prune_leaves_nothing_for_the_next_write_to_commit(
-    sqlite_saver: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A prune that fails part-way takes back what it had already deleted.
 
@@ -191,29 +184,29 @@ async def test_a_failed_sqlite_prune_leaves_nothing_for_the_next_write_to_commit
     be committed by whatever the saver wrote next. A real trigger refuses the
     second statement after the first has run.
     """
-    graph = _settling_graph(sqlite_saver)
+    graph = _settling_graph(checkpointer)
     thread_id, other_id = f"refused-{uuid4()}", f"other-{uuid4()}"
     await graph.ainvoke(
         cast("Any", {"log": ["one"]}), cast("Any", config_for(thread_id))
     )
-    writes = await _write_count(sqlite_saver, thread_id)
-    history = await stored_history(sqlite_saver, thread_id)
-    await sqlite_saver.conn.execute(
+    writes = await _write_count(checkpointer, thread_id)
+    history = await stored_history(checkpointer, thread_id)
+    await checkpointer.conn.execute(
         "CREATE TRIGGER refuse_prune BEFORE DELETE ON checkpoints "
         "BEGIN SELECT RAISE(ABORT, 'prune refused'); END"
     )
-    await sqlite_saver.conn.commit()
+    await checkpointer.conn.commit()
 
     with pytest.raises(sqlite3.DatabaseError, match="prune refused"):
-        await prune_settled_thread(sqlite_saver, thread_id)
+        await prune_settled_thread(checkpointer, thread_id)
 
-    await sqlite_saver.conn.execute("DROP TRIGGER refuse_prune")
+    await checkpointer.conn.execute("DROP TRIGGER refuse_prune")
     await graph.ainvoke(
         cast("Any", {"log": ["one"]}), cast("Any", config_for(other_id))
     )
 
-    assert await _write_count(sqlite_saver, thread_id) == writes
-    assert await stored_history(sqlite_saver, thread_id) == history
+    assert await _write_count(checkpointer, thread_id) == writes
+    assert await stored_history(checkpointer, thread_id) == history
 
 
 @pytest.mark.asyncio

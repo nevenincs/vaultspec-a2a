@@ -8,20 +8,11 @@ and leave every non-repair action intact.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
-from ...conftest import materialize_schema
 from ...database import create_thread
 from ...database.models import ControlActionModel
 from ...database.permission_repository import (
@@ -38,6 +29,11 @@ from ...thread.enums import ControlActionResultStatus, ControlActionType
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+    )
 
 _REPAIR_TYPES = (
     ControlActionType.REPAIR_STARTED.value,
@@ -147,88 +143,70 @@ async def _repair_row_count(session: AsyncSession, tid: str) -> int:
     ).scalar_one()
 
 
-def _database(
-    runtime_dir: Path, name: str
-) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
-    db_file = runtime_dir / f"{name}.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    return engine, async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-
-
 @pytest.mark.asyncio
-async def test_capped_boots_do_not_create_repair_history(runtime_dir: Path) -> None:
+async def test_capped_boots_do_not_create_repair_history(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """Repeated graph recovery does not append obsolete repair pairs."""
     tid = "thread-repair-capped"
-    engine, session_factory = _database(runtime_dir, "repair-retention-capped")
+    await _put_checkpoint(checkpointer, tid)
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=tid,
+            status="running",
+        )
+        await session.commit()
 
-    async with AsyncSqliteSaver.from_conn_string(
-        str(runtime_dir / "checkpoints-capped.db")
-    ) as checkpointer:
-        await _put_checkpoint(checkpointer, tid)
+    for _ in range(12):
         async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id=tid,
-                status="running",
+            await reconcile_threads_on_startup(
+                session, checkpointer, retain_repair_boots=2
             )
             await session.commit()
 
-        for _ in range(12):
-            async with session_factory() as session:
-                await reconcile_threads_on_startup(
-                    session, checkpointer, retain_repair_boots=2
-                )
-                await session.commit()
-
-        async with session_factory() as session:
-            capped = await _repair_row_count(session, tid)
+    async with session_factory() as session:
+        capped = await _repair_row_count(session, tid)
 
     assert capped == 0
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
-async def test_uncapped_boots_do_not_create_repair_history(runtime_dir: Path) -> None:
+async def test_uncapped_boots_do_not_create_repair_history(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """Disabling pruning does not restore obsolete repair writes."""
     tid = "thread-repair-uncapped"
-    engine, session_factory = _database(runtime_dir, "repair-retention-uncapped")
+    await _put_checkpoint(checkpointer, tid)
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=tid,
+            status="running",
+        )
+        await session.commit()
 
-    async with AsyncSqliteSaver.from_conn_string(
-        str(runtime_dir / "checkpoints-uncapped.db")
-    ) as checkpointer:
-        await _put_checkpoint(checkpointer, tid)
+    for _ in range(12):
         async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id=tid,
-                status="running",
+            await reconcile_threads_on_startup(
+                session, checkpointer, retain_repair_boots=0
             )
             await session.commit()
 
-        for _ in range(12):
-            async with session_factory() as session:
-                await reconcile_threads_on_startup(
-                    session, checkpointer, retain_repair_boots=0
-                )
-                await session.commit()
-
-        async with session_factory() as session:
-            uncapped = await _repair_row_count(session, tid)
+    async with session_factory() as session:
+        uncapped = await _repair_row_count(session, tid)
 
     assert uncapped == 0
-
-    await engine.dispose()
 
 
 @pytest.mark.asyncio
 async def test_capped_boots_leave_every_recoverable_row_intact(
-    runtime_dir: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The surviving set must still be sufficient to redrive after the prune.
 
@@ -239,51 +217,46 @@ async def test_capped_boots_leave_every_recoverable_row_intact(
     driven on top of that to show the individual lookups still resolve.
     """
     tid = "thread-repair-recovery"
-    engine, session_factory = _database(runtime_dir, "repair-retention-recovery")
+    await _put_checkpoint(checkpointer, tid)
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=tid,
+            status="running",
+        )
+        await _seed_recoverable_actions(session, tid)
+        await session.commit()
 
-    async with AsyncSqliteSaver.from_conn_string(
-        str(runtime_dir / "checkpoints-recovery.db")
-    ) as checkpointer:
-        await _put_checkpoint(checkpointer, tid)
+    async with session_factory() as session:
+        before = await _journal_inventory(session, tid)
+
+    for _ in range(12):
         async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id=tid,
-                status="running",
+            await reconcile_threads_on_startup(
+                session, checkpointer, retain_repair_boots=1
             )
-            await _seed_recoverable_actions(session, tid)
             await session.commit()
 
-        async with session_factory() as session:
-            before = await _journal_inventory(session, tid)
+    async with session_factory() as session:
+        after = await _journal_inventory(session, tid)
+        repair_rows = await _repair_row_count(session, tid)
 
-        for _ in range(12):
-            async with session_factory() as session:
-                await reconcile_threads_on_startup(
-                    session, checkpointer, retain_repair_boots=1
-                )
-                await session.commit()
-
-        async with session_factory() as session:
-            after = await _journal_inventory(session, tid)
-            repair_rows = await _repair_row_count(session, tid)
-
-            # Direct-control recovery redrives by action type over unapplied rows.
-            cancel = await get_latest_control_action(
-                session, thread_id=tid, action_type=ControlActionType.CANCEL
-            )
-            # A worker receipt settles the exact row its dispatch id names.
-            by_dispatch = await get_control_action_by_dispatch_id(
-                session, thread_id=tid, dispatch_id="dispatch-permission-1"
-            )
-            # An idempotent retry replays the durable outcome by key.
-            permission_replay = await get_control_action_by_idempotency_key(
-                session, thread_id=tid, idempotency_key=_PERMISSION_KEY
-            )
-            clarification_replay = await get_control_action_by_idempotency_key(
-                session, thread_id=tid, idempotency_key=_CLARIFICATION_KEY
-            )
+        # Direct-control recovery redrives by action type over unapplied rows.
+        cancel = await get_latest_control_action(
+            session, thread_id=tid, action_type=ControlActionType.CANCEL
+        )
+        # A worker receipt settles the exact row its dispatch id names.
+        by_dispatch = await get_control_action_by_dispatch_id(
+            session, thread_id=tid, dispatch_id="dispatch-permission-1"
+        )
+        # An idempotent retry replays the durable outcome by key.
+        permission_replay = await get_control_action_by_idempotency_key(
+            session, thread_id=tid, idempotency_key=_PERMISSION_KEY
+        )
+        clarification_replay = await get_control_action_by_idempotency_key(
+            session, thread_id=tid, idempotency_key=_CLARIFICATION_KEY
+        )
 
     # Four seeded actions remain intact through repeated startup passes.
     assert len(before) == 4
@@ -298,12 +271,11 @@ async def test_capped_boots_leave_every_recoverable_row_intact(
     assert clarification_replay is not None
     assert clarification_replay.applied_at is None
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_current_pass_pair_survives_a_cap_below_the_pair(
-    runtime_dir: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A cap of one must not reclaim a row the running pass is still holding.
 
@@ -315,54 +287,49 @@ async def test_current_pass_pair_survives_a_cap_below_the_pair(
     for half a pair.
     """
     tid = "thread-repair-tight-cap"
-    engine, session_factory = _database(runtime_dir, "repair-retention-tight")
+    await _put_checkpoint(checkpointer, tid)
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=tid,
+            status="running",
+        )
+        await session.commit()
 
-    async with AsyncSqliteSaver.from_conn_string(
-        str(runtime_dir / "checkpoints-tight.db")
-    ) as checkpointer:
-        await _put_checkpoint(checkpointer, tid)
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id=tid,
-                status="running",
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            for epoch in range(1, 4):
-                await create_control_action(
-                    session,
-                    thread_id=tid,
-                    action_type=ControlActionType.REPAIR_STARTED,
-                    idempotency_key=f"startup-repair:{tid}:{epoch}",
-                    result_status=ControlActionResultStatus.APPLIED,
-                )
-                await create_control_action(
-                    session,
-                    thread_id=tid,
-                    action_type=ControlActionType.REPAIR_FINISHED,
-                    idempotency_key=f"startup-repair-finished:{tid}:{epoch - 1}",
-                    result_status=ControlActionResultStatus.APPLIED,
-                )
-            await session.commit()
-
-        async with session_factory() as session:
-            hoarded = await _repair_row_count(session, tid)
-            deleted = await prune_repair_journal(session, thread_ids=[tid], keep_rows=1)
-            await session.commit()
-
-        async with session_factory() as session:
-            surviving = await _repair_row_count(session, tid)
-            started = await get_control_action_by_idempotency_key(
-                session, thread_id=tid, idempotency_key=f"startup-repair:{tid}:3"
-            )
-            finished = await get_control_action_by_idempotency_key(
+    async with session_factory() as session:
+        for epoch in range(1, 4):
+            await create_control_action(
                 session,
                 thread_id=tid,
-                idempotency_key=f"startup-repair-finished:{tid}:2",
+                action_type=ControlActionType.REPAIR_STARTED,
+                idempotency_key=f"startup-repair:{tid}:{epoch}",
+                result_status=ControlActionResultStatus.APPLIED,
             )
+            await create_control_action(
+                session,
+                thread_id=tid,
+                action_type=ControlActionType.REPAIR_FINISHED,
+                idempotency_key=f"startup-repair-finished:{tid}:{epoch - 1}",
+                result_status=ControlActionResultStatus.APPLIED,
+            )
+        await session.commit()
+
+    async with session_factory() as session:
+        hoarded = await _repair_row_count(session, tid)
+        deleted = await prune_repair_journal(session, thread_ids=[tid], keep_rows=1)
+        await session.commit()
+
+    async with session_factory() as session:
+        surviving = await _repair_row_count(session, tid)
+        started = await get_control_action_by_idempotency_key(
+            session, thread_id=tid, idempotency_key=f"startup-repair:{tid}:3"
+        )
+        finished = await get_control_action_by_idempotency_key(
+            session,
+            thread_id=tid,
+            idempotency_key=f"startup-repair-finished:{tid}:2",
+        )
 
     # Three historical pairs, then a cap of one row raised to a whole pair.
     assert hoarded == 6
@@ -371,5 +338,3 @@ async def test_current_pass_pair_survives_a_cap_below_the_pair(
     # The newest pair is the one kept, and it is a PAIR - not a half of one.
     assert started is not None
     assert finished is not None
-
-    await engine.dispose()

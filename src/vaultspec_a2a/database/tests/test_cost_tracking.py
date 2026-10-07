@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 from alembic import command
 from alembic.config import Config
 from langchain_core.messages import AIMessage, AIMessageChunk
@@ -76,7 +75,7 @@ from ..models import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Sequence
+    from collections.abc import Sequence
 
     from langchain_core.outputs import ChatGenerationChunk
     from sqlalchemy import Table
@@ -249,23 +248,6 @@ def _insert_raw_cost_row(db_path: Path, *, row_id: str, cost: float) -> None:
         conn.commit()
     finally:
         conn.close()
-
-
-@pytest_asyncio.fixture
-async def engine() -> AsyncGenerator[AsyncEngine]:
-    """A real in-memory SQLite engine with the live metadata schema."""
-    eng = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as sess:
-        yield sess
 
 
 async def _seed_thread(session: AsyncSession, thread_id: str) -> ThreadModel:

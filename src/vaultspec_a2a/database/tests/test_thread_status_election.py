@@ -6,20 +6,12 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...thread.enums import ControlActionType, InvalidTransitionError, ThreadStatus
-from ..models import Base, RunWriteAuthority
+from ..models import RunWriteAuthority
 from ..permission_repository import create_control_action
 from ..thread_repository import (
     ThreadStatusElectionOutcome,
@@ -31,30 +23,14 @@ from ..thread_repository import (
 )
 
 
-@pytest_asyncio.fixture
-async def engine(runtime_dir: Path) -> AsyncIterator[AsyncEngine]:
-    """Create a file-backed database so independent sessions share locks."""
-    database = runtime_dir / "thread-status-election.sqlite"
-    value = create_async_engine(f"sqlite+aiosqlite:///{database}")
-    async with value.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    yield value
-    await value.dispose()
-
-
-@pytest.fixture
-def sessions(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(engine, expire_on_commit=False)
-
-
 async def _seed(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
     thread_id: str,
     status: ThreadStatus,
     receipt: str,
 ) -> ThreadWriteExpectation:
     authority = RunWriteAuthority(0, 1, ControlActionType.INGEST, receipt)
-    async with sessions() as session:
+    async with session_factory() as session:
         thread = await create_thread(
             session,
             thread_id=thread_id,
@@ -99,17 +75,20 @@ def _successor(
     ],
 )
 async def test_stale_terminal_sessions_elect_exactly_one_winner(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
     winner_status: ThreadStatus,
     loser_status: ThreadStatus,
 ) -> None:
     thread_id = f"winner-{winner_status.value}"
     expected = await _seed(
-        sessions, thread_id, ThreadStatus.RUNNING, f"receipt-{winner_status.value}"
+        session_factory,
+        thread_id,
+        ThreadStatus.RUNNING,
+        f"receipt-{winner_status.value}",
     )
     successor = _successor(expected)
 
-    async with sessions() as winner:
+    async with session_factory() as winner:
         first = await elect_thread_status(
             winner,
             thread_id,
@@ -118,7 +97,7 @@ async def test_stale_terminal_sessions_elect_exactly_one_winner(
             successor=successor,
         )
         await winner.commit()
-    async with sessions() as stale:
+    async with session_factory() as stale:
         second = await elect_thread_status(
             stale,
             thread_id,
@@ -127,7 +106,7 @@ async def test_stale_terminal_sessions_elect_exactly_one_winner(
             successor=successor,
         )
         await stale.commit()
-    async with sessions() as reader:
+    async with session_factory() as reader:
         durable = await get_thread(reader, thread_id)
 
     assert first.outcome is ThreadStatusElectionOutcome.WON
@@ -140,14 +119,14 @@ async def test_stale_terminal_sessions_elect_exactly_one_winner(
 
 @pytest.mark.asyncio
 async def test_completion_before_running_wins_and_late_running_loses(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "early-completion"
     expected = await _seed(
-        sessions, thread_id, ThreadStatus.SUBMITTED, "early-completion-receipt"
+        session_factory, thread_id, ThreadStatus.SUBMITTED, "early-completion-receipt"
     )
     successor = _successor(expected)
-    async with sessions() as completion:
+    async with session_factory() as completion:
         completed = await elect_thread_status(
             completion,
             thread_id,
@@ -156,7 +135,7 @@ async def test_completion_before_running_wins_and_late_running_loses(
             successor=successor,
         )
         await completion.commit()
-    async with sessions() as late_running:
+    async with session_factory() as late_running:
         running = await elect_thread_status(
             late_running,
             thread_id,
@@ -172,11 +151,13 @@ async def test_completion_before_running_wins_and_late_running_loses(
 
 @pytest.mark.asyncio
 async def test_winner_refreshes_same_session_identity_map(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "same-session-truth"
-    await _seed(sessions, thread_id, ThreadStatus.RUNNING, "same-session-truth-receipt")
-    async with sessions() as session:
+    await _seed(
+        session_factory, thread_id, ThreadStatus.RUNNING, "same-session-truth-receipt"
+    )
+    async with session_factory() as session:
         loaded = await get_thread(session, thread_id)
         assert loaded is not None
         expected = thread_write_expectation(loaded)
@@ -220,11 +201,11 @@ async def test_winner_refreshes_same_session_identity_map(
 
 @pytest.mark.asyncio
 async def test_each_stale_authority_dimension_loses(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "all-dimensions"
     current = await _seed(
-        sessions, thread_id, ThreadStatus.RUNNING, "all-dimensions-receipt"
+        session_factory, thread_id, ThreadStatus.RUNNING, "all-dimensions-receipt"
     )
     altered = (
         (
@@ -265,7 +246,7 @@ async def test_each_stale_authority_dimension_loses(
         ),
     )
     for expectation, expected_outcome in altered:
-        async with sessions() as session:
+        async with session_factory() as session:
             result = await elect_thread_status(
                 session,
                 thread_id,
@@ -279,15 +260,15 @@ async def test_each_stale_authority_dimension_loses(
 
 @pytest.mark.asyncio
 async def test_successor_requires_same_thread_action_receipt(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     expected = await _seed(
-        sessions, "receipt-owner", ThreadStatus.RUNNING, "receipt-owner-ingest"
+        session_factory, "receipt-owner", ThreadStatus.RUNNING, "receipt-owner-ingest"
     )
     await _seed(
-        sessions, "foreign-owner", ThreadStatus.RUNNING, "foreign-cancel-receipt"
+        session_factory, "foreign-owner", ThreadStatus.RUNNING, "foreign-cancel-receipt"
     )
-    async with sessions() as session:
+    async with session_factory() as session:
         await create_control_action(
             session,
             thread_id="receipt-owner",
@@ -309,7 +290,7 @@ async def test_successor_requires_same_thread_action_receipt(
             receipt=receipt,
             generation=2,
         )
-        async with sessions() as session:
+        async with session_factory() as session:
             result = await elect_thread_status(
                 session,
                 "receipt-owner",
@@ -323,13 +304,13 @@ async def test_successor_requires_same_thread_action_receipt(
 
 @pytest.mark.asyncio
 async def test_changed_action_advances_generation_and_exact_receipt_wins(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "changed-action"
     expected = await _seed(
-        sessions, thread_id, ThreadStatus.RUNNING, "changed-action-ingest"
+        session_factory, thread_id, ThreadStatus.RUNNING, "changed-action-ingest"
     )
-    async with sessions() as session:
+    async with session_factory() as session:
         await create_control_action(
             session,
             thread_id=thread_id,
@@ -345,7 +326,7 @@ async def test_changed_action_advances_generation_and_exact_receipt_wins(
         receipt="changed-action-cancel-receipt",
         generation=2,
     )
-    async with sessions() as session:
+    async with session_factory() as session:
         result = await elect_thread_status(
             session,
             thread_id,
@@ -354,7 +335,7 @@ async def test_changed_action_advances_generation_and_exact_receipt_wins(
             successor=successor,
         )
         await session.commit()
-    async with sessions() as reader:
+    async with session_factory() as reader:
         durable = await get_thread(reader, thread_id)
 
     assert result.outcome is ThreadStatusElectionOutcome.WON
@@ -367,13 +348,13 @@ async def test_changed_action_advances_generation_and_exact_receipt_wins(
 
 @pytest.mark.asyncio
 async def test_invalid_successor_and_terminal_reopen_refuse_before_sql(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "terminal-refusal"
     expected = await _seed(
-        sessions, thread_id, ThreadStatus.COMPLETED, "terminal-refusal-receipt"
+        session_factory, thread_id, ThreadStatus.COMPLETED, "terminal-refusal-receipt"
     )
-    async with sessions() as session:
+    async with session_factory() as session:
         with pytest.raises(InvalidTransitionError):
             await elect_thread_status(
                 session,
@@ -396,13 +377,13 @@ async def test_invalid_successor_and_terminal_reopen_refuse_before_sql(
 
 @pytest.mark.asyncio
 async def test_noop_and_wrong_generation_successors_are_refused(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "successor-refusal"
     expected = await _seed(
-        sessions, thread_id, ThreadStatus.RUNNING, "successor-refusal-receipt"
+        session_factory, thread_id, ThreadStatus.RUNNING, "successor-refusal-receipt"
     )
-    async with sessions() as session:
+    async with session_factory() as session:
         with pytest.raises(ValueError, match="advance state or install"):
             await elect_thread_status(
                 session,
@@ -427,13 +408,13 @@ async def test_noop_and_wrong_generation_successors_are_refused(
 
 @pytest.mark.asyncio
 async def test_missing_thread_and_failure_reason_bound(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     missing = ThreadWriteExpectation(
         ThreadStatus.RUNNING,
         RunWriteAuthority(0, 1, ControlActionType.INGEST, "missing-receipt"),
     )
-    async with sessions() as session:
+    async with session_factory() as session:
         absent = await elect_thread_status(
             session,
             "missing-thread",
@@ -445,9 +426,9 @@ async def test_missing_thread_and_failure_reason_bound(
 
     thread_id = "bounded-reason"
     expected = await _seed(
-        sessions, thread_id, ThreadStatus.RUNNING, "bounded-reason-receipt"
+        session_factory, thread_id, ThreadStatus.RUNNING, "bounded-reason-receipt"
     )
-    async with sessions() as session:
+    async with session_factory() as session:
         result = await elect_thread_status(
             session,
             thread_id,
@@ -457,7 +438,7 @@ async def test_missing_thread_and_failure_reason_bound(
             failure_reason="字" * 1000,
         )
         await session.commit()
-    async with sessions() as reader:
+    async with session_factory() as reader:
         durable = await get_thread(reader, thread_id)
 
     assert result.outcome is ThreadStatusElectionOutcome.WON

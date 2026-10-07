@@ -11,13 +11,12 @@ from typing import TYPE_CHECKING
 import anyio
 import httpx
 import pytest
-import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...conftest import SqlitePosture
 from ...database import (
     create_control_action,
     create_thread,
@@ -27,8 +26,7 @@ from ...database import (
     mark_control_action_applied,
     thread_write_expectation,
 )
-from ...database.models import Base, RecoveryAttemptModel, RunWriteAuthority
-from ...database.session import configure_sqlite_transactions
+from ...database.models import RecoveryAttemptModel, RunWriteAuthority
 from ...database.thread_repository import ThreadStatusElectionOutcome
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
@@ -57,22 +55,14 @@ from ..worker_management import LazyWorkerSpawner
 from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncGenerator
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 _TEST_INTERNAL_TOKEN = "direct-control-recovery-test-token"
 
 
-@pytest_asyncio.fixture
-async def sessions(
-    tmp_path: Path,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'recovery.db'}")
-    configure_sqlite_transactions(engine)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    yield factory
-    await engine.dispose()
+pytestmark = pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,7 +176,7 @@ async def _persist_case(
 
 
 async def _run_recovery(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> tuple[DirectControlRecoverySummary, list[dict[str, object]]]:
     received: list[dict[str, object]] = []
     app = FastAPI()
@@ -200,7 +190,7 @@ async def _run_recovery(
         transport=httpx.ASGITransport(app=app), base_url="http://worker"
     ) as client:
         summary = await redrive_direct_control_actions(
-            sessions,
+            session_factory,
             worker_client=client,
             circuit_breaker=WorkerCircuitBreaker(
                 failure_threshold=3, recovery_timeout=30
@@ -217,22 +207,22 @@ async def _run_recovery(
 @pytest.mark.parametrize("status", [ThreadStatus.CANCELLING, ThreadStatus.RECONCILING])
 async def test_cancel_recovery_preserves_receipt_in_startup_state(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
     status: ThreadStatus,
 ) -> None:
     case = _accepted_cases(tmp_path)[2]
     case = _AcceptedCase(
         case.thread_id, case.action_type, status, case.dispatch, case.intent
     )
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, case)
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
     assert summary.dispatched == 1
     assert summary.conflicted == summary.refused == 0
     assert [item["dispatch_id"] for item in received] == ["cancel-stable"]
-    async with sessions() as db:
+    async with session_factory() as db:
         thread = await get_thread(db, case.thread_id)
         action = await get_control_action_by_dispatch_id(
             db, thread_id=case.thread_id, dispatch_id="cancel-stable"
@@ -245,15 +235,15 @@ async def test_cancel_recovery_preserves_receipt_in_startup_state(
 @pytest.mark.asyncio
 async def test_current_message_permission_and_cancel_redrive_stable_ids(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     cases = _accepted_cases(tmp_path)
-    async with sessions() as db:
+    async with session_factory() as db:
         for case in cases:
             await _persist_case(db, case)
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert summary.examined == 3
     assert summary.dispatched == 3
@@ -284,7 +274,7 @@ async def test_current_message_permission_and_cancel_redrive_stable_ids(
 @pytest.mark.asyncio
 async def test_unavailable_project_refuses_graph_action_but_allows_cancel(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     missing = tmp_path / "deleted-project"
     cases = list(_accepted_cases(tmp_path))
@@ -304,18 +294,18 @@ async def test_unavailable_project_refuses_graph_action_but_allows_cancel(
         cancel_case.dispatch.model_copy(update={"workspace_root": str(missing)}),
         cancel_case.intent,
     )
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, graph_case)
         await _persist_case(db, cancel_case)
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert summary.examined == 2
     assert summary.dispatched == 1
     assert summary.refused == 1
     assert [item["dispatch_id"] for item in received] == ["cancel-stable"]
-    async with sessions() as db:
+    async with session_factory() as db:
         refused_action = await get_control_action_by_dispatch_id(
             db,
             thread_id=graph_case.thread_id,
@@ -341,10 +331,10 @@ async def test_unavailable_project_refuses_graph_action_but_allows_cancel(
 @pytest.mark.asyncio
 async def test_older_accepted_action_loses_to_newer_exact_authority(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     old = _accepted_cases(tmp_path)[1]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, old)
         thread = await get_thread(db, old.thread_id)
         assert thread is not None
@@ -374,7 +364,7 @@ async def test_older_accepted_action_loses_to_newer_exact_authority(
         assert elected.outcome is ThreadStatusElectionOutcome.WON
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert summary.examined == 1
     assert summary.dispatched == 1
@@ -385,10 +375,10 @@ async def test_older_accepted_action_loses_to_newer_exact_authority(
 @pytest.mark.asyncio
 async def test_expired_run_is_quarantined_without_dispatch(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     case = _accepted_cases(tmp_path)[0]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(
             db,
             case,
@@ -401,12 +391,12 @@ async def test_expired_run_is_quarantined_without_dispatch(
         accepted.requested_at = datetime(2019, 1, 1, tzinfo=UTC)
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert not received
     assert summary.examined == 1
     assert summary.refused == 1
-    async with sessions() as db:
+    async with session_factory() as db:
         action = await get_control_action_by_dispatch_id(
             db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
         )
@@ -429,10 +419,10 @@ async def test_expired_run_is_quarantined_without_dispatch(
 @pytest.mark.asyncio
 async def test_applied_action_wins_over_deadline_quarantine(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     case = _accepted_cases(tmp_path)[0]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(
             db,
             case,
@@ -449,12 +439,12 @@ async def test_applied_action_wins_over_deadline_quarantine(
         )
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert not received
     assert summary.examined == 0
     assert summary.refused == 0
-    async with sessions() as db:
+    async with session_factory() as db:
         thread = await get_thread(db, case.thread_id)
         attempt = await db.scalar(
             select(RecoveryAttemptModel).where(
@@ -470,10 +460,10 @@ async def test_applied_action_wins_over_deadline_quarantine(
 @pytest.mark.asyncio
 async def test_corrupt_accepted_input_is_atomically_quarantined(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     case = _accepted_cases(tmp_path)[0]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, case)
         action = await get_control_action_by_dispatch_id(
             db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
@@ -482,13 +472,13 @@ async def test_corrupt_accepted_input_is_atomically_quarantined(
         action.payload_json = "{not-json"
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert not received
     assert summary.examined == 1
     assert summary.refused == 1
     assert summary.conflicted == 0
-    async with sessions() as db:
+    async with session_factory() as db:
         action = await get_control_action_by_dispatch_id(
             db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
         )
@@ -515,14 +505,14 @@ async def test_corrupt_accepted_input_is_atomically_quarantined(
 @pytest.mark.asyncio
 async def test_missing_accepted_action_quarantines_its_exact_run(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     case = _accepted_cases(tmp_path)[0]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, case)
         now = datetime.now(UTC)
         await db.commit()
-    async with sessions() as db:
+    async with session_factory() as db:
         assert await seed_recovery_attempts(db, observed_at=now, limit=1) == 1
         action = await get_control_action_by_dispatch_id(
             db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
@@ -531,12 +521,12 @@ async def test_missing_accepted_action_quarantines_its_exact_run(
         await db.delete(action)
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert not received
     assert summary.examined == 1
     assert summary.refused == 1
-    async with sessions() as db:
+    async with session_factory() as db:
         thread = await get_thread(db, case.thread_id)
         attempt = await db.scalar(
             select(RecoveryAttemptModel).where(
@@ -560,10 +550,10 @@ async def test_missing_accepted_action_quarantines_its_exact_run(
 @pytest.mark.asyncio
 async def test_capacity_failure_waits_for_durable_next_eligibility(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     case = _accepted_cases(tmp_path)[0]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, case)
         await db.commit()
 
@@ -586,20 +576,20 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
         transport=httpx.ASGITransport(app=app), base_url="http://worker"
     ) as client:
         first = await redrive_direct_control_actions(
-            sessions,
+            session_factory,
             worker_client=client,
             circuit_breaker=breaker,
             worker_spawner=spawner,
             trace_headers=None,
         )
         second = await redrive_direct_control_actions(
-            sessions,
+            session_factory,
             worker_client=client,
             circuit_breaker=breaker,
             worker_spawner=spawner,
             trace_headers=None,
         )
-        async with sessions() as db:
+        async with session_factory() as db:
             attempt = await db.scalar(
                 select(RecoveryAttemptModel).where(
                     RecoveryAttemptModel.thread_id == case.thread_id
@@ -612,13 +602,13 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
             attempt.next_eligible_at = attempt.created_at
             await db.commit()
         third = await redrive_direct_control_actions(
-            sessions,
+            session_factory,
             worker_client=client,
             circuit_breaker=breaker,
             worker_spawner=spawner,
             trace_headers=None,
         )
-        async with sessions() as db:
+        async with session_factory() as db:
             action = await get_control_action_by_dispatch_id(
                 db,
                 thread_id=case.thread_id,
@@ -634,7 +624,7 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
             attempt.next_eligible_at = attempt.created_at
             await db.commit()
         fourth = await redrive_direct_control_actions(
-            sessions,
+            session_factory,
             worker_client=client,
             circuit_breaker=breaker,
             worker_spawner=spawner,
@@ -647,7 +637,7 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
     assert fourth.examined == 1
     assert fourth.dispatched == 0
     assert received == 2
-    async with sessions() as db:
+    async with session_factory() as db:
         attempt = await db.scalar(
             select(RecoveryAttemptModel).where(
                 RecoveryAttemptModel.thread_id == case.thread_id
@@ -697,7 +687,7 @@ async def _worker_already_running(
 @pytest.mark.usefixtures("_dispatch_auth")
 async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A worker executing this run is reporting work in flight, not refusing it.
 
@@ -709,7 +699,7 @@ async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
     still scheduled, under the condition the worker actually served.
     """
     case = _accepted_cases(tmp_path)[0]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, case)
         await db.commit()
 
@@ -717,7 +707,7 @@ async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
         tmp_path / "busy-worker.db", case.thread_id
     ) as client:
         summary = await redrive_direct_control_actions(
-            sessions,
+            session_factory,
             worker_client=client,
             circuit_breaker=WorkerCircuitBreaker(
                 failure_threshold=3, recovery_timeout=30
@@ -729,7 +719,7 @@ async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
         )
 
     assert summary.deferred == 1
-    async with sessions() as db:
+    async with session_factory() as db:
         action = await get_control_action_by_dispatch_id(
             db,
             thread_id=case.thread_id,

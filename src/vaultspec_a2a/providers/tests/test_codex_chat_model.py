@@ -27,7 +27,6 @@ from langchain_core.messages import (
 )
 
 from ...database.models import ProviderRuntimeIdentityModel
-from ...database.tests._backends import migrated_session_factory
 from ...database.thread_repository import create_thread
 from ...graph.enums import Provider
 from ...service_tests._provider_catalog_live import declared_lane_model_value
@@ -58,6 +57,8 @@ from ..provider_readiness import probe_provider_readiness
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...conftest import ExternalPrerequisiteRule
     from .._acp_types import PermissionCallback
@@ -756,6 +757,7 @@ async def test_codex_live_turn_returns_output(
 async def test_codex_live_turn_persists_initialized_runtime_identity(
     tmp_path: Path,
     external_prerequisite: ExternalPrerequisiteRule,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The selected real app-server writes its first native thread before the turn."""
     external_prerequisite("codex-cli")
@@ -763,39 +765,38 @@ async def test_codex_live_turn_persists_initialized_runtime_identity(
     served, reason = await declared_lane_model_value(Provider.CODEX.value, tmp_path)
     if served is None:
         external_prerequisite.absent("provider-catalog-live-selection", reason)
-    async with migrated_session_factory("sqlite", tmp_path) as (_target, factory):
-        async with factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="codex-live-identity",
-                status=ThreadStatus.RUNNING,
-            )
-            await session.commit()
-        model = ProviderFactory().create(
-            Provider.CODEX, model=served, workspace_root=tmp_path
-        )
-        assert isinstance(model, CodexChatModel)
-        observed_version = probe_binary_version(model.command[0])
-        bound = bind_model_runtime_identity(
-            model,
+    async with migrated_session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
             thread_id="codex-live-identity",
-            port=SqlRuntimeIdentityPort(factory),
+            status=ThreadStatus.RUNNING,
         )
-        result = await bound.ainvoke(
-            [HumanMessage(content="Reply with exactly this word: pong")]
+        await session.commit()
+    model = ProviderFactory().create(
+        Provider.CODEX, model=served, workspace_root=tmp_path
+    )
+    assert isinstance(model, CodexChatModel)
+    observed_version = probe_binary_version(model.command[0])
+    bound = bind_model_runtime_identity(
+        model,
+        thread_id="codex-live-identity",
+        port=SqlRuntimeIdentityPort(migrated_session_factory),
+    )
+    result = await bound.ainvoke(
+        [HumanMessage(content="Reply with exactly this word: pong")]
+    )
+    assert str(result.content).strip().casefold() == "pong"
+    async with migrated_session_factory() as session:
+        row = await session.get(
+            ProviderRuntimeIdentityModel,
+            ("codex-live-identity", "codex", "codex-app-server"),
         )
-        assert str(result.content).strip().casefold() == "pong"
-        async with factory() as session:
-            row = await session.get(
-                ProviderRuntimeIdentityModel,
-                ("codex-live-identity", "codex", "codex-app-server"),
-            )
-            assert row is not None
-            assert row.cli_version == observed_version
-            assert row.adapter_version == row.cli_version
-            assert row.provider_session_id
-            assert row.managed_policy_present is None
+        assert row is not None
+        assert row.cli_version == observed_version
+        assert row.adapter_version == row.cli_version
+        assert row.provider_session_id
+        assert row.managed_policy_present is None
 
 
 @pytest.mark.asyncio

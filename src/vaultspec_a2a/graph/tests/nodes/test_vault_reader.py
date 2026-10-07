@@ -1,20 +1,16 @@
 """Tests for graph.nodes.vault_reader -- the mount node and the context mounter."""
 
-from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
 from ....database import create_thread, seed_task_queue
-from ....database.models import Base
 from ....domain_config import domain_config
 from ....tests._write_authority import make_test_write_authority
 from ....thread.state import TeamState, merge_vault_index
@@ -170,24 +166,6 @@ async def test_mount_refresh_preserves_prior_index_entries(tmp_path: Path) -> No
 # ---------------------------------------------------------------------------
 # Database-backed queue injection — real SQLite via SqlTaskQueuePort
 # ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def engine() -> AsyncGenerator[AsyncEngine]:
-    """Fresh in-memory async engine with all tables created."""
-    eng = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    engine: AsyncEngine,
-) -> async_sessionmaker[AsyncSession]:
-    """Async session factory bound to the in-memory engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest_asyncio.fixture

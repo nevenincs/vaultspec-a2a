@@ -18,9 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 import pytest
-import pytest_asyncio
 from fastapi.testclient import TestClient
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control.team_service import build_team_status
 from ...database import create_thread
@@ -43,21 +41,12 @@ from ..schemas.events import TeamStatusEvent
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from ...streaming.types import StreamableGraph
 
 _WORKER_ID = "vaultspec-coder"
-
-
-@pytest_asyncio.fixture
-async def graph_checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
-    """An in-memory SQLite checkpointer for the compiled team graph."""
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        yield saver
 
 
 def _deterministic_team() -> TeamConfig:
@@ -88,7 +77,6 @@ def _exact_assignment() -> dict[str, dict[str, object]]:
 async def test_team_status_reports_the_resolved_provider_and_model(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
-    graph_checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A compiled agent's provider and capability reach the REST response.
 
@@ -100,7 +88,7 @@ async def test_team_status_reports_the_resolved_provider_and_model(
     graph = compile_team_graph(
         team_config=team,
         agent_configs={_WORKER_ID: load_agent_config(_WORKER_ID)},
-        checkpointer=graph_checkpointer,
+        checkpointer=checkpointer,
         provider_factory=ProviderFactory(),
         model_assignment=_exact_assignment(),
         step_timeout=60.0,
@@ -124,7 +112,6 @@ async def test_team_status_reports_the_resolved_provider_and_model(
 async def test_thread_state_snapshot_reports_the_resolved_assignment(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
-    graph_checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The snapshot route carries the assignment too, not just ``/team/status``.
 
@@ -138,7 +125,7 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
     graph = compile_team_graph(
         team_config=team,
         agent_configs={_WORKER_ID: load_agent_config(_WORKER_ID)},
-        checkpointer=graph_checkpointer,
+        checkpointer=checkpointer,
         provider_factory=ProviderFactory(),
         model_assignment=_exact_assignment(),
         step_timeout=60.0,
@@ -185,7 +172,7 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
 
 @pytest.mark.asyncio
 async def test_team_status_broadcast_carries_the_resolved_assignment(
-    graph_checkpointer: AsyncSqliteSaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The ``team_status`` broadcast carries the assignment through to the wire.
 
@@ -197,7 +184,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
     graph = compile_team_graph(
         team_config=team,
         agent_configs={_WORKER_ID: load_agent_config(_WORKER_ID)},
-        checkpointer=graph_checkpointer,
+        checkpointer=checkpointer,
         provider_factory=ProviderFactory(),
         model_assignment=_exact_assignment(),
         step_timeout=60.0,

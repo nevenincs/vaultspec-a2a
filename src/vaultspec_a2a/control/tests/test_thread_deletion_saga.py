@@ -14,24 +14,21 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...authoring._tool_calls import ToolCallJournal, tool_call_journal_path
-from ...conftest import materialize_schema
 from ...testing import settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...control.repositories import (
     CleanupItem,
@@ -51,29 +48,6 @@ from ...database import (
 )
 from ...database.models import ThreadDeletionSagaModel
 from ...thread.enums import CleanupKind, ThreadStatus
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    case_dir = tmp_path_factory.mktemp("deletion-saga-control-db")
-    materialize_schema(Path(case_dir / "test.db"))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{case_dir / 'test.db'}")
-    yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    await engine.dispose()
-
-
-@pytest_asyncio.fixture
-async def checkpointer(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncSqliteSaver]:
-    case_dir = tmp_path_factory.mktemp("deletion-saga-checkpoints")
-    async with AsyncSqliteSaver.from_conn_string(
-        str(case_dir / "checkpoints.db")
-    ) as saver:
-        await saver.setup()
-        yield saver
 
 
 def _config(thread_id: str, namespace: str = "") -> RunnableConfig:

@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
-import pytest_asyncio
 from langchain_core.language_models.fake_chat_models import (
     FakeChatModel,
     FakeListChatModel,
@@ -18,12 +17,13 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import RetryPolicy
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import Callable
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..protocols import ProviderFactoryProtocol
 
 from ...control.config import settings
-from ...database.tests._backends import migrated_session_factory
 from ...graph.enums import Provider
 from ...providers import AcpPromptError, ProviderCondition
 from ...providers._codex_protocol import _turn_failure
@@ -72,15 +72,6 @@ from ..compiler import (
 )
 from ._state_graph_helpers import add_test_node, compile_test_graph
 from .conftest import deterministic_model_assignment
-
-
-@pytest_asyncio.fixture
-async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
-    """Provide an in-memory SQLite checkpointer for tests."""
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        yield saver
-
 
 # ---------------------------------------------------------------------------
 # Parametrized compilation (C7 rewrite)
@@ -134,7 +125,7 @@ async def test_compile_graph_structure(
     checkpointer: AsyncSqliteSaver,
     pf: ProviderFactoryProtocol,
     case: tuple[str, str, set[str], bool],
-    tmp_path: Path,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A non-research graph compiles with the concrete runtime identity port."""
     preset, topology, expected_workers, has_supervisor = case
@@ -144,16 +135,15 @@ async def test_compile_graph_structure(
         load_agent_config("vaultspec-supervisor") if has_supervisor else None
     )
 
-    async with migrated_session_factory("sqlite", tmp_path) as (_target, factory):
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=checkpointer,
-            supervisor_agent_config=supervisor_cfg,
-            provider_factory=pf,
-            model_assignment=deterministic_model_assignment(team),
-            runtime_identity_port=SqlRuntimeIdentityPort(factory),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        supervisor_agent_config=supervisor_cfg,
+        provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
+        runtime_identity_port=SqlRuntimeIdentityPort(migrated_session_factory),
+    )
 
     assert team.topology.type == topology
 

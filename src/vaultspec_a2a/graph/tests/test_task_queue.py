@@ -8,7 +8,6 @@ follows the revised contract: a single ``@tool`` returning
 is tested directly.
 """
 
-from collections.abc import AsyncGenerator
 from typing import Any, cast
 
 import pytest
@@ -16,14 +15,11 @@ import pytest_asyncio
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
 from ...database import create_thread, seed_task_queue
-from ...database.models import Base
 from ...tests._write_authority import make_test_write_authority
 from ...worker.task_queue_port import SqlTaskQueuePort
 from ..protocols import QueueEntryView
@@ -112,24 +108,6 @@ def test_render_row_order_is_preserved() -> None:
 # ---------------------------------------------------------------------------
 # mark-complete tool — real port over real SQLite
 # ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def engine() -> AsyncGenerator[AsyncEngine]:
-    """Fresh in-memory async engine with all tables created."""
-    eng = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    engine: AsyncEngine,
-) -> async_sessionmaker[AsyncSession]:
-    """Async session factory bound to the in-memory engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest_asyncio.fixture

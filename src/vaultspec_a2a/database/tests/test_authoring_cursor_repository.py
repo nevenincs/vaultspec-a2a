@@ -13,59 +13,20 @@ express either race.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator
-from pathlib import Path
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ...conftest import SqlitePosture
 from .. import DEFAULT_SUBSCRIBER_ID, get_authoring_cursor, set_authoring_cursor
-from ..models import AuthoringEventCursorModel, Base
+from ..models import AuthoringEventCursorModel
 
-
-@pytest_asyncio.fixture
-async def engine() -> AsyncGenerator[AsyncEngine]:
-    """Fresh in-memory async engine with all tables created."""
-    eng = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
-    """Fresh async session per test."""
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with factory() as sess:
-        yield sess
-        await sess.rollback()
-
-
-@pytest_asyncio.fixture
-async def shared_factory(
-    tmp_path: Path,
-) -> AsyncGenerator[async_sessionmaker[AsyncSession]]:
-    """Session factory over one real file-backed database shared by all sessions.
-
-    ``expire_on_commit=False`` mirrors the production factory: retained
-    post-commit attribute state is precisely what lets one session hold a cursor
-    snapshot that the database has already moved past. The connect timeout keeps
-    the serialised writers of the creation-race test waiting on SQLite's busy
-    handler instead of failing the run on lock contention.
-    """
-    url = f"sqlite+aiosqlite:///{(tmp_path / 'authoring_cursor.db').as_posix()}"
-    eng = create_async_engine(url, echo=False, connect_args={"timeout": 30})
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
-    await eng.dispose()
+# ``expire_on_commit=False`` on the root factory mirrors the production one:
+# retained post-commit attribute state is precisely what lets one session hold a
+# cursor snapshot the database has already moved past. The longer driver lock
+# wait keeps the serialised writers of the creation race waiting on SQLite's
+# busy handler instead of failing the run on lock contention.
+_RACING_WRITERS = pytest.mark.sqlite_engine(SqlitePosture.DRIVER, timeout=30)
 
 
 @pytest.mark.asyncio
@@ -109,19 +70,21 @@ async def test_equal_write_is_a_noop(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cursor_survives_new_session(engine: AsyncEngine) -> None:
+async def test_cursor_survives_new_session(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """A committed cursor is durable across sessions - the restart-survival unit."""
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with factory() as first:
+    async with session_factory() as first:
         await set_authoring_cursor(first, last_seq=42)
         await first.commit()
-    async with factory() as second:
+    async with session_factory() as second:
         assert await get_authoring_cursor(second) == 42
 
 
 @pytest.mark.asyncio
+@_RACING_WRITERS
 async def test_lagging_session_cannot_rewind_a_concurrently_advanced_cursor(
-    shared_factory: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A write decided against a stale snapshot must not lower the stored cursor.
 
@@ -141,11 +104,11 @@ async def test_lagging_session_cannot_rewind_a_concurrently_advanced_cursor(
     resynchronise that entity rather than leave the caller reading a value the
     database has already moved past.
     """
-    async with shared_factory() as seed:
+    async with session_factory() as seed:
         await set_authoring_cursor(seed, last_seq=10)
         await seed.commit()
 
-    async with shared_factory() as lagging, shared_factory() as leading:
+    async with session_factory() as lagging, session_factory() as leading:
         # The lagging session loads the row at 10 and holds that snapshot open.
         snapshot = await lagging.get(AuthoringEventCursorModel, DEFAULT_SUBSCRIBER_ID)
         assert snapshot is not None
@@ -161,13 +124,14 @@ async def test_lagging_session_cannot_rewind_a_concurrently_advanced_cursor(
         assert snapshot.last_seq == 15
 
     assert stored == 15
-    async with shared_factory() as reader:
+    async with session_factory() as reader:
         assert await get_authoring_cursor(reader) == 15
 
 
 @pytest.mark.asyncio
+@_RACING_WRITERS
 async def test_concurrent_first_writers_converge_on_the_highest_sequence(
-    shared_factory: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Writers racing to create the singleton row all succeed and none regress.
 
@@ -180,7 +144,7 @@ async def test_concurrent_first_writers_converge_on_the_highest_sequence(
     sequences = (4, 9, 2, 11, 7)
 
     async def advance(seq: int) -> int:
-        async with shared_factory() as db:
+        async with session_factory() as db:
             stored = await set_authoring_cursor(db, last_seq=seq)
             await db.commit()
             return stored
@@ -189,5 +153,5 @@ async def test_concurrent_first_writers_converge_on_the_highest_sequence(
 
     for requested, stored in zip(sequences, results, strict=True):
         assert stored >= requested
-    async with shared_factory() as reader:
+    async with session_factory() as reader:
         assert await get_authoring_cursor(reader) == max(sequences)

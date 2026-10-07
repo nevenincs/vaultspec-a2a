@@ -16,10 +16,8 @@ Once it lapses, nobody is answerable and ordinary reconciliation resumes.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
 
 from ...database import get_thread
@@ -33,17 +31,7 @@ from ..recovery_authority import (
     reconcile_run_checkpoint,
 )
 from ..repositories import count_queued_continuations
-from ._continuation import RUN, BusyRun, busy_run_state, queue_continuation
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
-
-
-@pytest_asyncio.fixture
-async def busy_run(tmp_path: Path) -> AsyncIterator[BusyRun]:
-    async with busy_run_state(tmp_path) as state:
-        yield state
+from ._continuation import RUN, BusyRun, queue_continuation
 
 
 async def _lapse_the_lease(run: BusyRun) -> None:

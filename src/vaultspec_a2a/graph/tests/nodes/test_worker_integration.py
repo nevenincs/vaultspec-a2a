@@ -15,7 +15,6 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 from pydantic import PrivateAttr
 
-from ....conftest import materialize_schema
 from ....tests._write_authority import make_test_write_authority
 from ....thread.state import TeamState
 from ...nodes.worker import WorkerNode, create_worker_node
@@ -23,6 +22,7 @@ from .._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
 
@@ -128,58 +128,57 @@ async def test_worker_execution_integration() -> None:
 @pytest.mark.asyncio
 async def test_acp_worker_records_initialized_subprocess_identity(
     tmp_path: Path,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A real ACP subprocess records initialize and session/new before its prompt."""
     from ....database.models import ProviderRuntimeIdentityModel
-    from ....database.tests._backends import migrated_session_factory
     from ....database.thread_repository import create_thread
     from ....providers.acp_chat_model import AcpChatModel
     from ....providers.binary_version import probe_binary_version
     from ....thread.enums import ThreadStatus
     from ....worker.runtime_identity_port import SqlRuntimeIdentityPort
 
-    async with migrated_session_factory("sqlite", tmp_path) as (_target, factory):
-        async with factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="acp-worker-identity",
-                status=ThreadStatus.RUNNING,
-            )
-            await session.commit()
-        model = AcpChatModel(
-            command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "pong"],
-            command_target=str(SIMULATOR_PATH),
-            provider="kimi",
-            execution_mode="kimi-code-acp",
-            runtime_authority="test_subprocess",
-            auth_mode="test",
-            acp_family="kimi",
-            env_vars={},
-            workspace_root=str(tmp_path),
+    async with migrated_session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="acp-worker-identity",
+            status=ThreadStatus.RUNNING,
         )
-        node = create_worker_node(
-            model=model,
-            system_prompt="You are terse.",
-            name="coder",
-            runtime_identity_port=SqlRuntimeIdentityPort(factory),
+        await session.commit()
+    model = AcpChatModel(
+        command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "pong"],
+        command_target=str(SIMULATOR_PATH),
+        provider="kimi",
+        execution_mode="kimi-code-acp",
+        runtime_authority="test_subprocess",
+        auth_mode="test",
+        acp_family="kimi",
+        env_vars={},
+        workspace_root=str(tmp_path),
+    )
+    node = create_worker_node(
+        model=model,
+        system_prompt="You are terse.",
+        name="coder",
+        runtime_identity_port=SqlRuntimeIdentityPort(migrated_session_factory),
+    )
+    state = _make_state()
+    state["thread_id"] = "acp-worker-identity"
+    result = await node(state)
+    assert isinstance(result, dict)
+    assert result["messages"][0].content == "pong"
+    async with migrated_session_factory() as session:
+        row = await session.get(
+            ProviderRuntimeIdentityModel,
+            ("acp-worker-identity", "kimi", "kimi-code-acp"),
         )
-        state = _make_state()
-        state["thread_id"] = "acp-worker-identity"
-        result = await node(state)
-        assert isinstance(result, dict)
-        assert result["messages"][0].content == "pong"
-        async with factory() as session:
-            row = await session.get(
-                ProviderRuntimeIdentityModel,
-                ("acp-worker-identity", "kimi", "kimi-code-acp"),
-            )
-            assert row is not None
-            assert row.adapter_name == "acp-simulator"
-            assert row.adapter_version == "1.0.0"
-            assert row.cli_version == probe_binary_version(PYTHON_EXE)
-            assert row.provider_session_id
-            assert row.managed_policy_present is None
+        assert row is not None
+        assert row.adapter_name == "acp-simulator"
+        assert row.adapter_version == "1.0.0"
+        assert row.cli_version == probe_binary_version(PYTHON_EXE)
+        assert row.provider_session_id
+        assert row.managed_policy_present is None
 
 
 @pytest.mark.asyncio
@@ -374,7 +373,7 @@ class MarkCompleteEmittingModel(BaseChatModel):
 
 @pytest.mark.asyncio
 async def test_worker_dispatches_mark_complete_command_through_graph(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A mark_task_complete call advances current_task_id via the node return.
 
@@ -383,21 +382,9 @@ async def test_worker_dispatches_mark_complete_command_through_graph(
     threads the ToolMessage back for the model's final turn, and returns the
     Command's current_task_id advance through the reducer pipeline.
     """
-    from sqlalchemy.ext.asyncio import (
-        AsyncSession,
-        async_sessionmaker,
-        create_async_engine,
-    )
-
     from ....database import create_thread, seed_task_queue
     from ....worker.task_queue_port import SqlTaskQueuePort
 
-    db_file = tmp_path / "queue.db"
-    materialize_schema(Path(db_file.as_posix()))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file.as_posix()}")
-    session_factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
     async with session_factory() as session:
         thread = await create_thread(
             session, write_authority=make_test_write_authority(), title="worker-queue"
@@ -441,4 +428,3 @@ async def test_worker_dispatches_mark_complete_command_through_graph(
     assert result["current_task_id"] == "Q-2"
     assert result["messages"][-1].content == "queue advanced"
     assert result["messages"][-1].name == "coder"
-    await engine.dispose()

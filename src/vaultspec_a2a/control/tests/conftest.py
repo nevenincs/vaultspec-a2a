@@ -1,8 +1,20 @@
 """Middleware test configuration — auto-applies the ``middleware`` marker."""
 
+from __future__ import annotations
+
 import importlib
+from typing import TYPE_CHECKING
 
 import pytest
+import pytest_asyncio
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from ._continuation import BusyRun
 
 # Warm the graph package before any control test module imports
 # ``control.thread_service``. That module imports ``context.metadata`` first,
@@ -21,3 +33,15 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         if str(item.path).startswith(_PACKAGE_DIR):
             item.add_marker(pytest.mark.middleware)
+
+
+@pytest_asyncio.fixture
+async def busy_run(
+    tmp_path: Path,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> BusyRun:
+    """One real run mid-first-turn, in the root migrated store and checkpointer."""
+    from ._continuation import start_busy_run
+
+    return await start_busy_run(migrated_session_factory, checkpointer, tmp_path)

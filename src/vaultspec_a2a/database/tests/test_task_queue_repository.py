@@ -1,21 +1,13 @@
 """Tests for the database-backed task-queue repository.
 
-Real in-memory aiosqlite, no mocks. Covers seeding, the injectable queue
+Real file-backed aiosqlite, no mocks. Covers seeding, the injectable queue
 view (current + horizon selection), the idempotent mark-complete transition,
 feature-tag validation, and cascade delete with the owning thread.
 """
 
-from collections.abc import AsyncGenerator
-
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import TaskQueueStatus
@@ -26,7 +18,7 @@ from .. import (
     mark_task_complete,
     seed_task_queue,
 )
-from ..models import Base, TaskQueueEntryModel
+from ..models import TaskQueueEntryModel
 
 _FEATURE = "sdd-blackboard-integration"
 
@@ -37,25 +29,6 @@ _ENTRIES: list[dict[str, object]] = [
     {"task_key": "SBI-004", "description": "Queue inject", "status": "pending"},
     {"task_key": "SBI-005", "description": "Audit tests", "status": "pending"},
 ]
-
-
-@pytest_asyncio.fixture
-async def engine() -> AsyncGenerator[AsyncEngine]:
-    """Fresh in-memory async engine with all tables created."""
-    eng = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
-    """Fresh async session per test."""
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with factory() as sess:
-        yield sess
-        await sess.rollback()
 
 
 async def _seed_thread(

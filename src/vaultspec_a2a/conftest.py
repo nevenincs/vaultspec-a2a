@@ -25,10 +25,11 @@ from .testing import (
     apply_layer_markers,
     live_provider_catalog_selector_is_configured,
     live_provider_override_selector_is_configured,
+    seated_lanes,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Callable, Iterator
 
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -37,6 +38,22 @@ if TYPE_CHECKING:
 
 #: Where a suite reads the live PostgreSQL server it was given.
 POSTGRES_URL_ENV = "VAULTSPEC_A2A_TEST_POSTGRES_URL"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _seated_fixture_lanes() -> Iterator[None]:
+    """Hold the source checkout's fixture lanes for every in-process test.
+
+    A test that builds a model, freezes a selection or resolves a frozen one in
+    its own process reaches the deterministic lane through the same plugin seam
+    a test gateway is armed with, so the lane is seated once for the session
+    rather than per test. Only the settings singleton is touched: a child
+    process is armed through its environment, never by inheriting this seat. A
+    test about an unarmed product posture, or one that arms the desktop profile,
+    unseats the lanes for its own block.
+    """
+    with seated_lanes():
+        yield
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,11 @@ from ...context.metadata import ThreadMetadata
 from ...control.config import settings
 from ...control.state_layout import state_layout
 from ...database import create_thread
-from ...testing import async_catalog_run_fields, settings_override
+from ...testing import (
+    armed_desktop_app_home,
+    async_catalog_run_fields,
+    unvalidated_selection,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..routes._gateway_run_start import _require_settled_predecessor
@@ -36,7 +40,7 @@ async def test_saved_project_aliases_remain_valid_for_successors(
     aliases = [str(project / ".." / "project")]
     if os.name == "nt":
         aliases.append("\\\\?\\" + str(project))
-    with settings_override(desktop_app_home=home):
+    with armed_desktop_app_home(home):
         async with session_factory() as db:
             for index, alias in enumerate(aliases):
                 predecessor_id = f"old-project-alias-{index}"
@@ -271,7 +275,7 @@ async def test_armed_desktop_confines_queries_and_run_admission(
     foreign.mkdir()
 
     app = _secured_app(session_factory, checkpointer)
-    with settings_override(desktop_app_home=desktop_home):
+    with armed_desktop_app_home(desktop_home):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://gateway.test",
@@ -288,7 +292,9 @@ async def test_armed_desktop_confines_queries_and_run_admission(
                     )
                     assert refused.status_code == 422, refused.text
                     assert "configured workspace root" in refused.json()["detail"]
-            fields = await async_catalog_run_fields(client, workspace_root=str(managed))
+            # The desktop profile serves no fixture lane, and every request
+            # below is refused before run start reads the catalog.
+            selection = unvalidated_selection()
             for stage in ("start", "prepare", "commit"):
                 refused = await client.post(
                     "/v1/runs",
@@ -301,7 +307,7 @@ async def test_armed_desktop_confines_queries_and_run_admission(
                         "team_preset": "mock-success-single",
                         "message": "start" if stage != "prepare" else "",
                         "metadata": {"workspace_root": str(desktop_home)},
-                        "selection": fields["selection"],
+                        "selection": selection,
                     },
                 )
                 assert refused.status_code == 422, refused.text
@@ -313,7 +319,7 @@ async def test_armed_desktop_confines_queries_and_run_admission(
                     "team_preset": "mock-success-single",
                     "message": "start",
                     "metadata": {"workspace_root": str(managed)},
-                    "selection": fields["selection"],
+                    "selection": selection,
                 },
             )
             assert admitted.status_code == 503, admitted.text

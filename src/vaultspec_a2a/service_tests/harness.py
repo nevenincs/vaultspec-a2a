@@ -298,10 +298,18 @@ class ServiceStack:
         )
 
     def _local_env(self) -> dict[str, str]:
+        # Arm the in-process lanes. This stack has no provider credentials, and
+        # a run has to present a selection naming a lane the gateway reports
+        # selectable - so without this the catalog offers nothing selectable at
+        # all and every run here is unstartable. The mock lane additionally
+        # needs a tape server, which VAULTSPEC_A2A_MOCK_API_BASE below supplies,
+        # so both in-process lanes are served and the mock presets can select
+        # their own.
         env = gateway_process_env(
             gateway_port=self.ports["gateway"],
             worker_port=self.ports["worker"],
             auto_spawn_worker=False,
+            serve_in_process_lanes=True,
         )
         if self.postgres_url is None:
             database_url = (
@@ -327,14 +335,6 @@ class ServiceStack:
                 "VAULTSPEC_A2A_GATEWAY_TOKEN": _GATEWAY_SERVICE_TOKEN,
                 "VAULTSPEC_A2A_INSTALL_ROOT": str(REPO_ROOT),
                 "VAULTSPEC_A2A_MOCK_API_BASE": self.vidaimock_url,
-                # Arm the in-process lanes. This stack has no provider
-                # credentials, and a run now has to present a selection naming a
-                # lane the gateway reports selectable - so without this the
-                # catalog offers nothing selectable at all and every run here is
-                # unstartable. The mock lane additionally needs a tape server,
-                # which VAULTSPEC_A2A_MOCK_API_BASE above supplies, so both
-                # in-process lanes are served and the mock presets can select their own.
-                "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true",
                 "OTEL_EXPORTER_OTLP_ENDPOINT": (
                     f"http://127.0.0.1:{self.ports['jaeger_otlp']}"
                 ),

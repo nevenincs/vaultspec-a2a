@@ -57,7 +57,9 @@ def get_model_attr(model_obj: BaseChatModel) -> str | None:
 
 
 def test_catalog_registrations_are_execution_mode_specific() -> None:
-    registrations = ProviderFactory().catalog_registrations(Path.cwd())
+    registrations = ProviderFactory().catalog_registrations(
+        Path.cwd(), serve_in_process_lanes=False
+    )
     assert tuple(registration.key for registration in registrations) == (
         ProviderCatalogKey("antigravity", "antigravity-cli"),
         ProviderCatalogKey("claude", f"claude-agent-acp:{settings.acp_backend}"),

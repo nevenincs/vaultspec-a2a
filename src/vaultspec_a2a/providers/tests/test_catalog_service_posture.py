@@ -23,10 +23,13 @@ from pathlib import Path
 
 import pytest
 
-from ...graph.enums import Provider
+from ...testing import settings_override
+from ...testing.lanes import LANES
+from ..execution_modes import EXTERNAL_EXECUTION_MODES
+from ..in_process_catalog import BUILT_IN_LANES
 from ..provider_catalog_service import _DISPLAY_NAMES, ProviderCatalogService
 
-_IN_PROCESS = {"deterministic", "mock"}
+_IN_PROCESS = {lane.provider.value for lane in (*LANES, *BUILT_IN_LANES)}
 _ARMING_ENV = "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES"
 
 
@@ -64,34 +67,42 @@ async def test_an_explicit_refusal_hides_them_and_the_default_defers() -> None:
     unconditionally would pass the test above, and without the None case a
     change that made explicit arming the default would go unnoticed - and that
     default is what every deployed gateway relies on.
+
+    The session holds the fixture lanes on the settings singleton, so the
+    deferring half declares the unarmed deployment it consults on that same
+    object, plugins unseated with it.
     """
     refused = await ProviderCatalogService(serve_in_process_lanes=False).records(
         _workspace()
     )
     assert not {record.provider_id for record in refused} & _IN_PROCESS
 
-    deferred = await ProviderCatalogService().records(_workspace())
+    with settings_override(serve_in_process_lanes=False, lane_plugins=()):
+        deferred = await ProviderCatalogService().records(_workspace())
     assert not {record.provider_id for record in deferred} & _IN_PROCESS, (
-        "with the environment unarmed, the deferring default must serve no "
+        "with the deployment unarmed, the deferring default must serve no "
         "in-process lane - it consults the deployment, it does not arm"
     )
 
 
-def test_every_provider_member_has_a_display_name() -> None:
-    """A new Provider member must not reach a route without a readable name.
+def test_every_external_lane_has_a_display_name() -> None:
+    """A new external lane must not reach a route without a readable name.
 
-    The service indexes ``_DISPLAY_NAMES`` directly, so a member added without an
-    entry raises ``KeyError`` from inside catalog assembly - which surfaces to a
-    client as a 500 from the provider-catalog endpoint, several layers from the
-    one-line omission that caused it. Adding the antigravity lane did exactly
-    that. Asserting totality here turns that into a named failure at the point of
-    the omission, which is the difference between a five-second fix and a
-    traceback hunt.
+    The service indexes ``_DISPLAY_NAMES`` for every lane that is not held
+    in-process, so a lane added without an entry raises ``KeyError`` from inside
+    catalog assembly - which surfaces to a client as a 500 from the
+    provider-catalog endpoint, several layers from the one-line omission that
+    caused it. Adding the antigravity lane did exactly that. Asserting totality
+    here turns that into a named failure at the point of the omission, which is
+    the difference between a five-second fix and a traceback hunt. An in-process
+    lane names itself through its registration and needs no entry.
     """
     missing = sorted(
-        member.value for member in Provider if member not in _DISPLAY_NAMES
+        provider.value
+        for provider in EXTERNAL_EXECUTION_MODES
+        if provider not in _DISPLAY_NAMES
     )
     assert not missing, (
-        f"Provider members without a display name: {missing}. Add each to "
+        f"External lanes without a display name: {missing}. Add each to "
         "_DISPLAY_NAMES in providers/provider_catalog_service.py"
     )

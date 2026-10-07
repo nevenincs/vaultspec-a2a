@@ -17,24 +17,24 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END
 from langgraph.types import Command
 
-from ...graph.enums import Provider
-from ...graph.nodes.worker import create_worker_node
-from ...team.team_config import AgentConfig, load_agent_config, load_team_config
-from ...testing import (
+from ....graph.enums import Provider
+from ....graph.nodes.worker import create_worker_node
+from ....providers.factory import ProviderFactory
+from ....team.team_config import AgentConfig, load_agent_config, load_team_config
+from ... import (
     add_test_node,
     ainvoke_test_graph,
     compile_test_graph,
     new_state_graph,
 )
-from ...testing.lanes import DeterministicResearchAdrChatModel, seated_lanes
-from ..factory import ProviderFactory
+from .. import DeterministicResearchAdrChatModel
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from langchain_core.runnables import RunnableConfig
 
-    from ...thread.state import TeamState
+    from ....thread.state import TeamState
 
 
 def _scenario_model(
@@ -44,10 +44,9 @@ def _scenario_model(
     team = load_team_config(team_id)
     assert len(team.workers) == 1
     agent = load_agent_config(team.workers[0].agent_id)
-    with seated_lanes():
-        model = ProviderFactory().create(
-            Provider.DETERMINISTIC, model="deterministic", agent_config=agent
-        )
+    model = ProviderFactory().create(
+        Provider.DETERMINISTIC, model="deterministic", agent_config=agent
+    )
     assert isinstance(model, DeterministicResearchAdrChatModel)
     return model, agent
 

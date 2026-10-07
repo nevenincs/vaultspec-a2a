@@ -7,10 +7,13 @@ registers the deterministic lane. The lane keeps its wire identity - provider
 ``deterministic``, execution mode ``in-process-deterministic``, model
 ``deterministic`` - so a run frozen against it replays under the same identity.
 
-Two seats arm it, one per kind of test. A test that boots a gateway or worker
-child gives the child :func:`armed_lane_environment`; the child inherits the
-environment, so one declaration reaches both processes. A test that builds
-models in its own process holds :func:`seated_lanes` around the work.
+Two seats arm it, one per kind of process. A gateway or worker child is given
+:func:`armed_lane_environment` by the test boot environment builders whenever
+they serve the in-process lanes; a gateway hands its worker that environment,
+so one declaration reaches both processes. A test process holds
+:func:`seated_lanes` for its whole session, through the repository's root
+conftest, so a test that builds models in its own process resolves the lane
+without seating it.
 
 This module stays light on purpose: a gateway imports it at startup, and the
 model it registers, with its chat-model stack, loads only when a lane builds

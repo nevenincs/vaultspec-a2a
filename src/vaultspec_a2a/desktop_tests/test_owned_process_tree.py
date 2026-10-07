@@ -42,9 +42,9 @@ from ..testing import (
     booted_gateway,
     desktop_workspace,
     seat_app_home,
+    unvalidated_selection,
     worker_lifecycle_gateway_script,
 )
-from ..testing.catalog import unvalidated_selection
 from ..utils import kill_pid_tree_async
 from ..utils._process_tree import pid_is_live, port_has_listener, wait_pid_gone
 from ..utils.process import ProcessContainment

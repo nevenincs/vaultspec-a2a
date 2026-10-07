@@ -89,7 +89,10 @@ def armed_desktop_app_home(app_home: Path) -> Generator[None]:
     ``desktop_app_home``, so arming means setting the field the property
     reads. Built on :func:`settings_override`, the sanctioned attribute-swap
     seam, and confirms the derived property actually flips before yielding.
+
+    The desktop profile holds no plugin lane - the product refuses one named
+    under it - so arming it also unseats any lane plugins this process holds.
     """
-    with settings_override(desktop_app_home=app_home):
+    with settings_override(desktop_app_home=app_home, lane_plugins=()):
         assert _settings.desktop_profile_armed is True
         yield

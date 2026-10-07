@@ -41,6 +41,7 @@ from ...providers.provider_catalog_service import (
     ProviderCatalogService,
     validate_public_catalog_bounds,
 )
+from ...testing import settings_override
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
@@ -143,16 +144,19 @@ async def test_authenticated_route_serves_all_registered_lanes_in_order(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     app = _gated_app()
-    async with httpx.AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://desktop.test",
-        timeout=30,
-    ) as client:
-        response = await client.get(
-            "/v1/provider-catalog",
-            params={"workspace_root": str(workspace)},
-            headers={"Authorization": f"Bearer {_TOKEN}"},
-        )
+    # A product deployment: the session's fixture lanes are unseated, so the
+    # route serves exactly the external lanes a deployment registers.
+    with settings_override(serve_in_process_lanes=False, lane_plugins=()):
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://desktop.test",
+            timeout=30,
+        ) as client:
+            response = await client.get(
+                "/v1/provider-catalog",
+                params={"workspace_root": str(workspace)},
+                headers={"Authorization": f"Bearer {_TOKEN}"},
+            )
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["api_version"] == "v1"

@@ -8,7 +8,6 @@ to the pure functions defined here.
 from __future__ import annotations
 
 import contextlib
-import hashlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -23,6 +22,7 @@ from ..graph.enums import (
     Provider,
     StreamFrameKind,
 )
+from .action_receipts import sha256_hex
 from .enums import (
     TERMINAL_STATUS_VALUES,
     DegradedReason,
@@ -861,7 +861,7 @@ def derive_message_id(role: str, content: str, stored_id: str | None) -> str:
     """Return the stored id or a deterministic hash fallback for deduplication."""
     if stored_id:
         return stored_id
-    return hashlib.sha256(f"{role}:{content}".encode()).hexdigest()[:32]
+    return sha256_hex(f"{role}:{content}".encode())[:32]
 
 
 def normalize_plan_entries(plan_raw: list[Any]) -> list[PlanEntry]:

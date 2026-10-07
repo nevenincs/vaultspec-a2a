@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import CursorResult
     from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..thread.action_receipts import canonical_json
 from ..thread.enums import (
     RECOVERY_ACTION_TYPES,
     ControlActionResultStatus,
@@ -88,7 +89,7 @@ argument at those call sites rather than being folded into this constant.
 def _encode_payload(payload: dict[str, object] | None) -> str | None:
     if payload is None:
         return None
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return canonical_json(payload)
 
 
 def _payload_matches(stored: str | None, expected: dict[str, object] | None) -> bool:

@@ -59,34 +59,16 @@ def validate_current_graph_receipt(
         expectation = thread_write_expectation(thread)
     except (ValueError, ValidationError):
         return None
-    if not _receipt_matches_current_writer(
-        receipt, thread, action, fingerprint, expectation
+    if not receipt.matches(
+        thread_id=thread.id,
+        action_id=action.id,
+        action_type=action.action_type,
+        dispatch_id=action.dispatch_id,
+        payload_fingerprint=fingerprint,
+        authority=expectation.authority,
     ):
         return None
     return receipt
-
-
-def _receipt_matches_current_writer(
-    receipt: GraphActionReceipt,
-    thread: ThreadModel,
-    action: ControlActionModel,
-    fingerprint: str,
-    expectation: ThreadWriteExpectation,
-) -> bool:
-    if (
-        receipt.thread_id != thread.id
-        or receipt.action_id != action.id
-        or receipt.payload_fingerprint != fingerprint
-        or action.action_type != receipt.action_type
-    ):
-        return False
-    return expectation.authority.owned_by(
-        receipt.action_type,
-        receipt.dispatch_id,
-        writer_generation=receipt.writer_generation,
-        run_revision=receipt.run_revision,
-        exact_revision=False,
-    )
 
 
 def _accepted_graph_action(

@@ -17,24 +17,6 @@ from .accepted_input import AcceptedActionInput
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.models import ControlActionModel
-
-
-def _receipt_matches_action(
-    receipt: GraphActionReceipt,
-    action: ControlActionModel,
-    accepted: AcceptedActionInput,
-    thread_id: str,
-) -> bool:
-    return (
-        receipt.action_id == action.id
-        and receipt.action_type == ControlActionType.INGEST
-        and receipt.thread_id == thread_id
-        and receipt.dispatch_id == action.dispatch_id
-        and receipt.payload_fingerprint
-        == control_action_payload_fingerprint(accepted.model_dump(mode="json"))
-    )
-
 
 async def read_accepted_graph_definition(
     db: AsyncSession, thread_id: str
@@ -54,7 +36,15 @@ async def read_accepted_graph_definition(
     if action.graph_receipt_json is None:
         raise ValueError("initial graph authority has no immutable receipt")
     receipt = GraphActionReceipt.model_validate_json(action.graph_receipt_json)
-    if not _receipt_matches_action(receipt, action, accepted, thread_id):
+    if not receipt.matches(
+        thread_id=thread_id,
+        action_id=action.id,
+        action_type=ControlActionType.INGEST,
+        dispatch_id=action.dispatch_id,
+        payload_fingerprint=control_action_payload_fingerprint(
+            accepted.model_dump(mode="json")
+        ),
+    ):
         raise ValueError("initial graph authority does not match its receipt")
     if accepted.dispatch["thread_id"] != thread_id:
         raise ValueError("initial graph authority belongs to a different run")

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
-from .write_authority import RECEIPT_ID_MAX_LENGTH
+from .action_receipts import DispatchIdentity
 
 __all__ = ["CancellationEvidence"]
 
@@ -17,7 +17,5 @@ class CancellationEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: Literal["cancellation-evidence-v1"]
-    dispatch_id: Annotated[
-        str, Field(min_length=1, max_length=RECEIPT_ID_MAX_LENGTH, pattern=r"^\S+$")
-    ]
+    dispatch_id: DispatchIdentity
     outcome: Literal["ceased", "no_active_work"]

@@ -11,8 +11,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
+from ..action_receipts import Fingerprint
 from ..clarification import (
     CLARIFICATION_DECLINE_MARKER,
     MAX_ANSWER_CHARS,
@@ -305,7 +306,7 @@ def test_resolution_fingerprint_is_canonical_and_outcome_sensitive() -> None:
     decline = ClarificationDecline(request_id="clarify-1")
 
     fingerprint = clarification_resolution_fingerprint(first)
-    assert fingerprint.startswith("sha256:")
+    assert TypeAdapter(Fingerprint).validate_python(fingerprint) == fingerprint
     assert fingerprint == clarification_resolution_fingerprint(reordered)
     assert fingerprint != clarification_resolution_fingerprint(changed_answer)
     assert fingerprint != clarification_resolution_fingerprint(continuation)

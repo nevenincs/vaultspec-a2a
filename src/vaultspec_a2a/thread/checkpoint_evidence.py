@@ -11,6 +11,9 @@ from langgraph.checkpoint.serde.types import ERROR
 from pydantic import ValidationError
 
 from .action_receipts import (
+    ACTIVE_RECEIPT_CHANNEL,
+    COMPLETION_RECEIPTS_CHANNEL,
+    INCORPORATED_RECEIPTS_CHANNEL,
     GraphActionReceipt,
     GraphCompletionReceipt,
     merge_active_graph_action_receipt,
@@ -34,8 +37,8 @@ __all__ = [
 # is what makes this read the value the next superstep will commit rather than
 # a second opinion about it.
 _RECEIPT_REDUCERS: dict[str, Callable[[Any, Any], object]] = {
-    "active_graph_action_receipt": merge_active_graph_action_receipt,
-    "graph_action_receipts": merge_graph_action_receipts,
+    ACTIVE_RECEIPT_CHANNEL: merge_active_graph_action_receipt,
+    INCORPORATED_RECEIPTS_CHANNEL: merge_graph_action_receipts,
 }
 
 # The channel a run's input is staged in, and the metadata source of the
@@ -91,14 +94,12 @@ def _action_evidence(
     values: dict[str, object], receipt: GraphActionReceipt, checkpoint_id: str
 ) -> CheckpointEvidence | None:
     try:
-        active = GraphActionReceipt.model_validate(
-            values.get("active_graph_action_receipt")
-        )
+        active = GraphActionReceipt.model_validate(values.get(ACTIVE_RECEIPT_CHANNEL))
     except ValidationError:
         return _incompatible(checkpoint_id)
     if active.thread_id != receipt.thread_id:
         return _incompatible(checkpoint_id)
-    incorporated_raw = values.get("graph_action_receipts")
+    incorporated_raw = values.get(INCORPORATED_RECEIPTS_CHANNEL)
     if not isinstance(incorporated_raw, dict):
         return _incompatible(checkpoint_id)
     incorporated = cast("dict[str, object]", incorporated_raw)
@@ -117,7 +118,7 @@ def _action_evidence(
 def _completion_evidence(
     values: dict[str, object], receipt: GraphActionReceipt, checkpoint_id: str
 ) -> CheckpointEvidence | None:
-    completions = values.get("graph_completion_receipts")
+    completions = values.get(COMPLETION_RECEIPTS_CHANNEL)
     if completions is not None and not isinstance(completions, dict):
         return _incompatible(checkpoint_id)
     if not isinstance(completions, dict) or receipt.dispatch_id not in completions:

@@ -92,7 +92,9 @@ hiddenimports = [
 # dashboard-bundled desktop runtime - a2a reaches it only out of process under
 # that profile. Exclude it explicitly so a build environment that happens to
 # have the extra installed cannot bloat the binary or pull an unshippable native
-# closure into the shipped tree.
+# closure into the shipped tree. The `otlp` extra's gRPC trace exporter is
+# excluded for the same reason: the binary ships without it, and telemetry runs
+# without exporting when the module is absent.
 # setuptools is a BUILD tool that PyInstaller drags into its own output: it is
 # PyInstaller's dependency, not the runtime's. Nothing here imports it or
 # `pkg_resources` - the shipped onedir carried `setuptools/` and no
@@ -123,6 +125,8 @@ excludes = [
     "sentence_transformers",
     "sympy",
     "vaultspec_rag",
+    "opentelemetry.exporter.otlp",
+    "grpc",
 ]
 
 pkg_datas, pkg_binaries, pkg_hidden = collect_all(

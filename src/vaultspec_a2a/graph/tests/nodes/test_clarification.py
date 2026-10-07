@@ -14,18 +14,23 @@ read it back the same way the recovery snapshot does.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import Command
 
 from ....graph.nodes.clarification import (
     ClarificationQuestionProducer,
     create_clarification_gate_node,
     create_clarification_request_node,
+)
+from ....testing import (
+    add_test_node,
+    compile_test_graph,
+    new_state_graph,
 )
 from ....thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,
@@ -38,11 +43,9 @@ from ....thread.clarification import (
     clarification_resolution_fingerprint,
     pending_clarification,
 )
-from ....thread.state import TeamState
-from .._state_graph_helpers import (
-    add_test_node,
-    compile_test_graph,
-)
+
+if TYPE_CHECKING:
+    from ....thread.state import TeamState
 
 
 def _request(request_id: str = "clarify-1") -> ClarificationRequest:
@@ -105,7 +108,7 @@ def _base_state() -> TeamState:
 
 def _clarify_graph(producer: ClarificationQuestionProducer) -> Any:
     """Build START -> clarify_request -> clarify_gate -> proceed -> END."""
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
 
     async def proceed(state: TeamState) -> dict[str, Any]:
         return {}
@@ -340,7 +343,7 @@ async def test_parked_questionnaire_is_readable_from_the_real_checkpoint() -> No
     graph is actually waiting on.
     """
     saver = InMemorySaver()
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
 
     async def proceed(state: TeamState) -> dict[str, Any]:
         return {}
@@ -457,7 +460,7 @@ async def test_second_questionnaire_does_not_erase_the_first_answers() -> None:
         async def __call__(self, state: TeamState) -> ClarificationRequest | None:
             return self.remaining.pop(0) if self.remaining else None
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     producer = _TwoShotProducer()
 
     add_test_node(

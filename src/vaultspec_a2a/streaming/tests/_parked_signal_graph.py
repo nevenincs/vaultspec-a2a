@@ -11,14 +11,14 @@ question and is then stopped by a signal from outside it.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import START, StateGraph
+from langgraph.graph import START
 from langgraph.types import Send, interrupt
 
 from ...graph.nodes._config_contract import accepting_runnable_config
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.clarification import CLARIFICATION_INTERRUPT_TYPE
 from ._error_injecting_graph import InjectedSignal
 
@@ -72,9 +72,7 @@ def build_parked_then_signalled_graph() -> Any:
             raise InjectedSignal("stop")
         return {}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(
-        cast("Any", ParkedSignalInput)
-    )
+    builder = new_state_graph(ParkedSignalInput)
     add_test_node(builder, _PARK_BRANCH, _park)
     add_test_node(builder, _SIGNAL_BRANCH, accepting_runnable_config(_signal))
     builder.add_conditional_edges(START, _both_branches, [_PARK_BRANCH, _SIGNAL_BRANCH])

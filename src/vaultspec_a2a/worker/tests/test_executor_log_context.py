@@ -16,8 +16,8 @@ import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...providers.team_selection import model_assignment_digest
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...utils.logging import LogContextFilter
 from ..executor import Executor
 from .test_executor import _current_ingest_dispatch, _make_recording_bridge
@@ -55,7 +55,7 @@ async def test_every_record_of_a_dispatch_carries_its_identity() -> None:
             try:
                 request = _current_ingest_dispatch("log-context-run")
                 builder = new_state_graph()
-                builder.add_node("step", step)
+                add_test_node(builder, "step", step)
                 builder.add_edge("__start__", "step")
                 builder.add_edge("step", "__end__")
                 definition = request.require_graph_definition()
@@ -68,7 +68,7 @@ async def test_every_record_of_a_dispatch_carries_its_identity() -> None:
                         model_assignment_digest(request.model_assignment),
                         definition.digest(),
                     ),
-                    builder.compile(checkpointer=checkpointer),
+                    compile_test_graph(builder, checkpointer=checkpointer),
                 )
                 capture.records.clear()
                 await asyncio.wait_for(executor.handle_dispatch(request), timeout=10.0)

@@ -35,7 +35,7 @@ from langchain_core.tools import tool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.config import get_stream_writer
 from langgraph.constants import TAG_NOSTREAM
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
 from ...graph.enums import ToolCallStatus
 from ...graph.events import (
@@ -46,7 +46,7 @@ from ...graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import EventAggregator
 
 if TYPE_CHECKING:
@@ -153,7 +153,7 @@ def _subgraph() -> Any:
         del state
         return {"note": "inner"}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
+    builder = new_state_graph(_State)
     add_test_node(builder, "inner", inner)
     builder.add_edge(START, "inner")
     builder.add_edge("inner", END)
@@ -161,7 +161,7 @@ def _subgraph() -> Any:
 
 
 def _identity_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
+    builder = new_state_graph(_State)
     add_test_node(builder, "worker", _worker)
     add_test_node(builder, "team", _subgraph())
     builder.add_edge(START, "worker")

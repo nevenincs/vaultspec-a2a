@@ -4,24 +4,25 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END
 from langgraph.types import Command
 from pydantic import PrivateAttr
 
+from ....testing import add_test_node, compile_test_graph, new_state_graph
 from ....tests._write_authority import make_test_write_authority
-from ....thread.state import TeamState
 from ...nodes.worker import WorkerNode, create_worker_node
-from .._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
+
+    from ....thread.state import TeamState
 
 SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
 
@@ -242,7 +243,7 @@ async def test_worker_resume_reinvokes_model_with_tool_result() -> None:
         name="coder",
     )
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, "coder", node)
     builder.set_entry_point("coder")
     builder.add_edge("coder", END)

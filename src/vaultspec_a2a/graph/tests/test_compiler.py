@@ -14,12 +14,13 @@ from langchain_core.language_models.fake_chat_models import (
     FakeListChatModel,
 )
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import RetryPolicy
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
+    from ...thread.state import TeamState
     from ..protocols import ProviderFactoryProtocol
 
 from ...control.config import settings
@@ -43,12 +44,12 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.errors import (
     ConfigError,
     DocumentConformanceError,
     WorkerExecutionError,
 )
-from ...thread.state import TeamState
 from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
 from .._compiler_models import (
     parse_catalog_preferences,
@@ -70,7 +71,6 @@ from ..compiler import (
     _route_from_supervisor,
     compile_team_graph,
 )
-from ._state_graph_helpers import add_test_node, compile_test_graph
 from .conftest import deterministic_model_assignment
 
 
@@ -1218,7 +1218,7 @@ def _counting_failure_graph(
             worker="coder", model="acp:test", message_count=1, cause=cause
         ) from cause
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, "coder", failing_node, retry_policy=policy)
     builder.add_edge(START, "coder")
     builder.add_edge("coder", END)

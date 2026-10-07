@@ -27,17 +27,23 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
-from ....thread.state import TeamState
+from ....testing import (
+    add_test_node,
+    ainvoke_test_graph,
+    compile_test_graph,
+    new_state_graph,
+)
 from ...nodes._config_contract import (
     RUNNABLE_CONFIG_ANNOTATION,
     accepting_runnable_config,
 )
-from .._state_graph_helpers import add_test_node, ainvoke_test_graph, compile_test_graph
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
+
+    from ....thread.state import TeamState
 
 _SEEN: dict[str, object] = {}
 
@@ -77,7 +83,7 @@ def _base_state() -> dict[str, Any]:
 
 
 async def _run(node: Any, name: str) -> object:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, name, node)
     builder.add_edge(START, name)
     builder.add_edge(name, END)

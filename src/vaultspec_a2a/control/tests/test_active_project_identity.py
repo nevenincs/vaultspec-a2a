@@ -26,7 +26,6 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...context.metadata import ThreadMetadata
 from ...control._thread_metadata import dispatchable_workspace_root
 from ...control.config import settings
@@ -35,6 +34,7 @@ from ...ipc.schemas import DispatchRequest, canonical_project_root
 from ...providers.team_selection import model_assignment_digest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.errors import ConfigError
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ...thread.state import TeamState
@@ -392,10 +392,10 @@ class TestGraphStateNamesTheProject:
             return {}
 
         builder = new_state_graph()
-        builder.add_node("observe", observe)
+        add_test_node(builder, "observe", observe)
         builder.add_edge("__start__", "observe")
         builder.add_edge("observe", "__end__")
-        graph = builder.compile(checkpointer=InMemorySaver())
+        graph = compile_test_graph(builder, checkpointer=InMemorySaver())
 
         await graph.ainvoke(
             GraphLifecycleManager.build_graph_input(
@@ -482,10 +482,10 @@ class TestOneWorkspaceOneGraphEntry:
             return {}
 
         builder = new_state_graph()
-        builder.add_node("finish", finish_node)
+        add_test_node(builder, "finish", finish_node)
         builder.add_edge("__start__", "finish")
         builder.add_edge("finish", "__end__")
-        return builder.compile(checkpointer=InMemorySaver())
+        return compile_test_graph(builder, checkpointer=InMemorySaver())
 
     def test_two_spellings_key_the_same_entry(self, workspace: Path) -> None:
         digest = model_assignment_digest({})

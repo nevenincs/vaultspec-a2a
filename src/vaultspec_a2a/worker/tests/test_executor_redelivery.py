@@ -16,8 +16,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...providers.team_selection import model_assignment_digest
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.enums import ControlActionType, ThreadStatus
 from ..executor import Executor
 from .test_executor import (
@@ -59,12 +59,14 @@ def _two_step_graph(checkpointer: Any, runs: list[str], gate: asyncio.Event) -> 
         return {"messages": [AIMessage(content="second")]}
 
     builder = new_state_graph()
-    builder.add_node("first", first)
-    builder.add_node("second", second)
+    add_test_node(builder, "first", first)
+    add_test_node(builder, "second", second)
     builder.add_edge("__start__", "first")
     builder.add_edge("first", "second")
     builder.add_edge("second", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(checkpointer=checkpointer)
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=checkpointer
+    )
     return graph
 
 

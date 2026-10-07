@@ -23,13 +23,13 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START
 from langgraph.types import Command, interrupt
 
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..action_receipts import GraphActionReceipt, control_action_payload_fingerprint
 from ..checkpoint_evidence import (
     CheckpointEvidenceKind,
     read_checkpoint_evidence,
 )
 from ..enums import ControlActionType
-from ._graph_helpers import add_node, compile_graph, new_builder
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -91,11 +91,11 @@ def _resume(receipt: GraphActionReceipt, answer: str) -> Command[str]:
 
 
 def _graph(saver: AsyncSqliteSaver) -> Any:
-    builder = new_builder()
-    add_node(builder, "gate", _gate)
+    builder = new_state_graph()
+    add_test_node(builder, "gate", _gate)
     builder.add_edge(START, "gate")
     builder.add_edge("gate", END)
-    return compile_graph(builder, checkpointer=saver)
+    return compile_test_graph(builder, checkpointer=saver)
 
 
 def _ingest_input(receipt: GraphActionReceipt) -> dict[str, Any]:

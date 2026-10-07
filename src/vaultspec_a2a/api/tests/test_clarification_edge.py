@@ -27,13 +27,13 @@ from ...graph.nodes.clarification import (
     create_clarification_gate_node,
     create_clarification_request_node,
 )
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.clarification import (
     MAX_ANSWER_CHARS,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
 )
-from .clarification_harness import new_state_graph
 from .conftest import SessionFactory, async_catalog_run_fields, make_app
 
 if TYPE_CHECKING:
@@ -84,19 +84,22 @@ async def _park_on_clarification(
         return {}
 
     builder = new_state_graph()
-    builder.add_node(
+    add_test_node(
+        builder,
         "clarification_request",
         create_clarification_request_node(
             _producer, gate_target="clarification_gate", proceed_target="proceed"
         ),
     )
-    builder.add_node(
-        "clarification_gate", create_clarification_gate_node(proceed_target="proceed")
+    add_test_node(
+        builder,
+        "clarification_gate",
+        create_clarification_gate_node(proceed_target="proceed"),
     )
-    builder.add_node("proceed", _proceed)
+    add_test_node(builder, "proceed", _proceed)
     builder.add_edge("__start__", "clarification_request")
     builder.add_edge("proceed", "__end__")
-    graph = builder.compile(checkpointer=checkpointer)
+    graph = compile_test_graph(builder, checkpointer=checkpointer)
 
     await graph.ainvoke(
         {
@@ -433,20 +436,22 @@ async def test_the_answered_questionnaire_stops_being_disclosed(
             return {}
 
         builder = new_state_graph()
-        builder.add_node(
+        add_test_node(
+            builder,
             "clarification_request",
             create_clarification_request_node(
                 _producer, gate_target="clarification_gate", proceed_target="proceed"
             ),
         )
-        builder.add_node(
+        add_test_node(
+            builder,
             "clarification_gate",
             create_clarification_gate_node(proceed_target="proceed"),
         )
-        builder.add_node("proceed", _proceed)
+        add_test_node(builder, "proceed", _proceed)
         builder.add_edge("__start__", "clarification_request")
         builder.add_edge("proceed", "__end__")
-        graph = builder.compile(checkpointer=cp)
+        graph = compile_test_graph(builder, checkpointer=cp)
 
         await graph.ainvoke(
             Command(

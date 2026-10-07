@@ -18,9 +18,9 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..checkpoints import _SelectorThreadPostgresCheckpointer, prune_settled_thread
 from ._checkpoint_history import config_for, stored_history
 
@@ -52,12 +52,12 @@ async def _fail(state: _Log) -> dict[str, list[str]]:
 
 
 def _settling_graph(saver: Checkpointer) -> Any:
-    inner: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
+    inner = new_state_graph(_Log)
     add_test_node(inner, "inner_step", _append("inner"))
     inner.add_edge(START, "inner_step")
     inner.add_edge("inner_step", END)
 
-    outer: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
+    outer = new_state_graph(_Log)
     add_test_node(outer, "first", _append("first"))
     add_test_node(outer, "nested", compile_test_graph(inner))
     add_test_node(outer, "last", _append("last"))
@@ -69,7 +69,7 @@ def _settling_graph(saver: Checkpointer) -> Any:
 
 
 def _failing_graph(saver: Checkpointer) -> Any:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
+    builder = new_state_graph(_Log)
     add_test_node(builder, "first", _append("first"))
     add_test_node(builder, "sibling", _append("sibling"))
     add_test_node(builder, "boom", _fail)

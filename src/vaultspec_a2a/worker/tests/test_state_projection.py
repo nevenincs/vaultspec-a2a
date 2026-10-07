@@ -12,12 +12,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import Command, Interrupt, PregelTask, interrupt
 from pydantic import BaseModel, ConfigDict
 
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ...providers import ProviderCondition
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import ControlActionType, ThreadStatus
@@ -131,7 +131,7 @@ async def test_a_node_that_asks_again_is_still_the_next_node() -> None:
             answer = interrupt({"type": "approval", "request_id": "request-9"})
         return {"answer": answer}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _AskState))
+    builder = new_state_graph(_AskState)
     add_test_node(builder, "ask_until_settled", ask_until_settled)
     builder.add_edge(START, "ask_until_settled")
     builder.add_edge("ask_until_settled", END)
@@ -174,7 +174,7 @@ def _fan_out_graph(saver: InMemorySaver) -> Any:
 
         return node
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _FanOutState))
+    builder = new_state_graph(_FanOutState)
     add_test_node(builder, "alpha", gate("request-alpha"))
     add_test_node(builder, "beta", gate("request-beta"))
     builder.add_edge(START, "alpha")

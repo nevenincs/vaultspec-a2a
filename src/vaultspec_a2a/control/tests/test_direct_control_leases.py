@@ -27,7 +27,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...control import cancel_service
 from ...control._permission_response_contract import (
     PermissionInput,
@@ -55,7 +54,12 @@ from ...database.models import Base, RecoveryAttemptModel, ThreadModel
 from ...database.session import begin_write_transaction, configure_sqlite_engine
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import session_scratch_dir
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    new_state_graph,
+    session_scratch_dir,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
@@ -166,10 +170,12 @@ def _install_receipt_graph(
         return {"messages": [AIMessage(content="applied")], "next": "FINISH"}
 
     builder = new_state_graph()
-    builder.add_node("worker", complete)
+    add_test_node(builder, "worker", complete)
     builder.add_edge("__start__", "worker")
     builder.add_edge("worker", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(checkpointer=checkpointer)
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=checkpointer
+    )
     workspace = Path(_ACTIVE_PROJECT)
     definition = freeze_graph_definition(
         load_team_config("mock-success-single", workspace_root=workspace),

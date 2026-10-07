@@ -34,13 +34,14 @@ from ....graph.nodes.diverge import (
     create_researcher_node,
     researcher_node_name,
 )
-from ....thread.state import TeamState
-from .._state_graph_helpers import add_test_node, compile_test_graph
+from ....testing import add_test_node, compile_test_graph, new_state_graph
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
+
+    from ....thread.state import TeamState
 _SPECS: list[dict[str, Any]] = [
     {"thread_id": "codebase", "locators": ["compiler.py:402"]},
     {"thread_id": "prior-art", "locators": ["Send docs"]},
@@ -162,7 +163,7 @@ async def test_compiled_researcher_forwards_config_to_config_aware_producer() ->
             "source_thread": spec["thread_id"],
         }
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(
         builder, "researcher", create_researcher_node(spec, config_aware_producer)
     )
@@ -214,7 +215,7 @@ async def test_diverge_stage_accumulates_findings_and_joins() -> None:
     The synthesis node runs once (the join), and by the time it runs every
     researcher branch's finding is visible through the reducer.
     """
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
 
     seen_at_synthesis: dict[str, list[dict[str, Any]]] = {}
 
@@ -249,7 +250,7 @@ async def test_diverge_stage_accumulates_findings_and_joins() -> None:
 async def test_wire_diverge_stage_rejects_empty_specs() -> None:
     from ....thread.errors import ConfigError
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     with pytest.raises(ConfigError, match="at least one research thread spec"):
         _wire_diverge_stage(
             builder,
@@ -313,7 +314,7 @@ async def test_web_locators_reach_synthesis_and_survive_the_checkpoint(
         return {"messages": [AIMessage(content="synthesised", name="synthesist")]}
 
     def _build() -> StateGraph[Any, None, Any, Any]:
-        builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+        builder = new_state_graph()
         dispatch = _wire_diverge_stage(
             builder,
             dispatch_name="research_dispatch",

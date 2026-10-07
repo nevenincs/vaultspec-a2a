@@ -15,11 +15,10 @@ import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.constants import TAG_NOSTREAM
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
-from ...graph.compiler import _add_node
 from ...graph.events import MessageChunk
-from ...graph.tests._state_graph_helpers import compile_test_graph
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import EventAggregator
 
 if TYPE_CHECKING:
@@ -47,8 +46,8 @@ async def _route_then_answer(state: _State) -> dict[str, str]:
 
 @pytest.mark.asyncio
 async def test_a_nostream_model_call_is_not_relayed_to_clients() -> None:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
-    _add_node(builder, "supervisor", _route_then_answer)
+    builder = new_state_graph(_State)
+    add_test_node(builder, "supervisor", _route_then_answer)
     builder.add_edge(START, "supervisor")
     builder.add_edge("supervisor", END)
     graph = cast("StreamableGraph", compile_test_graph(builder))

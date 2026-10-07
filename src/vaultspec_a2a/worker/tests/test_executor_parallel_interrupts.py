@@ -16,9 +16,9 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command, Send, interrupt
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...control.permission_dispatch import answered_permission_request
 from ...providers.team_selection import model_assignment_digest
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..executor import Executor
 from ..state_projection import ResumeRefusalCause
 from .test_executor import (
@@ -63,14 +63,14 @@ def _install_two_gate_fan_out(
         return {"next": "FINISH"}
 
     builder = new_state_graph()
-    builder.add_node("fan", fan)
-    builder.add_node("gate", gate)
-    builder.add_node("join", join)
+    add_test_node(builder, "fan", fan)
+    add_test_node(builder, "gate", gate)
+    add_test_node(builder, "join", join)
     builder.add_edge("__start__", "fan")
     builder.add_edge("gate", "join")
     builder.add_edge("join", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(
-        checkpointer=executor._checkpointer
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=executor._checkpointer
     )
     executor.register_compiled_graph(
         request.thread_id,

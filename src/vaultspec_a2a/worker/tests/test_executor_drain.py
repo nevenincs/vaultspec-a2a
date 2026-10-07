@@ -23,8 +23,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.config import get_store
 from langgraph.store.memory import InMemoryStore
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...providers.team_selection import model_assignment_digest
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from .._dispatch_contract import CAPACITY_ACCEPTED, CAPACITY_DRAINING
 from ..executor import Executor
 from .test_executor import _current_ingest_dispatch, _make_bridge
@@ -59,14 +59,14 @@ async def test_shutdown_drain_stops_the_run_between_nodes_without_settling_it() 
             executor = Executor(checkpointer=checkpointer, bridge=bridge)
             request = _current_ingest_dispatch("drain-run")
             builder = new_state_graph()
-            builder.add_node("first", first)
-            builder.add_node("second", second)
+            add_test_node(builder, "first", first)
+            add_test_node(builder, "second", second)
             builder.add_edge("__start__", "first")
             builder.add_edge("first", "second")
             builder.add_edge("second", "__end__")
             store = InMemoryStore()
-            graph: RegisteredCompiledGraph = builder.compile(
-                checkpointer=checkpointer, store=store
+            graph: RegisteredCompiledGraph = compile_test_graph(
+                builder, checkpointer=checkpointer, store=store
             )
             definition = request.require_graph_definition()
             executor.register_compiled_graph(
@@ -127,10 +127,12 @@ async def test_drain_reaches_a_run_whose_control_opens_after_it_was_requested() 
             executor = Executor(checkpointer=checkpointer, bridge=bridge)
             request = _current_ingest_dispatch("late-control-run")
             builder = new_state_graph()
-            builder.add_node("only", only)
+            add_test_node(builder, "only", only)
             builder.add_edge("__start__", "only")
             builder.add_edge("only", "__end__")
-            graph: RegisteredCompiledGraph = builder.compile(checkpointer=checkpointer)
+            graph: RegisteredCompiledGraph = compile_test_graph(
+                builder, checkpointer=checkpointer
+            )
             definition = request.require_graph_definition()
             executor.register_compiled_graph(
                 request.thread_id,
@@ -212,10 +214,12 @@ async def test_cancelling_a_run_mid_node_relays_no_failure_and_propagates() -> N
             executor = Executor(checkpointer=checkpointer, bridge=bridge)
             request = _current_ingest_dispatch("cancelled-run")
             builder = new_state_graph()
-            builder.add_node("slow", slow)
+            add_test_node(builder, "slow", slow)
             builder.add_edge("__start__", "slow")
             builder.add_edge("slow", "__end__")
-            graph: RegisteredCompiledGraph = builder.compile(checkpointer=checkpointer)
+            graph: RegisteredCompiledGraph = compile_test_graph(
+                builder, checkpointer=checkpointer
+            )
             definition = request.require_graph_definition()
             executor.register_compiled_graph(
                 request.thread_id,

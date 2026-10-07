@@ -21,8 +21,8 @@ import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...providers.team_selection import model_assignment_digest
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..executor import Executor
 from .test_executor import _current_ingest_dispatch, _make_bridge
 
@@ -65,12 +65,14 @@ async def test_the_application_receipt_precedes_the_work_it_reports_on() -> None
             executor = Executor(checkpointer=checkpointer, bridge=bridge)
             request = _current_ingest_dispatch("receipt-timing-run")
             builder = new_state_graph()
-            builder.add_node("first", first)
-            builder.add_node("second", second)
+            add_test_node(builder, "first", first)
+            add_test_node(builder, "second", second)
             builder.add_edge("__start__", "first")
             builder.add_edge("first", "second")
             builder.add_edge("second", "__end__")
-            graph: RegisteredCompiledGraph = builder.compile(checkpointer=checkpointer)
+            graph: RegisteredCompiledGraph = compile_test_graph(
+                builder, checkpointer=checkpointer
+            )
             definition = request.require_graph_definition()
             executor.register_compiled_graph(
                 request.thread_id,

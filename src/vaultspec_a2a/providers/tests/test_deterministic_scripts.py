@@ -13,18 +13,18 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END
 from langgraph.types import Command
 
 from ...graph.enums import Provider
 from ...graph.nodes.worker import create_worker_node
-from ...graph.tests._state_graph_helpers import (
+from ...team.team_config import AgentConfig, load_agent_config, load_team_config
+from ...testing import (
     add_test_node,
     ainvoke_test_graph,
     compile_test_graph,
+    new_state_graph,
 )
-from ...team.team_config import AgentConfig, load_agent_config, load_team_config
-from ...thread.state import TeamState
 from ..deterministic_chat_model import DeterministicResearchAdrChatModel
 from ..factory import ProviderFactory
 
@@ -32,6 +32,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from langchain_core.runnables import RunnableConfig
+
+    from ...thread.state import TeamState
 
 
 def _scenario_model(
@@ -70,7 +72,7 @@ async def test_deterministic_permission_pause_resumes_generic_callback() -> None
         system_prompt=agent.persona.system_prompt,
         name=agent.id,
     )
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, "coder", node)
     builder.set_entry_point("coder")
     builder.add_edge("coder", END)

@@ -29,17 +29,17 @@ import pytest_asyncio
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.serde.event_hooks import register_serde_event_listener
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import Command
 
 from ...graph.compiler import compile_team_graph
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ...graph.tests.conftest import deterministic_model_assignment
 from ...team.team_config import (
     ResearchThreadSpec,
     load_agent_config,
     load_team_config,
 )
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...testing import settings_override as _settings_override
 from ...thread.action_receipts import (
     GraphActionReceipt,
@@ -223,7 +223,7 @@ async def _write_leak(state: _Leak) -> dict[str, Any]:
 
 
 def _leaking_graph(saver: Checkpointer) -> Any:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Leak))
+    builder = new_state_graph(_Leak)
     add_test_node(builder, "leak", _write_leak)
     builder.add_edge(START, "leak")
     builder.add_edge("leak", END)

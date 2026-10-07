@@ -33,7 +33,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.config import get_stream_writer
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import interrupt
 
 from ...graph.enums import ToolCallStatus
@@ -47,7 +47,7 @@ from ...graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import EventAggregator
 
 if TYPE_CHECKING:
@@ -88,7 +88,7 @@ async def _speaking_node(state: _State) -> dict[str, Any]:
 
 
 def _full_surface_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
+    builder = new_state_graph(_State)
     add_test_node(builder, "speaker", _speaking_node)
     builder.add_edge(START, "speaker")
     builder.add_edge("speaker", END)
@@ -166,7 +166,7 @@ def _parking_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
         )
         return {"note": str(answer)}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
+    builder = new_state_graph(_State)
     add_test_node(builder, "gate", gate)
     builder.add_edge(START, "gate")
     builder.add_edge("gate", END)

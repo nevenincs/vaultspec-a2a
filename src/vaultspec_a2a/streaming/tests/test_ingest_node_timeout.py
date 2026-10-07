@@ -11,12 +11,11 @@ import asyncio
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import pytest
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import TimeoutPolicy
 
-from ...graph.compiler import _add_node
 from ...graph.events import ErrorOccurred
-from ...graph.tests._state_graph_helpers import compile_test_graph
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import EventAggregator
 
 if TYPE_CHECKING:
@@ -36,8 +35,8 @@ async def _outlasting_node(state: _State) -> dict[str, str]:
 
 
 def _graph_with_node_budget(run_timeout: float) -> StreamableGraph:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
-    _add_node(
+    builder = new_state_graph(_State)
+    add_test_node(
         builder,
         "slow_author",
         _outlasting_node,

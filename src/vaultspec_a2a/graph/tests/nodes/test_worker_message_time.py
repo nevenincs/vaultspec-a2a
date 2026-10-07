@@ -9,16 +9,16 @@ real checkpointer, and the snapshot projection reads its time back.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict
 
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
 from ....control.snapshot import _checkpoint_messages
+from ....testing import add_test_node, compile_test_graph, new_state_graph
 from ...nodes.worker import _finalize_worker_response
-from .._state_graph_helpers import add_test_node, compile_test_graph
 
 
 class _Transcript(TypedDict):
@@ -34,7 +34,7 @@ async def test_a_worker_turn_keeps_its_production_time_through_the_checkpoint() 
             worker_name="vaultspec-coder",
         )
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Transcript))
+    builder = new_state_graph(_Transcript)
     add_test_node(builder, "turn", turn)
     builder.add_edge(START, "turn")
     builder.add_edge("turn", END)

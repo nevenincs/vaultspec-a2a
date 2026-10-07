@@ -10,8 +10,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from importlib import import_module
-from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 import anyio
 import uvicorn
@@ -23,13 +22,13 @@ from ...graph.nodes.clarification import (
     create_clarification_gate_node,
     create_clarification_request_node,
 )
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.clarification import (
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
     pending_clarification,
 )
-from ...thread.state import TeamState
 from ...worker.graph_lifecycle import RegisteredCompiledGraph
 from ...worker.ipc import WorkerBridge
 
@@ -38,15 +37,14 @@ if TYPE_CHECKING:
 
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-    from langgraph.store.base import BaseStore
     from langgraph.types import Command
 
-    from ...database.checkpoints import Checkpointer
+    from ...thread.state import TeamState
+
 
 __all__ = [
     "clarification_graph",
     "loopback_callback_bridge",
-    "new_state_graph",
     "park_clarification",
 ]
 
@@ -59,46 +57,6 @@ type ClarificationCommand = Command[ClarificationNode]
 
 class ClarificationGraph(RegisteredCompiledGraph, Protocol):
     """Compiled graph surface the shared clarification tests exercise."""
-
-
-class ClarificationGraphBuilder(Protocol):
-    """Shared graph-construction surface for real worker test graphs."""
-
-    def add_node(self, node: str, action: object) -> None: ...
-
-    def add_edge(self, start_key: str, end_key: str) -> None: ...
-
-    def compile(
-        self, *, checkpointer: Checkpointer, store: BaseStore | None = None
-    ) -> RegisteredCompiledGraph: ...
-
-
-class _GraphState(Protocol):
-    """Structural state bound used only while constructing the real graph.
-
-    These two metadata attributes are LangGraph's TypedDict bound, not copied
-    application state fields. ``TeamState`` remains the actual runtime schema.
-    """
-
-    __required_keys__: ClassVar[frozenset[str]]
-    __optional_keys__: ClassVar[frozenset[str]]
-
-
-class _StateGraphConstructor(Protocol):
-    """Runtime-loaded LangGraph constructor narrowed to this harness's needs."""
-
-    def __call__(
-        self, state_schema: type[_GraphState]
-    ) -> ClarificationGraphBuilder: ...
-
-
-def new_state_graph() -> ClarificationGraphBuilder:
-    """Construct a real LangGraph builder behind this harness's typed boundary."""
-    graph_module = import_module("langgraph.graph")
-    state_graph = getattr(graph_module, "StateGraph", None)
-    assert callable(state_graph)
-    state_graph_constructor = cast("_StateGraphConstructor", state_graph)
-    return state_graph_constructor(cast("type[_GraphState]", TeamState))
 
 
 class BoundSocket(Protocol):
@@ -156,7 +114,8 @@ def _complete(state: TeamState) -> dict[str, object]:
 def clarification_graph(checkpointer: AsyncSqliteSaver) -> ClarificationGraph:
     """Compile the shared minimal graph around the real clarification nodes."""
     builder = new_state_graph()
-    builder.add_node(
+    add_test_node(
+        builder,
         "clarification_request",
         create_clarification_request_node(
             _produce_questions,
@@ -164,14 +123,15 @@ def clarification_graph(checkpointer: AsyncSqliteSaver) -> ClarificationGraph:
             proceed_target="complete",
         ),
     )
-    builder.add_node(
+    add_test_node(
+        builder,
         "clarification_gate",
         create_clarification_gate_node(proceed_target="complete"),
     )
-    builder.add_node("complete", _complete)
+    add_test_node(builder, "complete", _complete)
     builder.add_edge("__start__", "clarification_request")
     builder.add_edge("complete", "__end__")
-    return builder.compile(checkpointer=checkpointer)
+    return compile_test_graph(builder, checkpointer=checkpointer)
 
 
 async def park_clarification(

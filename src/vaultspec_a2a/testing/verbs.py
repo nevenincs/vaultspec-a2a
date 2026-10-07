@@ -30,7 +30,7 @@ from .boot import FIRST_DEMAND_TIMEOUT, GatewayBootError
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-__all__ = ["RunVerbs", "status_and_json"]
+__all__ = ["RunVerbs", "actor_tokens_body", "status_and_json"]
 
 type RunStage = Literal["start", "prepare", "commit", "release"]
 
@@ -47,6 +47,13 @@ def status_and_json(response: httpx.Response) -> tuple[int, dict[str, Any]]:
     return response.status_code, body
 
 
+def actor_tokens_body(
+    tokens: Mapping[str, str], *, engine_bearer: str = "bearer"
+) -> dict[str, object]:
+    """The wire ``actor_tokens`` bundle: per-role *tokens* plus the engine bearer."""
+    return {"tokens": dict(tokens), "engine_bearer": engine_bearer}
+
+
 @dataclass(frozen=True, slots=True)
 class RunVerbs:
     """Drive one gateway's run-start verb under one fixed policy.
@@ -56,8 +63,8 @@ class RunVerbs:
     it against the catalog served for the run's workspace, so it is resolved per
     workspace rather than written by hand, and a caller caches it so prepare and
     its release or commit present the same one. *tokens* is the actor-token
-    bundle a ``start`` or ``commit`` binds unless the call names its own; ``None``
-    sends none.
+    bundle a ``start`` or ``commit`` binds unless the call names its own, beside
+    *engine_bearer*; ``None`` sends none.
     """
 
     base_url: str
@@ -67,6 +74,7 @@ class RunVerbs:
     selection: Callable[[str], Mapping[str, object]]
     tokens: Mapping[str, str] | None = None
     message: str = "build it"
+    engine_bearer: str = "bearer"
 
     def prepare(
         self, run_id: str, *, metadata: Mapping[str, object] | None = None
@@ -191,7 +199,9 @@ class RunVerbs:
         if message is not None:
             body["message"] = message
         if tokens is not None:
-            body["actor_tokens"] = {"tokens": dict(tokens), "engine_bearer": "bearer"}
+            body["actor_tokens"] = actor_tokens_body(
+                tokens, engine_bearer=self.engine_bearer
+            )
         if title is not None:
             body["title"] = title
         with httpx.Client(

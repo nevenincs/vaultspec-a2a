@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import pytest
 
-from ...testing import JsonReplyHandler, serve_handler
+from ...testing import JsonReplyHandler, combined_output, serve_handler
 from ...tests.native_build import linux_isolation_helper
 from ...utils import ProcessContainmentError
 from ..native_isolation import (
@@ -259,7 +259,7 @@ request.on('error', e => { out.loopback = e.code; console.log(JSON.stringify(out
                 timeout=20,
                 check=False,
             )
-            assert completed.returncode == 0, completed.stdout + completed.stderr
+            assert completed.returncode == 0, combined_output(completed)
             observed = json.loads(completed.stdout)
             assert all(observed[key] == "ENOENT" for key in paths)
             assert observed["auth"] == "selected-provider"

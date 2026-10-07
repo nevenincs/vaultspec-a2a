@@ -9,14 +9,18 @@ that buffers the whole response can never reproduce.
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import httpx
 import pytest
 
 from ...streaming.aggregator import EventAggregator
-from ...testing import serve_on_loopback
+from ...testing import (
+    ProgressDeadline,
+    ProgressStalledError,
+    serve_on_loopback,
+    wait_for_async,
+)
 from ._relay_events import progress_event, relay_events
 from .conftest import make_app
 from .test_gateway_live import _seed_live_thread
@@ -38,23 +42,31 @@ class _CheckedOutPool(Protocol):
 
 
 async def _wait_for_subscribers(aggregator: EventAggregator, expected: int) -> None:
-    for _ in range(500):
-        if aggregator.subscriber_count() >= expected:
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError(
-        f"only {aggregator.subscriber_count()} of {expected} viewers attached"
-    )
+    async def _attached() -> bool | None:
+        return True if aggregator.subscriber_count() >= expected else None
+
+    try:
+        await wait_for_async(
+            _attached, deadline=ProgressDeadline(idle_window_s=5.0), interval_s=0.01
+        )
+    except ProgressStalledError as stalled:
+        raise AssertionError(
+            f"only {aggregator.subscriber_count()} of {expected} viewers attached"
+        ) from stalled
 
 
 async def _wait_for_idle_pool(pool: _CheckedOutPool) -> None:
-    for _ in range(500):
-        if pool.checkedout() == 0:
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError(
-        f"{pool.checkedout()} pooled connections are still checked out"
-    )
+    async def _idle() -> bool | None:
+        return True if pool.checkedout() == 0 else None
+
+    try:
+        await wait_for_async(
+            _idle, deadline=ProgressDeadline(idle_window_s=5.0), interval_s=0.01
+        )
+    except ProgressStalledError as stalled:
+        raise AssertionError(
+            f"{pool.checkedout()} pooled connections are still checked out"
+        ) from stalled
 
 
 @pytest.mark.asyncio(loop_scope="function")

@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing import free_port
+from ...testing import free_port, run_cli
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -164,15 +164,8 @@ def test_start_status_stop_restart_cycle_on_scratch_home(tmp_path: Path) -> None
 @pytest.mark.timeout(120)
 def test_cli_status_command_shapes_json_and_exit_codes(tmp_path: Path) -> None:
     """The status verb emits bounded JSON and carries the verdict in its exit."""
-    from ...utils.runtime_exec import self_command
-
     home = tmp_path / "home"
-    result = subprocess.run(
-        [*self_command(), "status", "--app-home", str(home)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run_cli("status", "--app-home", str(home))
     assert result.returncode == 1
     payload = json.loads(result.stdout)
     assert payload["state"] == "stopped"

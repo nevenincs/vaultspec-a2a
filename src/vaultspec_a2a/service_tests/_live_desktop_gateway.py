@@ -6,7 +6,7 @@ import contextlib
 from typing import TYPE_CHECKING
 
 from ..testing import (
-    DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_ATTACH_AUTHORIZATION,
     armed_gateway_env,
     booted_gateway,
     gateway_script,
@@ -33,4 +33,4 @@ def armed_gateway(tmp_path: Path, **extra_env: str) -> Generator[tuple[str, str]
         script=gateway_script(log_level="info"),
         detached=True,
     ) as gateway:
-        yield gateway.base_url, f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
+        yield gateway.base_url, DEFAULT_ATTACH_AUTHORIZATION

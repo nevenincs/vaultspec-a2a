@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import String
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...control.state_layout import StateLayout
 from ...database.models import ThreadModel
 from ...database.thread_repository import create_thread
 from ...testing import DEFAULT_TEAM_PRESET, booted_gateway
@@ -148,7 +149,9 @@ async def test_active_run_discovery_rebinds_to_authoritative_status(
             await _assert_unauthenticated_routes(anonymous)
 
         discovery = json.loads(
-            (tmp_path / "a2a-home" / "service.json").read_text(encoding="utf-8")
+            StateLayout(tmp_path / "a2a-home").discovery_path.read_text(
+                encoding="utf-8"
+            )
         )
         assert "service_token" not in discovery
         assert discovery["handoff_reference"]

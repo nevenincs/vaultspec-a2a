@@ -3,11 +3,10 @@
 This module is the single home of the primitives a real-process tier needs to
 stand a production gateway up and take it down again: death-aware readiness,
 bind-race retry, whole-tree reaping, the child gateway program, the seated
-application home it boots over, the environment a gateway child is given, and
-the sanitised environment an out-of-tree subprocess is given. It also owns the
-other peers a tier spawns or serves beside a gateway - a stranger process
-squatting on a worker port, a loopback listener for a worker bridge's callbacks,
-and the spawner a test attaches to a worker it did not start.
+application home it boots over, and the environment a gateway child is given. It
+also owns the other peers a tier spawns or serves beside a gateway - a stranger
+process squatting on a worker port, a loopback listener for a worker bridge's
+callbacks, and the spawner a test attaches to a worker it did not start.
 
 Acquiring the ports it boots on is a separate concept with its own home,
 :mod:`vaultspec_a2a.testing.ports`, and this consumes it. Nothing about holding
@@ -67,6 +66,7 @@ from ..desktop.credentials import (
     ATTACH_CREDENTIAL_NAME,
     OWNERSHIP_CAPABILITY_NAME,
     create_worker_ipc_credential,
+    credential_paths,
 )
 from ..desktop.profile import derive_state_paths
 from ..utils import ProcessContainment, spawn_contained
@@ -113,13 +113,13 @@ __all__ = [
     "await_ready",
     "booted_gateway",
     "broker_gateway_env",
-    "clean_subprocess_environment",
     "desktop_workspace",
     "foreign_worker",
     "gateway_process_env",
     "gateway_script",
     "log_tail",
     "loopback_callback_bridge",
+    "read_worker_ipc_secret",
     "reap_process",
     "seat_app_home",
     "spawn_gateway",
@@ -261,15 +261,6 @@ class Handler(BaseHTTPRequestHandler):
 HTTPServer(("127.0.0.1", port), Handler).serve_forever()
 """
 
-# Interpreter and package-manager state that would leak the running virtual
-# environment into a child asked to exercise a freshly installed one.
-_LEAKING_ENVIRONMENT_NAMES = (
-    "PYTHONHOME",
-    "PYTHONPATH",
-    "UV_PROJECT_ENVIRONMENT",
-    "VIRTUAL_ENV",
-)
-
 
 class GatewayBootError(AssertionError):
     """A process exited before its readiness probe passed.
@@ -408,6 +399,11 @@ def await_ready(
     raise AssertionError(f"{what} readiness never came up ({last}){_tails(watch)}")
 
 
+def _answers_health(base: str, *, timeout: float) -> bool:
+    with httpx.Client(base_url=base, timeout=timeout) as client:
+        return client.get("/health").status_code == 200
+
+
 def await_gateway_ready(
     base: str,
     gateway: WatchedProcess,
@@ -420,12 +416,12 @@ def await_gateway_ready(
     *gateway*: a gateway that dies first fails at once with its exit code and
     log.
     """
-
-    def _healthy() -> bool:
-        with httpx.Client(base_url=base, timeout=2.0) as client:
-            return client.get("/health").status_code == 200
-
-    await_ready(_healthy, what="gateway", watch=[gateway], timeout=timeout)
+    await_ready(
+        lambda: _answers_health(base, timeout=2.0),
+        what="gateway",
+        watch=[gateway],
+        timeout=timeout,
+    )
 
 
 def reap_process(watched: WatchedProcess) -> None:
@@ -510,6 +506,7 @@ def spawn_until_ready(
     *,
     attempts: int = 3,
     timeout: float = READINESS_TIMEOUT,
+    ports: tuple[int, int] | None = None,
 ) -> tuple[WatchedProcess, int, int, str]:
     """Boot a gateway on a fresh port pair, retrying only the bind-race death.
 
@@ -519,6 +516,12 @@ def spawn_until_ready(
     gateway answers its health endpoint. A child that dies before readiness is
     retried on new ports; the final attempt's failure propagates.
 
+    *ports* is a ``(gateway_port, worker_port)`` pair the caller claimed itself,
+    because it must know both before the boot - to seat a peer on the worker
+    port that reports the gateway's address, say. The pair is used as given, on
+    one attempt: a pinned port cannot be re-rolled, so a bind race on it fails
+    the boot instead of being retried.
+
     Ownership of a FAILED boot ends here. Only a successful boot hands its
     process to the caller, so a child still running after a failed attempt has
     no other owner and is reaped before this returns or raises - including on an
@@ -526,15 +529,18 @@ def spawn_until_ready(
     """
     from ..lifecycle import release_reservation
 
+    tries = attempts if ports is None else 1
     last_boot_error: GatewayBootError | None = None
-    for _ in range(attempts):
+    for _ in range(tries):
         # Reserve the pair through the registry first (default-safe: a
         # concurrent session cannot be handed either number while the markers
         # hold), falling back to one atomic candidate call so the pair cannot
         # collide with itself: a gateway handed its own port for its worker
         # would die on the second bind and burn a retry.
-        reservations = reserve_scratch_ports(2)
-        if reservations is not None:
+        reservations = None if ports is not None else reserve_scratch_ports(2)
+        if ports is not None:
+            gateway_port, worker_port = ports
+        elif reservations is not None:
             gateway_port, worker_port = (r.port for r in reservations)
         else:
             gateway_port, worker_port = allocate_free_ports(2)
@@ -571,7 +577,7 @@ def spawn_until_ready(
             hold_for_process_lifetime(worker_reservation)
         return gateway, gateway_port, worker_port, base
     raise AssertionError(
-        f"gateway did not boot within {attempts} attempts; last: {last_boot_error}"
+        f"gateway did not boot within {tries} attempt(s); last: {last_boot_error}"
     )
 
 
@@ -583,14 +589,16 @@ def booted_gateway(
     script: str | None,
     detached: bool = False,
     timeout: float = READINESS_TIMEOUT,
+    ports: tuple[int, int] | None = None,
 ) -> Generator[BootedGateway]:
     """Boot one gateway on fresh ports, yield it once ready, and reap its tree.
 
     *env* builds the child's environment for the ports each attempt is given -
     :func:`armed_gateway_env` or :func:`broker_gateway_env`, or a caller's own
-    builder. *script* and *detached* are as :func:`spawn_gateway` describes. The
-    tree is reaped when the body ends, whatever its outcome, so no gateway or
-    worker it spawned outlives the test.
+    builder. *script* and *detached* are as :func:`spawn_gateway` describes, and
+    *ports* as :func:`spawn_until_ready` does. The tree is reaped when the body
+    ends, whatever its outcome, so no gateway or worker it spawned outlives the
+    test.
     """
 
     def _spawn(gateway_port: int, worker_port: int) -> WatchedProcess:
@@ -603,7 +611,7 @@ def booted_gateway(
         )
 
     gateway, gateway_port, worker_port, base = spawn_until_ready(
-        _spawn, timeout=timeout
+        _spawn, timeout=timeout, ports=ports
     )
     try:
         yield BootedGateway(
@@ -782,9 +790,19 @@ def seat_app_home(
     return state
 
 
-def _answers_health(port: int) -> bool:
-    with httpx.Client(timeout=1.0) as client:
-        return client.get(f"http://127.0.0.1:{port}/health").status_code == 200
+def read_worker_ipc_secret(app_home: Path) -> str:
+    """The worker IPC secret the gateway over *app_home* minted at boot.
+
+    Read from the real owner-restricted file at the production path, so a test
+    that presents it to a worker or scans for its leak holds the very secret the
+    gateway holds.
+    """
+    credentials_dir = derive_state_paths(app_home).credentials_dir
+    return (
+        credential_paths(credentials_dir)
+        .worker_ipc_path.read_text(encoding="utf-8")
+        .strip()
+    )
 
 
 @contextlib.contextmanager
@@ -817,7 +835,7 @@ def foreign_worker(
     squatter = WatchedProcess("foreign worker", process, containment)
     try:
         await_ready(
-            lambda: _answers_health(port),
+            lambda: _answers_health(f"http://127.0.0.1:{port}", timeout=1.0),
             what="foreign worker",
             watch=[squatter],
             timeout=10.0,
@@ -953,20 +971,3 @@ def adopted_spawner(
     )
     spawner.adopt_worker()
     return spawner
-
-
-def clean_subprocess_environment() -> dict[str, str]:
-    """The current environment with this virtual environment's leakage removed.
-
-    A child asked to exercise a freshly installed capsule must not inherit the
-    running interpreter's ``PYTHONHOME``/``PYTHONPATH`` or the project's uv
-    environment pointers, or it resolves the development tree instead of what
-    was installed. Colour and progress output are also suppressed so captured
-    output is comparable.
-    """
-    environment = dict(os.environ)
-    for name in _LEAKING_ENVIRONMENT_NAMES:
-        environment.pop(name, None)
-    environment["NO_COLOR"] = "1"
-    environment["UV_NO_PROGRESS"] = "1"
-    return environment

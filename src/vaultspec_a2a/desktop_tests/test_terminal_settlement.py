@@ -26,7 +26,6 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
@@ -37,23 +36,23 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ..control.event_handlers import _handle_terminal_event, _settlement_tasks
 from ..database import get_thread
-from ..desktop.credentials import WORKER_IPC_CREDENTIAL_NAME
 from ..desktop.profile import derive_state_paths
 from ..testing import (
+    DEFAULT_ATTACH_AUTHORIZATION,
     DEFAULT_ATTACH_CREDENTIAL,
-    DEFAULT_PRESET_LANE,
     DEFAULT_REQUIRED_ROLE,
-    DEFAULT_TEAM_PRESET,
     JsonReplyHandler,
-    RunVerbs,
+    ProgressDeadline,
+    ProgressStalledError,
     booted_gateway,
     broker_gateway_env,
-    desktop_workspace,
-    fetch_in_process_selection_at,
+    gateway_run_verbs,
     gateway_script,
+    read_worker_ipc_secret,
     seat_app_home,
     serve_handler,
     settings_override,
+    wait_for,
     wait_for_run_status_async,
 )
 from ..thread.enums import TERMINAL_STATUS_VALUES, ThreadStatus
@@ -63,7 +62,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _ACTOR_TOKEN = "tok-coder-secret-value"
-_AUTH = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
 
 
 # ---------------------------------------------------------------------------
@@ -141,19 +139,25 @@ def _assert_settlement_state(
 ) -> None:
     # The deterministic run completes on its own; poll the receiver until it accepts the
     # settlement for this run (retry included).
-    deadline = time.monotonic() + 60.0
-    while time.monotonic() < deadline:
+    def _accepted() -> bool | None:
         with state.lock:
-            accepted = [b for b in state.accepted if b.get("run_id") == run_id]
-        if accepted:
-            break
-        time.sleep(0.5)
+            return (
+                True if any(b.get("run_id") == run_id for b in state.accepted) else None
+            )
+
+    try:
+        wait_for(
+            _accepted, deadline=ProgressDeadline(idle_window_s=60.0), interval_s=0.5
+        )
+    except ProgressStalledError as stalled:
+        raise AssertionError(
+            "settlement was never delivered to the dashboard receiver"
+        ) from stalled
 
     with state.lock:
         accepted = [b for b in state.accepted if b.get("run_id") == run_id]
         attempts = list(state.attempts)
         revoked = list(state.revoked_leases)
-    assert accepted, "settlement was never delivered to the dashboard receiver"
     settlement = accepted[0]
 
     # --- Authenticated with attach-control, never worker IPC. ---
@@ -162,7 +166,7 @@ def _assert_settlement_state(
     ]
     assert settle_attempts, attempts
     for auth, _raw in settle_attempts:
-        assert auth == _AUTH, auth
+        assert auth == DEFAULT_ATTACH_AUTHORIZATION, auth
         assert auth != f"Bearer {worker_ipc}", auth
 
     # --- Body carries only non-secret identities, no raw actor token. ---
@@ -196,14 +200,7 @@ def _assert_terminal_settlement(harness: _SettlementHarness, base_url: str) -> N
 
     # The worker-IPC secret the gateway minted at boot: settlement must never
     # authenticate with it, so it is read here to prove the callback does not.
-    worker_ipc = (
-        (
-            derive_state_paths(harness.app_home).credentials_dir
-            / WORKER_IPC_CREDENTIAL_NAME
-        )
-        .read_text(encoding="utf-8")
-        .strip()
-    )
+    worker_ipc = read_worker_ipc_secret(harness.app_home)
     _assert_settlement_state(harness.state, run_id, lease_id, worker_ipc)
 
 
@@ -252,24 +249,10 @@ async def _settle_completed_run(app_home: Path, run_id: str) -> None:
 def _prepare_and_commit(base: str) -> dict[str, Any]:
     """Prepare then commit one deterministic run; return the commit response body."""
     run_id = "run-terminal-settlement"
-    # Resolved ONCE: prepare and commit describe the same run, so the commit is
-    # only recognised as that run's commit while its selection matches.
-    workspace = desktop_workspace(base)
-    selection = fetch_in_process_selection_at(
-        base,
-        workspace,
-        headers={"Authorization": _AUTH},
-        prefer_provider_id=DEFAULT_PRESET_LANE,
-        cache=True,
-    )
-    verbs = RunVerbs(
-        base_url=base,
-        authorization=_AUTH,
-        team_preset=DEFAULT_TEAM_PRESET,
-        workspace_root=workspace,
-        selection=lambda _workspace: selection,
-        tokens={DEFAULT_REQUIRED_ROLE: _ACTOR_TOKEN},
-    )
+    # The verbs resolve the selection once and cache it: prepare and commit
+    # describe the same run, so the commit is only recognised as that run's
+    # commit while its selection matches.
+    verbs = gateway_run_verbs(base, tokens={DEFAULT_REQUIRED_ROLE: _ACTOR_TOKEN})
     prep = verbs.prepare(run_id)
     assert prep.status_code == 201, prep.text
     commit = verbs.commit(run_id, prep.json()["reservation_id"])

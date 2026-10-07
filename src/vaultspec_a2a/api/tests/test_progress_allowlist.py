@@ -16,7 +16,6 @@ a permitted-field assertion, so an empty or dropped frame cannot satisfy it.
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, cast
 
 import httpx
@@ -25,7 +24,7 @@ import pytest
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
-from ...testing import read_frame, serve_on_loopback
+from ...testing import ProgressDeadline, read_frame, serve_on_loopback, wait_for_async
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from .conftest import (
@@ -68,11 +67,12 @@ async def _seed_running_run(session_factory: SessionFactory) -> str:
 
 
 async def _await_subscriber(agg: EventAggregator) -> None:
-    for _ in range(200):
-        if agg.subscriber_count() > 0:
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError("stream subscriber never registered")
+    async def _registered() -> bool | None:
+        return True if agg.subscriber_count() > 0 else None
+
+    await wait_for_async(
+        _registered, deadline=ProgressDeadline(idle_window_s=2.0), interval_s=0.01
+    )
 
 
 def _assert_team_status_frame(frame: dict[str, object], raw: str, run_id: str) -> None:

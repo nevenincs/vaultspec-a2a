@@ -29,8 +29,7 @@ import pytest
 
 from ..desktop.migration import package_migration_range
 from ..desktop.profile import derive_state_paths
-from ..testing import clean_subprocess_environment
-from ..utils.runtime_exec import CLI_MODULE
+from ..testing import clean_subprocess_environment, run_cli
 
 _PROJECT_ROOT: Final = Path(__file__).resolve().parents[3]
 
@@ -73,21 +72,13 @@ def _run_migrate(
     runtime: InstalledRuntime, home: Path, *extra: str
 ) -> tuple[int, dict[str, object]]:
     """Run ``migrate`` from the installed runtime and parse its JSON result."""
-    result = subprocess.run(
-        [
-            str(runtime.python),
-            "-m",
-            CLI_MODULE,
-            "migrate",
-            "--app-home",
-            str(home),
-            *extra,
-        ],
+    result = run_cli(
+        "migrate",
+        "--app-home",
+        str(home),
+        *extra,
+        interpreter=runtime.python,
         cwd=runtime.sandbox,
-        env=clean_subprocess_environment(),
-        capture_output=True,
-        text=True,
-        timeout=120,
     )
     payload = json.loads(result.stdout.strip())
     assert isinstance(payload, dict), result.stdout

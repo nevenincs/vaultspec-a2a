@@ -8,11 +8,11 @@ refuse everything else. No shape is asserted that is not also proven runnable.
 
 from __future__ import annotations
 
-import subprocess
 import sys
 
 import pytest
 
+from ...testing import run_child, run_cli
 from ..runtime_exec import (
     CLI_MODULE,
     DISPATCHABLE_MODULES,
@@ -42,11 +42,9 @@ def test_module_command_refuses_unlisted_module() -> None:
 
 
 def test_isolated_module_command_really_runs_without_project_imports() -> None:
-    result = subprocess.run(
+    result = run_child(
         module_command("vaultspec_core", "--version", isolated=True),
-        capture_output=True,
-        text=True,
-        check=False,
+        what="vaultspec_core --version",
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip()
@@ -65,21 +63,14 @@ def test_is_module_invocation_accepts_exactly_both_authority_shapes() -> None:
 
 def test_self_command_really_boots_the_cli() -> None:
     """The rendered self-invocation is runnable, not just well-shaped."""
-    result = subprocess.run(
-        [*self_command(), "--version"], capture_output=True, text=True, check=False
-    )
+    result = run_cli("--version")
     assert result.returncode == 0, result.stderr
     assert "vaultspec-a2a" in result.stdout
 
 
 def test_run_module_verb_refuses_unlisted_module_loudly() -> None:
     """The dispatch verb fails closed on a hand-assembled unlisted module."""
-    result = subprocess.run(
-        [*self_command(), RUN_MODULE_VERB, "os"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run_cli(RUN_MODULE_VERB, "os")
     assert result.returncode != 0
     assert "not dispatchable" in result.stderr
 
@@ -91,11 +82,6 @@ def test_run_module_verb_dispatches_vaultspec_core() -> None:
     observable, service-free result; its exit proves argv threading through the
     runpy dispatch, not just import success.
     """
-    result = subprocess.run(
-        [*self_command(), RUN_MODULE_VERB, "vaultspec_core", "--version"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run_cli(RUN_MODULE_VERB, "vaultspec_core", "--version")
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip()

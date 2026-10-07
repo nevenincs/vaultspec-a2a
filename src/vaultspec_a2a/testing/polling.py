@@ -21,11 +21,10 @@ rather than burning the window.
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any
 
 from ..thread.enums import TERMINAL_STATUS_VALUES
-from .progress import ProgressDeadline, ProgressStalledError, wait_for
+from .progress import ProgressDeadline, ProgressStalledError, wait_for, wait_for_async
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
@@ -110,21 +109,22 @@ async def wait_for_run_status_async[B: Mapping[str, Any]](
 
     The same wait as :func:`wait_for_run_status`, for a coroutine reader.
     """
-    deadline = ProgressDeadline(idle_window_s=timeout)
     last: B | None = None
-    previous: object = object()
-    while True:
+
+    async def _poll() -> B | None:
+        nonlocal last
         body = await read()
-        if body is not None:
-            last = body
-            if predicate(body):
-                return body
-        current = _fingerprint(last)
-        if current != previous:
-            previous = current
-            deadline.touch()
-        try:
-            deadline.check()
-        except ProgressStalledError as stalled:
-            raise _unsatisfied(label, last, stalled) from stalled
-        await asyncio.sleep(interval)
+        if body is None:
+            return None
+        last = body
+        return body if predicate(body) else None
+
+    try:
+        return await wait_for_async(
+            _poll,
+            deadline=ProgressDeadline(idle_window_s=timeout),
+            fingerprint=lambda: _fingerprint(last),
+            interval_s=interval,
+        )
+    except ProgressStalledError as stalled:
+        raise _unsatisfied(label, last, stalled) from stalled

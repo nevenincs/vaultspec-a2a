@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ..conftest import EXTERNAL_PREREQUISITES
+from ..testing import combined_output
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -128,7 +129,7 @@ def test_prerequisite_import_does_not_load_live_catalog_validation() -> None:
         timeout=60,
         check=False,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 0, combined_output(result)
 
 
 def test_unknown_declaration_is_a_usage_error() -> None:
@@ -136,8 +137,8 @@ def test_unknown_declaration_is_a_usage_error() -> None:
     result = _pytest(
         "--require-prerequisite=not-a-prerequisite", "--collect-only", "-q"
     )
-    assert result.returncode == _USAGE_ERROR, result.stdout + result.stderr
-    combined = result.stdout + result.stderr
+    assert result.returncode == _USAGE_ERROR, combined_output(result)
+    combined = combined_output(result)
     assert "unknown prerequisites: not-a-prerequisite" in combined, combined
     assert "dashboard-engine" in combined, combined
 
@@ -150,8 +151,8 @@ def test_declaring_an_absent_prerequisite_aborts_before_collection() -> None:
         "-q",
         without=("VAULTSPEC_A2A_ENGINE_SERVE_CMD",),
     )
-    assert result.returncode == _USAGE_ERROR, result.stdout + result.stderr
-    combined = result.stdout + result.stderr
+    assert result.returncode == _USAGE_ERROR, combined_output(result)
+    combined = combined_output(result)
     assert "prerequisites this host does not have: dashboard-engine" in combined
     assert "VAULTSPEC_A2A_ENGINE_SERVE_CMD" in combined, combined
 
@@ -180,7 +181,7 @@ def test_absent_cross_repo_engine_is_disclosed_never_a_red_gate() -> None:
         _LOST_ACK,
         without=("VAULTSPEC_A2A_ENGINE_SERVE_CMD",),
     )
-    combined = result.stdout + result.stderr
+    combined = combined_output(result)
     assert result.returncode == 0, combined
     assert "withheld 1 live proof(s)" in combined, combined
     assert "dashboard-engine" in combined, combined
@@ -206,7 +207,7 @@ def test_live_provider_proofs_deselect_until_every_resource_is_declared() -> Non
             "VAULTSPEC_A2A_LIVE_OPTION_ID",
         ),
     )
-    combined = result.stdout + result.stderr
+    combined = combined_output(result)
     # Withheld, disclosed, and NOT red. Exit 5 would be the same red gate the
     # rule refuses, reached through the exit status: a host with no dashboard
     # repository would fail the service tier over a resource it was never
@@ -234,7 +235,7 @@ def test_declared_live_provider_selector_fails_before_collection_when_unset() ->
             "VAULTSPEC_A2A_LIVE_OPTION_ID",
         ),
     )
-    combined = result.stdout + result.stderr
+    combined = combined_output(result)
     assert result.returncode == _USAGE_ERROR, combined
     assert "provider-catalog-live-selection" in combined, combined
     assert "VAULTSPEC_A2A_LIVE_OPTION_ID" in combined, combined
@@ -262,7 +263,7 @@ def test_live_provider_proofs_collect_only_after_all_resources_are_declared() ->
         *_LIVE_PROVIDER_TESTS,
         with_env=required_env,
     )
-    combined = result.stdout + result.stderr
+    combined = combined_output(result)
     assert result.returncode == 0, combined
     assert "test_production_engine_recovers_lost_run_start_ack_exactly_once" in combined
     assert "test_dashboard_catalog_selection_completes_and_replays" in combined
@@ -301,7 +302,7 @@ def test_a_gate_that_skips_despite_its_declaration_fails_the_session(
         "--require-prerequisite=codex-cli",
         env=env,
     )
-    combined = result.stdout + result.stderr
+    combined = combined_output(result)
     # Nothing failed, and yet the session must not report success.
     assert "1 skipped" in combined, combined
     assert result.returncode != 0, combined
@@ -330,7 +331,7 @@ def test_a_suite_probed_absence_skips_unless_the_caller_guaranteed_it(
     wide = {**os.environ, "COLUMNS": "400"}
 
     undeclared = _nested_session(tmp_path / "undeclared", source, env=wide)
-    skipped = undeclared.stdout + undeclared.stderr
+    skipped = combined_output(undeclared)
     assert undeclared.returncode == 0, skipped
     assert "1 skipped" in skipped, skipped
     assert prerequisite.absence_reason("no ADR to name") in skipped, skipped
@@ -338,7 +339,7 @@ def test_a_suite_probed_absence_skips_unless_the_caller_guaranteed_it(
     declared = _nested_session(
         tmp_path / "declared", source, "--require-prerequisite=engine-vault-adr"
     )
-    failed = declared.stdout + declared.stderr
+    failed = combined_output(declared)
     assert declared.returncode != 0, failed
     assert "1 failed" in failed, failed
     assert "--require-prerequisite=engine-vault-adr guarantees it is present" in failed
@@ -357,6 +358,6 @@ def test_declaring_docker_without_a_resolvable_cli_aborts_before_collection(
         "-q",
         with_env={"PATH": str(bare)},
     )
-    assert result.returncode == _USAGE_ERROR, result.stdout + result.stderr
-    combined = result.stdout + result.stderr
+    assert result.returncode == _USAGE_ERROR, combined_output(result)
+    combined = combined_output(result)
     assert "prerequisites this host does not have: docker" in combined, combined

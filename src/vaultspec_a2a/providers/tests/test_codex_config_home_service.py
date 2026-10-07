@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...graph.enums import Provider
+from ...testing import combined_output
 from ...utils.enums import CodexWebSearchMode
 from .._acp_mcp import codex_mcp_server_specs
 from .._codex_config_home import (
@@ -91,7 +92,7 @@ def test_codex_refuses_an_unrecognised_web_mode(tmp_path: Path) -> None:
     )
     proc = _run_mcp_list(_codex_cli(), home)
     assert proc.returncode != 0
-    combined = proc.stdout + proc.stderr
+    combined = combined_output(proc)
     assert "web_search" in combined
     for mode in CodexWebSearchMode:
         assert f"`{mode.value}`" in combined

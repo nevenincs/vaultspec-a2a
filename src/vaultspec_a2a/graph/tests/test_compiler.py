@@ -38,6 +38,7 @@ from ...providers.team_selection import FrozenLaneAssignment, FrozenNativeContro
 from ...team.team_config import (
     TeamConfig,
     TeamGraphConfig,
+    TeamHarnessConfig,
     TopologyConfig,
     TopologyType,
     WorkerRef,
@@ -57,7 +58,10 @@ from ...thread.errors import (
     DocumentConformanceError,
     WorkerExecutionError,
 )
+from ...worker.authoring_binding import AuthoringBindingProvider
+from ...worker.catalog_store import RunCatalogStore
 from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
+from ...worker.token_store import RunTokenStore
 from .._compiler_models import (
     resolve_model_for_worker,
     resolve_supervisor_model,
@@ -493,6 +497,40 @@ async def test_compile_refuses_invalid_controls_before_any_provider_contact(
             model_assignment=assignment,
         )
     assert factory.calls == []
+
+
+@pytest.mark.asyncio
+async def test_compile_refuses_an_authoring_bridge_with_no_attach_surface(
+    checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """A harness-armed preset on a lane with no attach surface refuses at compile.
+
+    The deterministic lane exposes neither ``with_mcp_servers`` nor
+    ``with_authoring_mcp_server`` - only the ACP and Codex lanes do - so an
+    ``authoring_bridge`` preset resolving to it must be refused before the run
+    starts, with the same served ``ConfigError`` text the per-turn attach
+    raises, rather than one turn later inside the run (R5 test obligation #8).
+    """
+    team = _pipeline_team().model_copy(
+        update={"harness": TeamHarnessConfig(authoring_bridge=True)}
+    )
+    agents = {ref.agent_id: load_agent_config(ref.agent_id) for ref in team.workers}
+    provider = AuthoringBindingProvider(
+        engine_base_url="http://127.0.0.1:1",
+        token_store=RunTokenStore(),
+        catalog_store=RunCatalogStore(),
+    )
+
+    with pytest.raises(ConfigError, match="no authoring attachment surface"):
+        compile_team_graph(
+            team_config=team,
+            agent_configs=agents,
+            checkpointer=checkpointer,
+            provider_factory=pf,
+            model_assignment=deterministic_model_assignment(team),
+            authoring_binding_provider=provider,
+        )
 
 
 # ---------------------------------------------------------------------------

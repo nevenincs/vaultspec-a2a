@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from ..thread.action_receipts import GraphActionReceipt
     from ._dispatch_receipts import DispatchReceiptReporter
     from ._dispatch_settlement import TerminalArbitration
+    from ._run_registry import RunScopedRegistry
     from .catalog_store import RunCatalogStore
     from .ipc import WorkerBridge
     from .token_store import RunTokenStore
@@ -313,7 +314,7 @@ class Executor(SettlementMixin):
 
     @property
     @override
-    def _active_ingests(self) -> dict[str, DispatchCapacityReservation]:
+    def _active_ingests(self) -> RunScopedRegistry[DispatchCapacityReservation]:
         return self._capacity.active_ingests
 
     @property
@@ -439,7 +440,7 @@ class Executor(SettlementMixin):
                 thread_id=thread_id,
                 generation=self._capacity.next_generation,
             )
-            self._active_ingests[thread_id] = reservation
+            self._active_ingests.register(thread_id, reservation)
             return reservation, CAPACITY_ACCEPTED
 
     @override
@@ -448,10 +449,7 @@ class Executor(SettlementMixin):
     ) -> bool:
         """Release only the exact dispatch reservation supplied by its owner."""
         async with self._ingest_lock:
-            if self._active_ingests.get(reservation.thread_id) is not reservation:
-                return False
-            self._active_ingests.pop(reservation.thread_id)
-            return True
+            return self._active_ingests.drop_held(reservation.thread_id, reservation)
 
     @override
     async def _mark_ingest_done(
@@ -471,7 +469,7 @@ class Executor(SettlementMixin):
         interrupt-park).
         """
         async with self._ingest_lock:
-            active_snapshot = set(self._active_ingests).difference({thread_id})
+            active_snapshot = self._active_ingests.thread_ids() - {thread_id}
         # Drop the run's actor tokens when its active window truly closes,
         # i.e. a terminal outcome - never on an interrupt-park that will resume.
         if outcome in TERMINAL_STATUSES:

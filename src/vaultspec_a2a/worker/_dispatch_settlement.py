@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from ..providers import ProviderCondition
     from ..streaming.aggregator import EventAggregator
     from ..streaming.types import StreamableGraph
+    from ._run_registry import RunScopedRegistry
     from .graph_lifecycle import GraphCompilationError, GraphLifecycleManager
     from .state_projection import StateProjector
 
@@ -139,7 +140,7 @@ class _SettlementHost(Protocol):
     def _ingest_lock(self) -> asyncio.Lock: ...
 
     @property
-    def _active_ingests(self) -> dict[str, DispatchCapacityReservation]: ...
+    def _active_ingests(self) -> RunScopedRegistry[DispatchCapacityReservation]: ...
 
     def _dispatch_log_extra(
         self, req: DispatchRequest, **fields: Any

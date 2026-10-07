@@ -48,15 +48,18 @@ class DispatchCapacityState:
     they bracket: both are keyed by thread, and a thread's arbitration is what
     serializes the settlement that releases its slot.
 
-    The three maps stay plain dicts instead of run-scoped registries because
-    none of them is a value held for one run's active window. Reservations are
-    counted, compared by identity and snapshotted under ``lock``; a pending
-    cancellation is written by a cancel that may find no run at all and is
-    consumed by whichever terminal settles next; an arbitration entry lives
-    while it has waiters, not while a run does.
+    A reservation is the one value here held for a run's active window, so
+    ``active_ingests`` is a run-scoped registry; its count, membership, key
+    snapshot and identity-checked drop are all read and written under ``lock``.
+    The other two maps stay plain dicts because neither is held for a run's
+    window: a pending cancellation is written by a cancel that may find no run
+    at all and is consumed by whichever terminal settles next, and an
+    arbitration entry lives while it has waiters, not while a run does.
     """
 
-    active_ingests: dict[str, DispatchCapacityReservation] = field(default_factory=dict)
+    active_ingests: RunScopedRegistry[DispatchCapacityReservation] = field(
+        default_factory=RunScopedRegistry
+    )
     pending_cancellations: dict[str, str] = field(default_factory=dict)
     terminal_arbitrations: dict[str, TerminalArbitration] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)

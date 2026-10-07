@@ -13,12 +13,9 @@ from sqlalchemy import select
 from ..database import (
     ThreadModel,
     ThreadStatusElectionOutcome,
-    begin_write_transaction,
     elect_thread_status,
-    expire_pending_permission_requests,
     get_control_action_by_dispatch_id,
     mark_control_action_applied,
-    set_thread_approval_state,
     set_thread_repair_state,
     thread_write_expectation,
 )
@@ -32,14 +29,12 @@ from ..thread.enums import (
     RepairStatus,
     ThreadStatus,
 )
-from ..thread.terminal_effects import compute_terminal_effects
 from .dispatch_receipts import (
     prepare_graph_action_receipt,
     validate_current_graph_receipt,
 )
 from .repair_transitions import mark_message_followup_requested
 from .repositories.continuation_queue import (
-    lock_run_for_continuation_decision,
     open_promoted_continuation,
     promoted_turn_deadline,
     promotion_dispatch_pending,
@@ -48,6 +43,7 @@ from .repositories.continuation_queue import (
     refuse_queued_continuations,
     run_lifetime_deadline,
 )
+from .terminal_settlement import TerminalEvidence, lock_terminal_run, settle_terminal
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,6 +52,18 @@ if TYPE_CHECKING:
     from ..thread import ThreadWriteExpectation
     from ..thread.action_receipts import GraphActionReceipt
     from ..thread.checkpoint_evidence import CheckpointEvidence
+
+__all__ = [
+    "AWAITING_PROMOTION_DISPATCH",
+    "CONTINUATION_NOT_PROMOTABLE",
+    "CONTINUATION_PROMOTED",
+    "HOLDS_QUEUED_CONTINUATION",
+    "PROMOTION_OWNED_CONDITIONS",
+    "RecoveryObservation",
+    "RecoveryRequest",
+    "RecoveryTrigger",
+    "reconcile_run_checkpoint",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -294,66 +302,38 @@ async def _reconcile_completed_checkpoint(
     action_id: str,
     decision: _CheckpointDecision,
 ) -> RecoveryObservation:
-    # The queue is read before anything is written, so this transaction must
-    # already hold the write lock. A transaction that begins deferred and
-    # reads first cannot upgrade to a write once another connection has
-    # committed in between: SQLite refuses it outright instead of waiting.
-    await begin_write_transaction(db)
-    # The run's own row is locked before the queue is read, against the same
-    # lock an admission takes. Without it a settlement can read an empty queue
-    # while an uncommitted admission reads a live run, and both commit: the
-    # waiting turn is then stranded on a settled run.
-    locked = await lock_run_for_continuation_decision(db, thread_id=decision.thread_id)
+    # The queue is read under the settlement's own lock, so a promotion and
+    # the settlement it defers decide against the same locked row.
+    locked = await lock_terminal_run(db, decision.thread_id)
     if locked is not None:
         thread = locked
     promoted = await _promote_queued_continuation(db, thread, action_id, decision)
     if promoted is not None:
         return promoted
-    election = await elect_thread_status(
+    outcome = await settle_terminal(
         db,
-        decision.thread_id,
-        expectation=decision.expectation,
-        status=ThreadStatus.COMPLETED,
-        action_type=decision.receipt.action_type,
-        action_receipt_id=decision.receipt.dispatch_id,
+        thread,
+        ThreadStatus.COMPLETED,
+        evidence=TerminalEvidence(
+            expectation=decision.expectation,
+            action_id=action_id,
+            action_type=decision.receipt.action_type,
+            action_receipt_id=decision.receipt.dispatch_id,
+        ),
+        last_sequence=decision.last_sequence,
     )
-    if election.outcome is ThreadStatusElectionOutcome.WON:
-        if decision.last_sequence is not None:
-            thread.last_sequence = decision.last_sequence
-        await mark_control_action_applied(db, action_id)
-        await expire_pending_permission_requests(db, thread_id=decision.thread_id)
-        await set_thread_approval_state(
-            db,
-            decision.thread_id,
-            approval_status=None,
-            approval_request_id=None,
-            approval_reason=None,
-            approval_response_action_id=None,
-        )
-        effects = compute_terminal_effects(
-            ThreadStatus.COMPLETED, has_cancel_action=False
-        )
-        await set_thread_repair_state(
-            db,
-            decision.thread_id,
-            repair_status=effects.repair_status,
-            repair_reason=effects.repair_reason,
-            execution_readiness=effects.repair_status.value,
-            last_applied_action=effects.last_applied_action,
-        )
     await db.commit()
     fresh = await db.scalar(
         select(ThreadModel)
         .where(ThreadModel.id == decision.thread_id)
         .execution_options(populate_existing=True)
     )
+    won = outcome is ThreadStatusElectionOutcome.WON
     return RecoveryObservation(
         ThreadStatus(fresh.status) if fresh is not None else None,
-        decision.evidence.kind.value
-        if election.outcome is ThreadStatusElectionOutcome.WON
-        else election.outcome.value,
+        decision.evidence.kind.value if won else outcome.value,
         decision.evidence.checkpoint_id,
-        election.outcome is ThreadStatusElectionOutcome.WON,
+        won,
     )
 
 

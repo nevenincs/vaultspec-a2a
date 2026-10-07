@@ -44,7 +44,6 @@ this deterministic certification must never do.
 from __future__ import annotations
 
 import os
-import time
 import tomllib
 import uuid
 from pathlib import Path
@@ -53,6 +52,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from ..acceptance.tests._harness import certified_gateway
+from ..testing import ok_body, wait_for_run_status
 from ..testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
@@ -80,7 +80,6 @@ _PRESET_PATH = (
 )
 
 _WORKER_READY_BUDGET_SECONDS = "120"
-_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "error"})
 
 
 def _preset_roles() -> list[str]:
@@ -119,24 +118,6 @@ def _served_in_process_selection(
         return in_process_selection(response.json(), prefer_provider_id="mock")
     except NoSelectableLaneError as exc:
         pytest.skip(f"a deterministic certification run cannot be selected here: {exc}")
-
-
-def _await_terminal(
-    gateway: CertifiedGateway, run_id: str, *, budget: float
-) -> dict[str, Any]:
-    deadline = time.monotonic() + budget
-    last: dict[str, Any] = {}
-    while time.monotonic() < deadline:
-        response = gateway.status(run_id)
-        if response.status_code == 200:
-            last = response.json()
-            if last.get("status") in _TERMINAL_STATUSES:
-                return last
-        time.sleep(1.0)
-    raise AssertionError(
-        f"run {run_id} never reached a terminal state within {budget:.0f}s; "
-        f"last status snapshot: {last or 'never readable'}"
-    )
 
 
 def test_advertised_assignment_is_the_assignment_the_worker_executes(
@@ -186,7 +167,11 @@ def test_advertised_assignment_is_the_assignment_the_worker_executes(
 
         # The run must genuinely execute first, so a transport failure fails as
         # itself instead of being read as a disagreement.
-        snapshot = _await_terminal(gateway, run_id, budget=180.0)
+        snapshot = wait_for_run_status(
+            lambda: ok_body(gateway.status(run_id)),
+            timeout=180.0,
+            label=f"run {run_id}",
+        )
         assert snapshot["status"] == "completed", snapshot
 
         history = gateway.thread_state(run_id)

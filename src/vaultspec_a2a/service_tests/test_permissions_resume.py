@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ..testing import wait_for_run_status
 from ..testing.tests._support.payloads import (
     json_object,
     json_object_list,
     required_bool,
     required_text,
 )
-from ._state import select_option_id, wait_for_state
+from ._state import select_option_id, thread_state
 
 if TYPE_CHECKING:
     from ..providers._json_contract import JsonObject
@@ -86,7 +87,9 @@ def _wait_for_pending_permission(
             and state.get("snapshot_complete") is True
         )
 
-    return wait_for_state(stack, thread_id, _matches, timeout=timeout)
+    return wait_for_run_status(
+        lambda: thread_state(stack, thread_id), _matches, timeout=timeout
+    )
 
 
 def _wait_for_pending_permission_matching(
@@ -113,7 +116,9 @@ def _wait_for_pending_permission_matching(
                 return True
         return False
 
-    return wait_for_state(stack, thread_id, _matches, timeout=timeout)
+    return wait_for_run_status(
+        lambda: thread_state(stack, thread_id), _matches, timeout=timeout
+    )
 
 
 def test_permission_request_can_be_resumed_via_public_api(
@@ -148,10 +153,8 @@ def test_permission_request_can_be_resumed_via_public_api(
     )
     assert required_bool(response, "applied", at="permission response") is False
 
-    completed = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_completed,
+    completed = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_completed
     )
     service_stack.record(f"permission-completed:{thread_id}", completed)
 
@@ -241,10 +244,8 @@ def test_conflicting_second_permission_response_is_rejected_after_resume(
         required_bool(accepted, "accepted", at="accepted permission response") is True
     )
 
-    completed = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_completed,
+    completed = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_completed
     )
 
     conflicting = json_object(
@@ -323,10 +324,8 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
         == "accepted_not_applied"
     )
 
-    completed = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_completed,
+    completed = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_completed
     )
     assistant_messages = [
         message
@@ -369,10 +368,8 @@ def test_permission_denial_completes_with_denied_outcome(
         == "accepted_not_applied"
     )
 
-    completed = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_completed,
+    completed = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_completed
     )
     assistant_messages = [
         message
@@ -481,10 +478,8 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
         == "accepted_not_applied"
     )
 
-    completed = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_completed,
+    completed = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_completed
     )
     service_stack.record(f"supervisor-completed:{thread_id}", completed)
 

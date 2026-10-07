@@ -3,8 +3,9 @@
 The suite's contention machinery: a machine-readable resource vocabulary
 (``resources``), machine-global leases arbitrating exclusive use across
 processes and sessions (``leases``), progress-based deadlines that fail on
-death or stall rather than on elapsed wall clock (``progress``), registry-
-backed service endpoint resolution (``endpoints``), and the pytest plugin
+death or stall rather than on elapsed wall clock (``progress``), run-status
+polling built on them (``polling``), registry-backed service endpoint
+resolution (``endpoints``), and the pytest plugin
 (``plugin``) that derives scheduling groups, timeout backstops, and lease
 acquisition from the declarations.
 
@@ -48,6 +49,12 @@ if TYPE_CHECKING:
     )
     from .links import plant_link_to_file
     from .markers import apply_layer_markers
+    from .polling import (
+        is_terminal,
+        ok_body,
+        wait_for_run_status,
+        wait_for_run_status_async,
+    )
     from .ports import (
         SCRATCH_ROLE,
         PortAllocationError,
@@ -143,6 +150,13 @@ _LAZY_EXPORTS = {
     "lease_home": ("vaultspec_a2a.testing.leases", "lease_home"),
     "plant_link_to_file": ("vaultspec_a2a.testing.links", "plant_link_to_file"),
     "apply_layer_markers": ("vaultspec_a2a.testing.markers", "apply_layer_markers"),
+    "is_terminal": ("vaultspec_a2a.testing.polling", "is_terminal"),
+    "ok_body": ("vaultspec_a2a.testing.polling", "ok_body"),
+    "wait_for_run_status": ("vaultspec_a2a.testing.polling", "wait_for_run_status"),
+    "wait_for_run_status_async": (
+        "vaultspec_a2a.testing.polling",
+        "wait_for_run_status_async",
+    ),
     "SCRATCH_ROLE": ("vaultspec_a2a.testing.ports", "SCRATCH_ROLE"),
     "PortAllocationError": ("vaultspec_a2a.testing.ports", "PortAllocationError"),
     "allocate_free_ports": ("vaultspec_a2a.testing.ports", "allocate_free_ports"),
@@ -242,10 +256,12 @@ __all__ = [
     "free_port",
     "hold_for_process_lifetime",
     "hold_lease",
+    "is_terminal",
     "lease_home",
     "live_peer_sessions",
     "machine_cpu_budget",
     "measured_child_startup_s",
+    "ok_body",
     "plant_link_to_file",
     "register_session",
     "registry_watch",
@@ -260,4 +276,6 @@ __all__ = [
     "settings_override",
     "uses_impure_fixture",
     "wait_for",
+    "wait_for_run_status",
+    "wait_for_run_status_async",
 ]

@@ -47,9 +47,7 @@ unproven, never as proven.
 
 from __future__ import annotations
 
-import asyncio
 import os
-import time
 import uuid
 from typing import TYPE_CHECKING, cast
 
@@ -58,6 +56,7 @@ import pytest
 
 from ..api.schemas.gateway import ProviderCatalogSelection
 from ..providers.conditions import ProviderCondition
+from ..testing import wait_for_run_status_async
 from ..testing.endpoints import resolve_gateway_url
 from .test_pw7_acceptance import _GATEWAY_AUTH_HEADERS
 
@@ -274,21 +273,19 @@ async def test_a_real_provider_refusal_reaches_run_status_as_a_typed_condition(
             f"run-start expected 201, got {start.status_code}: {start.text}"
         )
 
-        status: JsonObject = {}
-        deadline = time.monotonic() + _TERMINAL_DEADLINE_SECONDS
-        while time.monotonic() < deadline:
+        async def _read_status() -> JsonObject:
             resp = await hc.get(f"{gateway_url}/v1/runs/{run_id}", timeout=30.0)
             resp.raise_for_status()
-            status = resp.json()
-            if status.get("status") in {"failed", "completed", "cancelled"}:
-                break
-            await asyncio.sleep(_POLL_SECONDS)
+            return resp.json()
+
+        status = await wait_for_run_status_async(
+            _read_status,
+            timeout=_TERMINAL_DEADLINE_SECONDS,
+            interval=_POLL_SECONDS,
+            label=f"run {run_id}",
+        )
 
     observed_status = status.get("status")
-    assert observed_status is not None, (
-        f"run {run_id} never reached a terminal state within "
-        f"{_TERMINAL_DEADLINE_SECONDS}s; the chain cannot be observed"
-    )
     assert observed_status == "failed", (
         f"run {run_id} ended {observed_status!r} rather than failing, so the armed "
         f"lane did not refuse work and there is no condition to prove. Reported "

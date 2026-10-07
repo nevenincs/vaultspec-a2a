@@ -51,10 +51,8 @@ from __future__ import annotations
 import json
 import os
 import re
-import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 import yaml
@@ -64,12 +62,9 @@ from ..acceptance.tests._harness import (
     DEFAULT_TEAM_PRESET,
     certified_gateway,
 )
+from ..testing import ok_body, wait_for_run_status
 from ..testing.tests._support.payloads import json_object, json_object_list
 from ._net import tape_server_listening
-
-if TYPE_CHECKING:
-    from ..acceptance.tests._harness import CertifiedGateway
-    from ..providers._json_contract import JsonObject
 
 # The scripted backend the mock provider proxies to. The compose service publishes
 # it on this loopback port; an environment that already runs one points at it with
@@ -98,8 +93,6 @@ _TAPE_PATH = (
 # run must carry.
 _TAPE_FINAL_BRANCH_MARKER = "{%- else -%}"
 _TAPE_TEXT_BLOCK = re.compile(r'"type":"text","text":"((?:[^"\\]|\\.)*)"')
-
-_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "error"})
 
 # The gateway's default budget for its freshly spawned worker to answer is tuned
 # for a warm host. A cold interpreter importing the whole worker stack for the
@@ -149,25 +142,6 @@ def _tape_server_base() -> str:
     return (os.environ.get(_TAPE_SERVER_ENV) or "").strip() or _TAPE_SERVER_DEFAULT
 
 
-def _await_terminal(
-    gateway: CertifiedGateway, run_id: str, *, budget: float
-) -> JsonObject:
-    """Poll the authoritative status snapshot until the run stops running."""
-    deadline = time.monotonic() + budget
-    last: JsonObject = {}
-    while time.monotonic() < deadline:
-        response = gateway.status(run_id)
-        if response.status_code == 200:
-            last = json_object(response.json(), at="terminal run status")
-            if last.get("status") in _TERMINAL_STATUSES:
-                return last
-        time.sleep(1.0)
-    raise AssertionError(
-        f"run {run_id} never reached a terminal state within {budget:.0f}s; "
-        f"last status snapshot: {last or 'never readable'}"
-    )
-
-
 def test_real_worker_run_reaches_terminal_state_with_scripted_content(
     tmp_path: Path,
 ) -> None:
@@ -200,7 +174,11 @@ def test_real_worker_run_reaches_terminal_state_with_scripted_content(
         started = gateway.start(run_id, message="Complete the task and stop.")
         assert started.status_code == 201, started.text
 
-        snapshot = _await_terminal(gateway, run_id, budget=180.0)
+        snapshot = wait_for_run_status(
+            lambda: ok_body(gateway.status(run_id)),
+            timeout=180.0,
+            label=f"run {run_id}",
+        )
         assert snapshot.get("status") == "completed", snapshot
 
         history = gateway.thread_state(run_id)

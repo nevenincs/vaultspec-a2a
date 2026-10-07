@@ -11,9 +11,10 @@ from uuid import uuid4
 import pytest
 
 from ..control.action_lease import CONTROL_ACTION_LEASE_TTL
+from ..testing import wait_for_run_status
 from ..testing.tests._support.catalog_selection import in_process_selection
 from ..testing.tests._support.payloads import json_object, required_bool, required_text
-from ._state import wait_for_state
+from ._state import thread_state
 from .harness import _spawn_process, _wait_for, build_service_stack
 
 if TYPE_CHECKING:
@@ -93,7 +94,9 @@ def test_cancellation_survives_fresh_worker(
                 },
             )
             assert response.status_code == 201, response.text
-            running = wait_for_state(stack, run_id, _is_running, timeout=30.0)
+            running = wait_for_run_status(
+                lambda: thread_state(stack, run_id), _is_running, timeout=30.0
+            )
             health = stack.health()
             assert health["checks"]["worker"]["status"] == "ok", health
             stack.record("fresh-worker-running", running)
@@ -117,9 +120,8 @@ def test_cancellation_survives_fresh_worker(
                 stack._gateway_log.close()
                 stack._gateway_log = None
             _start_lazy_gateway(stack)
-        terminal = wait_for_state(
-            stack,
-            run_id,
+        terminal = wait_for_run_status(
+            lambda: thread_state(stack, run_id),
             _is_cancelled,
             timeout=(
                 CONTROL_ACTION_LEASE_TTL.total_seconds() + 60.0 if restart else 30.0
@@ -181,7 +183,9 @@ def test_blocked_deterministic_stream_cancellation_settles_terminally(
         required_text(created, "run_id", at="blocked cancellation run start") == run_id
     )
 
-    running = wait_for_state(service_stack, run_id, _is_running, timeout=30.0)
+    running = wait_for_run_status(
+        lambda: thread_state(service_stack, run_id), _is_running, timeout=30.0
+    )
     service_stack.record(f"blocked-cancel-running:{run_id}", running)
 
     cancelling = json_object(
@@ -193,7 +197,9 @@ def test_blocked_deterministic_stream_cancellation_settles_terminally(
         == "cancelling"
     )
 
-    cancelled = wait_for_state(service_stack, run_id, _is_cancelled, timeout=30.0)
+    cancelled = wait_for_run_status(
+        lambda: thread_state(service_stack, run_id), _is_cancelled, timeout=30.0
+    )
     service_stack.record(f"blocked-cancelled:{run_id}", cancelled)
     assert (
         required_text(cancelled, "status", at="blocked cancellation state")
@@ -237,7 +243,9 @@ def test_pre_ingest_deterministic_cancellation_settles_terminally(
         == "cancelling"
     )
 
-    cancelled = wait_for_state(service_stack, run_id, _is_cancelled, timeout=30.0)
+    cancelled = wait_for_run_status(
+        lambda: thread_state(service_stack, run_id), _is_cancelled, timeout=30.0
+    )
     service_stack.record(f"pre-ingest-cancelled:{run_id}", cancelled)
     assert (
         required_text(cancelled, "status", at="pre-ingest cancellation state")

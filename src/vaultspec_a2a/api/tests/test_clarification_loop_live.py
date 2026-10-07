@@ -68,6 +68,7 @@ from ...database import (
 from ...database.models import ControlActionModel
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import wait_for_run_status_async
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,
@@ -86,7 +87,7 @@ from .clarification_harness import (
 from .conftest import async_catalog_run_fields, make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator
 
     from fastapi import FastAPI
     from langchain_core.messages import BaseMessage
@@ -659,26 +660,11 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
     assert action.applied_at is not None
 
 
-async def _wait_for_run_status(
-    client: httpx.AsyncClient,
-    run_id: str,
-    predicate: Callable[[dict[str, object]], bool],
-) -> dict[str, object]:
-    """Poll the real run-status read until *predicate* holds; return that body."""
-    last: dict[str, object] = {}
-    try:
-        with anyio.fail_after(15.0):
-            while True:
-                response = await client.get(f"/v1/runs/{run_id}")
-                assert response.status_code == 200, response.text
-                last = response.json()
-                if predicate(last):
-                    return last
-                await anyio.sleep(0.05)
-    except TimeoutError as exc:
-        raise AssertionError(
-            f"run {run_id} never matched; last status: {last}"
-        ) from exc
+async def _read_run_status(client: httpx.AsyncClient, run_id: str) -> dict[str, object]:
+    """Read the real run-status body, which every wait here requires be served."""
+    response = await client.get(f"/v1/runs/{run_id}")
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 @pytest.mark.asyncio
@@ -721,10 +707,12 @@ async def test_a_worker_reported_park_reads_input_required_and_refuses_followups
             delivered = await worker_client.post("/dispatch", json=ingest)
             assert delivered.is_success, delivered.text
 
-            parked = await _wait_for_run_status(
-                gateway_client,
-                thread_id,
+            parked = await wait_for_run_status_async(
+                lambda: _read_run_status(gateway_client, thread_id),
                 lambda body: body["status"] == ThreadStatus.INPUT_REQUIRED.value,
+                timeout=15.0,
+                interval=0.05,
+                label=f"run {thread_id}",
             )
             pending = cast("dict[str, object]", parked["pending_clarification"])
             request_id = pending["request_id"]
@@ -758,9 +746,11 @@ async def test_a_worker_reported_park_reads_input_required_and_refuses_followups
             assert answered.status_code == 200, answered.text
             assert answered.json()["accepted"] is True
 
-            resumed = await _wait_for_run_status(
-                gateway_client,
-                thread_id,
+            resumed = await wait_for_run_status_async(
+                lambda: _read_run_status(gateway_client, thread_id),
                 lambda body: body["status"] != ThreadStatus.INPUT_REQUIRED.value,
+                timeout=15.0,
+                interval=0.05,
+                label=f"run {thread_id}",
             )
     assert resumed["pending_clarification"] is None

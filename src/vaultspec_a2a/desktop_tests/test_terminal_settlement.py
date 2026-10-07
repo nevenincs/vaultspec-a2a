@@ -45,7 +45,7 @@ from ..desktop.credentials import (
     create_worker_ipc_credential,
 )
 from ..desktop.profile import derive_state_paths
-from ..testing import settings_override
+from ..testing import settings_override, wait_for_run_status_async
 from ..tests.gateway_boot import (
     broker_gateway_env,
     desktop_workspace,
@@ -56,7 +56,7 @@ from ..tests.gateway_boot import (
     spawn_gateway,
     spawn_until_ready,
 )
-from ..thread.enums import TERMINAL_STATUS_VALUES, TERMINAL_STATUSES, ThreadStatus
+from ..thread.enums import TERMINAL_STATUS_VALUES, ThreadStatus
 from ._catalog import catalog_selection
 
 if TYPE_CHECKING:
@@ -292,33 +292,34 @@ async def _settle_completed_run(app_home: Path, run_id: str) -> None:
     database_path = derive_state_paths(app_home).database_path
     engine = create_async_engine(f"sqlite+aiosqlite:///{database_path.as_posix()}")
     factory = async_sessionmaker(engine)
+
+    async def _read_status() -> dict[str, str]:
+        async with factory() as db:
+            thread = await get_thread(db, run_id)
+        assert thread is not None
+        return {"status": thread.status}
+
     try:
-        deadline = time.monotonic() + 60.0
-        while time.monotonic() < deadline:
-            async with factory() as db:
-                thread = await get_thread(db, run_id)
-                assert thread is not None
-                status = ThreadStatus(thread.status)
-            if status in TERMINAL_STATUSES:
-                assert status is ThreadStatus.COMPLETED
-                prior_tasks = set(_settlement_tasks)
-                async with AsyncSqliteSaver.from_conn_string(
-                    str(derive_state_paths(app_home).checkpoint_path)
-                ) as saver:
-                    await _handle_terminal_event(
-                        run_id,
-                        {"event_type": "thread_terminal", "status": "completed"},
-                        session_factory=factory,
-                        checkpointer=saver,
-                    )
-                    scheduled = _settlement_tasks - prior_tasks
-                    assert len(scheduled) == 1, (
-                        "terminal event must schedule settlement"
-                    )
-                    await asyncio.gather(*scheduled)
-                return
-            await asyncio.sleep(0.1)
-        raise AssertionError("broker run never reached a durable terminal")
+        terminal = await wait_for_run_status_async(
+            _read_status,
+            timeout=60.0,
+            interval=0.1,
+            label=f"broker run {run_id}",
+        )
+        assert ThreadStatus(terminal["status"]) is ThreadStatus.COMPLETED
+        prior_tasks = set(_settlement_tasks)
+        async with AsyncSqliteSaver.from_conn_string(
+            str(derive_state_paths(app_home).checkpoint_path)
+        ) as saver:
+            await _handle_terminal_event(
+                run_id,
+                {"event_type": "thread_terminal", "status": "completed"},
+                session_factory=factory,
+                checkpointer=saver,
+            )
+            scheduled = _settlement_tasks - prior_tasks
+            assert len(scheduled) == 1, "terminal event must schedule settlement"
+            await asyncio.gather(*scheduled)
     finally:
         await engine.dispose()
 

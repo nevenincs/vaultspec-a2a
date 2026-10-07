@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -32,6 +31,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..lifecycle.discovery import write_service_json
 from ..service_tests._live_desktop_gateway import ATTACH_CREDENTIAL, armed_gateway
+from ..testing import wait_for_run_status
 from ..testing.ports import free_port
 from ..utils.process import ProcessContainment
 from ._provider_catalog_live import (
@@ -186,9 +186,8 @@ def _wait_for_completed_run(
     run_id: str,
 ) -> dict[str, object]:
     """Poll the production recovery surface until the one opt-in turn completes."""
-    deadline = time.monotonic() + _TERMINAL_DEADLINE_SECONDS
-    final: dict[str, object] | None = None
-    while time.monotonic() < deadline:
+
+    def _read_status() -> dict[str, object]:
         response = httpx.post(
             f"{engine_base}/ops/a2a/run-status",
             headers={"Authorization": f"Bearer {token}"},
@@ -197,14 +196,13 @@ def _wait_for_completed_run(
         )
         envelope = _engine_envelope(response, source="run-status")
         _frozen_assignment(envelope, selection)
-        status = envelope.get("status")
-        if status in {"completed", "failed", "cancelled"}:
-            final = envelope
-            break
-        time.sleep(_POLL_SECONDS)
-    assert final is not None, (
-        f"the configured provider run did not reach a terminal state within "
-        f"{_TERMINAL_DEADLINE_SECONDS}s"
+        return envelope
+
+    final = wait_for_run_status(
+        _read_status,
+        timeout=_TERMINAL_DEADLINE_SECONDS,
+        interval=_POLL_SECONDS,
+        label=f"run {run_id}",
     )
     assert final.get("status") == "completed", (
         "the explicitly configured provider turn did not complete: "

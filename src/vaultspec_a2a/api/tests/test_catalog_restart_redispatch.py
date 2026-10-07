@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-import time
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, replace
@@ -54,6 +53,7 @@ from ...providers.team_selection import (
     model_assignment_digest,
 )
 from ...team.team_config import load_team_config
+from ...testing import wait_for_run_status
 from ...testing.tests._support.catalog_selection import in_process_selection
 from ...tests._write_authority import make_test_write_authority
 from ...tests.gateway_boot import (
@@ -337,17 +337,26 @@ async def _seed_restart_case(case: _RestartCase) -> None:
         await close_db()
 
 
-def _await_terminal(client: httpx.Client, run_id: str) -> dict[str, Any]:
-    deadline = time.monotonic() + 30.0
-    observed: dict[str, Any] = {}
-    while time.monotonic() < deadline:
+def _gateway_log_tail(log_path: Path) -> str:
+    return log_path.read_text(encoding="utf-8", errors="replace")[-8000:]
+
+
+def _await_terminal(
+    client: httpx.Client, run_id: str, log_path: Path
+) -> dict[str, Any]:
+    def _read() -> dict[str, Any]:
         response = client.get(f"/v1/runs/{run_id}")
         assert response.status_code == 200, response.text
-        observed = cast("dict[str, Any]", response.json())
-        if observed["status"] in {"completed", "failed", "error"}:
-            return observed
-        time.sleep(0.1)
-    return observed
+        return cast("dict[str, Any]", response.json())
+
+    try:
+        return wait_for_run_status(
+            _read, timeout=30.0, interval=0.1, label=f"run {run_id}"
+        )
+    except AssertionError as stalled:
+        raise AssertionError(
+            f"{stalled}\ngateway log tail: {_gateway_log_tail(log_path)}"
+        ) from stalled
 
 
 def _assert_restart_runs(
@@ -377,11 +386,8 @@ def _assert_restart_runs(
     )
     assert trigger.status_code == 201, trigger.text
 
-    snapshot = _await_terminal(client, "current-schema-restart")
-    assert snapshot["status"] == "completed", (
-        snapshot,
-        log_path.read_text(encoding="utf-8", errors="replace")[-8000:],
-    )
+    snapshot = _await_terminal(client, "current-schema-restart", log_path)
+    assert snapshot["status"] == "completed", (snapshot, _gateway_log_tail(log_path))
     # Semantic object equality covers every nested identity and value;
     # JSON object key order is deliberately not part of the contract.
     assert snapshot["frozen_assignment"] == case.exact_wire_disclosure
@@ -397,8 +403,8 @@ def _assert_restart_runs(
     assert history.json()["state"]["model_assignment_digest"] == (
         case.exact_assignment_digest
     )
-    same_snapshot = _await_terminal(client, "same-assignment-restart")
-    other_snapshot = _await_terminal(client, "other-assignment-restart")
+    same_snapshot = _await_terminal(client, "same-assignment-restart", log_path)
+    other_snapshot = _await_terminal(client, "other-assignment-restart", log_path)
     assert same_snapshot["status"] == "completed"
     assert other_snapshot["status"] == "completed"
 

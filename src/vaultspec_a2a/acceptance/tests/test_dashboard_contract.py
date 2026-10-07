@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from ...testing import ok_body, wait_for_run_status
 from ...testing.tests._support.sse import read_frame
 from ...thread.enums import (
     TERMINAL_STATUS_VALUES,
@@ -38,7 +39,6 @@ from ...thread.enums import (
     ThreadStatus,
 )
 from ._harness import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET
-from .conftest import wait_for_terminal
 
 if TYPE_CHECKING:
     from ._harness import CertifiedGateway
@@ -161,7 +161,9 @@ def test_authenticated_status_snapshot_is_coherent_or_a_real_not_found(
     started = gateway.start(run_id)
     assert started.status_code == 201, started.text
 
-    snapshot = wait_for_terminal(gateway, run_id)
+    snapshot = wait_for_run_status(
+        lambda: ok_body(gateway.status(run_id)), label=f"run {run_id}"
+    )
     assert snapshot["run_id"] == run_id
     assert snapshot["topology"]["team_preset"] == DEFAULT_TEAM_PRESET
     assert any(role["agent_id"] == DEFAULT_REQUIRED_ROLE for role in snapshot["roles"])
@@ -225,7 +227,7 @@ async def test_authenticated_progress_stream_relays_bounded_lifecycle_frame(
     run_id = "run-contract-progress"
     started = gateway.start(run_id)
     assert started.status_code == 201, started.text
-    wait_for_terminal(gateway, run_id)
+    wait_for_run_status(lambda: ok_body(gateway.status(run_id)), label=f"run {run_id}")
 
     # The gate is real: an unauthenticated stream open never begins.
     unauth = httpx.get(f"{gateway.base_url}{gateway.stream_path(run_id)}", timeout=30.0)

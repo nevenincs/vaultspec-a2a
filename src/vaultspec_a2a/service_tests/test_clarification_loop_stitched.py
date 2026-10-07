@@ -76,6 +76,7 @@ from ..acceptance.tests._harness import certified_gateway
 from ..authoring.discovery import resolve_engine_with_retry
 from ..control.config import setting_env, settings
 from ..team.team_config import load_team_config
+from ..testing import is_terminal, ok_body, wait_for_run_status
 from ..testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
@@ -240,24 +241,25 @@ def _await_parked(
     gateway: CertifiedGateway, run_id: str, *, budget: float
 ) -> JsonObject:
     """Poll the authoritative snapshot until a questionnaire is disclosed."""
-    deadline = time.monotonic() + budget
-    last: JsonObject = {}
-    while time.monotonic() < deadline:
-        response = gateway.status(run_id)
-        if response.status_code == 200:
-            last = _response_object(response, at="run-status while awaiting park")
-            if last.get("pending_clarification"):
-                return last
-            if last.get("status") in {"failed", "cancelled", "error"}:
-                raise AssertionError(
-                    f"run {run_id} settled {last.get('status')!r} before it ever "
-                    f"parked for its question; snapshot: {last}"
-                )
-        time.sleep(1.0)
-    raise AssertionError(
-        f"run {run_id} never disclosed a pending clarification within "
-        f"{budget:.0f}s; last snapshot: {last or 'never readable'}"
+
+    def _parked(body: JsonObject) -> bool:
+        if body.get("pending_clarification"):
+            return True
+        if is_terminal(body):
+            raise AssertionError(
+                f"run {run_id} settled {body.get('status')!r} before it ever "
+                f"parked for its question; snapshot: {body}"
+            )
+        return False
+
+    parked = wait_for_run_status(
+        lambda: ok_body(gateway.status(run_id)),
+        _parked,
+        timeout=budget,
+        interval=1.0,
+        label=f"run {run_id} (awaiting a pending clarification)",
     )
+    return json_object(parked, at="run-status while awaiting park")
 
 
 def _transcript_tail(gateway: CertifiedGateway, run_id: str, *, keep: int = 4) -> str:
@@ -332,34 +334,37 @@ def _await_resumed_past_fan_out(
     loop is broken" while the clarification loop had in fact worked perfectly.
     The narrower claim is the true one.
     """
-    deadline = time.monotonic() + budget
-    last: JsonObject = {}
-    while time.monotonic() < deadline:
-        response = gateway.status(run_id)
-        if response.status_code == 200:
-            last = _response_object(response, at="run-status while awaiting resume")
-            if not last.get("pending_clarification") and _has_synthesis_turn(
-                gateway, run_id
-            ):
-                return last
-            if last.get("status") in {"failed", "cancelled", "error"}:
-                topology = _required_object(
-                    last, "topology", at="failed run-status after clarification answer"
-                )
-                raise AssertionError(
-                    f"run {run_id} settled {last.get('status')!r} after the answer "
-                    f"instead of advancing.\n"
-                    f"semantic_phase={last.get('semantic_phase')!r} "
-                    f"pause_cause={topology.get('pause_cause')!r} "
-                    f"degraded={last.get('degraded_reasons')}\n"
-                    f"transcript tail: {_transcript_tail(gateway, run_id)}"
-                )
-        time.sleep(1.0)
-    raise AssertionError(
-        f"run {run_id} did not advance past the research fan-out within "
-        f"{budget:.0f}s of being answered - the resume did not reach the graph. "
-        f"last snapshot: {last or 'never readable'}"
+
+    def _advanced(body: JsonObject) -> bool:
+        if not body.get("pending_clarification") and _has_synthesis_turn(
+            gateway, run_id
+        ):
+            return True
+        if is_terminal(body):
+            topology = _required_object(
+                body, "topology", at="settled run-status after clarification answer"
+            )
+            raise AssertionError(
+                f"run {run_id} settled {body.get('status')!r} after the answer "
+                f"instead of advancing.\n"
+                f"semantic_phase={body.get('semantic_phase')!r} "
+                f"pause_cause={topology.get('pause_cause')!r} "
+                f"degraded={body.get('degraded_reasons')}\n"
+                f"transcript tail: {_transcript_tail(gateway, run_id)}"
+            )
+        return False
+
+    advanced = wait_for_run_status(
+        lambda: ok_body(gateway.status(run_id)),
+        _advanced,
+        timeout=budget,
+        interval=1.0,
+        label=(
+            f"run {run_id} (advancing past the research fan-out after being "
+            "answered - the resume did not reach the graph)"
+        ),
     )
+    return json_object(advanced, at="run-status while awaiting resume")
 
 
 def _read_frame(lines: Iterable[str], *, wanted: str, deadline: float) -> JsonObject:

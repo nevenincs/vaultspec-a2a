@@ -1206,9 +1206,13 @@ class TestThreadState:
         assert data["approval_status"] is None
         assert data["approval_request_id"] is None
         assert data["pause_cause"] is None
-        assert data["snapshot_complete"] is True
         assert data["replay_status"] == "unknown"
         assert "pending_permission_without_checkpoint_truth" in data["degraded_reasons"]
+        # A read that listed a reason is not a complete read. The excused window
+        # before a run's first checkpoint withholds the replay accusation, not
+        # the degradation this same read established - reporting a reason beside
+        # ``snapshot_complete: true`` contradicted itself on the wire.
+        assert data["snapshot_complete"] is False
 
     def test_state_excludes_terminal_thread_pending_permission_residue(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver

@@ -142,10 +142,12 @@ def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
     assert isinstance(model, AcpChatModel)
     assert model.env_vars.get("CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN") == "1"
     assert model.command == [str(_BIN_PATH)]
-    assert model.runtime_authority == "package_bin"
-    assert model.command_origin == "package_bin"
-    assert model.command_kind == "bun_binary"
-    assert model.acp_backend == BINARY_BACKEND
+    launch = model.provider_command
+    assert launch is not None
+    assert launch.runtime_authority == "package_bin"
+    assert launch.command_origin == "package_bin"
+    assert launch.command_kind == "bun_binary"
+    assert launch.acp_backend == BINARY_BACKEND
 
 
 def test_provider_factory_claude_default_never_injects_a_setting_token() -> None:

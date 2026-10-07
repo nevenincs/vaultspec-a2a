@@ -29,7 +29,6 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
-from ..control.infra_config import AcpBackend
 from ..desktop.native_isolation import NativeLaunchAuthority, NativeWorkspaceAuthority
 from ..team.team_config import AgentConfig
 from ..workspace.environment import resolve_env_vars
@@ -82,11 +81,17 @@ from ._acp_types import (
     require_workspace_root,
 )
 from ._cleanup import CleanupStep, run_independent_cleanups
+from ._factory_commands import ProviderCommand
 from ._json_contract import JsonObject
 from ._mcp_contract import verify_harness_mcp_contract
 from ._native_role import prepare_acp_role, require_native_workspace, role_environment
 from ._prompt_render import render_prompt_blocks
-from ._runtime_identity import RuntimeIdentityBinding, identity_path, identity_text
+from ._runtime_identity import (
+    RuntimeIdentityBinding,
+    identity_command,
+    identity_path,
+    identity_text,
+)
 from ._stream_lifetime import ProcessChatModel
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
@@ -163,16 +168,14 @@ class AcpChatModel(ProcessChatModel):
     )
     version_proof_required: bool = Field(default=False, exclude=True)
     execution_mode: str | None = Field(default=None, exclude=True)
-    runtime_authority: str | None = Field(
-        default=None,
-        description="Bounded runtime authority classification for the ACP command.",
-    )
-    acp_backend: AcpBackend | None = Field(
+    provider_command: ProviderCommand | None = Field(
         default=None,
         description=(
-            "ACP gateway backend the Claude-family adapter runs on. Unset for a "
-            "lane with no selectable backend."
+            "The classified launch this model runs: its runtime authority, "
+            "origin, kind, target and, for the Claude-family adapter, the ACP "
+            "backend. Unset for a command that was never classified."
         ),
+        exclude=True,
     )
     acp_family: str = Field(
         default="claude",
@@ -181,22 +184,6 @@ class AcpChatModel(ProcessChatModel):
             "allowlist transport: the claude family emits the Claude-CLI-only "
             "session/new allowedTools _meta; the kimi family omits it."
         ),
-    )
-    command_origin: str | None = Field(
-        default=None,
-        description="Bounded origin of the resolved ACP command.",
-    )
-    command_kind: str | None = Field(
-        default=None,
-        description="Bounded command kind such as node_entry or bun_binary.",
-    )
-    command_executable: str | None = Field(
-        default=None,
-        description="Resolved ACP executable basename for evidence logs.",
-    )
-    command_target: str | None = Field(
-        default=None,
-        description="Resolved ACP entrypoint or executable target for evidence logs.",
     )
     auth_mode: str | None = Field(
         default=None,
@@ -265,13 +252,8 @@ class AcpChatModel(ProcessChatModel):
                 allowed_tools=list(self.allowed_tools),
                 use_exec=self.use_exec,
                 provider=self.provider,
-                runtime_authority=self.runtime_authority,
-                acp_backend=self.acp_backend,
+                provider_command=self.provider_command,
                 acp_family=self.acp_family,
-                command_origin=self.command_origin,
-                command_kind=self.command_kind,
-                command_executable=self.command_executable,
-                command_target=self.command_target,
                 auth_mode=self.auth_mode,
                 desired_model=self.desired_model,
                 desired_config_options=dict(self.desired_config_options),
@@ -459,14 +441,15 @@ class AcpChatModel(ProcessChatModel):
         binding = self._runtime_identity
         if binding is None:
             return
-        entry = identity_path(self.command_target, field="adapter entry path")
+        launch = identity_command(self.provider_command)
+        entry = identity_path(launch.command_target, field="adapter entry path")
         if self.acp_family == "claude":
             cli = identity_path(
                 self._state.session.claude_executable, field="CLI executable path"
             )
             node = (
                 identity_path(self.command[0], field="Node executable path")
-                if self.acp_backend == NODE_BACKEND and self.command
+                if launch.acp_backend == NODE_BACKEND and self.command
                 else None
             )
         else:
@@ -490,7 +473,7 @@ class AcpChatModel(ProcessChatModel):
                 self.execution_mode, field="execution mode"
             ),
             "runtime_authority": identity_text(
-                self.runtime_authority, field="runtime authority"
+                launch.runtime_authority, field="runtime authority"
             ),
             "adapter_name": identity_text(agent_info.get("name"), field="adapter name"),
             "adapter_version": identity_text(

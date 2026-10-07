@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing import settings_override
+from ...testing import request_permission_params, settings_override
 from .._acp_mcp import statically_approvable_tool_names
 from .._acp_rpc_handlers import (
     on_fs_read_text_file,
@@ -30,11 +30,9 @@ from .._acp_rpc_handlers import (
 )
 from .._acp_session import claude_session_options
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
-from .._json_contract import JsonObject, JsonValue
-from ..execution_modes import NODE_BACKEND
 
 if TYPE_CHECKING:
-    from ...control.infra_config import AcpBackend
+    from .._json_contract import JsonObject
 
 # The read tools the harness registry declares for the search server, in the
 # qualified spelling the composed allowlist carries.
@@ -82,7 +80,6 @@ def _config(
     *,
     workspace_root: str | None,
     acp_family: str = "claude",
-    acp_backend: AcpBackend | None = NODE_BACKEND,
     permission_callback: PermissionCallback | None = None,
 ) -> AcpModelConfig:
     """Build the frozen config a run of the given lane is served with."""
@@ -95,12 +92,7 @@ def _config(
         mcp_servers=[],
         use_exec=False,
         provider="anthropic",
-        runtime_authority=None,
-        acp_backend=acp_backend,
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
         allowed_tools=list(_DECLARED_READS),
         acp_family=acp_family,
@@ -115,11 +107,11 @@ async def _decide(
     options: list[JsonObject] | None = None,
 ) -> str:
     """Drive the production handler and return the option id it selected."""
-    params: JsonObject = {
-        "sessionId": ctx.session_id,
-        "toolCall": {"toolCallId": "tc-1", "title": title, "rawInput": raw_input},
-        "options": list[JsonValue](options if options is not None else _CLAUDE_OPTIONS),
-    }
+    params = request_permission_params(
+        ctx.session_id,
+        tool_call={"toolCallId": "tc-1", "title": title, "rawInput": raw_input},
+        options=options if options is not None else _CLAUDE_OPTIONS,
+    )
     response = await on_request_permission(1, params, ctx, config)
     result = response.get("result")
     assert isinstance(result, dict)
@@ -453,7 +445,7 @@ async def test_the_kimi_lane_keeps_its_proven_behaviour(
         {"optionId": "approve_for_session", "kind": "allow_always"},
         {"optionId": "reject", "kind": "reject_once"},
     ]
-    config = _config(workspace_root=str(bound), acp_family="kimi", acp_backend=None)
+    config = _config(workspace_root=str(bound), acp_family="kimi")
 
     assert (
         await _decide(

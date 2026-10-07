@@ -61,14 +61,10 @@ def runtime_log_extra(
     session_id = options.get("session_id")
     stderr_event_count = options.get("stderr_event_count")
     exit_code = options.get("exit_code")
+    command = config.provider_command
     extra: dict[str, object] = {
         "provider": config.provider,
-        "runtime_authority": config.runtime_authority,
-        "acp_backend": config.acp_backend,
-        "command_origin": config.command_origin,
-        "command_kind": config.command_kind,
-        "command_executable": config.command_executable,
-        "command_target": config.command_target,
+        **(command.metadata() if command is not None else {}),
         "auth_mode": config.auth_mode,
         "use_exec": config.use_exec,
         "workspace_root_present": bool(config.workspace_root),

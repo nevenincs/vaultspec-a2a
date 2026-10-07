@@ -435,10 +435,9 @@ def _require_authoring_attach_surface(
     here: providers authenticate from the environment they inherit and report
     an unauthenticated lane at run time.
     """
-    if (
-        getattr(model, "with_mcp_servers", None) is not None
-        or getattr(model, "with_authoring_mcp_server", None) is not None
-    ):
+    from ..providers._acp_authoring import has_authoring_attach_surface
+
+    if has_authoring_attach_surface(model):
         return
     raise ConfigError(
         f"harness-armed preset {team_config.id!r} declares "

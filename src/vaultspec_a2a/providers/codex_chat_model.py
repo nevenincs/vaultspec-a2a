@@ -79,12 +79,17 @@ from ._codex_protocol import (
     _turn_failure,
     _usage_metadata,
 )
-from ._factory_commands import CODEX_HOME_ENV
+from ._factory_commands import CODEX_HOME_ENV, ProviderCommand
 from ._json_contract import JsonObject, lenient_json_object
 from ._mcp_contract import verify_harness_mcp_contract
 from ._native_role import require_native_workspace
 from ._project_scope import RunProjectScope
-from ._runtime_identity import RuntimeIdentityBinding, identity_path, identity_text
+from ._runtime_identity import (
+    RuntimeIdentityBinding,
+    identity_command,
+    identity_path,
+    identity_text,
+)
 from ._stream_lifetime import ProcessChatModel
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .binary_version import probe_binary_version
@@ -166,11 +171,7 @@ class CodexChatModel(ProcessChatModel):
     # Observability metadata (mirrors AcpChatModel's runtime fields).
     provider: str = "codex"
     execution_mode: str | None = Field(default=None, exclude=True)
-    runtime_authority: str | None = None
-    command_origin: str | None = None
-    command_kind: str | None = None
-    command_executable: str | None = None
-    command_target: str | None = None
+    provider_command: ProviderCommand | None = Field(default=None, exclude=True)
     version_proof_required: bool = Field(default=False, exclude=True)
 
     _runtime_identity: RuntimeIdentityBinding | None = PrivateAttr(default=None)
@@ -213,7 +214,8 @@ class CodexChatModel(ProcessChatModel):
             raise _CodexProtocolError(
                 "Codex initialize omitted a versioned server identity"
             )
-        cli = identity_path(self.command_target, field="Codex CLI executable path")
+        launch = identity_command(self.provider_command)
+        cli = identity_path(launch.command_target, field="Codex CLI executable path")
         cli_version = await asyncio.to_thread(
             probe_binary_version, cli, native_authority=native_authority
         )
@@ -228,7 +230,7 @@ class CodexChatModel(ProcessChatModel):
                 self.execution_mode, field="execution mode"
             ),
             "runtime_authority": identity_text(
-                self.runtime_authority, field="runtime authority"
+                launch.runtime_authority, field="runtime authority"
             ),
             "adapter_name": EXTERNAL_EXECUTION_MODES[Provider.CODEX],
             "adapter_version": match.group(1),
@@ -483,13 +485,14 @@ class CodexChatModel(ProcessChatModel):
 
                 require_binary_proof(
                     codex_binary_proof_reason(
-                        self.command, native_authority=native_authority
+                        self.provider_command, native_authority=native_authority
                     )
                 )
+            launch = self.provider_command
             metadata = {
                 "provider": self.provider,
-                "command_executable": self.command_executable,
-                "command_target": self.command_target,
+                "command_executable": launch.command_executable if launch else None,
+                "command_target": launch.command_target if launch else None,
             }
 
             process = await spawn_acp_process(

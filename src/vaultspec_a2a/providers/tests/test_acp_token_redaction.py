@@ -30,12 +30,7 @@ def _config() -> AcpModelConfig:
         mcp_servers=[],
         use_exec=False,
         provider="zai",
-        runtime_authority=None,
-        acp_backend=None,
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode="zai_auth_token",
     )
 

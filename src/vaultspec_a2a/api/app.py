@@ -84,7 +84,7 @@ from ..lifecycle.registration import (
 )
 from ..lifecycle.registry import ProcRecord
 from ..lifecycle.shutdown import ShutdownDeadline, build_shutdown_server, finish_before
-from ..providers.in_process_catalog import in_process_lanes
+from ..providers.lane_registry import registered_lanes
 from ..streaming import RelayHub
 from ..telemetry import TelemetryMiddleware, configure_telemetry, trace_headers
 from ..telemetry.aggregator_hook import OTelAggregatorHook
@@ -784,7 +784,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings.validate_postgres_requirement()
     # A lane plugin this process cannot honour refuses the gateway here, at
     # startup, rather than at the first catalog read that resolves the lanes.
-    in_process_lanes()
+    registered_lanes()
 
     armed = settings.desktop_profile_armed
     engine = await _initialize_gateway_database(app, armed=armed)

@@ -14,7 +14,6 @@ from pathlib import Path
 from langchain_core.messages import UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk
 
-from ..control.infra_config import AcpBackend
 from ..control.workspace import (
     canonical_workspace_root,
     configured_workspace_boundary,
@@ -23,6 +22,7 @@ from ..control.workspace import (
 from ..team.team_config import AgentConfig
 from ..utils import redact_text
 from ._acp_terminal_output import AcpTerminalOutput
+from ._factory_commands import ProviderCommand
 from ._json_contract import JsonObject
 from ._project_scope import RunProjectScope
 from ._subprocess import STDERR_TAIL_LINES
@@ -90,12 +90,7 @@ class AcpModelConfig:
     mcp_servers: list[JsonObject]
     use_exec: bool
     provider: str | None
-    runtime_authority: str | None
-    acp_backend: AcpBackend | None
-    command_origin: str | None
-    command_kind: str | None
-    command_executable: str | None
-    command_target: str | None
+    provider_command: ProviderCommand | None
     auth_mode: str | None
     # Exact tool names (mcp__<server>__<tool>) auto-permitted for a headless run
     # so the CLI can invoke the bridged authoring tools without a local prompt.

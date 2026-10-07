@@ -100,6 +100,7 @@ __all__ = [
     "build_authoring_mcp_servers",
     "build_authoring_stdio_mcp_servers",
     "config_home_authoring_entry",
+    "has_authoring_attach_surface",
     "is_write_tool_name",
 ]
 
@@ -484,6 +485,20 @@ def codex_authoring_mcp_server_spec(binding: AuthoringToolBinding) -> JsonObject
         "env": env,
         "tools": _json_string_list(binding.tool_names),
     }
+
+
+def has_authoring_attach_surface(model: object) -> bool:
+    """Return whether *model* has a surface the run's authoring bridge mounts on.
+
+    The ACP lane's ``with_mcp_servers`` and the Codex lane's
+    ``with_authoring_mcp_server`` are the two surfaces
+    :func:`attach_authoring_tools` dispatches on; a model with neither cannot
+    carry the run's bridged tools.
+    """
+    return (
+        getattr(model, "with_mcp_servers", None) is not None
+        or getattr(model, "with_authoring_mcp_server", None) is not None
+    )
 
 
 def attach_authoring_tools(

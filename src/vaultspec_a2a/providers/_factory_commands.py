@@ -1,27 +1,23 @@
 """Provider command resolution and explicit subprocess environment builders."""
 
-from __future__ import annotations
-
 import functools
 import os
 import platform
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import Final
+
+from vaultspec_core.config import ConfigVariable
 
 from ..control.config import settings
 from ..control.env_prefix import ENV_PREFIX
 from ..control.env_registry import CREDENTIAL_VARIABLES
+from ..control.infra_config import AcpBackend
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from .cli_resolution import resolve_provider_cli_executable, resolve_service_executable
 from .execution_modes import ACP_BACKEND_LANES, BINARY_BACKEND, NODE_BACKEND
-
-if TYPE_CHECKING:
-    from vaultspec_core.config import ConfigVariable
-
-    from ..control.infra_config import AcpBackend
 
 __all__ = [
     "ANTHROPIC_AUTH_TOKEN_ENV",
@@ -57,6 +53,9 @@ class ProviderCommand:
     than re-testing the argv. ``resolved`` is false only for the bare-name
     fallback that no trusted search path answered; every other origin carries
     an absolute launcher.
+
+    The chat models hold one as a pydantic field, so this module keeps its
+    annotations evaluated rather than deferred.
     """
 
     argv: tuple[str, ...]

@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 from vaultspec_core.config import env_value
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
+    from collections.abc import Awaitable, Callable
     from pathlib import Path
 
     from langchain_core.language_models import BaseChatModel
@@ -41,6 +41,7 @@ from ._factory_commands import (
     CLAUDE_OAUTH_TOKEN,
     CODEX_HOME_ENV,
     KIMI_API_KEY_ENV,
+    ProviderCommand,
     _build_kimi_env,
     _kimi_home_env,
     acp_launch_options,
@@ -72,11 +73,11 @@ from .execution_modes import (
 from .in_process_catalog import (
     discover_in_process_catalog,
     in_process_lane,
-    in_process_lanes,
     served_in_process_lanes,
 )
 from .kimi_catalog import discover_kimi_catalog
 from .lane_admission import PROVEN_TURN_LANES, lane_proof_accepts_version
+from .lane_registry import registered_lanes
 from .openai_catalog import discover_openai_compatible_catalog
 from .provider_catalog import (
     AuthenticationState,
@@ -208,28 +209,26 @@ def binary_proof_reason(
 
 
 def codex_binary_proof_reason(
-    command: Sequence[str] | None = None,
+    command: ProviderCommand | None = None,
     *,
     native_authority: NativeLaunchAuthority | None = None,
     workspace_root: Path | None = None,
 ) -> ProviderRuntimeUnavailableReason | None:
     """Probe the service-path Codex launcher selected by the factory.
 
-    ``command`` is the launch a model already holds; without one the lane is
-    classified here, once. An unresolved classification is refused unprobed,
-    and a held launcher is probed exactly as handed over, so a bare name is
-    refused by the probe rather than looked up again.
+    ``command`` is the classification a model already holds; without one the
+    lane is classified here, once. An unresolved classification is refused
+    unprobed, so a bare name is never looked up again.
     """
     if Provider.CODEX not in PROVEN_TURN_LANES:
         return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
     if command is None:
-        classified = classify_provider_command(Provider.CODEX)
-        if not classified.resolved:
-            return ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
-        command = classified.argv
+        command = classify_provider_command(Provider.CODEX)
+    if not command.resolved:
+        return ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
     return binary_proof_reason(
         Provider.CODEX,
-        command[0],
+        command.argv[0],
         "service_path",
         native_authority=native_authority,
         workspace_root=workspace_root,
@@ -657,7 +656,7 @@ def _create_codex_model(
 
     command = classify_provider_command(Provider.CODEX)
     require_binary_proof(
-        codex_binary_proof_reason(command.argv, workspace_root=workspace_root)
+        codex_binary_proof_reason(command, workspace_root=workspace_root)
     )
     # Codex auth is file-based; no secret env is injected.
     codex_controls = _native_control_fields(selected_controls)
@@ -672,11 +671,7 @@ def _create_codex_model(
         timeout=float(timeout),
         provider=str(Provider.CODEX.value),
         execution_mode=EXTERNAL_EXECUTION_MODES[Provider.CODEX],
-        runtime_authority=command.runtime_authority,
-        command_origin=command.command_origin,
-        command_kind=command.command_kind,
-        command_executable=command.command_executable,
-        command_target=command.command_target,
+        provider_command=command,
         version_proof_required=True,
     )
 
@@ -722,12 +717,7 @@ def _create_claude_model(
         use_exec=use_exec,
         provider=str(Provider.CLAUDE.value),
         execution_mode=external_execution_mode(Provider.CLAUDE, backend),
-        runtime_authority=command.runtime_authority,
-        command_origin=command.command_origin,
-        command_kind=command.command_kind,
-        command_executable=command.command_executable,
-        command_target=command.command_target,
-        acp_backend=command.acp_backend,
+        provider_command=command,
         auth_mode=auth_mode,
         version_proof_required=True,
     )
@@ -772,12 +762,7 @@ def _create_zai_model(
         use_exec=use_exec,
         provider=str(Provider.ZAI.value),
         execution_mode=external_execution_mode(Provider.ZAI, backend),
-        runtime_authority=command.runtime_authority,
-        command_origin=command.command_origin,
-        command_kind=command.command_kind,
-        command_executable=command.command_executable,
-        command_target=command.command_target,
-        acp_backend=command.acp_backend,
+        provider_command=command,
         auth_mode=auth_mode,
         version_proof_required=True,
     )
@@ -824,11 +809,7 @@ def _create_kimi_model(
         provider=str(Provider.KIMI.value),
         execution_mode=EXTERNAL_EXECUTION_MODES[Provider.KIMI],
         acp_family="kimi",
-        runtime_authority=classified.runtime_authority,
-        command_origin=classified.command_origin,
-        command_kind=classified.command_kind,
-        command_executable=classified.command_executable,
-        command_target=classified.command_target,
+        provider_command=classified,
         auth_mode="temporary_model" if temporary_definition else "persisted_config",
     )
 
@@ -871,7 +852,7 @@ class ProviderFactory:
         # Resolving the in-process lane set here makes a lane plugin that cannot
         # be honoured refuse the process that builds its factory at startup,
         # rather than surface at the first run that reaches a lane.
-        in_process_lanes()
+        registered_lanes()
 
     def catalog_registrations(
         self, workspace_root: Path, *, serve_in_process_lanes: bool | None = None

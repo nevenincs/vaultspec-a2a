@@ -168,12 +168,7 @@ def _terminal_config(workspace_root: str) -> AcpModelConfig:
         mcp_servers=[],
         use_exec=False,
         provider=None,
-        runtime_authority=None,
-        acp_backend=None,
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
     )
 

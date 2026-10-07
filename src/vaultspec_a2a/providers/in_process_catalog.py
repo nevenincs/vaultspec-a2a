@@ -17,8 +17,9 @@ round trip would have made a static fact look like an observation.
 :class:`~.lane_registry.LaneRegistration` that a configured lane plugin
 registers (:mod:`.lane_registry`); this build compiles none in. The admission
 declaration, the factory and the catalog service all read the lane set from
-:func:`in_process_lanes`, so they cannot drift into disagreeing about what an
-in-process lane is called, and none of them names a lane it does not hold.
+:func:`~.lane_registry.registered_lanes`, so they cannot drift into disagreeing
+about what an in-process lane is called, and none of them names a lane it does
+not hold.
 
 **Serving is armed, never ambient.** These lanes are constrained to stay
 hidden, and the reason is a product one: a lane that returns fixed content would
@@ -52,18 +53,8 @@ __all__ = [
     "discover_in_process_catalog",
     "in_process_catalog_key",
     "in_process_lane",
-    "in_process_lanes",
     "served_in_process_lanes",
 ]
-
-
-def in_process_lanes() -> tuple[LaneRegistration, ...]:
-    """Return every in-process lane this process can execute, in registry order.
-
-    Raises:
-        LanePluginError: If the configured lane plugins cannot be honoured.
-    """
-    return registered_lanes()
 
 
 def in_process_lane(provider: Provider) -> LaneRegistration | None:
@@ -75,7 +66,7 @@ def in_process_lane(provider: Provider) -> LaneRegistration | None:
     if provider in EXTERNAL_EXECUTION_MODES:
         return None
     return next(
-        (lane for lane in in_process_lanes() if lane.provider is provider), None
+        (lane for lane in registered_lanes() if lane.provider is provider), None
     )
 
 
@@ -135,7 +126,7 @@ def _lane_for_key(key: ProviderCatalogKey) -> LaneRegistration:
     Raises:
         ValueError: If *key* is not a held in-process lane identity.
     """
-    for lane in in_process_lanes():
+    for lane in registered_lanes():
         if in_process_catalog_key(lane) == key:
             return lane
     raise ValueError("catalog key does not name an in-process provider lane")

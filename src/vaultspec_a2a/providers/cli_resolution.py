@@ -61,11 +61,11 @@ class ProviderRuntimeUnavailableError(ConfigError):
         self.reason = reason
 
 
-_SYSTEM_CLI_NAMES: dict[Provider, str] = {
-    Provider.CLAUDE: "claude",
-    Provider.CODEX: "codex",
-    Provider.KIMI: "kimi",
-}
+# The lanes that run a CLI installed on this machine; each CLI is named by its
+# provider.
+_SYSTEM_CLI_PROVIDERS: frozenset[Provider] = frozenset(
+    {Provider.CLAUDE, Provider.CODEX, Provider.KIMI}
+)
 
 
 def _absolute_search_directories(search_path: str | None) -> tuple[str, ...]:
@@ -139,11 +139,9 @@ def resolve_provider_cli_executable(
     is handed.
     """
 
-    try:
-        name = _SYSTEM_CLI_NAMES[provider]
-    except KeyError as exc:
-        raise ValueError(f"provider {provider.value} has no system CLI") from exc
-    for candidate in _cli_candidates(name, windows=sys.platform == "win32"):
+    if provider not in _SYSTEM_CLI_PROVIDERS:
+        raise ValueError(f"provider {provider.value} has no system CLI")
+    for candidate in _cli_candidates(provider.value, windows=sys.platform == "win32"):
         if executable := resolve_service_executable(candidate, search_path=search_path):
             return executable
     return None

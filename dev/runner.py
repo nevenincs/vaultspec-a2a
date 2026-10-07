@@ -17,14 +17,15 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dev import ci_formats
 from dev.exit_codes import TOOL_BROKEN, TOOL_MISSING
+from dev.paths import REPO_ROOT
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+    from pathlib import Path
 
 __all__ = [
     "TOOLING_PROFILE",
@@ -216,7 +217,7 @@ def run_tool_or_docker(step: ToolOrDocker) -> int:
         neither the tool nor Docker is present.
     """
     if resolve_executable(step.tool) is not None:
-        return run([step.tool, *step.argv])
+        return run([step.tool, *step.argv], cwd=REPO_ROOT)
     if resolve_executable("docker") is None:
         print(
             f"{step.tool} not found and docker is unavailable",
@@ -231,7 +232,7 @@ def run_tool_or_docker(step: ToolOrDocker) -> int:
             "run",
             "--rm",
             "-v",
-            f"{Path.cwd()}:/repo",
+            f"{REPO_ROOT}:/repo",
             "-w",
             "/repo",
             step.image,

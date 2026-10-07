@@ -1,7 +1,7 @@
 """Tests for workspace provisioning.
 
-Pure-logic helpers (version-skew composition, version parsing) are exercised with
-real string inputs - no mocks. Provisioning itself is proven the honest way: a
+The pure-logic helper (version-skew composition) is exercised with real string
+inputs - no mocks. Provisioning itself is proven the honest way: a
 REAL ``vaultspec-core install`` subprocess into a ``tmp_path`` workspace, then the
 real harness verifier over the result. No doubles: an integration test that does
 not shell the real installer would prove nothing about provisioning.
@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 from ..provision import (
     _compute_skew,
     _core_base_command,
-    _parse_version,
     _pinned_version,
     _resolved_version,
     provision_workspace,
@@ -41,17 +40,6 @@ class TestVersionSkew:
 
     def test_unknown_resolved_is_not_a_skew(self) -> None:
         assert _compute_skew("0.1.43", None) is None
-
-
-class TestParseVersion:
-    def test_parses_bare_semver(self) -> None:
-        assert _parse_version("0.1.43\n") == "0.1.43"
-
-    def test_parses_click_style_version_line(self) -> None:
-        assert _parse_version("vaultspec-core, version 0.1.43") == "0.1.43"
-
-    def test_no_version_returns_none(self) -> None:
-        assert _parse_version("no version here") is None
 
 
 class TestVerifyOnly:

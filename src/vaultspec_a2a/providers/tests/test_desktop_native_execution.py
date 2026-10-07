@@ -9,11 +9,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control.provider_execution import native_execution_refusal_reason
+from ...control.provider_execution import (
+    NativeExecutionRefusedError,
+    native_execution_refusal_reason,
+)
 from ...control.state_layout import state_layout
 from ...graph.enums import Provider
 from ...testing import armed_desktop_app_home, settings_override
-from ...utils import ProcessContainmentError
 from .._acp_rpc_terminal_handlers import on_terminal_create
 from .._acp_types import AcpSessionContext
 from .._provider_execution import provider_execution_command
@@ -62,12 +64,14 @@ async def test_desktop_native_read_is_refused_before_child_execution(
             provider_agent_gid=1002 if identity_configured else None,
         ),
     ):
-        with pytest.raises(ProcessContainmentError, match="OS isolation backend"):
+        with pytest.raises(NativeExecutionRefusedError, match="OS isolation backend"):
             await spawn_acp_process(
                 command, dict(os.environ), str(project), use_exec=use_exec
             )
         for supervise in (False, True):
-            with pytest.raises(ProcessContainmentError, match="OS isolation backend"):
+            with pytest.raises(
+                NativeExecutionRefusedError, match="OS isolation backend"
+            ):
                 provider_execution_command(command, supervise=supervise)
         with pytest.raises(BinaryVersionProbeError, match="OS isolation backend"):
             probe_binary_version(sys.executable)

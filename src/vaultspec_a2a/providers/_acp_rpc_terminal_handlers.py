@@ -14,7 +14,7 @@ import signal
 from pathlib import Path
 from uuid import uuid4
 
-from ..control.provider_execution import native_execution_refusal_reason
+from ..control.provider_execution import require_native_execution
 from ..desktop.native_isolation import NativeLaunchAuthority
 from ..utils import ProcessContainmentError
 from ..utils.async_cleanup import complete_cleanup
@@ -193,9 +193,7 @@ def terminal_isolation_authority(
     ctx: AcpSessionContext, config: AcpModelConfig
 ) -> NativeLaunchAuthority:
     """Require the session's OS boundary, never infer isolation from its cwd."""
-    reason = native_execution_refusal_reason()
-    if reason is not None:
-        raise ProcessContainmentError(reason)
+    require_native_execution()
     authority = process_native_authority(ctx.process)
     if authority is None:
         raise ProcessContainmentError("ACP terminal requires workspace OS isolation")

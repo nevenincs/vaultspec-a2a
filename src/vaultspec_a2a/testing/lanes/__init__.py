@@ -12,6 +12,11 @@ child gives the child :func:`armed_lane_environment`; the child inherits the
 environment, so one declaration reaches both processes. A test that builds
 models in its own process holds :func:`seated_lanes` around the work.
 
+A child armed with a hold gate also serves the hold-then-complete scenario: its
+turn stays in flight while the gate file exists and completes once it is gone.
+The test closes and opens the gate with :func:`held_turns`, so a run is held
+mid-turn by a signal the test controls rather than by a timer.
+
 This module stays light on purpose: a gateway imports it at startup, and the
 model it registers, with its chat-model stack, loads only when a lane builds
 one. The model names below resolve lazily for the same reason.
@@ -21,7 +26,9 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from ...graph.enums import Provider
@@ -44,6 +51,7 @@ __all__ = [
     "UNATTENDED_REPLY",
     "DeterministicResearchAdrChatModel",
     "armed_lane_environment",
+    "held_turns",
     "register_lanes",
     "seated_lanes",
 ]
@@ -64,6 +72,12 @@ def __getattr__(name: str) -> object:
     raise AttributeError(msg)
 
 
+# The environment variable naming the file a hold-then-complete turn waits on.
+# It is read where the lane builds its model, so it reaches a worker the same way
+# the lane arming does: through the environment the child is spawned with.
+_HOLD_GATE_ENVIRON: Final = "VAULTSPEC_A2A_TEST_HOLD_GATE"
+
+
 @dataclass(frozen=True, slots=True)
 class _DeterministicLane:
     """The deterministic lane's identity, selectors and model."""
@@ -80,7 +94,10 @@ class _DeterministicLane:
     def create_model(self, agent_config: AgentConfig | None) -> BaseChatModel:
         from .deterministic import DeterministicResearchAdrChatModel
 
-        return DeterministicResearchAdrChatModel(agent_config=agent_config)
+        gate = os.environ.get(_HOLD_GATE_ENVIRON)
+        return DeterministicResearchAdrChatModel(
+            agent_config=agent_config, hold_gate=Path(gate) if gate else None
+        )
 
 
 DETERMINISTIC_LANE: Final = _DeterministicLane()
@@ -95,18 +112,39 @@ def register_lanes(registry: LaneRegistry) -> None:
         registry.register(lane)
 
 
-def armed_lane_environment() -> dict[str, str]:
+def armed_lane_environment(*, hold_gate: Path | None = None) -> dict[str, str]:
     """Return the environment that serves these lanes from a child process.
 
     Both settings are named through the settings schema, so the spelling a
-    child reads is the one the service declares.
+    child reads is the one the service declares. *hold_gate* is the file the
+    child's hold-then-complete turns wait on; without it that scenario refuses
+    its turn rather than complete one its test meant to hold.
     """
     from ...control.config import setting_env
 
-    return {
+    environment = {
         setting_env("serve_in_process_lanes"): "true",
         setting_env("lane_plugins"): __name__,
     }
+    if hold_gate is not None:
+        environment[_HOLD_GATE_ENVIRON] = str(hold_gate)
+    return environment
+
+
+@contextlib.contextmanager
+def held_turns(gate: Path) -> Generator[None]:
+    """Hold every hold-then-complete turn waiting on *gate* until the block ends.
+
+    The gate is closed before the block runs, so a run started inside it holds
+    from its first turn, and opened when the block ends, however it ends, so no
+    turn stays held past the test that held it. A gate that is already closed
+    is refused: two holders would each believe they own the release.
+    """
+    gate.touch(exist_ok=False)
+    try:
+        yield
+    finally:
+        gate.unlink(missing_ok=True)
 
 
 @contextlib.contextmanager

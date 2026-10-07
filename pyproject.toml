@@ -245,7 +245,8 @@ exclude = [
   # name. Every one is a scripted fixture - forced failure, a bridge-free
   # provider-condition probe, and the in-process scenarios that drive a
   # supervised permission pause, a cancellation window, a relay burst,
-  # supervisor routing and an endless generation loop - so they
+  # supervisor routing, an endless generation loop and a turn held until its
+  # test releases it - so they
   # belong with the other certification variants: available in source and
   # native integration tests, absent from a product wheel. The agent halves are listed beside
   # their teams because a scenario agent is no more shippable than the scenario
@@ -262,6 +263,8 @@ exclude = [
   "src/vaultspec_a2a/team/presets/teams/deterministic-supervisor-routing.toml",
   "src/vaultspec_a2a/team/presets/teams/deterministic-looping.toml",
   "src/vaultspec_a2a/team/presets/agents/deterministic-looping.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-hold-then-complete.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-hold-then-complete.toml",
 ]
 
   [tool.hatch.build.targets.wheel.force-include]

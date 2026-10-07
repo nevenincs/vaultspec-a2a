@@ -16,14 +16,16 @@ factory injects:
   loop. The feature tag and topic are configurable so a parameterized harness can
   assert the materialized document stems.
 - scripted scenarios: supervisor routing, a supervised permission pause, a
-  provider failure, a cancellation window, a relay burst, and an endless
-  generation loop, each selected by the bundled agent that names it.
+  provider failure, a cancellation window, a relay burst, an endless
+  generation loop, and a turn held until its test releases it, each selected
+  by the bundled agent that names it.
 """
 
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 from enum import StrEnum
+from pathlib import Path
 from typing import override
 
 from langchain_core.callbacks import (
@@ -59,6 +61,7 @@ class _DeterministicScript(StrEnum):
     CANCEL_WINDOW = "cancel_window"
     RELAY_BURST = "relay_burst"
     LOOPING = "looping"
+    HOLD_THEN_COMPLETE = "hold_then_complete"
 
 
 # The worker the scripted supervisor routes to. It is the supervised worker of
@@ -79,6 +82,7 @@ _SCRIPT_BY_AGENT_ID: dict[str, _DeterministicScript] = {
     "deterministic-cancel-window": _DeterministicScript.CANCEL_WINDOW,
     "deterministic-relay-burst": _DeterministicScript.RELAY_BURST,
     "deterministic-looping": _DeterministicScript.LOOPING,
+    "deterministic-hold-then-complete": _DeterministicScript.HOLD_THEN_COMPLETE,
 }
 
 # The supervisor node's own completion route.
@@ -97,6 +101,10 @@ UNATTENDED_REPLY = "Deterministic task completed unattended; no permission was a
 _RELAY_BURST_CHUNKS = 1100
 _RELAY_BURST_CHUNK_BYTES = 4096
 _LOOP_INTERVAL_SECONDS = 0.05
+# How often a held turn looks for its gate's removal. The hold ends on that
+# signal, never on elapsed time, so this bounds only the release latency.
+_HOLD_POLL_SECONDS = 0.05
+_HELD_TURN_REPLY = "Deterministic held turn completed after its release."
 
 # The reviewer sentinel the research_adr inner-review router advances on (the
 # REVISION path is driven by the gate verdict, not this provider).
@@ -250,13 +258,15 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
     factory injects the run's ``AgentConfig`` so the model resolves its role or
     its scenario. The output is deterministic and derives only from the agent
     id, feature tag, topic, the turn's messages and the permission answer, never
-    from a network call.
+    from a network call. A held turn's content is fixed as well; its test decides
+    only when it completes, through the hold gate.
     """
 
     feature_tag: str = "acceptance-harness"
     topic: str = "research_adr acceptance"
     agent_config: AgentConfig | None = Field(default=None, exclude=True)
     permission_callback: PermissionCallback | None = Field(default=None, exclude=True)
+    hold_gate: Path | None = Field(default=None, exclude=True)
 
     _cancel_window_entered: asyncio.Event = PrivateAttr(default_factory=asyncio.Event)
 
@@ -308,6 +318,24 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
             return f"Deterministic permission approved with {option_id}."
         return f"Deterministic permission denied with {option_id}."
 
+    async def _held_turn_content(self) -> str:
+        """Hold the turn while its gate file exists, then complete it.
+
+        The gate is a release signal the test controls from its own process: the
+        turn waits for the file's removal, so it stays in flight for exactly as
+        long as the test keeps the gate closed. A model given no gate has nothing
+        to wait on and refuses the turn, so a stack that forgot to configure one
+        fails loudly instead of completing a turn its test expected to hold.
+        """
+        gate = self.hold_gate
+        if gate is None:
+            raise RuntimeError(
+                "deterministic hold-then-complete turn was served without a hold gate"
+            )
+        while gate.exists():
+            await asyncio.sleep(_HOLD_POLL_SECONDS)
+        return _HELD_TURN_REPLY
+
     async def _looping_chunks(self) -> AsyncIterator[ChatGenerationChunk]:
         """Generate output forever; only cancelling the turn ends it."""
         iteration = 0
@@ -338,6 +366,9 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
 
         if script is _DeterministicScript.FAILURE:
             raise RuntimeError("deterministic scripted provider failure")
+
+        if script is _DeterministicScript.HOLD_THEN_COMPLETE:
+            return await self._held_turn_content()
 
         if script is _DeterministicScript.CANCEL_WINDOW:
             self._cancel_window_entered.set()

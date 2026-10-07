@@ -18,7 +18,7 @@ from ...context.stage import infer_phase_from_vault_index
 from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
-from ...thread import canonical_json, parse_approval_verdict, sha256_hex
+from ...thread import canonical_digest, parse_approval_verdict
 from ...thread.enums import VERDICT_APPROVED, ApprovalStatus, InterruptType
 from ...thread.errors import SupervisorRoutingError
 from ...thread.state import merge_vault_index
@@ -96,11 +96,10 @@ def _plan_approval_request_id(
     verdict for a superseded plan recognisable after the plan was revised - a
     run-scoped handle alone would let an old approval release a new plan.
     """
-    canonical = canonical_json(
+    digest = canonical_digest(
         [state.get("thread_id") or "", exec_worker, sorted(plan_paths)], default=str
     )
-    digest = sha256_hex(canonical.encode())[:32]
-    return f"{_PLAN_APPROVAL_ID_PREFIX}{digest}"
+    return f"{_PLAN_APPROVAL_ID_PREFIX}{digest[:32]}"
 
 
 def _worker_owning_phase(

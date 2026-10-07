@@ -16,7 +16,7 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING, Final
 
-from ..thread import canonical_json, sha256_hex
+from ..thread import canonical_digest
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -148,7 +148,7 @@ _EXPECTED_OBJECTS: Final[dict[tuple[str, str], ObjectSignature]] = {
 
 
 def _schema_digest() -> str:
-    canonical = canonical_json(
+    return canonical_digest(
         {
             "objects": [
                 [object_type, name, *signature]
@@ -159,8 +159,7 @@ def _schema_digest() -> str:
                 for name, columns in sorted(_EXPECTED_TABLES.items())
             },
         }
-    ).encode("utf-8")
-    return sha256_hex(canonical)
+    )
 
 
 CHECKPOINT_SCHEMA_DIGEST: Final = _schema_digest()

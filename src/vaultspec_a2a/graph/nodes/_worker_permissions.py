@@ -18,7 +18,7 @@ from langgraph.config import get_config
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Interrupt, interrupt
 
-from ...thread import InterruptType, PermissionAnswer, canonical_json, sha256_hex
+from ...thread import InterruptType, PermissionAnswer, canonical_digest
 from ...thread.state import read_untrusted_state_value
 from ..acp_options import is_remembering, valid_option_ids
 
@@ -44,8 +44,8 @@ def _permission_request_id(tool_name: str, tool_input: dict[str, Any]) -> str:
     another tool, or the same tool with other arguments - names a different one.
     """
     namespace = get_config().get("configurable", {}).get("checkpoint_ns", "")
-    canonical = canonical_json([namespace, tool_name, tool_input], default=str)
-    return f"perm-{sha256_hex(canonical.encode())[:32]}"
+    digest = canonical_digest([namespace, tool_name, tool_input], default=str)
+    return f"perm-{digest[:32]}"
 
 
 def _offered_options(options: list[dict[str, Any]]) -> list[dict[str, Any]]:

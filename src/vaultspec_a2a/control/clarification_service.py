@@ -37,11 +37,7 @@ from ..thread.clarification import (
     validate_clarification_answers,
 )
 from ..thread.dispatch_policy import FailureType
-from ..thread.enums import (
-    NON_ACTIVE_STATUSES,
-    ControlActionResultStatus,
-    ControlActionType,
-)
+from ..thread.enums import NON_ACTIVE_STATUSES, ControlActionType
 from ..thread.idempotency import (
     CLARIFICATION_RESPONSE_KEY_PREFIX,
     clarification_response_action_key,
@@ -50,6 +46,7 @@ from .accepted_input import AcceptedActionInput, freeze_accepted_input
 from .action_lease import (
     ControlActionClaim,
     ControlActionClaimRequest,
+    ControlActionOutcome,
     DispatchFailureDisposition,
     prepare_control_action_claim,
 )
@@ -72,22 +69,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ClarificationResult:
-    """Protocol-neutral outcome of resolving one questionnaire."""
-
-    request_id: str
-    thread_id: str
-    accepted: bool
-    applied: bool
-    action_status: str
-    action_id: str | None = None
-    idempotency_key: str | None = None
-    dispatched: bool = False
-    error_detail: str | None = None
-    error_status_code: int | None = None
-    failure_type: FailureType | None = None
+_RESOLUTION_CONFLICT = "A different clarification resolution is already accepted"
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,15 +105,6 @@ class _ClaimContext:
     thread_id: str
     request_id: str
     parked_matches: bool
-
-
-@dataclass(frozen=True, slots=True)
-class _ResultError:
-    detail: str
-    # Named only by a guard about this request; a dispatch outcome carries its
-    # typed failure alone and the protocol mapping chooses its status.
-    status_code: int | None = None
-    failure_type: FailureType | None = None
 
 
 def _checkpoint_receipt(checkpoint: CheckpointRead, request_id: str) -> str | None:
@@ -189,9 +162,11 @@ def _result(
     accepted: bool = True,
     applied: bool | None = None,
     dispatched: bool = False,
-    error: _ResultError | None = None,
-) -> ClarificationResult:
-    return ClarificationResult(
+    error_detail: str | None = None,
+    error_status_code: int | None = None,
+    failure_type: FailureType | None = None,
+) -> ControlActionOutcome:
+    return ControlActionOutcome(
         request_id=action.request_id or "",
         thread_id=action.thread_id,
         accepted=accepted,
@@ -200,9 +175,9 @@ def _result(
         action_id=action.id,
         idempotency_key=action.idempotency_key,
         dispatched=dispatched,
-        error_detail=error.detail if error else None,
-        error_status_code=error.status_code if error else None,
-        failure_type=error.failure_type if error else None,
+        error_detail=error_detail,
+        error_status_code=error_status_code,
+        failure_type=failure_type,
     )
 
 
@@ -212,15 +187,14 @@ async def _replay_existing_action(
     fingerprint: str,
     checkpoint: CheckpointRead,
     parked_matches: bool,
-) -> ClarificationResult | None:
+) -> ControlActionOutcome | None:
     stored = _stored_resolution(existing)
     if stored is None or clarification_resolution_fingerprint(stored) != fingerprint:
         return _result(
             existing,
             accepted=False,
-            error=_ResultError(
-                "A different clarification resolution is already accepted", 409
-            ),
+            error_detail=_RESOLUTION_CONFLICT,
+            error_status_code=409,
         )
     if await _settle_from_receipt(
         db,
@@ -246,7 +220,7 @@ def _invalid_parked_answers(
     resolution: ClarificationResolution,
     thread_id: str,
     request_id: str,
-) -> ClarificationResult | None:
+) -> ControlActionOutcome | None:
     if (
         parked is None
         or parked.request_id != request_id
@@ -256,24 +230,18 @@ def _invalid_parked_answers(
     violations = validate_clarification_answers(parked, resolution.answers)
     if not violations:
         return None
-    return ClarificationResult(
+    return ControlActionOutcome(
         request_id=request_id,
         thread_id=thread_id,
-        accepted=False,
-        applied=False,
-        action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
         error_detail="; ".join(violations),
         error_status_code=422,
     )
 
 
-def _run_not_found(request_id: str, thread_id: str) -> ClarificationResult:
-    return ClarificationResult(
+def _run_not_found(request_id: str, thread_id: str) -> ControlActionOutcome:
+    return ControlActionOutcome(
         request_id=request_id,
         thread_id=thread_id,
-        accepted=False,
-        applied=False,
-        action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
         error_detail="Run not found",
         error_status_code=404,
     )
@@ -286,7 +254,7 @@ async def respond_to_clarification(
     request_id: str,
     resolution: ClarificationResolution,
     runtime: ClarificationRuntime,
-) -> ClarificationResult:
+) -> ControlActionOutcome:
     """Reserve, lease, and dispatch one typed clarification resolution.
 
     The service owns its transaction boundary.  A fresh competing dispatcher
@@ -346,7 +314,7 @@ class _ClarificationAttempt:
 
 async def _respond_under_write_lock(
     db: AsyncSession, attempt: _ClarificationAttempt
-) -> ClarificationResult:
+) -> ControlActionOutcome:
     thread = await get_thread(db, attempt.thread_id)
     if thread is None:
         return _run_not_found(attempt.request_id, attempt.thread_id)
@@ -359,12 +327,9 @@ async def _respond_under_write_lock(
         idempotency_key=idempotency_key,
     )
     if existing is None and not attempt.is_parked:
-        return ClarificationResult(
+        return ControlActionOutcome(
             request_id=attempt.request_id,
             thread_id=attempt.thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             error_detail="Clarification request is not pending for this run",
             error_status_code=404,
         )
@@ -403,7 +368,7 @@ async def _respond_under_write_lock(
 
 async def _claim_and_dispatch(
     db: AsyncSession, thread: ThreadModel, context: _ClaimContext
-) -> ClarificationResult:
+) -> ControlActionOutcome:
     # ``prepare_control_action_claim`` rolls back the caller's session when this request
     # loses a concurrent insert.  SQLAlchemy expires every loaded ORM instance
     # on that rollback, so all thread fields needed after the election must be
@@ -422,12 +387,9 @@ async def _claim_and_dispatch(
     if isinstance(dispatch, DispatchRefusal):
         # Nothing was claimed, so the refusal carries its typed failure alone
         # and the one protocol mapping serves it, as it does for every verb.
-        return ClarificationResult(
+        return ControlActionOutcome(
             request_id=context.request_id,
             thread_id=context.thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             error_detail=dispatch.reason,
             failure_type=dispatch.failure_type,
         )
@@ -449,12 +411,9 @@ async def _claim_and_dispatch(
         ),
     )
     if not claim.authority_matches:
-        return ClarificationResult(
+        return ControlActionOutcome(
             request_id=context.request_id,
             thread_id=context.thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             error_status_code=409,
             failure_type=FailureType.INCOMPATIBLE_STATE,
             error_detail="Accepted action no longer owns the current run",
@@ -481,14 +440,13 @@ async def _claimed_action_result(
     claim: ControlActionClaim,
     context: _ClaimContext,
     thread_status: str,
-) -> ClarificationResult | None:
+) -> ControlActionOutcome | None:
     if not claim.payload_matches:
         return _result(
             action,
             accepted=False,
-            error=_ResultError(
-                "A different clarification resolution is already accepted", 409
-            ),
+            error_detail=_RESOLUTION_CONFLICT,
+            error_status_code=409,
         )
 
     if claim.applied or action.applied_at is not None:
@@ -498,7 +456,8 @@ async def _claimed_action_result(
         result = _result(
             action,
             accepted=False,
-            error=_ResultError("Clarification application cannot be confirmed", 409),
+            error_detail="Clarification application cannot be confirmed",
+            error_status_code=409,
         )
         await db.rollback()
         return result
@@ -506,7 +465,8 @@ async def _claimed_action_result(
         result = _result(
             action,
             accepted=False,
-            error=_ResultError("Run is not active", 409),
+            error_detail="Run is not active",
+            error_status_code=409,
         )
         await db.rollback()
         return result
@@ -523,7 +483,7 @@ async def _dispatch_claimed(
     claim: ControlActionClaim,
     dispatch: DispatchRequest,
     context: _DispatchContext,
-) -> ClarificationResult:
+) -> ControlActionOutcome:
     failure = await dispatch_leased(db, claim, dispatch, context.runtime.transport)
     if failure is not None:
         if failure.disposition is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
@@ -545,7 +505,8 @@ async def _dispatch_claimed(
         # that met the same outcome serves for it.
         return _result(
             action,
-            error=_ResultError(failure.detail, failure_type=failure.failure_type),
+            error_detail=failure.detail,
+            failure_type=failure.failure_type,
         )
 
     # A very fast worker may already have checkpointed the receipt before its HTTP

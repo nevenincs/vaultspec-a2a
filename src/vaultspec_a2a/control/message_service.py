@@ -17,7 +17,6 @@ commits.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
@@ -27,13 +26,19 @@ from ..database import (
     outstanding_permission_pause,
 )
 from ..thread.dispatch_policy import FailureType
-from ..thread.enums import ControlActionType, PermissionRequestStatus, ThreadStatus
+from ..thread.enums import (
+    ControlActionResultStatus,
+    ControlActionType,
+    PermissionRequestStatus,
+    ThreadStatus,
+)
 from ..thread.message_policy import (
     ParkedPause,
     PauseAnswerability,
     can_send_followup,
 )
 from .accepted_input import freeze_accepted_input
+from .action_lease import ControlActionOutcome
 from .continuation_queue import (
     QueuedContinuationDisposition,
     QueuedContinuationRequest,
@@ -47,7 +52,7 @@ from .leased_dispatch import DispatchRefusal, build_followon_dispatch
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-__all__ = ["MessageResult", "send_followup_message"]
+__all__ = ["send_followup_message"]
 
 logger = logging.getLogger(__name__)
 
@@ -67,27 +72,6 @@ _REFUSALS: dict[QueuedContinuationDisposition, tuple[FailureType, str]] = {
         "does. Nothing was reserved; retry once the waiting turn has run.",
     ),
 }
-
-
-@dataclass(frozen=True, slots=True)
-class MessageResult:
-    """What one follow-up offer did to a run's continuation queue.
-
-    ``queued`` says a turn was taken; ``queue_position`` is the place it was
-    given, counting from one, and it is the same place a replay of the same
-    key reports. ``action_status`` is the journal row's own status, so a
-    replay says what became of the turn rather than restating that it was
-    once queued. A refusal carries none of the three and reserved nothing.
-    """
-
-    action_id: str
-    thread_id: str
-    thread_status: str
-    queued: bool
-    queue_position: int | None = None
-    action_status: str = ""
-    error_detail: str | None = None
-    failure_type: FailureType | None = None
 
 
 def _now() -> datetime:
@@ -128,14 +112,13 @@ def _refused(
     thread_status: str,
     failure_type: FailureType,
     detail: str,
-    action_id: str = "",
-) -> MessageResult:
+    action_id: str | None = None,
+) -> ControlActionOutcome:
     """Report one refusal that reserved nothing and queued nothing."""
-    return MessageResult(
+    return ControlActionOutcome(
         action_id=action_id,
         thread_id=thread_id,
         thread_status=thread_status,
-        queued=False,
         error_detail=detail,
         failure_type=failure_type,
     )
@@ -153,12 +136,18 @@ class _FollowupMessageArgs(TypedDict):
 
 async def send_followup_message(
     db: AsyncSession, **options: Unpack[_FollowupMessageArgs]
-) -> MessageResult:
+) -> ControlActionOutcome:
     """Reserve a follow-up turn behind the one this run is executing.
 
-    Returns a :class:`MessageResult` describing the outcome.  Never raises
+    Returns a :class:`ControlActionOutcome` describing the outcome.  Never raises
     HTTP exceptions — the caller is responsible for translating the result
     into an appropriate HTTP response.  Commits the session before returning.
+
+    ``accepted`` says a turn was taken; ``queue_position`` is the place it was
+    given, counting from one, and it is the same place a replay of the same
+    key reports. ``action_status`` is the journal row's own status, so a
+    replay says what became of the turn rather than restating that it was
+    once queued. A refusal reserved nothing and carries its ``failure_type``.
     """
     # -- Thread lookup & guard -------------------------------------------
     # The run's row is locked before its status is read, and held until this
@@ -295,11 +284,12 @@ async def send_followup_message(
             ),
         },
     )
-    return MessageResult(
+    return ControlActionOutcome(
         action_id=reserved.action_id,
         thread_id=options["thread_id"],
         thread_status=thread_status,
-        queued=True,
+        accepted=True,
+        applied=reserved.result_status == ControlActionResultStatus.APPLIED.value,
         queue_position=reserved.position,
         action_status=reserved.result_status,
     )

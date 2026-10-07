@@ -19,14 +19,12 @@ if TYPE_CHECKING:
     from ..database import PermissionRequestModel, ThreadModel
     from ..ipc.schemas import DispatchRequest
     from ..thread import CheckpointProjection, ProjectedInterrupt
-    from ..thread.dispatch_policy import FailureType
     from .action_lease import ControlActionClaim
 
 __all__ = [
     "AuthorizedPermission",
     "ParkedPermission",
     "PermissionInput",
-    "PermissionResult",
     "PermissionTransition",
     "RejectedResponse",
     "audited_tool_name",
@@ -216,29 +214,6 @@ def existing_rejection_error(existing_action: object) -> str | None:
 
 
 @dataclass(frozen=True, slots=True)
-class PermissionResult:
-    """Outcome of a permission response operation.
-
-    The route handler translates this into an HTTP response or exception.
-    """
-
-    request_id: str
-    thread_id: str
-    accepted: bool
-    applied: bool
-    action_status: str
-    action_id: str | None = None
-    idempotency_key: str | None = None
-    approval_status: str | None = None
-    dispatched: bool = False
-    # Error signalling. A guard about this request names its own status; a
-    # dispatch outcome carries only ``failure_type``, which the route maps.
-    error_detail: str | None = None
-    error_status_code: int | None = None
-    failure_type: FailureType | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class PermissionInput:
     request_id: str
     option_id: str
@@ -264,7 +239,7 @@ class AuthorizedPermission:
     Carries the resolved durable state the transition and dispatch stages need,
     so those stages never re-read or re-validate. Produced by
     :func:`_authorize_permission_response` only when the response is admitted;
-    any rejection or dedup outcome is a :class:`PermissionResult` instead.
+    any rejection or dedup outcome is a :class:`ControlActionOutcome` instead.
     """
 
     permission: ParkedPermission

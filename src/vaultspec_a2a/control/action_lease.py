@@ -19,7 +19,12 @@ from ..database import (
     thread_write_expectation,
 )
 from ..thread.dispatch_policy import FailureType
-from ..thread.enums import RECOVERY_ACTION_TYPES, ControlActionType, RecoveryCondition
+from ..thread.enums import (
+    RECOVERY_ACTION_TYPES,
+    ControlActionResultStatus,
+    ControlActionType,
+    RecoveryCondition,
+)
 from .dispatch_receipts import prepare_graph_action_receipt
 from .recovery import RecoveryAuthorityLostError, record_recovery_failure
 
@@ -33,6 +38,7 @@ __all__ = [
     "DEFINITE_NON_DELIVERY",
     "ControlActionClaim",
     "ControlActionClaimRequest",
+    "ControlActionOutcome",
     "DispatchFailureDisposition",
     "finalize_control_action_acceptance",
     "prepare_control_action_claim",
@@ -87,6 +93,40 @@ class ControlActionClaimRequest:
     write_expectation: ThreadWriteExpectation | None = None
     recovery_timeout_seconds: int | None = None
     recovery_deadline_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ControlActionOutcome:
+    """What one run-control verb did, in the terms every verb shares.
+
+    Permission answers, clarification answers, cancellations and follow-up
+    messages each end by reporting the journal action they reserved or replayed
+    and whether it was taken. The record defaults to a refusal that reserved
+    nothing, so a verb names only what it learned. A refusal about the request
+    itself carries its own ``error_status_code``; one that met a dispatch
+    outcome carries only its ``failure_type``, and the protocol mapping chooses
+    the status.
+
+    ``approval_status`` belongs to permission answers, ``thread_status`` and
+    ``cancelled`` to cancellation, ``thread_status`` and ``queue_position`` to
+    follow-up messages. A verb that has no use for one leaves it at its default.
+    """
+
+    thread_id: str
+    request_id: str = ""
+    action_id: str | None = None
+    idempotency_key: str | None = None
+    accepted: bool = False
+    applied: bool = False
+    action_status: str = ControlActionResultStatus.REJECTED_INVALID_STATE.value
+    dispatched: bool = False
+    approval_status: str | None = None
+    thread_status: str = ""
+    cancelled: bool = False
+    queue_position: int | None = None
+    error_detail: str | None = None
+    error_status_code: int | None = None
+    failure_type: FailureType | None = None
 
 
 class DispatchFailureDisposition(StrEnum):

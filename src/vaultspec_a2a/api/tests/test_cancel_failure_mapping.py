@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from ...control.cancel_service import CancelResult
+from ...control.action_lease import ControlActionOutcome
 from ...thread.dispatch_policy import FailureType
 from .._dispatch_refusals import refused_cancel
 
@@ -21,11 +21,10 @@ def _result(
     *,
     detail: str | None = None,
     thread_status: str | None = None,
-) -> CancelResult:
+) -> ControlActionOutcome:
     if thread_status is None:
         thread_status = "cancelling" if failure is None else "running"
-    return CancelResult(
-        action_id=None,
+    return ControlActionOutcome(
         thread_id="t-1",
         cancelled=failure is None,
         thread_status=thread_status,

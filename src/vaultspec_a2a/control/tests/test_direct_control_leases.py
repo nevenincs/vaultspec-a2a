@@ -24,8 +24,8 @@ from sqlalchemy.exc import OperationalError
 from ...conftest import SqlitePosture
 from ...control import cancel_service
 from ...control._permission_response_contract import PermissionInput
-from ...control.action_lease import prepare_control_action_claim
-from ...control.cancel_service import CancelResult, cancel_thread
+from ...control.action_lease import ControlActionOutcome, prepare_control_action_claim
+from ...control.cancel_service import cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.leased_dispatch import DispatchTransport
 from ...control.message_service import send_followup_message
@@ -334,9 +334,9 @@ async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
                 agent_id="vaultspec-supervisor",
                 idempotency_key="busy-refusal-key",
             )
-        assert result.queued is False
+        assert result.accepted is False
         assert result.failure_type is FailureType.RUN_BUSY
-        assert result.action_id == ""
+        assert result.action_id is None
         assert len(worker.app.state.dispatch_ids) == 0
 
     async with session_factory() as db:
@@ -400,7 +400,7 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
 
     async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
 
-        async def cancel(label: str) -> CancelResult:
+        async def cancel(label: str) -> ControlActionOutcome:
             async with session_factory() as db:
                 return await cancel_thread(
                     db,
@@ -606,7 +606,7 @@ async def test_cancel_waits_for_a_concurrent_writer_rather_than_failing(
         held.last_sequence = 7
         await sibling.flush()
 
-        async def _cancel() -> CancelResult:
+        async def _cancel() -> ControlActionOutcome:
             async with (
                 httpx.AsyncClient(
                     transport=httpx.ASGITransport(app=app), base_url="http://worker"

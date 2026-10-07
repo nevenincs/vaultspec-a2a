@@ -23,6 +23,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from ...domain_config import domain_config
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import adopted_spawner
 from ...testing.catalog_authority import current_execution_metadata
 from ...thread.action_receipts import (
     GraphActionReceipt,
@@ -39,7 +40,6 @@ from ..circuit_breaker import WorkerCircuitBreaker
 from ..config import settings
 from ..dispatch import safe_dispatch
 from ..execution_authority import resolve_execution_authority
-from ..worker_management import LazyWorkerSpawner
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -78,14 +78,6 @@ async def _real_worker(
             tasks.cancel_scope.cancel()
         await executor.shutdown()
         await bridge.close()
-
-
-def _spawner() -> LazyWorkerSpawner:
-    spawner = LazyWorkerSpawner(
-        worker_url="http://worker", worker_port=8001, auto_spawn=False
-    )
-    spawner.adopt_worker()
-    return spawner
 
 
 def _breaker() -> WorkerCircuitBreaker:
@@ -150,7 +142,7 @@ async def test_a_full_worker_is_backpressure_and_says_when_to_return(
                 client,
                 _ingest(tmp_path, "overflow", f"overflow-{attempt}", with_receipt=True),
                 breaker,
-                _spawner(),
+                adopted_spawner(),
             )
             for attempt in range(4)
         ]
@@ -181,7 +173,7 @@ async def test_a_worker_already_running_the_thread_refuses_it_as_busy(
                     tmp_path, "busy-thread", f"second-{attempt}", with_receipt=True
                 ),
                 breaker,
-                _spawner(),
+                adopted_spawner(),
             )
             for attempt in range(3)
         ]
@@ -226,7 +218,7 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
                 client,
                 _ingest(tmp_path, "busy-run", f"busy-{attempt}", with_receipt=True),
                 breaker,
-                _spawner(),
+                adopted_spawner(),
             )
             for attempt in range(threshold + 1)
         ]
@@ -244,7 +236,7 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
                 client,
                 _ingest(tmp_path, "other-run", f"full-{attempt}", with_receipt=True),
                 breaker,
-                _spawner(),
+                adopted_spawner(),
             )
             for attempt in range(threshold + 1)
         ]
@@ -256,7 +248,7 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
             client,
             _ingest(tmp_path, "other-run", "other-admitted", with_receipt=True),
             breaker,
-            _spawner(),
+            adopted_spawner(),
         )
 
     assert [outcome.failure_type for outcome in busy] == [
@@ -285,7 +277,7 @@ async def test_a_dispatch_refused_before_the_worker_leaves_the_circuit_alone(
             client,
             _ingest(tmp_path, "no-receipt-thread", "no-receipt", with_receipt=False),
             breaker,
-            _spawner(),
+            adopted_spawner(),
         )
 
     assert outcome.failure_type == FailureType.INCOMPATIBLE_STATE.value
@@ -297,10 +289,7 @@ async def test_a_dispatch_refused_before_the_worker_leaves_the_circuit_alone(
 async def test_an_unreachable_worker_opens_the_circuit(tmp_path: Path) -> None:
     """Transport failure is the thing the breaker exists for."""
     breaker = _breaker()
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
-    )
-    spawner.adopt_worker()
+    spawner = adopted_spawner()
     async with httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.25) as client:
         outcomes = [
             await safe_dispatch(
@@ -338,7 +327,7 @@ async def test_a_server_fault_opens_the_circuit(tmp_path: Path) -> None:
                     tmp_path, "faulting-thread", f"fault-{attempt}", with_receipt=True
                 ),
                 breaker,
-                _spawner(),
+                adopted_spawner(),
             )
             for attempt in range(2)
         ]
@@ -373,7 +362,7 @@ async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
             client,
             _ingest(tmp_path, "probe-thread", "probe-blocked", with_receipt=True),
             breaker,
-            _spawner(),
+            adopted_spawner(),
         )
         assert blocked.failure_type == FailureType.CIRCUIT_OPEN.value
 
@@ -382,7 +371,7 @@ async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
             client,
             _ingest(tmp_path, "probe-thread", "probe-admitted", with_receipt=True),
             breaker,
-            _spawner(),
+            adopted_spawner(),
         )
 
     assert admitted.success

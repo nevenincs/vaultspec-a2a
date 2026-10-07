@@ -22,7 +22,6 @@ from ...control._permission_response_contract import PermissionInput
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_thread,
     get_control_action_by_idempotency_key,
@@ -31,6 +30,7 @@ from ...database import (
     supersede_permission_requests,
 )
 from ...database.models import ControlActionModel
+from ...testing import adopted_spawner
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionResultStatus, ThreadStatus
 
@@ -60,12 +60,7 @@ async def _respond(
     Every rejection under test returns before any dispatch, so the worker never
     has to answer; the collaborators are real objects regardless.
     """
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9",
-        worker_port=9,
-        auto_spawn=False,
-    )
-    spawner.adopt_worker()
+    spawner = adopted_spawner()
     circuit_breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=1.0)
     async with httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client:
         permission = await get_permission_request(session, request_id)

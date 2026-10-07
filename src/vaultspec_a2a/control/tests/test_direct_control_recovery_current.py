@@ -30,6 +30,7 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import adopted_spawner
 from ...testing.catalog_authority import current_execution_metadata
 from ...thread import RunWriteAuthority
 from ...thread.enums import (
@@ -53,7 +54,6 @@ from ..direct_control_recovery import (
 from ..dispatch_receipts import prepare_graph_action_receipt
 from ..execution_authority import resolve_execution_authority
 from ..recovery import seed_recovery_attempts
-from ..worker_management import LazyWorkerSpawner
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -207,9 +207,7 @@ async def _run_recovery(
             circuit_breaker=WorkerCircuitBreaker(
                 failure_threshold=3, recovery_timeout=30
             ),
-            worker_spawner=LazyWorkerSpawner(
-                worker_url="http://worker", worker_port=8001, auto_spawn=False
-            ),
+            worker_spawner=adopted_spawner(),
             trace_headers=None,
         )
     return summary, received
@@ -566,9 +564,7 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
         return JSONResponse({"status": "dispatched"})
 
     breaker = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30)
-    spawner = LazyWorkerSpawner(
-        worker_url="http://worker", worker_port=8001, auto_spawn=False
-    )
+    spawner = adopted_spawner()
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://worker"
     ) as client:
@@ -697,9 +693,7 @@ async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
             circuit_breaker=WorkerCircuitBreaker(
                 failure_threshold=3, recovery_timeout=30
             ),
-            worker_spawner=LazyWorkerSpawner(
-                worker_url="http://worker", worker_port=8001, auto_spawn=False
-            ),
+            worker_spawner=adopted_spawner(),
             trace_headers=None,
         )
 

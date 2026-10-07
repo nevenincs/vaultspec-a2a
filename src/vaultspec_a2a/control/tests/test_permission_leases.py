@@ -12,13 +12,13 @@ from ...control._permission_response_contract import PermissionInput
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_thread,
     get_control_action_by_idempotency_key,
     get_permission_request,
     record_permission_request,
 )
+from ...testing import adopted_spawner
 from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
@@ -65,9 +65,7 @@ async def _run_case(
     start = asyncio.Event()
 
     async def respond(index: int, option_id: str, notes: str | None):
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
+        spawner = adopted_spawner()
         breaker = WorkerCircuitBreaker(failure_threshold=2, recovery_timeout=1)
         async with (
             sessions() as session,

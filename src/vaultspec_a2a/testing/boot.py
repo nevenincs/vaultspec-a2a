@@ -6,8 +6,8 @@ bind-race retry, whole-tree reaping, the child gateway program, the seated
 application home it boots over, the environment a gateway child is given, and
 the sanitised environment an out-of-tree subprocess is given. It also owns the
 other peers a tier spawns or serves beside a gateway - a stranger process
-squatting on a worker port, and a loopback listener for a worker bridge's
-callbacks.
+squatting on a worker port, a loopback listener for a worker bridge's callbacks,
+and the spawner a test attaches to a worker it did not start.
 
 Acquiring the ports it boots on is a separate concept with its own home,
 :mod:`vaultspec_a2a.testing.ports`, and this consumes it. Nothing about holding
@@ -88,6 +88,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ..control.state_layout import StateLayout
+    from ..control.worker_management import LazyWorkerSpawner
     from ..worker.ipc import WorkerBridge
 
 
@@ -102,6 +103,7 @@ __all__ = [
     "GatewayBootError",
     "SignalledChild",
     "WatchedProcess",
+    "adopted_spawner",
     "armed_gateway_env",
     "await_gateway_ready",
     "await_ready",
@@ -908,6 +910,28 @@ async def loopback_callback_bridge(
             yield bridge
         finally:
             await bridge.close()
+
+
+def adopted_spawner(
+    worker_url: str = "http://worker", worker_port: int = 8001
+) -> LazyWorkerSpawner:
+    """A spawner attached to an already serving worker that it never starts.
+
+    Adoption marks the dispatch target usable without a health probe, so a test
+    that reaches the worker through its own client - an in-process ASGI app, or an
+    unreachable address chosen to provoke a transport failure - is not also sent
+    through the spawner's attach path. Auto-spawn is off, so nothing built here can
+    launch a worker. A test of the attach or spawn path itself constructs
+    ``LazyWorkerSpawner`` directly instead: adoption would settle the very state it
+    asserts on.
+    """
+    from ..control.worker_management import LazyWorkerSpawner
+
+    spawner = LazyWorkerSpawner(
+        worker_url=worker_url, worker_port=worker_port, auto_spawn=False
+    )
+    spawner.adopt_worker()
+    return spawner
 
 
 def clean_subprocess_environment() -> dict[str, str]:

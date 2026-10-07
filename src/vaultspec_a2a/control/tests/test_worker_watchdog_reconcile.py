@@ -21,7 +21,7 @@ from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.health import assemble_health_status
 from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
-from ...testing import health_listener
+from ...testing import adopted_spawner, health_listener
 from ...testing.ports import free_port
 from ...utils.process import ProcessContainment
 
@@ -99,8 +99,7 @@ def test_restart_cooldown_gate() -> None:
 @pytest.mark.asyncio
 async def test_external_healthy_worker_stale_heartbeat_is_not_restarted() -> None:
     with health_listener() as port:
-        spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=False)
-        spawner.adopt_worker()  # adopted external worker: spawned, no process
+        spawner = adopted_spawner(f"http://127.0.0.1:{port}", port)
         app_state = _stale_app_state(
             circuit_breaker=WorkerCircuitBreaker(3, 30.0),
             worker_spawner=spawner,
@@ -155,8 +154,7 @@ async def test_adopted_worker_recovers_from_transient_down_to_up() -> None:
 async def test_unowned_down_worker_is_reported_not_restarted() -> None:
     # No listener → worker unreachable; auto_spawn False → external (not ours).
     port = free_port()
-    spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=False)
-    spawner.adopt_worker()
+    spawner = adopted_spawner(f"http://127.0.0.1:{port}", port)
     app_state = _stale_app_state(
         circuit_breaker=WorkerCircuitBreaker(3, 30.0),
         worker_spawner=spawner,

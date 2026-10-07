@@ -57,7 +57,6 @@ from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.graph_definition import read_accepted_graph_definition
 from ...control.leased_dispatch import DispatchTransport, accepted_recursion_budget
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_control_action,
     create_thread,
@@ -69,6 +68,7 @@ from ...database.models import ControlActionModel
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import (
+    adopted_spawner,
     async_catalog_run_fields,
     loopback_callback_bridge,
     wait_for_run_status_async,
@@ -595,12 +595,7 @@ async def _redrive_expired_claim(
         failure_threshold=3,
         recovery_timeout=30.0,
     )
-    worker_spawner = LazyWorkerSpawner(
-        worker_url="http://worker",
-        worker_port=8001,
-        auto_spawn=False,
-    )
-    worker_spawner.adopt_worker()
+    worker_spawner = adopted_spawner()
     async with _real_worker(None, run.target, checkpointer) as worker_client:
         runtime = ClarificationRuntime(
             checkpointer,

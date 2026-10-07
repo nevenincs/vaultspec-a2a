@@ -32,7 +32,6 @@ from ...control.thread_service import (
     ThreadCreationResult,
     create_and_dispatch_thread,
 )
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     ThreadStatusElectionOutcome,
     create_control_action,
@@ -42,6 +41,7 @@ from ...database import (
     thread_write_expectation,
 )
 from ...database.models import ControlActionModel, ThreadModel
+from ...testing import adopted_spawner
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
@@ -121,9 +121,7 @@ async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
                     circuit_breaker=WorkerCircuitBreaker(
                         failure_threshold=1, recovery_timeout=1.0
                     ),
-                    worker_spawner=LazyWorkerSpawner(
-                        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-                    ),
+                    worker_spawner=adopted_spawner(),
                     worker_client=client,
                     trace_headers=None,
                 ),
@@ -237,10 +235,7 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
     tmp_path: Path,
 ) -> None:
     captured: dict[str, Any] = {}
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-    )
-    spawner.adopt_worker()
+    spawner = adopted_spawner()
     circuit_breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=1.0)
     bundle = ActorTokenBundle(
         tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
@@ -317,10 +312,7 @@ async def test_early_terminal_initial_dispatch_cannot_be_reopened(
     tmp_path: Path,
 ) -> None:
     captured: dict[str, Any] = {}
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-    )
-    spawner.adopt_worker()
+    spawner = adopted_spawner()
     thread_id = "early-terminal"
     async with (
         httpx.AsyncClient(
@@ -369,10 +361,7 @@ async def test_initial_dispatch_reports_missing_row_without_refresh_failure(
     session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
 ) -> None:
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-    )
-    spawner.adopt_worker()
+    spawner = adopted_spawner()
     thread_id = "deleted-before-ack"
     async with (
         httpx.AsyncClient(
@@ -414,10 +403,7 @@ async def test_lost_initial_ack_yields_to_early_terminal_authority(
     tmp_path: Path,
 ) -> None:
     captured: dict[str, Any] = {}
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-    )
-    spawner.adopt_worker()
+    spawner = adopted_spawner()
     thread_id = "terminal-before-lost-ack"
     async with (
         httpx.AsyncClient(
@@ -465,10 +451,7 @@ async def test_definite_initial_rejection_survives_a_different_winning_action(
     session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
 ) -> None:
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-    )
-    spawner.adopt_worker()
+    spawner = adopted_spawner()
     thread_id = "cancel-wins-before-capacity-response"
     async with (
         httpx.AsyncClient(
@@ -545,10 +528,7 @@ async def test_initial_ingest_keeps_its_fresh_lease_during_a_real_recovery_pass(
         dispatches.append(body)
         return JSONResponse({"status": "dispatched", "thread_id": thread_id})
 
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-    )
-    spawner.adopt_worker()
+    spawner = adopted_spawner()
     breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=1.0)
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://worker"
@@ -619,10 +599,7 @@ async def test_ambiguous_initial_dispatch_retains_its_fresh_lease(
 ) -> None:
     """A connection failure has no non-delivery proof, so the fresh lease remains."""
     thread_id = "ambiguous-initial-dispatch"
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
-    )
-    spawner.adopt_worker()
+    spawner = adopted_spawner()
     async with (
         httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.2) as worker_client,
         session_factory() as session,

@@ -15,15 +15,7 @@ import asyncio
 
 from ...control._worker_health import GATEWAY_LIFETIME_ID
 from ...control.config import setting_env
-from ...control.worker_management import LazyWorkerSpawner
-
-
-def _spawner() -> LazyWorkerSpawner:
-    return LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:19101",
-        worker_port=19101,
-        auto_spawn=False,
-    )
+from ...testing import adopted_spawner
 
 
 def test_the_lifetime_identity_is_a_stable_non_empty_value() -> None:
@@ -47,12 +39,12 @@ def test_the_env_names_are_distinct_and_namespaced() -> None:
 
 def test_a_fresh_spawner_has_issued_no_generation() -> None:
     """Generation zero means no worker has been spawned by this gateway."""
-    assert _spawner().generation == 0
+    assert adopted_spawner().generation == 0
 
 
 def test_each_generation_request_yields_a_distinct_increasing_value() -> None:
     """A restart must not reuse the generation of the worker it replaces."""
-    spawner = _spawner()
+    spawner = adopted_spawner()
 
     issued = [spawner.next_generation() for _ in range(5)]
 
@@ -62,7 +54,7 @@ def test_each_generation_request_yields_a_distinct_increasing_value() -> None:
 
 def test_the_generation_counter_is_per_spawner_not_global() -> None:
     """Two gateways counting into one another would make the value meaningless."""
-    first, second = _spawner(), _spawner()
+    first, second = adopted_spawner(), adopted_spawner()
 
     first.next_generation()
     first.next_generation()
@@ -73,7 +65,7 @@ def test_the_generation_counter_is_per_spawner_not_global() -> None:
 
 def test_concurrent_generation_requests_never_collide() -> None:
     """The watchdog and the lazy path can both request one; neither may duplicate."""
-    spawner = _spawner()
+    spawner = adopted_spawner()
 
     async def _drive() -> list[int]:
         return await asyncio.gather(

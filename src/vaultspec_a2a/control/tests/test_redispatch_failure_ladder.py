@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from ...testing import adopted_spawner
 from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
@@ -38,7 +39,6 @@ from ...control.execution_authority import (
     ExecutionAuthorityError,
     resolve_execution_authority,
 )
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import create_control_action, create_thread, get_thread
 from ...database.session import close_db, get_session_factory, init_db
 from ...ipc.schemas import DispatchRequest
@@ -216,10 +216,7 @@ async def test_retired_stored_authority_fails_closed_without_redispatch(
             )
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.adopt_worker()
+        spawner = adopted_spawner()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )
@@ -297,10 +294,7 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
             )
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.adopt_worker()
+        spawner = adopted_spawner()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )
@@ -387,10 +381,7 @@ async def test_a_thread_with_no_active_project_fails_alone_and_the_sweep_continu
             )
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.adopt_worker()
+        spawner = adopted_spawner()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )
@@ -464,10 +455,7 @@ async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
             )
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.adopt_worker()
+        spawner = adopted_spawner()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )
@@ -517,10 +505,7 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
                 )
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.adopt_worker()
+        spawner = adopted_spawner()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )
@@ -588,10 +573,7 @@ async def test_redispatch_logs_once_for_a_single_failure_with_no_summary(
             )
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.adopt_worker()
+        spawner = adopted_spawner()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )

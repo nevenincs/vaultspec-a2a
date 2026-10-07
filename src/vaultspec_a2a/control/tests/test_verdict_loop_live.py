@@ -83,7 +83,12 @@ from ...database import (
 from ...graph.nodes.phase_gate import create_phase_gate_node
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    adopted_spawner,
+    compile_test_graph,
+    new_state_graph,
+)
 from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.actor_tokens import ActorTokenBundle
@@ -96,7 +101,6 @@ from ...worker.ipc import WorkerBridge
 from .._verdict_subscriber_config import VerdictSubscriberConfig
 from ..circuit_breaker import WorkerCircuitBreaker
 from ..verdict_subscriber import VerdictSubscriber
-from ..worker_management import LazyWorkerSpawner
 from .test_verdict_subscriber_live import (
     _decide,
     _DecisionRequest,
@@ -393,9 +397,7 @@ async def _resume_live_verdict_run(
             circuit_breaker=WorkerCircuitBreaker(
                 failure_threshold=3, recovery_timeout=30.0
             ),
-            worker_spawner=LazyWorkerSpawner(
-                worker_url="http://worker", worker_port=1, auto_spawn=False
-            ),
+            worker_spawner=adopted_spawner(),
             endpoint_provider=lambda: None,
         )
     )

@@ -38,7 +38,6 @@ from ...control.execution_authority import resolve_execution_authority
 from ...control.leased_dispatch import DispatchTransport
 from ...control.message_service import send_followup_message
 from ...control.permission_service import respond_to_permission
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     RecoveryAttemptModel,
     ThreadModel,
@@ -54,6 +53,7 @@ from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import (
     add_test_node,
+    adopted_spawner,
     compile_test_graph,
     new_state_graph,
     session_scratch_dir,
@@ -133,16 +133,6 @@ async def _worker_runtime(
 
 def _circuit_breaker() -> WorkerCircuitBreaker:
     return WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30.0)
-
-
-def _spawner(worker_url: str = "http://worker") -> LazyWorkerSpawner:
-    spawner = LazyWorkerSpawner(
-        worker_url=worker_url,
-        worker_port=8001,
-        auto_spawn=False,
-    )
-    spawner.adopt_worker()
-    return spawner
 
 
 def _install_receipt_graph(
@@ -316,7 +306,7 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
                 transport=DispatchTransport(
                     worker_client=worker_client,
                     circuit_breaker=_circuit_breaker(),
-                    worker_spawner=_spawner(),
+                    worker_spawner=adopted_spawner(),
                 ),
             )
         assert result.accepted is True
@@ -404,7 +394,7 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
             transport=DispatchTransport(
                 worker_client=no_worker,
                 circuit_breaker=shut,
-                worker_spawner=_spawner("http://127.0.0.1:1"),
+                worker_spawner=adopted_spawner("http://127.0.0.1:1"),
             ),
         )
     assert definite.failure_type is FailureType.CIRCUIT_OPEN
@@ -424,7 +414,7 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
             transport=DispatchTransport(
                 worker_client=unreachable,
                 circuit_breaker=_circuit_breaker(),
-                worker_spawner=_spawner("http://127.0.0.1:1"),
+                worker_spawner=adopted_spawner("http://127.0.0.1:1"),
             ),
         )
     assert ambiguous.failure_type is FailureType.UNREACHABLE
@@ -560,7 +550,7 @@ async def test_cancel_retries_sqlite_lock_before_claim(
                 transport=DispatchTransport(
                     worker_client=worker_client,
                     circuit_breaker=_circuit_breaker(),
-                    worker_spawner=_spawner(),
+                    worker_spawner=adopted_spawner(),
                 ),
             )
         assert result.accepted
@@ -592,7 +582,7 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
                     transport=DispatchTransport(
                         worker_client=worker_client,
                         circuit_breaker=_circuit_breaker(),
-                        worker_spawner=_spawner(),
+                        worker_spawner=adopted_spawner(),
                     ),
                 )
 
@@ -641,7 +631,7 @@ async def test_ambiguous_cancel_preserves_durable_cancelling_intent(
             transport=DispatchTransport(
                 worker_client=unreachable_client,
                 circuit_breaker=_circuit_breaker(),
-                worker_spawner=_spawner("http://127.0.0.1:1"),
+                worker_spawner=adopted_spawner("http://127.0.0.1:1"),
             ),
         )
 
@@ -690,7 +680,7 @@ async def test_definite_cancel_non_delivery_never_rolls_back_lifecycle_authority
             transport=DispatchTransport(
                 worker_client=worker_client,
                 circuit_breaker=_circuit_breaker(),
-                worker_spawner=_spawner(),
+                worker_spawner=adopted_spawner(),
             ),
         )
     assert result.cancelled is False
@@ -738,7 +728,7 @@ async def test_terminal_state_before_cancel_prevents_dispatch_reservation(
             transport=DispatchTransport(
                 worker_client=worker_client,
                 circuit_breaker=_circuit_breaker(),
-                worker_spawner=_spawner("http://127.0.0.1:1"),
+                worker_spawner=adopted_spawner("http://127.0.0.1:1"),
             ),
         )
     assert result.accepted is False
@@ -803,7 +793,7 @@ async def test_cancel_waits_for_a_concurrent_writer_rather_than_failing(
                     transport=DispatchTransport(
                         worker_client=worker_client,
                         circuit_breaker=_circuit_breaker(),
-                        worker_spawner=_spawner(),
+                        worker_spawner=adopted_spawner(),
                     ),
                 )
 

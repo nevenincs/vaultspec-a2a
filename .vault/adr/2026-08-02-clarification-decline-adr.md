@@ -3,12 +3,13 @@ tags:
   - '#adr'
   - '#clarification-decline'
 date: '2026-08-02'
-modified: '2026-08-02'
+modified: '2026-10-07'
 body_schema: 'body-v1'
-body_hash: 'sha256:3d3f97a8b1531f3f184f762b28e125af5274c4b4144c40ce16945c49a502fe6d'
+body_hash: 'sha256:af446ddf171020d5807d18e22ed4ec775a1c955b74619019db8b935de5b5d3f2'
 related:
   - "[[2026-08-02-clarification-decline-research]]"
   - "[[2026-08-02-clarification-continuation-adr]]"
+  - '[[2026-08-02-clarification-answers-grounding-adr]]'
 ---
 
 # `clarification-decline` adr: `typed decline resolution for parked questions` | (**status:** `accepted`)
@@ -109,3 +110,9 @@ fixed words rather than fabricating prose the user never wrote.
   pass, so refusal is durable for the run - which is the intended meaning of decline.
 - The pre-existing zero-reader status of recorded answers remains open and is
   explicitly out of scope here.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+The open zero-reader question about recorded answers (Consequences, last bullet) is closed by the 2026-10-07 amendment of `2026-08-02-clarification-answers-grounding-adr`, which removes the write-only `clarification_answers` channel and leaves the rendered transcript turn as the only carrier of an answer.

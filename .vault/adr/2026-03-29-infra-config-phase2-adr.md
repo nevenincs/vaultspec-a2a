@@ -4,7 +4,7 @@ tags:
 - '#infra-config'
 date: '2026-03-29'
 modified: '2026-10-07'
-body_hash: 'sha256:f249697924bdc72cd4f7bb528a104a4af62a177a2f24a01ab5f69778e82442b2'
+body_hash: 'sha256:7729a8fe80326be5ab6c781bd7c1fba14c62117886e236e1454984b0bb954aa2'
 related:
 - '[[2026-03-28-infra-config-adr]]'
 - '[[2026-03-28-infra-config-rolling-audit]]'
@@ -122,3 +122,7 @@ Two items are reconciled with decisions accepted on 2026-10-07.
 
 - **D-06, reversed.** D-06 kept `_StubProviderFactory` and `FakeChatModel` because "VidaiMock covers execution paths". `2026-10-07-codebase-remediation-fixture-lanes-adr` removes VidaiMock. The deterministic lane, selected through the real `ProviderFactory`, replaces `_StubProviderFactory` (`src/vaultspec_a2a/graph/tests/conftest.py`) and the langchain fake chat models in tests. The protocol-drift assertion D-06 added goes with the stub. Grounding: R6-F3 and R6-F15 in `2026-10-06-codebase-remediation-audit`; decision D2 in `2026-10-06-codebase-remediation-plan`.
 - **D-09, historical.** The Postgres Compose credentials item has no subject. `docker-compose.prod.postgres.yml` was retired under `2026-10-04-container-release-native-production-adr`, and `2026-10-07-codebase-remediation-sqlite-only-adr` supersedes `2026-03-10-postgres-dual-backend-adr` and makes SQLite the only store. `.env.example` carries no `POSTGRES_PASSWORD`, and its remaining Postgres block is removed under that record. Grounding: R3-F12 in `2026-10-06-codebase-remediation-audit`; decision D1 in `2026-10-06-codebase-remediation-plan`.
+
+A third item is reconciled with the same decisions.
+
+- **D-08, historical.** The item's premise has gone. "Docker services (postgres, jaeger, vidaimock) keep separate stop/kill since `docker stop` vs `docker kill` are semantically different": only Jaeger remains. `2026-10-04-container-release-native-production-adr` retired the Postgres Compose files, `2026-10-07-codebase-remediation-sqlite-only-adr` removes Postgres as a store, and `2026-10-07-codebase-remediation-fixture-lanes-adr` removes VidaiMock. Jaeger is a development and test fixture. The Justfile carries no per-service stop/kill pair for any of them. Compose projects stop through their `down` recipes (`Justfile:758,778`), and registered host processes are killed through `service-kill` (`Justfile:708`). The gateway, worker and ui kill-to-stop delegation the item added has no recipe left to apply to. Grounding: R6-F3 in `2026-10-06-codebase-remediation-audit`; decision D2 in `2026-10-06-codebase-remediation-plan`.

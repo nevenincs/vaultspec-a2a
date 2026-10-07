@@ -4,7 +4,7 @@ tags:
   - '#infra-config'
 date: '2026-03-28'
 modified: '2026-10-07'
-body_hash: 'sha256:c13b8ab016d5071690a6726556bad41a04745336d8d323ba6e3aa0c74681890f'
+body_hash: 'sha256:f71e34c20590b74856f514e31ff66fae01562a73ff692937948da32ecc66fe67'
 related:
   - '[[2026-03-28-infra-config-research]]'
   - '[[2026-03-28-post-layer2d-boundary-audit]]'
@@ -13,6 +13,7 @@ related:
   - '[[2026-03-23-core-layer-boundary-adr]]'
   - '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
   - '[[2026-10-04-container-release-native-production-adr]]'
+  - '[[2026-10-07-codebase-remediation-fixture-lanes-adr]]'
 ---
 
 # `infra-config` adr: layer 3 infrastructure config cleanup | (**status:** `accepted`)
@@ -197,3 +198,11 @@ The Compose Postgres files this record names are historical:
 - Consequences, Deferred items: "`docker-compose.prod.postgres.yml` hardcoded credentials".
 
 `docker-compose.prod.postgres.yml` and the other application Compose files were retired under `2026-10-04-container-release-native-production-adr`; only `service/docker-compose.integration.yml` remains. No Postgres overlay returns: `2026-10-07-codebase-remediation-sqlite-only-adr` supersedes `2026-03-10-postgres-dual-backend-adr` and makes SQLite the only store. Grounding: R3-F12 in `2026-10-06-codebase-remediation-audit`; decision D1 in `2026-10-06-codebase-remediation-plan`. The 2026-10-07 settings amendment above is unchanged.
+
+The VidaiMock tapes mount is historical (D2). `2026-10-07-codebase-remediation-fixture-lanes-adr` removes VidaiMock, `MockChatModel` and the tapes under `src/vaultspec_a2a/team/presets/mock/tapes`. Three passages concern the mount and are historical:
+
+- Implementation, Phase 2: "Fix `docker-compose.integration.yml` vidaimock volume mount: `core/presets/mock/tapes` → `team/presets/mock/tapes`".
+- Rationale, "**Bug fix:** The stale tapes mount is a silent failure that makes VidaiMock integration testing non-functional in Docker."
+- Problem Statement, the stale-volume-mount sentence of the "Docker topology bugs" bullet, "silently breaking VidaiMock tape loading". The orphan `docker-compose.postgres.yml` part of that bullet is unaffected: this record deleted it and it stays deleted.
+
+The mount no longer exists in the file in any case. `service/docker-compose.integration.yml` has no `volumes` key, and the VidaiMock image copies the tapes at build (`service/docker/vidaimock.Dockerfile:31`). Grounding: R6-F3 in `2026-10-06-codebase-remediation-audit`; decision D2 in `2026-10-06-codebase-remediation-plan`.

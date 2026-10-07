@@ -5,7 +5,7 @@ tags:
 date: '2026-10-07'
 modified: '2026-10-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:c063081a552262d6c59e93056ed45bad7f8fc32c74cd98934477782e38955279'
+body_hash: 'sha256:1fa56172cb5e58bf5e9e7215904f40c6020c57790c90aa5e923ac95290cb2181'
 related:
   - "[[2026-10-06-codebase-remediation-audit]]"
   - "[[2026-02-26-process-and-workspace-management-adr]]"
@@ -61,7 +61,7 @@ The only process-management record, `2026-02-26-process-and-workspace-management
 - A start fingerprint stays clock-independent and comparable across processes and across A2A generations. A recorded fingerprint in an encoding the reader does not produce degrades to pid-liveness. It never reads as a pid-reuse mismatch.
 - An ownership verdict that cannot be established is unresolved. Unresolved never authorizes a credential.
 - Detached processes launched through `lifecycle/manager.spawn` (the dev-process registry and the `service` verbs) keep the strategy of `2026-07-15-dev-process-registry-adr`.
-- **Scope of the credential rule.** It covers every process A2A spawns, including the gateway-owned worker in both profiles. A worker attached with `auto_spawn_worker=False` (Compose or registry-managed) is attached by operator configuration; its trust model is unchanged here.
+- **Scope of the credential rule.** It covers every process A2A spawns, including the gateway-owned worker in both profiles. A worker attached with `auto_spawn_worker=False` (registry-managed or externally attached) is attached by operator configuration; its trust model is unchanged here.
 - **Affected prior rulings.**
   - `2026-02-26-process-and-workspace-management-adr` is rejected.
   - `2026-07-18-desktop-product-profile-adr` "Security, singleton, and discovery" gains the ownership-before-credential amendment.

@@ -4,7 +4,7 @@ tags:
 - '#worker-process-architecture'
 date: 2026-03-04
 modified: '2026-10-07'
-body_hash: 'sha256:09710d33d5ef2ff6d747d57af4202c8fed1839e87c86c3400692f512b92c5628'
+body_hash: 'sha256:f784d857285e2a0213d4cb17c16c1bcc75ee76cd54d9b8d23b922567d6d41d13'
 related:
 - '[[2026-02-26-tech-stack-deployment-adr]]'
 - '[[2026-02-26-observability-telemetry-integration-adr]]'
@@ -16,6 +16,7 @@ related:
 - '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
 - '[[2026-10-07-codebase-remediation-process-introspection-adr]]'
 - '[[2026-10-07-codebase-remediation-task-queue-retirement-adr]]'
+- '[[2026-10-04-container-release-native-production-adr]]'
 ---
 
 # `worker-process-architecture` adr: `adr-25` | (**status:** `accepted`)
@@ -305,3 +306,9 @@ Four clauses are reconciled with decisions accepted on 2026-10-07. Code paths ar
 - **2026-09-30 amendment, schema setup, corrected.** Superseded sentence: "Concurrent schema setup across the two processes is serialized by the owner named in `2026-03-10-postgres-dual-backend-adr`." Replacement: checkpoint schema setup is LangGraph's idempotent `CREATE TABLE IF NOT EXISTS` (`langgraph/checkpoint/sqlite/aio.py:305-344`, locked `langgraph-checkpoint-sqlite` 3.1.1), and the SQLite write lock serializes it across the two processes; a second setup creates nothing. Outside the desktop profile the opening process runs it at boot. The armed desktop profile skips it at boot and runs it only from the staged-generation migration entrypoint (`database/checkpoints.py:654-666`). This follows the "Checkpoint schema setup" clause of `2026-10-07-codebase-remediation-sqlite-only-adr`, which replaces the Postgres advisory lock as the owner of concurrent setup.
 - **Section 2.4, Auto-spawn, corrected.** Superseded: "Gateway spawns the worker as a child process via `subprocess.Popen`". Replacement: the gateway starts the worker through `utils/process.spawn_contained()`, the only way to start an owned process under `2026-10-07-codebase-remediation-process-introspection-adr`. The worker's root is created inside its containment before its first instruction runs, and a failed admission kills that exact root and raises. The current spawn-running-then-assign path (`control/worker_management.py:160-168`, `control/_worker_readiness.py:82-87`) is what that record replaces (R7-F2 in `2026-10-06-codebase-remediation-audit`; decision D13 in `2026-10-06-codebase-remediation-plan`). The narrowing to first execution demand by `2026-07-18-desktop-product-profile-adr` is unchanged.
 - **Section 7, reference historical.** "ADR-021 — task queue integration with Executor". ADR-021 is `2026-03-03-persistent-task-queue-schema-adr`, superseded by `2026-10-07-codebase-remediation-task-queue-retirement-adr`. The executor has no task-queue integration: the queue port (`worker/task_queue_port.py`, wired at `worker/graph_lifecycle.py:279,746`) is removed (R3-F3 in `2026-10-06-codebase-remediation-audit`; decision D10 in `2026-10-06-codebase-remediation-plan`).
+
+Compose and scaling passages, and the worker-output claim, are reconciled with `2026-10-04-container-release-native-production-adr`, which retires application containers. Native desktop is the only production profile, and SQLite is the only store (`2026-10-07-codebase-remediation-sqlite-only-adr`), so multi-host and replicated deployment are unsupported.
+
+- **Scaling and separate-host passages, historical.** Section 1, "the worker can be scaled horizontally while the gateway remains a singleton (SQLite WAL limitation)". Section 2.2, "The worker can be deployed on a separate host (future scaling) with only a URL change". Section 2.4, "Suitable for Docker Compose multi-container deployments (ADR-017) and horizontal scaling". Section 3, Positive, "Standalone mode enables Docker Compose multi-service deployments and future horizontal worker scaling".
+- **Compose standalone mode, historical.** Section 2.4's Standalone mode names Compose and a Docker service as its hosts, and those hosts are historical. The attach path itself remains, for a registry-managed or externally attached worker (`auto_spawn_worker=False`, `src/vaultspec_a2a/control/infra_config.py:689`). Its trust model is the one `2026-10-07-codebase-remediation-process-introspection-adr` leaves unchanged. The ADR-017 Docker Compose references in section 2.3 ("single-container production constraint") and section 7 ("Docker Compose multi-service deployment") name the same retired topology.
+- **Section 2.4, worker output, corrected.** Superseded: "Worker stdout/stderr is piped to the gateway logs." Replacement: the gateway sends the worker's stdout and stdin to `DEVNULL` and redirects its stderr to a per-port log file, `worker-autospawn-<port>.stderr.log` in the runtime directory (`src/vaultspec_a2a/control/worker_management.py:161-166`, `src/vaultspec_a2a/control/_worker_health.py:245-247`). Neither stream is piped to the gateway's logs.

@@ -4,7 +4,7 @@ tags:
   - '#desktop-product-profile'
 date: '2026-07-18'
 modified: '2026-10-07'
-body_hash: 'sha256:c1f2bfaf9d441b7451cbcdd0deee351f6131fb66ba6f66633edc37e62e485d47'
+body_hash: 'sha256:eae93bcbd9720c702ec99a910a15620cf5483e06676fa1c1fa127bb8a28ca909'
 related:
   - "[[2026-07-18-desktop-product-profile-research]]"
   - "[[2026-07-18-desktop-product-profile-reference]]"
@@ -20,6 +20,7 @@ related:
   - '[[2026-10-04-engine-discovery-security-adr]]'
   - '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
   - '[[2026-10-06-codebase-remediation-audit]]'
+  - '[[2026-10-04-container-release-native-production-adr]]'
 ---
 
 # `desktop-product-profile` adr: `a dashboard-managed companion profile alongside Compose` | (**status:** `accepted`)
@@ -365,3 +366,18 @@ Two Postgres clauses are historical:
 - "Verification": "PostgreSQL" in "Compose receives regression certification for server topology, standalone workers, PostgreSQL, and observability."
 
 No profile offers a Postgres option and no certification covers one. The rest of both sentences is not ruled by this amendment.
+
+**Compose server profile, historical.** Native desktop is the only production profile. `2026-10-04-container-release-native-production-adr` retires the application containers and every application Compose configuration. The one Compose definition left is the fixture file `service/docker-compose.integration.yml`, which `2026-10-07-codebase-remediation-fixture-lanes-adr` reduces to Jaeger. These clauses describe a retired profile and are historical:
+
+- Title, "alongside Compose". The heading text stays as written.
+- Problem statement, "while preserving Docker Compose as the server profile".
+- Considerations, "Compose remains the accepted server deployment topology. The desktop profile must coexist with it".
+- Constraints, "remains authoritative for the server profile". The rest of that bullet is unchanged: the registry and tooling decisions still govern the development lifecycle, and gateway-worker separation and Alembic stay retained.
+- Implementation, "Product profiles and artifact boundary": "A2A gains a `desktop` profile alongside the existing `compose` server profile. Compose retains its gateway, independently managed worker, PostgreSQL option, Jaeger integration, and operator lifecycle." Jaeger survives only as a development and test fixture.
+- Implementation, "Ownership and process topology": "The Compose profile retains independently managed worker mode. No dashboard lifecycle operation may adopt or terminate a Compose worker." No Compose worker exists. The gateway controls the worker it spawns, and the dashboard controls only the gateway, as Constraints rule. A worker attached by operator configuration is registry-managed or externally attached.
+- Compatibility and prior decisions: "this record overrides Compose as the sole production deployment", "Docker Compose remains production for servers", "Compose retains standalone worker mode" and "Compose may retain startup migration". Desktop migrations run only in the owned snapshot-and-rollback transaction.
+- Verification, "Compose receives regression certification for server topology, standalone workers, PostgreSQL, and observability". The sentence is historical in full, because `2026-10-04-container-release-native-production-adr` forbids application Compose certification. Native lifecycle, execution, cancellation, transport and trace tests continue.
+- Rationale, "Profile-scoped overrides preserve the validated server deployment".
+- Consequences, "A2A must maintain two explicit production profiles whose lifecycle and migration behavior differ at their outer boundary". There is one production profile, the desktop profile.
+
+The readiness payload still serves `profile` as `compose` for an unarmed gateway (`src/vaultspec_a2a/control/health.py:667`). That value labels the development and test host mode and is not a production profile.

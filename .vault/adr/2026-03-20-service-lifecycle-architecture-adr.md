@@ -13,8 +13,9 @@ related:
   - '[[2026-10-07-codebase-remediation-sqlite-only-adr]]'
   - '[[2026-10-07-codebase-remediation-fixture-lanes-adr]]'
   - '[[2026-10-06-codebase-remediation-audit]]'
+  - '[[2026-10-04-container-release-native-production-adr]]'
 modified: '2026-10-07'
-body_hash: 'sha256:315ebb7819481d6aa026226d454874ddd2bd8cb3aa6d166bafb74805423645bf'
+body_hash: 'sha256:67f402ae750fc34bab13308f090c2c07b545daa7e0cfa7e923fee52a4dea65d2'
 ---
 # `service-lifecycle-architecture` adr: `adr-039` | (**status:** `accepted`)
 
@@ -414,3 +415,7 @@ Two passages are reconciled with decisions accepted on 2026-10-07.
 
 - **Section 1, optional infrastructure, historical.** "plus optional infrastructure (Jaeger, Postgres, VidaiMock)" and "Optional infrastructure: Jaeger (:4317/:16686), Postgres (:5432), VidaiMock (:8100)." Postgres is removed: `2026-10-07-codebase-remediation-sqlite-only-adr` supersedes `2026-03-10-postgres-dual-backend-adr` and makes SQLite the only store (R3-F12 in `2026-10-06-codebase-remediation-audit`; decision D1 in `2026-10-06-codebase-remediation-plan`). VidaiMock is removed by `2026-10-07-codebase-remediation-fixture-lanes-adr` (R6-F3; decision D2). Jaeger is the only optional infrastructure.
 - **Production scope correction, 2026-10-04, corrected.** Superseded sentence: "Compose ownership now applies only to development/test Jaeger and VidaiMock fixtures." Replacement: Compose ownership applies only to the development and test Jaeger fixture. The `vidaimock` service in `service/docker-compose.integration.yml` (`:6`) and `service/docker/vidaimock.Dockerfile` are what `2026-10-07-codebase-remediation-fixture-lanes-adr` removes. The deterministic in-process lane replaces that fixture and needs no container. The rest of the correction is unchanged.
+
+A third passage is reconciled, with this record's own 2026-10-04 correction.
+
+**Current authority, Compose clause historical.** In "This record remains accepted for the Compose server product topology, profile boundaries, service separation, health model, and the decision not to build a custom product supervisor or operating-system service", the phrase "for the Compose server product topology" is historical. It contradicts the "Production scope correction, 2026-10-04" section of this record, under which `2026-10-04-container-release-native-production-adr` supersedes the application Docker and Compose production clauses. The rest of the sentence is not ruled by this paragraph. The later sentence "Neither decision supersedes this record's Compose or product-lifecycle decisions" speaks only of the two records it names and does not restore the Compose topology.

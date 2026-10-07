@@ -33,7 +33,7 @@ from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ..database.compatibility import supported_migration_head
+from ..database import supported_migration_head
 
 __all__ = [
     "ComponentEntrypoint",

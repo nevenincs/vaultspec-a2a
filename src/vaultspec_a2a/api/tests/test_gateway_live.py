@@ -124,7 +124,7 @@ async def _seed_permission(
     thread_id: str,
 ) -> str:
     """Park a real run on a permission request, journal it, and name it."""
-    from ...database.permission_repository import record_permission_request
+    from ...database import record_permission_request
 
     request_id = await park_permission(
         checkpointer, thread_id=thread_id, tool_name="bash"
@@ -434,7 +434,7 @@ async def test_legacy_lease_only_metadata_remains_status_visible(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """run-status carries a valid legacy lease and rejects an invalid one."""
-    from ...database.thread_repository import create_thread
+    from ...database import create_thread
     from ...thread.enums import ThreadStatus
 
     valid_metadata: JsonObject = {"run_lease": {"lease_id": "lease-legacy123"}}
@@ -475,7 +475,7 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The TCP gateway projects one real stored tuple without a second latest read."""
-    from ...database.thread_repository import create_thread
+    from ...database import create_thread
     from ...thread.enums import ThreadStatus
 
     thread_id = "coherent-status-capture"

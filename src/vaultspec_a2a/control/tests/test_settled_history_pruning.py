@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from ...database.models import ThreadModel
+from ...database import ThreadModel
 from ...testing import seed_completed_authority
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus

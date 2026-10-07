@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from ...database.run_event_repository import RunEventRecord, RunEventStore
+from ...database import RunEventRecord, RunEventStore
 from ...testing import (
     armed_gateway_env,
     booted_gateway,

@@ -10,13 +10,11 @@ from langgraph.types import Interrupt
 
 from ...control.thread_state_service import capture_thread_state
 from ...database import (
+    PermissionRequestModel,
+    ThreadExecutionStateModel,
     create_thread,
     record_permission_request,
     record_permission_response_submission,
-)
-from ...database.models import (
-    PermissionRequestModel,
-    ThreadExecutionStateModel,
 )
 from ...streaming import RelayHub
 from ...tests._checkpoint_seeding import real_checkpoint

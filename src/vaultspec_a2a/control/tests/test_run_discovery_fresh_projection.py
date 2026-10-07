@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from pytest import MonkeyPatch
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ...database.checkpoints import Checkpointer
+    from ...database import Checkpointer
     from ..recovery_authority import RecoveryRequest
 
 

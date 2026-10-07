@@ -30,13 +30,15 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..database.checkpoint_schema import (
+from ..database import (
     CHECKPOINT_SCHEMA_VERSION,
+    backfill_teamstate_sdd_fields,
+    checkpoint_pragmas,
+    checkpoint_wal,
     install_checkpoint_schema_identity,
+    migration_script_location,
+    run_migrations,
 )
-from ..database.migrate import migration_script_location, run_migrations
-from ..database.migrations import backfill_teamstate_sdd_fields
-from ..database.session import checkpoint_wal
 from .profile import DesktopProfileError, derive_state_paths, ensure_private_state
 
 if TYPE_CHECKING:
@@ -286,7 +288,6 @@ async def _setup_checkpointer(checkpoint_path: Path) -> None:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from ..control.config import settings
-    from ..database.checkpoint_schema import checkpoint_pragmas
 
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
         await checkpointer.setup()

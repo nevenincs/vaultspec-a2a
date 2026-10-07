@@ -20,9 +20,12 @@ import pytest_asyncio
 from sqlalchemy import select
 
 from ...conftest import SqlitePosture
-from ...database import create_thread
-from ...database.models import ThreadExecutionStateModel, ThreadModel
-from ...database.session import begin_write_transaction
+from ...database import (
+    ThreadExecutionStateModel,
+    ThreadModel,
+    begin_write_transaction,
+    create_thread,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..event_handlers import _handle_execution_state_event

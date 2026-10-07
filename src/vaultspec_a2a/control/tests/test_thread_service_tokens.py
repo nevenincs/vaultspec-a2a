@@ -33,6 +33,8 @@ from ...control.thread_service import (
     create_and_dispatch_thread,
 )
 from ...database import (
+    ControlActionModel,
+    ThreadModel,
     ThreadStatusElectionOutcome,
     create_control_action,
     delete_thread,
@@ -42,7 +44,6 @@ from ...database import (
     get_thread,
     thread_write_expectation,
 )
-from ...database.models import ControlActionModel, ThreadModel
 from ...team import load_team_config
 from ...testing import DEFAULT_TEAM_PRESET, adopted_spawner
 from ...thread.actor_tokens import ActorTokenBundle

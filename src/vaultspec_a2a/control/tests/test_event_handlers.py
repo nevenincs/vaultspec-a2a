@@ -33,6 +33,8 @@ from ...control.event_handlers import (
     relay_event,
 )
 from ...database import (
+    ControlActionModel,
+    ThreadModel,
     ThreadStatusElectionOutcome,
     acquire_control_action_lease,
     create_control_action,
@@ -46,7 +48,6 @@ from ...database import (
     set_thread_approval_state,
     thread_write_expectation,
 )
-from ...database.models import ControlActionModel, ThreadModel
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
 from ...streaming.sse_frames import enforce_progress_allowlist

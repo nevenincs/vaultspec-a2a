@@ -32,7 +32,7 @@ from ..thread.snapshots import ExecutionTaskData
 from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..streaming.types import StreamableGraph
     from ..thread import LiveInterrupt
     from ..thread.action_receipts import GraphActionReceipt

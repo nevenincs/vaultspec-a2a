@@ -16,11 +16,11 @@ from ...control.projection import (
     reconcile_checkpoint_permissions_with_durable_state,
 )
 from ...database import (
+    ThreadExecutionStateModel,
     create_thread,
     record_permission_request,
     record_thread_execution_state,
 )
-from ...database.models import ThreadExecutionStateModel
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import DegradedReason, RepairStatus
 from ...thread.snapshots import (

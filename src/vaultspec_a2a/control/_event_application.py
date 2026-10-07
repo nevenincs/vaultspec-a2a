@@ -18,7 +18,7 @@ from .permission_options import response_is_rejection
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..thread.action_receipts import GraphActionReceipt
 
 __all__ = [

@@ -33,6 +33,12 @@ from .authoring_cursor_repository import (
 from .checkpoint_retention import (
     prune_settled_checkpoints as prune_settled_checkpoints,
 )
+from .checkpoint_schema import CHECKPOINT_SCHEMA_DIGEST as CHECKPOINT_SCHEMA_DIGEST
+from .checkpoint_schema import CHECKPOINT_SCHEMA_VERSION as CHECKPOINT_SCHEMA_VERSION
+from .checkpoint_schema import checkpoint_pragmas as checkpoint_pragmas
+from .checkpoint_schema import (
+    install_checkpoint_schema_identity as install_checkpoint_schema_identity,
+)
 from .checkpoints import Checkpointer as Checkpointer
 from .checkpoints import CheckpointRead as CheckpointRead
 from .checkpoints import CheckpointReadStatus as CheckpointReadStatus
@@ -65,6 +71,9 @@ from .control_action_repository import (
 )
 from .control_action_repository import (
     get_latest_control_action as get_latest_control_action,
+)
+from .control_action_repository import (
+    get_or_create_control_action as get_or_create_control_action,
 )
 from .control_action_repository import (
     get_unapplied_control_actions as get_unapplied_control_actions,
@@ -224,6 +233,7 @@ from .runtime_identity_repository import (
 )
 from .session import application_session_factory as application_session_factory
 from .session import begin_write_transaction as begin_write_transaction
+from .session import checkpoint_wal as checkpoint_wal
 from .session import close_db as close_db
 from .session import configure_sqlite_engine as configure_sqlite_engine
 from .session import (
@@ -282,6 +292,8 @@ from .thread_repository import (
 )
 
 __all__ = [
+    "CHECKPOINT_SCHEMA_DIGEST",
+    "CHECKPOINT_SCHEMA_VERSION",
     "CONTROL_ACTION_LEASE_TTL",
     "DEFAULT_SUBSCRIBER_ID",
     "DELETION_SAGA_CLAIM_LEASE",
@@ -319,6 +331,8 @@ __all__ = [
     "backfill_teamstate_sdd_fields",
     "begin_write_transaction",
     "build_migration_config",
+    "checkpoint_pragmas",
+    "checkpoint_wal",
     "claim_deletion_saga_row",
     "claim_recovery_attempt",
     "clear_lease",
@@ -345,6 +359,7 @@ __all__ = [
     "get_deletion_saga_row",
     "get_engine",
     "get_latest_control_action",
+    "get_or_create_control_action",
     "get_pending_permission_requests",
     "get_permission_logs_by_thread",
     "get_permission_request",
@@ -358,6 +373,7 @@ __all__ = [
     "init_db",
     "insert_deletion_saga_row",
     "inspect_sqlite_database",
+    "install_checkpoint_schema_identity",
     "lease_free_from",
     "list_active_thread_page",
     "list_non_terminal_threads",

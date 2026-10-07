@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ...database.models import ControlActionModel
+    from ...database import ControlActionModel
     from ...graph.compiler import CompiledTeamGraph
     from ...thread.action_receipts import GraphActionReceipt
 

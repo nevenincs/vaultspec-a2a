@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import asyncio
 
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..providers.factory import ProviderFactory
     from ..streaming import RunEventProducer
     from .catalog_store import RunCatalogStore

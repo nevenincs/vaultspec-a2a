@@ -25,7 +25,7 @@ from ....control.deletion_saga import (
     CleanupItemResult,
     CleanupItemState,
 )
-from ....database.models import ThreadModel
+from ....database import ThreadModel
 from ....testing import settings_override
 from ....tests._write_authority import make_test_thread_authority_columns
 from ....thread.enums import CleanupKind

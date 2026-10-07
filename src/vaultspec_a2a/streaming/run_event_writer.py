@@ -22,12 +22,12 @@ from collections import OrderedDict, deque
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
-from ..database.run_event_repository import RunEventRecord
+from ..database import RunEventRecord
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ..database.run_event_repository import RunEventStore
+    from ..database import RunEventStore
     from .subscribers import SequenceAllocation
 
 #: The three bounds below and the default projector are this writer's own

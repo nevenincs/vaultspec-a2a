@@ -54,7 +54,7 @@ def _secured(
 
 
 async def _seed_running_run(session_factory: SessionFactory) -> str:
-    from ...database.thread_repository import create_thread
+    from ...database import create_thread
 
     async with session_factory() as session:
         thread = await create_thread(

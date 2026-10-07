@@ -18,8 +18,7 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import func, select, update
 
-from ...database import get_thread
-from ...database.models import ThreadDeletionSagaModel
+from ...database import ThreadDeletionSagaModel, get_thread
 from ...testing import seed_journaled_thread
 from ...thread.enums import CleanupKind, ThreadStatus
 from ..deletion_saga import (

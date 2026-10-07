@@ -7,8 +7,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ...database.models import ProviderRuntimeIdentityModel
-from ...database.thread_repository import create_thread
+from ...database import ProviderRuntimeIdentityModel, create_thread
 from ...providers.binary_version import probe_binary_version
 from ...providers.codex_chat_model import CodexChatModel
 from ...providers.factory import ProviderFactory

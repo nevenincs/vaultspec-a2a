@@ -871,7 +871,7 @@ def schema_template() -> Path:
     if _schema_template is None:
         from sqlalchemy import create_engine
 
-        from .database.models import Base
+        from .database import Base
         from .testing import session_scratch_dir
 
         target = session_scratch_dir("vaultspec-schema-") / "template.db"
@@ -909,7 +909,7 @@ def migrated_schema_template() -> Path:
         import asyncio
         from concurrent.futures import ThreadPoolExecutor
 
-        from .database.migrate import run_migrations
+        from .database import run_migrations
         from .testing import session_scratch_dir
 
         target = session_scratch_dir("vaultspec-migrated-") / "migrated.db"
@@ -963,7 +963,7 @@ def _sqlite_engine(
 ) -> AsyncEngine:
     from sqlalchemy.ext.asyncio import create_async_engine
 
-    from .database.session import (
+    from .database import (
         configure_sqlite_engine,
         configure_sqlite_transactions,
     )

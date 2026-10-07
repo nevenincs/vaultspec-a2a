@@ -21,12 +21,12 @@ from starlette.testclient import TestClient
 
 from ...control._worker_health import WorkerLiveness
 from ...database import (
+    ThreadExecutionStateModel,
     create_thread,
     get_permission_request,
     get_thread_execution_state,
     set_thread_repair_state,
 )
-from ...database.models import ThreadExecutionStateModel
 from ...graph.enums import AgentLifecycleState
 from ...providers import ProviderCondition
 from ...streaming import RelayHub
@@ -906,7 +906,7 @@ class TestTerminalEventFailureReasonPersistence:
         session_factory: SessionFactory,
     ) -> None:
         from ...control.event_handlers import RelayServices, _handle_terminal_event
-        from ...database.models import ThreadModel
+        from ...database import ThreadModel
 
         async with session_factory() as session:
             _, receipt = await seed_accepted_thread(
@@ -939,7 +939,7 @@ class TestTerminalEventFailureReasonPersistence:
     ) -> None:
         """No error_detail on completed/cancelled — the column stays None."""
         from ...control.event_handlers import RelayServices, _handle_terminal_event
-        from ...database.models import ThreadModel
+        from ...database import ThreadModel
 
         async with session_factory() as session:
             _, receipt = await seed_accepted_thread(
@@ -971,7 +971,7 @@ class TestTerminalEventFailureReasonPersistence:
         reaches the durable column — falls back to leaving it untouched
         rather than raising or coercing garbage into the record."""
         from ...control.event_handlers import RelayServices, _handle_terminal_event
-        from ...database.models import ThreadModel
+        from ...database import ThreadModel
 
         async with session_factory() as session:
             _, receipt = await seed_accepted_thread(
@@ -1009,7 +1009,7 @@ class TestTerminalEventProviderConditionPersistence:
     ) -> None:
         """The lane's own verdict survives the relay hop into the column."""
         from ...control.event_handlers import RelayServices, _handle_terminal_event
-        from ...database.models import ThreadModel
+        from ...database import ThreadModel
         from ...providers import ProviderCondition
 
         async with session_factory() as session:
@@ -1045,7 +1045,7 @@ class TestTerminalEventProviderConditionPersistence:
         which a consumer can render and act on.
         """
         from ...control.event_handlers import RelayServices, _handle_terminal_event
-        from ...database.models import ThreadModel
+        from ...database import ThreadModel
         from ...providers import ProviderCondition
 
         async with session_factory() as session:
@@ -1080,7 +1080,7 @@ class TestTerminalEventProviderConditionPersistence:
         it can at least render.
         """
         from ...control.event_handlers import RelayServices, _handle_terminal_event
-        from ...database.models import ThreadModel
+        from ...database import ThreadModel
 
         async with session_factory() as session:
             _, receipt = await seed_accepted_thread(
@@ -1110,7 +1110,7 @@ class TestTerminalEventProviderConditionPersistence:
     ) -> None:
         """A run that did not fail has no provider failure to classify."""
         from ...control.event_handlers import RelayServices, _handle_terminal_event
-        from ...database.models import ThreadModel
+        from ...database import ThreadModel
 
         async with session_factory() as session:
             _, receipt = await seed_accepted_thread(
@@ -1307,7 +1307,7 @@ class TestNoFailedRunPersistsWithoutACondition:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """A malformed direct dispatch cannot emit a terminal without authority."""
-        from ...database.models import ThreadModel
+        from ...database import ThreadModel
         from ...ipc.schemas import DispatchRequest
         from ...worker.executor import Executor
         from .conftest import make_app

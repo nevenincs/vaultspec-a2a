@@ -14,29 +14,12 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from ..context.metadata import ThreadMetadata
-from ..control.projection import (
-    apply_authoring_completion_check,
-    apply_checkpoint_projection,
-    classify_transcript_availability,
-    clear_permissions_without_checkpoint_truth,
-    enrich_snapshot_from_durable_state,
-    enrich_snapshot_from_execution_state,
-    finalize_snapshot_replay_status,
-    mark_degraded,
-    reconcile_checkpoint_permissions_with_durable_state,
+from ..database import (
+    ThreadModel,
+    get_thread,
+    read_latest_checkpoint,
+    retained_high_water_mark,
 )
-from ..control.recovery_authority import (
-    RecoveryRequest,
-    RecoveryTrigger,
-    reconcile_run_checkpoint,
-)
-from ..control.snapshot import (
-    MinimalState,
-    checkpoint_history_depth,
-    enrich_snapshot_from_state,
-)
-from ..database import ThreadModel, get_thread, read_latest_checkpoint
-from ..database.run_event_repository import retained_high_water_mark
 from ..domain_config import domain_config
 from ..graph.enums import SemanticPhase, research_adr_semantic_phase
 from ..team.team_config import AuthoringCapability, authoring_capability
@@ -58,11 +41,32 @@ from .execution_authority import (
     resolve_execution_authority_from_fields,
 )
 from .graph_definition import read_accepted_graph_definition
+from .projection import (
+    apply_authoring_completion_check,
+    apply_checkpoint_projection,
+    classify_transcript_availability,
+    clear_permissions_without_checkpoint_truth,
+    enrich_snapshot_from_durable_state,
+    enrich_snapshot_from_execution_state,
+    finalize_snapshot_replay_status,
+    mark_degraded,
+    reconcile_checkpoint_permissions_with_durable_state,
+)
+from .recovery_authority import (
+    RecoveryRequest,
+    RecoveryTrigger,
+    reconcile_run_checkpoint,
+)
+from .snapshot import (
+    MinimalState,
+    checkpoint_history_depth,
+    enrich_snapshot_from_state,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..streaming import RelayHub, RunLiveStateMirror
     from ..thread.snapshots import CheckpointProjection
 

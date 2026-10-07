@@ -30,7 +30,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...control.run_start_policy import required_role_ids
-from ...database.thread_repository import create_thread
+from ...database import create_thread
 from ...ipc.schemas import DispatchRequest
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...team.team_config import load_team_config

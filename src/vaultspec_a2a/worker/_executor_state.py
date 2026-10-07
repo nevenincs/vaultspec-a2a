@@ -16,7 +16,7 @@ from .catalog_store import RunCatalogStore
 from .token_store import RunTokenStore
 
 if TYPE_CHECKING:
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ._dispatch_contract import DispatchCapacityReservation
     from ._dispatch_settlement import TerminalArbitration
 

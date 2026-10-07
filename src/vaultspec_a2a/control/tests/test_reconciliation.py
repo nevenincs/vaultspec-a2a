@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control.reconciliation import reconcile_threads_on_startup
 from ...database import (
     create_thread,
     get_thread,
@@ -16,6 +15,7 @@ from ...database import (
 from ...testing import current_execution_metadata, seed_create_action
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
+from ..reconciliation import reconcile_threads_on_startup
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 @pytest.mark.asyncio
 async def test_pending_permission_without_checkpoint_is_not_marked_resumable(
-    runtime_dir: Path,
+    tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
 ) -> None:
@@ -37,9 +37,9 @@ async def test_pending_permission_without_checkpoint_is_not_marked_resumable(
             session,
             write_authority=make_test_write_authority(),
             thread_id="thread-missing-checkpoint",
-            metadata=current_execution_metadata(runtime_dir),
+            metadata=current_execution_metadata(tmp_path),
         )
-        await seed_create_action(session, thread.id, workspace=runtime_dir)
+        await seed_create_action(session, thread.id, workspace=tmp_path)
         await record_permission_request(
             session,
             request_id=f"{thread.id}:perm-1",
@@ -73,7 +73,7 @@ async def test_pending_permission_without_checkpoint_is_not_marked_resumable(
 
 @pytest.mark.asyncio
 async def test_cancelling_without_checkpoint_is_not_marked_cancel_pending(
-    runtime_dir: Path,
+    tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
 ) -> None:
@@ -84,9 +84,9 @@ async def test_cancelling_without_checkpoint_is_not_marked_cancel_pending(
             write_authority=make_test_write_authority(),
             thread_id="thread-cancelling-missing-checkpoint",
             status="cancelling",
-            metadata=current_execution_metadata(runtime_dir),
+            metadata=current_execution_metadata(tmp_path),
         )
-        await seed_create_action(session, thread.id, workspace=runtime_dir)
+        await seed_create_action(session, thread.id, workspace=tmp_path)
         await session.commit()
 
     async with session_factory() as session:
@@ -175,7 +175,7 @@ async def test_deleting_thread_with_pending_permission_is_never_swept(
 
 @pytest.mark.asyncio
 async def test_answered_pending_apply_with_checkpoint_is_not_marked_resumable(
-    runtime_dir: Path,
+    tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
 ) -> None:
@@ -202,9 +202,9 @@ async def test_answered_pending_apply_with_checkpoint_is_not_marked_resumable(
             write_authority=make_test_write_authority(),
             thread_id="thread-answered-pending-apply-reconcile",
             status="running",
-            metadata=current_execution_metadata(runtime_dir),
+            metadata=current_execution_metadata(tmp_path),
         )
-        await seed_create_action(session, thread.id, workspace=runtime_dir)
+        await seed_create_action(session, thread.id, workspace=tmp_path)
         await record_permission_request(
             session,
             request_id=f"{thread.id}:perm-1",

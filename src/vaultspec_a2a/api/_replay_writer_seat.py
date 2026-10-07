@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from ..control.config import settings
-from ..database.run_event_repository import RunEventStore
+from ..database import RunEventStore
 from ..streaming import RunEventWriter, RunSequenceAllocator
 
 __all__ = ["replay_writer_seat", "seated_replay_writer"]

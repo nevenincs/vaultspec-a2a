@@ -26,8 +26,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from ...database.models import ProviderRuntimeIdentityModel
-from ...database.thread_repository import create_thread
+from ...database import ProviderRuntimeIdentityModel, create_thread
 from ...graph.enums import Provider
 from ...testing import declared_lane_model_value
 from ...tests._write_authority import make_test_write_authority

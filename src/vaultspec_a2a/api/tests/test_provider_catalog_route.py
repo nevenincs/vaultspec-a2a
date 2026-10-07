@@ -20,7 +20,7 @@ from ...api.schemas.provider_catalog import (
     PROVIDER_CATALOG_PATH,
     ProviderCatalogResponse,
 )
-from ...database.thread_repository import normalize_workspace_identity
+from ...database import normalize_workspace_identity
 from ...providers.lane_admission import is_catalog_lane_admissible
 from ...providers.provider_catalog import (
     CATALOG_SCHEMA_VERSION,

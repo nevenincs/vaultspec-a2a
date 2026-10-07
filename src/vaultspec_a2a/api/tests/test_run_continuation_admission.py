@@ -25,8 +25,12 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from ...database import create_thread, get_thread, record_permission_request
-from ...database.models import ControlActionModel
+from ...database import (
+    ControlActionModel,
+    create_thread,
+    get_thread,
+    record_permission_request,
+)
 from ...testing import DEFAULT_TEAM_PRESET, async_catalog_run_fields
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType

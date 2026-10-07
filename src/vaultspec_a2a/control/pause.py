@@ -44,8 +44,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database import CheckpointRead
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer, CheckpointRead
     from ..thread import (
         CheckpointProjection,
         ProjectedInterrupt,

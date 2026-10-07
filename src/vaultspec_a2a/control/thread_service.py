@@ -18,15 +18,6 @@ from langchain_core.messages import AIMessage
 
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
-from ..control.accepted_input import freeze_accepted_input
-from ..control.action_lease import (
-    ControlActionClaim,
-    ControlActionClaimRequest,
-    prepare_control_action_claim,
-)
-from ..control.repair_transitions import (
-    apply_repair_transition,
-)
 from ..database import (
     ThreadModel,
     ThreadStatusElectionOutcome,
@@ -55,6 +46,12 @@ from ..thread.executable_graph import freeze_graph_definition
 from ..thread.idempotency import thread_create_action_key
 from ..thread.lifecycle_guards import can_archive, can_delete
 from ..thread.repair_policy import RepairPhase, repair_state_for_action
+from .accepted_input import freeze_accepted_input
+from .action_lease import (
+    ControlActionClaim,
+    ControlActionClaimRequest,
+    prepare_control_action_claim,
+)
 from .cleanup import build_cleanup_manifest, execute_cleanup_manifest
 from .deletion_saga import (
     CleanupItemResult,
@@ -64,6 +61,7 @@ from .deletion_saga import (
     finalize_deletion_saga,
 )
 from .leased_dispatch import accepted_recursion_budget, dispatch_leased
+from .repair_transitions import apply_repair_transition
 from .workspace import require_admitted_workspace_root
 
 if TYPE_CHECKING:

@@ -40,11 +40,11 @@ from ...control.workspace import (
     require_admitted_workspace_root,
 )
 from ...database import (
+    Checkpointer,
+    ThreadModel,
     get_thread,
     retry_write_contention,
 )
-from ...database.checkpoints import Checkpointer
-from ...database.models import ThreadModel
 from ...domain_config import domain_config
 from ...ipc.schemas import SeedTranscriptMessage
 from ...providers.team_selection import (

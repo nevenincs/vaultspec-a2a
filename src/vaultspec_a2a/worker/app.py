@@ -37,7 +37,7 @@ from vaultspec_core.config import ConfigurationError
 
 from ..control.config import settings
 from ..control.settings_base import build_now
-from ..database.checkpoints import open_checkpointer
+from ..database import open_checkpointer
 from ..domain_config import domain_config
 from ..ipc import (
     BoundedHttpBodyMiddleware,

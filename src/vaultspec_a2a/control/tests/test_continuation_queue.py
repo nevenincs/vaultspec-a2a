@@ -18,13 +18,13 @@ import pytest
 from sqlalchemy import select
 
 from ...database import (
+    ControlActionModel,
     count_queued_continuations,
     create_thread,
     get_thread,
     next_queue_position,
     read_next_queued_continuation,
 )
-from ...database.models import ControlActionModel
 from ...domain_config import domain_config
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config

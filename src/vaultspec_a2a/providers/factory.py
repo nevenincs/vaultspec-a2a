@@ -864,30 +864,6 @@ def _create_openai_compatible_model(
     return ChatOpenAI(**kwargs)
 
 
-def _bind_create_options(
-    args: tuple[object, ...], kwargs: dict[str, Any]
-) -> tuple[AgentConfig | None, Path | None, str | None]:
-    names = ("agent_config", "workspace_root", "backend")
-    if len(args) > len(names):
-        raise TypeError(
-            f"create() takes at most {len(names) + 2} positional arguments "
-            f"({len(args) + 2} given)"
-        )
-    bound: list[object | None] = []
-    for index, name in enumerate(names):
-        if index < len(args):
-            if name in kwargs:
-                raise TypeError(f"create() got multiple values for argument {name!r}")
-            bound.append(args[index])
-        else:
-            bound.append(kwargs.pop(name, None))
-    return (
-        cast("AgentConfig | None", bound[0]),
-        cast("Path | None", bound[1]),
-        cast("str | None", bound[2]),
-    )
-
-
 class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
 
@@ -993,7 +969,10 @@ class ProviderFactory:
         self,
         provider: Provider,
         model: str,
-        *args: object,
+        *,
+        agent_config: AgentConfig | None = None,
+        workspace_root: Path | None = None,
+        backend: str | None = None,
         **kwargs: Any,
     ) -> BaseChatModel:
         """Create a configured BaseChatModel for the given provider.
@@ -1008,12 +987,14 @@ class ProviderFactory:
                 an explicit value to select a backend without mutating global
                 settings (useful in tests and factory call sites that need
                 non-default behaviour).
-            kwargs: Additional overrides for the specific provider.
+            kwargs: ``execution_mode``, ``native_controls`` and ``timeout``
+                select the frozen lane, its native controls and the call
+                deadline; anything else is a client override for the
+                OpenAI-compatible providers.
 
         Returns:
             A LangChain BaseChatModel implementation.
         """
-        agent_config, workspace_root, backend = _bind_create_options(args, kwargs)
         timeout, backend, selected_controls = _admit_create_options(
             provider, backend, kwargs
         )

@@ -9,7 +9,7 @@ import json
 import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.constants import TAG_NOSTREAM
@@ -38,47 +38,22 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-__all__ = ["create_plan_approval_node", "create_supervisor_node"]
+__all__ = ["SupervisorOptions", "create_plan_approval_node", "create_supervisor_node"]
 
 
-class _SupervisorOptions(TypedDict, total=False):
-    worker_phase_map: dict[str, str] | None
-    autonomous: bool
-    workspace_root: Path | None
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SupervisorOptions:
+    """Routing policy and workspace scope of one supervisor node.
 
+    ``worker_phase_map`` maps worker_id -> pipeline phase for phase artifact
+    prerequisite gates; workers absent from the map are exempt from gating.
+    ``autonomous`` skips the plan approval interrupt (headless MCP-launched runs
+    -- no human present to approve). ``workspace_root`` scopes the ACP CWD.
+    """
 
-def _bind_supervisor_options(
-    args: tuple[object, ...], options: _SupervisorOptions
-) -> tuple[dict[str, str] | None, bool, Path | None]:
-    names = ("worker_phase_map", "autonomous", "workspace_root")
-    if len(args) > len(names):
-        raise TypeError(
-            f"create_supervisor_node() takes at most {len(names) + 3} "
-            f"positional arguments ({len(args) + 3} given)"
-        )
-    unknown = set(options).difference(names)
-    if unknown:
-        name = sorted(unknown)[0]
-        raise TypeError(
-            f"create_supervisor_node() got an unexpected keyword argument {name!r}"
-        )
-    bound: list[object] = []
-    defaults: tuple[object, ...] = (None, False, None)
-    for index, name in enumerate(names):
-        if index < len(args):
-            if name in options:
-                raise TypeError(
-                    f"create_supervisor_node() got multiple values for argument "
-                    f"{name!r}"
-                )
-            bound.append(args[index])
-        else:
-            bound.append(options.get(name, defaults[index]))
-    return (
-        cast("dict[str, str] | None", bound[0]),
-        cast("bool", bound[1]),
-        cast("Path | None", bound[2]),
-    )
+    worker_phase_map: dict[str, str] | None = None
+    autonomous: bool = False
+    workspace_root: Path | None = None
 
 
 def _active_agent_for_route(route: str) -> str:
@@ -801,28 +776,25 @@ def create_supervisor_node(
     model: BaseChatModel,
     system_prompt: str,
     workers: list[str],
-    *args: object,
-    **options: Unpack[_SupervisorOptions],
+    options: SupervisorOptions | None = None,
 ) -> SupervisorNode:
     """Create a LangGraph supervisor node for routing.
 
     Args:
-        model:            The LangChain chat model to use for this node.
-        system_prompt:    The system prompt defining the supervisor's behavior.
-        workers:          A list of available worker names to route to.
-        worker_phase_map: Optional mapping of worker_id -> pipeline phase for
-                          phase artifact prerequisite gates. Workers
-                          absent from the map are exempt from gating.
-        autonomous:       When True, skip plan approval interrupt (headless
-                          MCP-launched runs -- no human present to approve).
-        workspace_root:   Optional workspace root for ACP CWD scoping.
+        model:         The LangChain chat model to use for this node.
+        system_prompt: The system prompt defining the supervisor's behavior.
+        workers:       A list of available worker names to route to.
+        options:       Phase gating, autonomy and workspace scope; the
+                       defaults gate nothing, ask for plan approval, and
+                       scope no workspace.
 
     Returns:
         An async function that conforms to the LangGraph node signature.
     """
-    worker_phase_map, autonomous, workspace_root = _bind_supervisor_options(
-        args, options
-    )
+    resolved = options or SupervisorOptions()
+    worker_phase_map = resolved.worker_phase_map
+    autonomous = resolved.autonomous
+    workspace_root = resolved.workspace_root
     route_options = [*workers, "FINISH"]
 
     # Append routing instructions to ensure structured text output

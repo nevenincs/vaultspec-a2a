@@ -51,7 +51,11 @@ from .compiler import (
 from .nodes._config_contract import accepting_runnable_config
 from .nodes.action_completion import GRAPH_COMPLETION_NODE
 from .nodes.phase_gate import review_requests_revision, revision_granted
-from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
+from .nodes.supervisor import (
+    SupervisorOptions,
+    create_plan_approval_node,
+    create_supervisor_node,
+)
 from .nodes.vault_reader import create_mount_node
 
 __all__ = ["_compile_pipeline", "_compile_pipeline_loop", "_compile_star"]
@@ -180,9 +184,11 @@ def _compile_star(
             model=supervisor_model,
             system_prompt=supervisor_prompt,
             workers=worker_ids,
-            worker_phase_map=worker_phase_map or None,
-            autonomous=options.get("autonomous", False),
-            workspace_root=options.get("workspace_root"),
+            options=SupervisorOptions(
+                worker_phase_map=worker_phase_map or None,
+                autonomous=options.get("autonomous", False),
+                workspace_root=options.get("workspace_root"),
+            ),
         ),
         metadata=sv_meta,
         retry_policy=_NODE_RETRY_POLICY,

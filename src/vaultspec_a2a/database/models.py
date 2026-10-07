@@ -35,7 +35,6 @@ from ..thread.enums import (
     PermissionRequestStatus,
     RecoveryCondition,
     RepairStatus,
-    TaskQueueStatus,
     ThreadStatus,
 )
 from .control_action_schema import (
@@ -62,7 +61,6 @@ __all__ = [
     "RecoveryAttemptModel",
     "RunEventModel",
     "RunWriteAuthority",
-    "TaskQueueEntryModel",
     "ThreadDeletionSagaModel",
     "ThreadExecutionStateModel",
     "ThreadModel",
@@ -481,9 +479,6 @@ class ThreadModel(Base):
         lazy="raise",
     )
     cost_records: Mapped[list["CostTrackingModel"]] = relationship(
-        back_populates="thread", cascade="all, delete-orphan", lazy="raise"
-    )
-    task_queue_entries: Mapped[list["TaskQueueEntryModel"]] = relationship(
         back_populates="thread", cascade="all, delete-orphan", lazy="raise"
     )
 
@@ -964,57 +959,3 @@ class CostTrackingModel(Base):
         Index("ix_cost_tracking_thread_id", "thread_id"),
         Index("ix_cost_tracking_agent_id", "agent_id"),
     )
-
-
-class TaskQueueEntryModel(Base):
-    """A single worker task-queue row, owned by a thread.
-
-    Orchestration state that used to live in a ``.vault/plan`` markdown table.
-    ``position`` is the sole ordering authority; ``task_key`` is the stable
-    per-thread identity the mark-complete tool addresses.  ``plan_changeset_id``
-    and ``plan_step_key`` are references to the engine plan proposal (references,
-    never content).
-    """
-
-    __tablename__ = "task_queue_entries"
-
-    __table_args__ = (
-        Index("ix_task_queue_entries_thread_id", "thread_id"),
-        UniqueConstraint(
-            "thread_id",
-            "position",
-            name="uq_task_queue_entries_thread_id_position",
-        ),
-        UniqueConstraint(
-            "thread_id",
-            "task_key",
-            name="uq_task_queue_entries_thread_id_task_key",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(primary_key=True)
-    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"))
-    feature_tag: Mapped[str] = mapped_column()
-    position: Mapped[int] = mapped_column()
-    task_key: Mapped[str] = mapped_column()
-    description: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(default=TaskQueueStatus.PENDING)
-    plan_changeset_id: Mapped[str | None] = mapped_column(default=None)
-    plan_step_key: Mapped[str | None] = mapped_column(default=None)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), default=_utcnow, onupdate=_utcnow
-    )
-
-    thread: Mapped["ThreadModel"] = relationship(
-        back_populates="task_queue_entries", lazy="raise"
-    )
-
-    @override
-    def __repr__(self) -> str:
-        """Return developer-friendly representation."""
-        return (
-            f"TaskQueueEntryModel(thread_id={self.thread_id!r}, "
-            f"position={self.position!r}, task_key={self.task_key!r}, "
-            f"status={self.status!r})"
-        )

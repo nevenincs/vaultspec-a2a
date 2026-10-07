@@ -188,12 +188,6 @@ class DomainConfig(ProjectSettings):
             "Minimum remaining token budget required before mounting any document."
         ),
     )
-    task_queue_pending_horizon: int = Field(
-        default=2,
-        description=(
-            "Number of upcoming task-queue entries to include in the agent prompt."
-        ),
-    )
 
     # -- Run continuation ----------------------------------------------------
 

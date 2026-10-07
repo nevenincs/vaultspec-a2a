@@ -34,7 +34,6 @@ from ...thread.snapshots import stamp_message_created_at
 from ...thread.state import read_untrusted_state_value
 from ..enums import PipelinePhase
 from ..run_context import RunContext, run_thread_id
-from ..tools.task_queue import create_mark_task_complete_tool
 from ._config_contract import accepting_runnable_config
 from ._worker_permissions import (
     permission_callback_for,
@@ -50,7 +49,6 @@ if TYPE_CHECKING:
     # constructed models and never instantiates one.
     from langchain_core.language_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
-    from langchain_core.tools import BaseTool
     from langgraph.runtime import Runtime
     from langgraph.types import Command
 
@@ -58,7 +56,7 @@ if TYPE_CHECKING:
     from ...providers._acp_authoring import AuthoringToolBinding
     from ...thread.state import TeamState
     from ...worker.authoring_binding import AuthoringBindingProvider
-    from ..protocols import CostPort, RuntimeIdentityPort, TaskQueuePort
+    from ..protocols import CostPort, RuntimeIdentityPort
     from .vault_reader import ContextMounter
 
 _logger = logging.getLogger(__name__)
@@ -574,14 +572,9 @@ def _finalize_worker_response(
     *,
     response: BaseMessage,
     worker_name: str,
-    state_updates: dict[str, Any],
     **channels: Unpack[_WorkerReturnChannels],
 ) -> dict[str, Any]:
-    """Attach worker attribution and merge the queue tool's Command update.
-
-    ``state_updates`` carries the non-message keys (e.g. ``current_task_id``)
-    from any ``mark_task_complete`` Command dispatched this turn; they flow
-    through the reducer pipeline via this node return.
+    """Attach worker attribution and the turn's run-state channels.
 
     When the lane reported usage, this node also emits the per-agent delta on
     the ``token_usage`` channel, whose existing additive reducer accumulates it
@@ -602,7 +595,6 @@ def _finalize_worker_response(
         "approval_status": (
             ApprovalStatus.APPROVED.value if approval_granted else None
         ),
-        **state_updates,
     }
     if not approval_granted:
         # The linkage outlives the turn only for as long as the approval does.
@@ -637,20 +629,6 @@ def _attach_authoring_tools(
     from ...providers._acp_authoring import attach_authoring_tools
 
     return attach_authoring_tools(model, binding, autonomous=autonomous)
-
-
-def _queue_tool_for_state(
-    thread_id: str | None,
-    task_queue_port: TaskQueuePort | None,
-    feature_tag: str | None,
-) -> BaseTool | None:
-    if task_queue_port is None or feature_tag is None:
-        return None
-    return (
-        create_mark_task_complete_tool(task_queue_port, thread_id)
-        if thread_id
-        else None
-    )
 
 
 async def _feedback_for_state(
@@ -703,8 +681,6 @@ def _compose_worker_harness(
 class _WorkerNodeOptions(TypedDict, total=False):
     autonomous: bool
     workspace_root: Path | None
-    feature_tag: str | None
-    task_queue_port: TaskQueuePort | None
     authoring_binding_provider: AuthoringBindingProvider | None
     role: str | None
     phase: str | None
@@ -719,8 +695,6 @@ class _WorkerNodeOptions(TypedDict, total=False):
 class _WorkerNodeSettings(TypedDict):
     autonomous: bool
     workspace_root: Path | None
-    feature_tag: str | None
-    task_queue_port: TaskQueuePort | None
     authoring_binding_provider: AuthoringBindingProvider | None
     role: str | None
     phase: str | None
@@ -741,8 +715,6 @@ def _bind_worker_node_settings(
     bound: dict[str, object] = {
         "autonomous": False,
         "workspace_root": None,
-        "feature_tag": None,
-        "task_queue_port": None,
         "authoring_binding_provider": None,
         "role": None,
         "phase": None,
@@ -782,10 +754,6 @@ def create_worker_node(
         name:              The name of the worker, added to the generated message.
         autonomous:        When True, skip permission_callback wiring (headless).
         workspace_root:    Optional workspace root for RuleManager scoping.
-        feature_tag:       Optional feature tag gating task-queue wiring.
-        task_queue_port:   Optional database-backed queue port; when present the
-                           mark-task-complete tool is bound per invocation to the
-                           running thread.
         cost_port:         Optional database-backed token-accounting port; when
                            present, each turn that reports usage persists one
                            ``cost_tracking`` row for the running thread.
@@ -834,14 +802,6 @@ def create_worker_node(
         # finds its earlier approvals here rather than in the order its
         # interrupts happened to fall in.
         permission_answers = recorded_permission_answers(state)
-        # The task queue is thread-scoped, so build the mark-complete
-        # tool per invocation using the thread_id carried in graph state — the
-        # compiled graph is shared across threads and cannot close over it. The
-        # tool returns a Command (revised contract); its update is propagated
-        # through this node's return, not a side-channel drain.
-        queue_tool = _queue_tool_for_state(
-            thread_id, settings["task_queue_port"], settings["feature_tag"]
-        )
         feedback_grounding = await _feedback_for_state(
             state, thread_id, settings["feedback_reader"]
         )
@@ -939,10 +899,9 @@ def create_worker_node(
         attempt_config = _config_with_relay_watch(config, relay_watch)
         try:
             response = await effective_model.ainvoke(messages, config=attempt_config)
-            response, state_updates = await resolve_worker_tool_calls(
+            response = await resolve_worker_tool_calls(
                 messages=messages,
                 response=response,
-                queue_tool=queue_tool,
                 model=effective_model,
                 autonomous=settings["autonomous"],
                 config=attempt_config,
@@ -986,7 +945,6 @@ def create_worker_node(
         return _finalize_worker_response(
             response=response,
             worker_name=name,
-            state_updates=state_updates,
             approval_status=state.get("approval_status"),
             usage=usage,
             clear_validation_errors=_clears_validation_errors(state, settings["phase"]),

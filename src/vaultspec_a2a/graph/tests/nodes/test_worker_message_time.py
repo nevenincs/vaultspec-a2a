@@ -32,7 +32,6 @@ async def test_a_worker_turn_keeps_its_production_time_through_the_checkpoint() 
         return _finalize_worker_response(
             response=AIMessage(content="done"),
             worker_name="vaultspec-coder",
-            state_updates={},
         )
 
     builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Transcript))

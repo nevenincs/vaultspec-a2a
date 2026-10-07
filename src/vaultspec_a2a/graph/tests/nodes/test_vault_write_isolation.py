@@ -1,37 +1,22 @@
-"""Observed-negative proof: the queue path performs zero .vault writes.
+"""Observed-negative proof: the mount path performs zero .vault writes.
 
-Real file-backed aiosqlite, no mocks. A continuous filesystem watcher runs across
-the whole exercise while the database-backed queue is injected (mount node reads
-.vault docs) and advanced (mark-complete tool). The assertion is an observed
-negative — the watcher records every create/modify/delete under .vault for the
-duration and must observe none — not a no-write-path argument.
+No mocks. A continuous filesystem watcher runs across the whole exercise while
+the mount node refreshes the vault index and the context mounter reads .vault
+docs. The assertion is an observed negative — the watcher records every
+create/modify/delete under .vault for the duration and must observe none — not a
+no-write-path argument.
 """
 
 import threading
 import time
-from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
-import pytest_asyncio
-from langgraph.types import Command
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
-from ....conftest import materialize_schema
-from ....database import create_thread, seed_task_queue
-from ....tests._write_authority import make_test_write_authority
 from ....thread.state import TeamState, merge_vault_index
-from ....worker.task_queue_port import SqlTaskQueuePort
 from ...nodes.vault_reader import create_context_mounter, create_mount_node
-from ...tools.task_queue import create_mark_task_complete_tool
 
-_FEATURE = "queue-isolation"
+_FEATURE = "mount-isolation"
 
 
 class _VaultWriteWatcher:
@@ -91,24 +76,6 @@ class _VaultWriteWatcher:
         self._diff(self._snapshot())
 
 
-@pytest_asyncio.fixture
-async def file_engine(tmp_path: Path) -> AsyncGenerator[AsyncEngine]:
-    """File-backed async engine (shared across the port's separate sessions)."""
-    db_file = tmp_path / "service.db"
-    materialize_schema(Path(db_file.as_posix()))
-    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file.as_posix()}")
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    file_engine: AsyncEngine,
-) -> async_sessionmaker[AsyncSession]:
-    """Session factory bound to the file-backed engine."""
-    return async_sessionmaker(file_engine, class_=AsyncSession, expire_on_commit=False)
-
-
 def _make_workspace(tmp_path: Path) -> Path:
     """Create a workspace with a real .vault/adr document to mount and read."""
     workspace = tmp_path / "ws"
@@ -117,15 +84,13 @@ def _make_workspace(tmp_path: Path) -> Path:
     (adr_dir / f"{_FEATURE}-adr.md").write_text(
         "# ADR\n\nBinding decision text.", encoding="utf-8"
     )
-    # A plan directory exists but carries NO queue markdown — the queue is in the DB.
-    (workspace / ".vault" / "plan").mkdir(parents=True)
     return workspace
 
 
-def _exec_state(thread_id: str, current_task_id: str | None) -> TeamState:
+def _exec_state() -> TeamState:
     return {
         "messages": [],
-        "thread_id": thread_id,
+        "thread_id": "isolation",
         "active_agent": "coder",
         "artifacts": [],
         "current_plan": [],
@@ -133,38 +98,15 @@ def _exec_state(thread_id: str, current_task_id: str | None) -> TeamState:
         "active_feature": _FEATURE,
         "pipeline_phase": "exec",
         "vault_index": {"adr": [f".vault/adr/{_FEATURE}-adr.md"]},
-        "current_task_id": current_task_id,
     }
 
 
 @pytest.mark.asyncio
-async def test_db_queue_functions_with_zero_vault_writes(
-    tmp_path: Path,
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
+async def test_mount_path_performs_zero_vault_writes(tmp_path: Path) -> None:
     workspace = _make_workspace(tmp_path)
     vault_dir = workspace / ".vault"
-
-    async with session_factory() as session:
-        thread = await create_thread(
-            session, write_authority=make_test_write_authority(), title="isolation"
-        )
-        await seed_task_queue(
-            session,
-            thread_id=thread.id,
-            feature_tag=_FEATURE,
-            entries=[
-                {"task_key": "Q-1", "description": "First", "status": "in_progress"},
-                {"task_key": "Q-2", "description": "Second", "status": "pending"},
-                {"task_key": "Q-3", "description": "Third", "status": "pending"},
-            ],
-        )
-        await session.commit()
-        thread_id = thread.id
-
-    port = SqlTaskQueuePort(session_factory)
     refresh_index = create_mount_node(workspace)
-    mounter = create_context_mounter(workspace, port)
+    mounter = create_context_mounter(workspace)
 
     async def mount(state: TeamState) -> str | None:
         update = await refresh_index(state)
@@ -176,44 +118,17 @@ async def test_db_queue_functions_with_zero_vault_writes(
         }
         return await mounter(merged)
 
-    tool = create_mark_task_complete_tool(port, thread_id)
-
     watcher = _VaultWriteWatcher(vault_dir)
     watcher.start()
     try:
-        # 1. Mount reads the .vault ADR and injects the DB-sourced queue view.
-        context = await mount(_exec_state(thread_id, "Q-1"))
+        # 1. The mount refreshes the index and reads the .vault ADR.
+        context = await mount(_exec_state())
         assert context is not None
         assert "Binding decision text." in context  # .vault read succeeded
-        assert "## Task Queue -- queue-isolation" in context  # queue came from the DB
-        assert "| Q-1 | in_progress | First |" in context
-        assert "| Q-2 | pending | Second |" in context
 
-        # 2. The worker loop advances the queue via the mark-complete tool; the
-        #    Command update carries the next task pointer (revised contract).
-        command = await tool.ainvoke(
-            {
-                "name": "mark_task_complete",
-                "args": {"task_id": "Q-1"},
-                "id": "call_q1",
-                "type": "tool_call",
-            }
-        )
-        assert isinstance(command, Command)
-        raw_update = command.update
-        assert isinstance(raw_update, dict)
-        update = cast("dict[str, Any]", raw_update)
-        assert update["current_task_id"] == "Q-2"
-        assert update["messages"][0].content == (
-            "Task Q-1 marked complete. Next task: Q-2."
-        )
-
-        # 3. Re-mounting reflects the advanced cursor, still DB-sourced.
-        remounted_context = await mount(_exec_state(thread_id, "Q-2"))
-        assert remounted_context is not None
-        assert "| Q-2 | in_progress | Second |" not in remounted_context
-        assert "| Q-2 | pending | Second |" in remounted_context
-        assert "Q-1" not in remounted_context  # completed row no longer shown
+        # 2. A second pass is served through the mounter's content cache.
+        remounted_context = await mount(_exec_state())
+        assert remounted_context == context
 
         # Give the watcher time to observe any stray write before stopping.
         time.sleep(0.05)
@@ -221,6 +136,6 @@ async def test_db_queue_functions_with_zero_vault_writes(
         watcher.stop()
 
     assert watcher.events == [], (
-        f"Expected zero .vault writes during the DB-queue exercise, "
+        f"Expected zero .vault writes during the mount exercise, "
         f"observed: {watcher.events}"
     )

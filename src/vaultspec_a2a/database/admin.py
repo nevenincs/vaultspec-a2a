@@ -284,9 +284,9 @@ def _action_restore(name: str, yes: bool) -> None:
 # parent first would be refused wherever foreign keys are enforced.
 #
 # A previous list covered four of these nine and no checkpoint state, so a
-# "clear" left control actions, permission requests, queued tasks, execution
-# state, the authoring cursor, and every conversation checkpoint in place - and
-# reported success. An incomplete truncation that announces completion is worse
+# "clear" left control actions, permission requests, execution state, the
+# authoring cursor, and every conversation checkpoint in place - and reported
+# success. An incomplete truncation that announces completion is worse
 # than none, because the operator stops looking.
 _CLEAR_ORDER: tuple[str, ...] = (
     "recovery_attempts",
@@ -297,7 +297,6 @@ _CLEAR_ORDER: tuple[str, ...] = (
     "control_actions",
     "cost_tracking",
     "provider_runtime_identities",
-    "task_queue_entries",
     "thread_execution_state",
     "thread_deletion_saga",
     "authoring_event_cursor",

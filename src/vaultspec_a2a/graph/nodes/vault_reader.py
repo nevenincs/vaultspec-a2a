@@ -18,22 +18,17 @@ from __future__ import annotations
 
 import asyncio
 import glob as _glob
-import logging
 from typing import TYPE_CHECKING, Any, Protocol
 
 from langchain_core.messages.utils import count_tokens_approximately
 
 from ...context.stage import VAULT_STAGE_PATTERNS
 from ...domain_config import domain_config
-from ...graph.enums import PipelinePhase
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from ...thread.state import TeamState
-    from ..protocols import TaskQueuePort
-
-from ..tools.task_queue import render_queue_view
 
 __all__ = [
     "ContextMounter",
@@ -66,11 +61,8 @@ class ContextMounter(Protocol):
         ...
 
 
-_logger = logging.getLogger(__name__)
-
 _DOC_SEPARATOR = "--- MOUNTED: {path} ---"
 _DOC_FOOTER = "--- END ---"
-_QUEUE_PHASES = frozenset({PipelinePhase.PLAN, PipelinePhase.EXEC})
 
 
 def build_initial_vault_index(
@@ -125,37 +117,6 @@ def _select_paths(
     return adr_paths + phase_paths
 
 
-async def _render_queue_block(
-    state: TeamState, task_queue_port: TaskQueuePort | None
-) -> str | None:
-    """Render the database-backed queue view as a mounted block, if any."""
-    if task_queue_port is None:
-        return None
-    feature = state.get("active_feature")
-    phase: str | None = state.get("pipeline_phase")
-    thread_id = state.get("thread_id")
-    if not feature or phase not in _QUEUE_PHASES or not thread_id:
-        return None
-    try:
-        entries = await task_queue_port.get_queue_view(
-            thread_id,
-            state.get("current_task_id"),
-            domain_config.task_queue_pending_horizon,
-        )
-    except Exception:
-        # Best-effort context assembly: a queue read failure degrades to
-        # no queue block rather than failing the worker turn.
-        _logger.warning(
-            "task-queue injection failed for thread %s", thread_id, exc_info=True
-        )
-        return None
-    queue_text = render_queue_view(feature, entries)
-    if not queue_text:
-        return None
-    header = _DOC_SEPARATOR.format(path="task-queue")
-    return f"{header}\n{queue_text}\n{_DOC_FOOTER}"
-
-
 async def _read_vault_doc(path: Path, cache: dict[str, tuple[float, str]]) -> str:
     """Read a .vault/ document asynchronously with an mtime-validated cache."""
 
@@ -176,7 +137,7 @@ async def _mount_document_blocks(
     phase: str | None,
     workspace_root: Path,
     cache: dict[str, tuple[float, str]],
-) -> tuple[list[str], int]:
+) -> list[str]:
     """Read selected documents within the mount token budget."""
     blocks: list[str] = []
     tokens_used = 0
@@ -202,7 +163,7 @@ async def _mount_document_blocks(
             break
         else:
             break
-    return blocks, tokens_used
+    return blocks
 
 
 async def refresh_vault_index(
@@ -244,16 +205,11 @@ def create_mount_node(workspace_root: Path | None) -> MountNode:
     return mount_node
 
 
-def create_context_mounter(
-    workspace_root: Path | None,
-    task_queue_port: TaskQueuePort | None = None,
-) -> ContextMounter:
+def create_context_mounter(workspace_root: Path | None) -> ContextMounter:
     """Factory: expands phase-scoped vault documents for one worker invocation.
 
     The content cache is scoped to this factory call -- one cache per compiled
-    worker, not shared across threads or sessions. When a ``task_queue_port``
-    is injected, the database-backed queue view is appended as a mounted block
-    during the plan and exec phases.
+    worker, not shared across threads or sessions.
     """
     # One entry per path holding (mtime, content): a re-edited file replaces
     # its entry instead of accreting stale mtime-keyed copies, so the cache is
@@ -265,19 +221,12 @@ def create_context_mounter(
         if workspace_root is None or not state.get("active_feature"):
             return None
 
-        blocks, tokens_used = await _mount_document_blocks(
+        blocks = await _mount_document_blocks(
             state.get("vault_index") or {},
             state.get("pipeline_phase"),
             workspace_root,
             cache,
         )
-
-        queue_block = await _render_queue_block(state, task_queue_port)
-        if queue_block is not None:
-            queue_tokens = count_tokens_approximately(queue_block)
-            if queue_tokens <= domain_config.mount_token_ceiling - tokens_used:
-                blocks.append(queue_block)
-
         return "\n\n".join(blocks) if blocks else None
 
     return mount_context

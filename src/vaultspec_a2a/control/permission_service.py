@@ -10,7 +10,6 @@ rejection and audit records.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from ..database import (
@@ -116,6 +115,10 @@ async def _journal_rejection(
     re-deciding it. The commit is part of the sequence - the action must be
     durable before the rejection is reported, or a replay arriving after the
     reply would find no record of the original decision.
+
+    The row carries no recovery deadline. It is settled the moment it is
+    written, so nothing will ever dispatch it, and the ``now + 5 min`` it used
+    to invent was a figure no acceptance stood behind.
     """
     request_id = rejected.request_id
     thread_id = rejected.thread_id
@@ -132,7 +135,6 @@ async def _journal_rejection(
         idempotency_key=permission_rejection_action_key(idempotency_key),
         payload=_rejected_payload(option_id, error_detail),
         result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
-        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
     )
     await db.commit()
     return ControlActionOutcome(
@@ -472,7 +474,6 @@ async def _refuse_unparked_permission(
             idempotency_key=permission_duplicate_action_key(resolved_idempotency_key),
             payload={"option_id": option_id},
             result_status=ControlActionResultStatus.DUPLICATE,
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         await db.commit()
         return ControlActionOutcome(

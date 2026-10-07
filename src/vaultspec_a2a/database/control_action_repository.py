@@ -37,6 +37,7 @@ from ..thread.enums import (
 )
 from ._helpers import _coerce, _journal_row_for, affected_rows, save_model
 from ._leases import CONTROL_ACTION_LEASE, clear_lease, require_lease_window
+from .control_action_schema import DISPATCHABLE_RESULT_STATUSES
 from .models import ControlActionModel, ThreadModel, utcnow
 from .thread_repository import thread_owned_by
 
@@ -144,10 +145,25 @@ async def create_control_action(
     )
     dispatch_id = kwargs.get("dispatch_id")
     recovery_deadline_at = kwargs.get("recovery_deadline_at")
-    requires_deadline = resolved_type in RECOVERY_ACTION_TYPES
+    resolved_status = _coerce(
+        ControlActionResultStatus,
+        result_status,
+        label="control action result status",
+    )
+    # A deadline belongs to a row a dispatcher may still deliver, not to an
+    # action type. A row written already settled - a refusal, a duplicate - will
+    # never be dispatched, so requiring one of it obliged the writer to invent a
+    # figure, and recovery cannot tell an invented deadline from a real one.
+    requires_deadline = (
+        resolved_type in RECOVERY_ACTION_TYPES
+        and resolved_status in DISPATCHABLE_RESULT_STATUSES
+    )
     if requires_deadline != (recovery_deadline_at is not None):
         requirement = "requires" if requires_deadline else "cannot carry"
-        raise ValueError(f"{resolved_type.value} {requirement} a recovery deadline")
+        raise ValueError(
+            f"{resolved_type.value} journaled as {resolved_status.value} "
+            f"{requirement} a recovery deadline"
+        )
     model = ControlActionModel(
         id=uuid4().hex,
         thread_id=thread_id,
@@ -155,11 +171,7 @@ async def create_control_action(
         request_id=request_id,
         idempotency_key=kwargs["idempotency_key"],
         payload_json=_encode_payload(payload),
-        result_status=_coerce(
-            ControlActionResultStatus,
-            result_status,
-            label="control action result status",
-        ).value,
+        result_status=resolved_status.value,
         dispatch_id=dispatch_id or uuid4().hex,
         recovery_deadline_at=recovery_deadline_at,
     )
@@ -478,11 +490,14 @@ async def get_unapplied_control_actions(
 def select_recoverable_actions(
     *window: ColumnElement[bool],
 ) -> Select[tuple[ControlActionModel]]:
-    """Select the unapplied recoverable actions that an active run still writes.
+    """Select the dispatchable recoverable actions that an active run still writes.
 
     Only an action its active run still names as the writer qualifies, since an
-    action another writer has superseded has nothing left to settle. *window*
-    bounds the recovery deadline; ordering and paging are the caller's.
+    action another writer has superseded has nothing left to settle. Only a
+    DISPATCHABLE outcome qualifies either: a settled row keeps the deadline it
+    was accepted with, and selecting one would redeliver work the journal has
+    already closed. *window* bounds the recovery deadline; ordering and paging
+    are the caller's.
     """
     return (
         select(ControlActionModel)
@@ -490,6 +505,9 @@ def select_recoverable_actions(
         .where(
             ControlActionModel.action_type.in_(
                 action.value for action in RECOVERY_ACTION_TYPES
+            ),
+            ControlActionModel.result_status.in_(
+                status.value for status in DISPATCHABLE_RESULT_STATUSES
             ),
             ControlActionModel.applied_at.is_(None),
             ControlActionModel.recovery_deadline_at.is_not(None),

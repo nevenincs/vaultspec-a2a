@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import httpx
@@ -28,6 +29,8 @@ from ...database import (
     create_thread,
     get_control_action_by_idempotency_key,
     get_permission_request,
+    mark_permission_request_applied,
+    overdue_recovery_actions,
     record_permission_request,
     supersede_permission_requests,
 )
@@ -134,10 +137,19 @@ async def _assert_journalled(
     """The rejection row must be readable from a session that never wrote it."""
     async with session_factory() as reader:
         stored = await reader.get(ControlActionModel, action_id)
+        overdue = await overdue_recovery_actions(
+            reader, observed_at=datetime.now(UTC) + timedelta(days=1), limit=10
+        )
     assert stored is not None, "the rejection was reported but never committed"
     assert (
         stored.result_status == ControlActionResultStatus.REJECTED_INVALID_STATE.value
     )
+    # A refusal is settled the moment it is written: nothing will ever dispatch
+    # it, so it carries no recovery deadline and recovery never selects it. The
+    # invented ``now + 5 min`` made every refusal look like accepted work whose
+    # delivery was owed, and the deadline it claimed was fiction.
+    assert stored.recovery_deadline_at is None
+    assert action_id not in {action.id for action in overdue}
     assert isinstance(stored.payload_json, str), (
         "the rejection reason must be persisted on the action"
     )
@@ -231,6 +243,49 @@ async def test_a_request_the_run_is_not_parked_on_is_journalled_and_committed(
         expected_option_id="allow_once",
         expected_error_detail="Permission request is no longer pending",
     )
+
+
+@pytest.mark.asyncio
+async def test_an_answer_to_an_applied_request_journals_an_undispatchable_duplicate(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """The duplicate a settled request's replay records is settled when written.
+
+    The run has moved past the request and its answer is already applied, so the
+    replay is reported as the duplicate it is. Nothing will dispatch that row, so
+    it carries no recovery deadline and recovery never selects it.
+    """
+    thread_id = await _seed_thread(session_factory)
+    request_id = f"{thread_id}:perm-applied"
+    await _journal_request(session_factory, thread_id=thread_id, request_id=request_id)
+    async with session_factory() as session:
+        await mark_permission_request_applied(session, request_id=request_id)
+        await session.commit()
+
+    async with session_factory() as session:
+        result = await _respond(
+            session,
+            checkpointer,
+            thread_id=thread_id,
+            request_id=request_id,
+            option_id="allow_once",
+        )
+
+    assert result.accepted is True
+    assert result.applied is True
+    assert result.action_status == ControlActionResultStatus.DUPLICATE.value
+    assert result.action_id is not None
+
+    async with session_factory() as reader:
+        stored = await reader.get(ControlActionModel, result.action_id)
+        overdue = await overdue_recovery_actions(
+            reader, observed_at=datetime.now(UTC) + timedelta(days=1), limit=10
+        )
+    assert stored is not None, "the duplicate was reported but never committed"
+    assert stored.result_status == ControlActionResultStatus.DUPLICATE.value
+    assert stored.recovery_deadline_at is None
+    assert result.action_id not in {action.id for action in overdue}
 
 
 @pytest.mark.asyncio

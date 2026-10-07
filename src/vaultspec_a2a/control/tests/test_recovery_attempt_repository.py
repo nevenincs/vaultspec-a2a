@@ -18,7 +18,11 @@ from ...database import (
 )
 from ...thread import RunWriteAuthority
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import ControlActionType, RecoveryCondition
+from ...thread.enums import (
+    ControlActionResultStatus,
+    ControlActionType,
+    RecoveryCondition,
+)
 from ..action_lease import (
     ControlActionClaim,
     DispatchFailureDisposition,
@@ -64,7 +68,10 @@ async def test_recoverable_action_deadline_is_a_storage_invariant(
 ) -> None:
     deadline = datetime(2026, 9, 7, 1, tzinfo=UTC)
     async with session_factory() as db:
-        with pytest.raises(ValueError, match="ingest requires a recovery deadline"):
+        with pytest.raises(
+            ValueError,
+            match="ingest journaled as accepted_not_applied requires a recovery",
+        ):
             await create_control_action(
                 db,
                 thread_id="missing",
@@ -73,13 +80,30 @@ async def test_recoverable_action_deadline_is_a_storage_invariant(
             )
         with pytest.raises(
             ValueError,
-            match="permission_request_created cannot carry a recovery deadline",
+            match="permission_request_created journaled as accepted_not_applied "
+            "cannot carry a recovery deadline",
         ):
             await create_control_action(
                 db,
                 thread_id="unexpected",
                 action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
                 idempotency_key="unexpected-deadline",
+                recovery_deadline_at=deadline,
+            )
+        # A deadline belongs to a row a dispatcher may still deliver. A row of a
+        # recovery type written already settled will never be dispatched, so it
+        # neither needs nor may invent one.
+        with pytest.raises(
+            ValueError,
+            match="resume journaled as rejected_invalid_state cannot carry a "
+            "recovery deadline",
+        ):
+            await create_control_action(
+                db,
+                thread_id="settled",
+                action_type=ControlActionType.RESUME,
+                idempotency_key="settled-deadline",
+                result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
                 recovery_deadline_at=deadline,
             )
 

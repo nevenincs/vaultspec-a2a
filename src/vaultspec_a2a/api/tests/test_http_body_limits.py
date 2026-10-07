@@ -52,7 +52,7 @@ def _body(path: str, size: int) -> bytes:
     elif path == "/internal/heartbeat":
         payload = {"type": "heartbeat", "active_threads": ["t"]}
     else:
-        payload = {"action": "cancel", "thread_id": "t", "recursion_limit": 25}
+        payload = {"action": "cancel", "thread_id": "t"}
     encoded = json.dumps(payload).encode()
     assert len(encoded) <= size
     return encoded + b" " * (size - len(encoded))

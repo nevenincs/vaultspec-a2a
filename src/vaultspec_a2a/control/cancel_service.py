@@ -44,7 +44,7 @@ from ..thread.enums import (
 )
 from ..thread.idempotency import default_cancel_key
 from ..thread.repair_policy import RepairPhase, repair_state_for_action
-from .leased_dispatch import accepted_recursion_budget, dispatch_leased
+from .leased_dispatch import dispatch_leased
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -288,7 +288,6 @@ async def _claim_cancel(
     dispatch = DispatchRequest(
         action=to_dispatch_action(ControlActionType.CANCEL),
         thread_id=thread_id,
-        recursion_limit=accepted_recursion_budget(None),
     )
     claim = await prepare_control_action_claim(
         db,

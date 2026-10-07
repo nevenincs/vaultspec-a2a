@@ -37,7 +37,7 @@ async def test_cancel_dispatch_bypasses_open_circuit() -> None:
     ) as client:
         outcome = await safe_dispatch(
             client,
-            DispatchRequest(action="cancel", thread_id="run", recursion_limit=1),
+            DispatchRequest(action="cancel", thread_id="run"),
             circuit,
             spawner,
         )

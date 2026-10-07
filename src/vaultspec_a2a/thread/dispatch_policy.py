@@ -1,9 +1,4 @@
-"""Pure dispatch-failure classification — no I/O, no database.
-
-Consolidates the inconsistent failure policies previously scattered
-across thread_service, message_service, cancel_service, and
-permission_service into a single authoritative lookup.
-"""
+"""Pure dispatch-failure vocabulary and policy — no I/O, no database."""
 
 from __future__ import annotations
 
@@ -12,7 +7,6 @@ from enum import StrEnum
 
 __all__ = [
     "FailureType",
-    "classify_dispatch_failure",
     "evaluate_dispatch_failure",
 ]
 
@@ -64,7 +58,7 @@ class FailureAction:
     """Whether the thread should transition to FAILED status."""
 
 
-_POLICY: dict[str, FailureAction] = {
+_POLICY: dict[FailureType, FailureAction] = {
     # An open circuit, a saturated worker and an unreachable one are all
     # conditions that pass. The accepted work stays alive for the retry the
     # recovery coordinator already scheduled, so none of them may move the run
@@ -82,41 +76,31 @@ _POLICY: dict[str, FailureAction] = {
 
 _DEFAULT = FailureAction(should_mark_failed=True)
 
-
-def classify_dispatch_failure(failure_type: str | None) -> FailureAction:
-    """Return the canonical failure action for a dispatch outcome.
-
-    Args:
-        failure_type: The ``DispatchOutcome.failure_type`` string, or None
-            on success.
-
-    Returns:
-        A frozen descriptor the caller uses to decide status transitions
-        and error responses.
-    """
-    if failure_type is None:
-        return FailureAction(should_mark_failed=False)
-    return _POLICY.get(failure_type, _DEFAULT)
+_NO_FAILURE = FailureAction(should_mark_failed=False)
 
 
 def evaluate_dispatch_failure(
     failure_type: str | None,
 ) -> tuple[FailureAction, FailureType | None]:
-    """Classify a dispatch failure and resolve its typed form together.
+    """Classify a dispatch outcome and resolve its typed failure together.
 
-    Every dispatch caller (run creation, message follow-up, permission resume,
-    cancel) pairs the failure-action classification with the same typed-failure
-    resolution. Returning both from one call keeps those callers from deriving
-    the pair differently.
+    The leased delivery sequence is the one consumer: it reports the typed
+    failure and acts on the policy, and getting both from one call keeps it
+    from deriving the pair differently.
 
     Args:
-        failure_type: The ``DispatchOutcome.failure_type`` string, or None.
+        failure_type: The ``DispatchOutcome.failure_type`` string, or None on
+            success.
 
     Returns:
-        The canonical :class:`FailureAction` and the :class:`FailureType` the
-        string maps to (``None`` when there is no failure type).
+        The :class:`FailureAction` the failure calls for and the
+        :class:`FailureType` the string maps to (``None`` when there is no
+        failure type).
+
+    Raises:
+        ValueError: If *failure_type* names no :class:`FailureType`.
     """
-    return (
-        classify_dispatch_failure(failure_type),
-        FailureType(failure_type) if failure_type else None,
-    )
+    if not failure_type:
+        return _NO_FAILURE, None
+    typed = FailureType(failure_type)
+    return _POLICY.get(typed, _DEFAULT), typed

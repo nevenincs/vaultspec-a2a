@@ -107,17 +107,13 @@ class _FollowonFields(TypedDict, total=False):
     content: str
 
 
-def accepted_recursion_budget(definition: FrozenGraphDefinition | None) -> int:
+def accepted_recursion_budget(definition: FrozenGraphDefinition) -> int:
     """The recursion budget one accepted dispatch carries.
 
     The operator ceiling bounds every graph invocation, and the budget the
-    accepted preset declares can only lower it. A cancel enters no graph and
-    carries no definition, so it carries the ceiling alone.
+    accepted preset declares can only lower it.
     """
-    ceiling = domain_config.graph_recursion_limit
-    if definition is None:
-        return ceiling
-    return min(ceiling, definition.recursion_limit)
+    return min(domain_config.graph_recursion_limit, definition.recursion_limit)
 
 
 async def build_followon_dispatch(

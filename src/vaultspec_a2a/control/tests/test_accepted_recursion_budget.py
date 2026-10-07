@@ -47,7 +47,3 @@ def test_a_preset_budget_above_the_ceiling_is_held_to_the_ceiling(
 
     assert definition.recursion_limit == _LARGEST_PRESET_BUDGET
     assert accepted_recursion_budget(definition) == domain_config.graph_recursion_limit
-
-
-def test_a_cancel_enters_no_graph_and_carries_the_ceiling_alone() -> None:
-    assert accepted_recursion_budget(None) == domain_config.graph_recursion_limit

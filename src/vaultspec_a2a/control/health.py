@@ -28,7 +28,6 @@ import asyncio
 import logging
 import shutil
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -61,12 +60,11 @@ if TYPE_CHECKING:
         RunAdmission,
         WorkerLifecycleState,
     )
-    from .circuit_breaker import WorkerCircuitBreaker
+    from .leased_dispatch import DispatchTransport
 
 __all__ = [
     "SERVICE_HEALTH_DEADLINE_SECONDS",
     "SERVICE_WORKER_PROBE_TIMEOUT_SECONDS",
-    "FullHealthRuntime",
     "assemble_desktop_readiness",
     "assemble_health_status",
     "build_full_health",
@@ -810,17 +808,10 @@ async def _worker_health_check(
     return worker_check, pairing
 
 
-@dataclass(frozen=True, slots=True)
-class FullHealthRuntime:
-    worker_client: httpx.AsyncClient
-    circuit_breaker: WorkerCircuitBreaker
-    worker_spawner: LazyWorkerSpawner
-
-
 async def build_full_health(
     *,
     db: AsyncSession,
-    runtime: FullHealthRuntime,
+    transport: DispatchTransport,
     app_state: object,
     include_pairing: bool = False,
 ) -> dict[str, object]:
@@ -847,7 +838,9 @@ async def build_full_health(
         database_task = tasks.create_task(_database_health_check(db, app_state))
         checkpoint_task = tasks.create_task(_checkpoint_health_check(app_state))
         worker_task = tasks.create_task(
-            _worker_health_check(runtime.worker_client, include_pairing=include_pairing)
+            _worker_health_check(
+                transport.worker_client, include_pairing=include_pairing
+            )
         )
 
     probe_elapsed_ms = round((time.monotonic() - probe_started) * 1000)
@@ -860,9 +853,9 @@ async def build_full_health(
     checks["worker"], pairing = worker_task.result()
 
     # --- Circuit breaker & spawner ---
-    checks["circuit_breaker"] = {"status": runtime.circuit_breaker.state}
+    checks["circuit_breaker"] = {"status": transport.circuit_breaker.state}
     checks["worker_spawned"] = {
-        "status": "yes" if runtime.worker_spawner.spawned else "no"
+        "status": "yes" if transport.worker_spawner.spawned else "no"
     }
     recovery_owner_error = shared["recovery_owner_error"]
     checks["recovery_owner"] = (

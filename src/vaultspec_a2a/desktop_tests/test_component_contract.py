@@ -53,10 +53,6 @@ _PRODUCTION_PRESET_INVENTORY: Final = frozenset(
         "vaultspec_a2a/team/presets/agents/vaultspec-supervisor.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-synthesist.toml",
         "vaultspec_a2a/team/presets/teams/vaultspec-adr-research.toml",
-        # Served: discover_team_preset_ids() offers it, so presets-list does too.
-        # Referenced by id at runtime rather than by import, which is why a
-        # source grep alone reads it as a test fixture.
-        "vaultspec_a2a/team/presets/teams/vaultspec-adr-research-clarify.toml",
         "vaultspec_a2a/team/presets/teams/vaultspec-doc-editor.toml",
         "vaultspec_a2a/team/presets/teams/vaultspec-solo-coder.toml",
     }

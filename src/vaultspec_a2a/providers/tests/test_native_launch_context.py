@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...desktop.tests.test_native_isolation import _authority, _install_runtime
-from ...testing import settings_override
+from ...testing import armed_desktop_app_home
 from ...utils import ProcessContainmentError
 from .._acp_mcp import resolve_harness_mcp_servers
 from .._acp_rpc_terminal_handlers import (
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 def test_explicit_authority_cannot_bypass_armed_refusal(tmp_path: Path) -> None:
     authority = _authority(tmp_path)
-    with settings_override(desktop_app_home=authority.app_home.path):
+    with armed_desktop_app_home(authority.app_home.path):
         with pytest.raises(ProcessContainmentError, match="OS isolation backend"):
             provider_execution_launch(
                 [sys.executable],
@@ -231,7 +231,7 @@ async def test_mcp_cached_surface_cannot_bypass_profile_refusal(tmp_path: Path) 
         args=args,
         declared=tools,
     )
-    with settings_override(desktop_app_home=authority.app_home.path):
+    with armed_desktop_app_home(authority.app_home.path):
         for context in (None, authority):
             with pytest.raises(ProcessContainmentError, match="OS isolation backend"):
                 await verify_declared_tool_contract(

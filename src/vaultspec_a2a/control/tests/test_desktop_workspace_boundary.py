@@ -19,7 +19,7 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import DEFAULT_TEAM_PRESET, settings_override
+from ...testing import DEFAULT_TEAM_PRESET, armed_desktop_app_home
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
@@ -64,7 +64,7 @@ def test_desktop_refuses_state_outside_projects_and_ancestors(
     project.mkdir(parents=True)
     forbidden = home / target
     forbidden.mkdir(parents=True, exist_ok=True)
-    with settings_override(desktop_app_home=home, workspace_root=None):
+    with armed_desktop_app_home(home, workspace_root=None):
         with pytest.raises(ValueError, match="configured workspace root"):
             require_admitted_workspace_root(forbidden)
         with pytest.raises(ValueError, match="configured workspace root"):
@@ -91,7 +91,7 @@ def test_desktop_refuses_candidate_and_boundary_symlink_redirects(
     state.mkdir()
     escape = managed / "escape"
     escape.symlink_to(state, target_is_directory=True)
-    with settings_override(desktop_app_home=home):
+    with armed_desktop_app_home(home):
         with pytest.raises(ValueError, match="configured workspace root"):
             require_admitted_workspace_root(escape)
         assert (
@@ -117,7 +117,7 @@ def test_desktop_normalizes_project_aliases_before_enforcing_authority(
     if os.name == "nt":
         aliases.extend([str(project).upper(), "\\\\?\\" + str(project)])
         forbidden_aliases.append("\\\\?\\" + str(home))
-    with settings_override(desktop_app_home=home):
+    with armed_desktop_app_home(home):
         for alias in aliases:
             admitted = require_admitted_workspace_root(alias)
             assert admitted.samefile(project)
@@ -138,7 +138,7 @@ def test_frozen_dispatch_rechecks_desktop_authority_and_cancel_remains_available
         load_team_config(DEFAULT_TEAM_PRESET, workspace_root=project),
         workspace_root=project,
     )
-    with settings_override(desktop_app_home=home):
+    with armed_desktop_app_home(home):
         for root in (home, project):
             request = DispatchRequest(
                 action="resume",
@@ -188,7 +188,7 @@ async def test_saved_project_aliases_remain_valid_for_restart_reconciliation(
         load_team_config(DEFAULT_TEAM_PRESET, workspace_root=project),
         workspace_root=project,
     )
-    with settings_override(desktop_app_home=home):
+    with armed_desktop_app_home(home):
         async with session_factory() as db:
             for index, alias in enumerate(aliases):
                 run_id = f"saved-alias-{index}"

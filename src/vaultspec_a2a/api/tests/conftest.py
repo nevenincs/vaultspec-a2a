@@ -22,7 +22,7 @@ from httpx import ASGITransport
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...control._worker_health import _internal_auth_headers
+from ...control._worker_health import internal_auth_headers
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.event_handlers import CheckpointPruneRegistry
@@ -32,7 +32,7 @@ from ...streaming import RelayHub
 from ...testing import LaneInventoryFactory, adopted_spawner
 from ...tests._write_authority import make_test_write_authority
 from ...worker._dispatch_contract import CAPACITY_FULL
-from ...worker.app import _capacity_refusal, _verify_dispatch_token
+from ...worker.app import capacity_refusal, verify_dispatch_token
 from ..app import create_app
 from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ..internal import internal_router
@@ -121,7 +121,7 @@ class _InProcessWorker:
             self.dispatch_received.set()
             await self.release_dispatch.wait()
             if self._at_capacity:
-                raise _capacity_refusal(CAPACITY_FULL)
+                raise capacity_refusal(CAPACITY_FULL)
             thread_id = body.get("thread_id", "")
             if not isinstance(thread_id, str):
                 thread_id = ""
@@ -135,14 +135,14 @@ class _InProcessWorker:
             _dispatch,
             methods=["POST"],
             response_model=None,
-            dependencies=[Depends(_verify_dispatch_token)],
+            dependencies=[Depends(verify_dispatch_token)],
         )
         _app.add_api_route("/health", _health, methods=["GET"])
 
         self._client = httpx.AsyncClient(
             transport=ASGITransport(app=_app),
             base_url="http://test-worker:8001",
-            headers=_internal_auth_headers(internal_token),
+            headers=internal_auth_headers(internal_token),
         )
 
     @property

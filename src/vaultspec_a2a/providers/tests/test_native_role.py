@@ -13,7 +13,7 @@ from langchain_core.messages import HumanMessage
 
 from ...desktop.native_isolation import NativeWorkspaceAuthority
 from ...desktop.tests.test_native_isolation import _authority, _install_runtime
-from ...testing import settings_override
+from ...testing import armed_desktop_app_home
 from ...utils import ProcessContainmentError
 from .._native_role import (
     bind_model_native_workspace,
@@ -42,8 +42,8 @@ def test_worker_binding_is_private_and_does_not_recapture_changed_project(
         ),
         CodexChatModel(workspace_root=str(roots.workspace.path)),
     )
-    with settings_override(
-        desktop_app_home=roots.app_home.path, capsule_assets_root=roots.capsule.path
+    with armed_desktop_app_home(
+        roots.app_home.path, capsule_assets_root=roots.capsule.path
     ):
         scopes: list[NativeWorkspaceAuthority] = []
         for model in models:
@@ -150,8 +150,8 @@ async def test_model_startup_refusals_remove_prepared_role_homes(
     )
     homes = roots.home.path.parent
     before = set(homes.iterdir())
-    with settings_override(
-        desktop_app_home=roots.app_home.path,
+    with armed_desktop_app_home(
+        roots.app_home.path,
         a2a_home=roots.app_home.path,
         capsule_assets_root=roots.capsule.path,
     ):

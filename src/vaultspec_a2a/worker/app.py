@@ -29,7 +29,6 @@ from uuid import uuid4
 
 import anyio  # anyio: structured task groups for heartbeat + dispatch.
 import httpx
-import uvicorn
 from anyio.to_thread import run_sync
 from fastapi import Depends, FastAPI, Header, HTTPException
 from opentelemetry import metrics, trace
@@ -45,7 +44,7 @@ from ..ipc.body_limit import BoundedHttpBodyMiddleware, worker_body_limit
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..lifecycle.pairing import DispatchPairingStatus, resolve_worker_gateway_target
 from ..lifecycle.registration import deregister_serve, register_serve
-from ..lifecycle.shutdown import ShutdownDeadline, ShutdownServer, finish_before
+from ..lifecycle.shutdown import ShutdownDeadline, build_shutdown_server, finish_before
 from ..providers.warmup import warm_model_imports
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..thread.dispatch_policy import FailureType
@@ -63,7 +62,13 @@ from .dispatch_ids import DispatchIdAdmission
 from .executor import Executor
 from .ipc import WorkerBridge
 
-__all__ = ["WorkerApp", "create_worker_app", "main"]
+__all__ = [
+    "WorkerApp",
+    "capacity_refusal",
+    "create_worker_app",
+    "main",
+    "verify_dispatch_token",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +102,7 @@ async def _warm_model_imports() -> None:
         )
 
 
-async def _verify_dispatch_token(
+async def verify_dispatch_token(
     authorization: str | None = Header(None),
 ) -> None:
     """Verify bearer token for gateway->worker dispatch requests.
@@ -352,10 +357,10 @@ async def _reserve_dispatch_or_replay(
     # A duplicate can be admitted while this request waits for capacity.
     if req.dispatch_id in dispatch_ids:
         return None, True
-    raise _capacity_refusal(reason)
+    raise capacity_refusal(reason)
 
 
-def _capacity_refusal(reason: str) -> HTTPException:
+def capacity_refusal(reason: str) -> HTTPException:
     """Answer a refused reservation in the terms the refusal actually had.
 
     The refusals used to share a 429, which told the gateway that a worker
@@ -478,7 +483,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
     @app.post(
         "/dispatch",
         response_model=DispatchResponse,
-        dependencies=[Depends(_verify_dispatch_token)],
+        dependencies=[Depends(verify_dispatch_token)],
     )
     async def dispatch_endpoint(req: DispatchRequest) -> DispatchResponse:
         """Accept a work dispatch from the gateway.
@@ -488,7 +493,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         """
         return await _dispatch_request(app, req)
 
-    @app.get("/health", dependencies=[Depends(_verify_dispatch_token)])
+    @app.get("/health", dependencies=[Depends(verify_dispatch_token)])
     async def health_endpoint() -> dict[str, object]:
         """Worker health check.
 
@@ -535,7 +540,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
     @app.post(
         "/admin/shutdown",
         status_code=202,
-        dependencies=[Depends(_verify_dispatch_token)],
+        dependencies=[Depends(verify_dispatch_token)],
     )
     async def shutdown_endpoint() -> dict[str, str]:
         """Terminate this worker process.
@@ -587,19 +592,6 @@ def _serve() -> None:
         settings.worker_url,
     )
     app = create_worker_app()
-    config = uvicorn.Config(
-        app,
-        host=settings.worker_host,
-        port=settings.worker_port,
-        log_level=settings.log_level.value,
-        access_log=settings.access_log,
-        loop="auto",
-        timeout_graceful_shutdown=settings.shutdown_stream_grace_seconds,
-    )
-    server = ShutdownServer(
-        config,
-        app=app,
-        total_seconds=settings.shutdown_total_timeout_seconds,
-    )
-    app.state.request_server_shutdown = lambda: setattr(server, "should_exit", True)
-    server.run()
+    build_shutdown_server(
+        app, host=settings.worker_host, port=settings.worker_port
+    ).run()

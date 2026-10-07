@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control.config import settings
+from ...testing import settings_override
 from .._acp_mcp import statically_approvable_tool_names
 from .._acp_rpc_handlers import (
     on_fs_read_text_file,
@@ -491,21 +491,23 @@ async def test_the_kimi_lane_keeps_its_proven_behaviour(
 async def test_privileged_callback_refuses_static_symlink_escape(
     two_projects: tuple[Path, Path],
     acp_session_context: AcpSessionContext,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bound, protected = two_projects
     secret = protected / "service.token"
     secret.write_text("must-not-leak", encoding="utf-8")
     escape = bound / "escape"
     escape.symlink_to(protected, target_is_directory=True)
-    monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
 
-    response = await on_fs_read_text_file(
-        1,
-        {"path": "escape/service.token", "sessionId": acp_session_context.session_id},
-        acp_session_context,
-        _config(workspace_root=str(bound)),
-    )
+    with settings_override(provider_identity_launcher=Path("/configured")):
+        response = await on_fs_read_text_file(
+            1,
+            {
+                "path": "escape/service.token",
+                "sessionId": acp_session_context.session_id,
+            },
+            acp_session_context,
+            _config(workspace_root=str(bound)),
+        )
 
     assert "error" in response
     assert "must-not-leak" not in str(response)
@@ -516,7 +518,6 @@ async def test_privileged_callback_refuses_static_symlink_escape(
 async def test_privileged_callback_refuses_replaced_workspace_root(
     two_projects: tuple[Path, Path],
     acp_session_context: AcpSessionContext,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bound, protected = two_projects
     managed = bound.parent / "managed"
@@ -525,15 +526,16 @@ async def test_privileged_callback_refuses_replaced_workspace_root(
     admitted.symlink_to(protected, target_is_directory=True)
     secret = protected / "service.token"
     secret.write_text("must-not-leak", encoding="utf-8")
-    monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
-    monkeypatch.setattr(settings, "workspace_root", managed)
 
-    response = await on_fs_read_text_file(
-        1,
-        {"path": "service.token", "sessionId": acp_session_context.session_id},
-        acp_session_context,
-        _config(workspace_root=str(admitted)),
-    )
+    with settings_override(
+        provider_identity_launcher=Path("/configured"), workspace_root=managed
+    ):
+        response = await on_fs_read_text_file(
+            1,
+            {"path": "service.token", "sessionId": acp_session_context.session_id},
+            acp_session_context,
+            _config(workspace_root=str(admitted)),
+        )
 
     assert "error" in response
     assert "must-not-leak" not in str(response)
@@ -552,7 +554,6 @@ async def test_privileged_read_stays_on_opened_parent_during_symlink_swap(
     safe.mkdir()
     (safe / "data.txt").write_text("workspace-data", encoding="utf-8")
     (protected / "data.txt").write_text("service-secret", encoding="utf-8")
-    monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
     real_open = os.open
     swapped = False
 
@@ -571,12 +572,13 @@ async def test_privileged_read_stays_on_opened_parent_during_symlink_swap(
         return real_open(path, flags, mode, dir_fd=dir_fd)
 
     monkeypatch.setattr(os, "open", swapping_open)
-    response = await on_fs_read_text_file(
-        1,
-        {"path": "safe/data.txt", "sessionId": acp_session_context.session_id},
-        acp_session_context,
-        _config(workspace_root=str(bound)),
-    )
+    with settings_override(provider_identity_launcher=Path("/configured")):
+        response = await on_fs_read_text_file(
+            1,
+            {"path": "safe/data.txt", "sessionId": acp_session_context.session_id},
+            acp_session_context,
+            _config(workspace_root=str(bound)),
+        )
 
     assert response["result"] == {"content": "workspace-data"}
     assert "service-secret" not in str(response)
@@ -595,11 +597,9 @@ async def test_privileged_write_stays_on_opened_parent_during_symlink_swap(
     safe.mkdir()
     protected_target = protected / "target.txt"
     protected_target.write_text("service-state", encoding="utf-8")
-    monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
     # The privileged write re-groups the file to the agent GID; an unprivileged
     # test process can only fchown to a group it belongs to.
     assert os.name == "posix"
-    monkeypatch.setattr(settings, "provider_agent_gid", os.getgid())
     real_open = os.open
     swapped = False
 
@@ -618,16 +618,20 @@ async def test_privileged_write_stays_on_opened_parent_during_symlink_swap(
         return real_open(path, flags, mode, dir_fd=dir_fd)
 
     monkeypatch.setattr(os, "open", swapping_open)
-    response = await on_fs_write_text_file(
-        1,
-        {
-            "path": "safe/target.txt",
-            "content": "workspace-write",
-            "sessionId": acp_session_context.session_id,
-        },
-        acp_session_context,
-        _config(workspace_root=str(bound)),
-    )
+    with settings_override(
+        provider_identity_launcher=Path("/configured"),
+        provider_agent_gid=os.getgid(),
+    ):
+        response = await on_fs_write_text_file(
+            1,
+            {
+                "path": "safe/target.txt",
+                "content": "workspace-write",
+                "sessionId": acp_session_context.session_id,
+            },
+            acp_session_context,
+            _config(workspace_root=str(bound)),
+        )
 
     assert response["result"] == {}
     assert protected_target.read_text(encoding="utf-8") == "service-state"

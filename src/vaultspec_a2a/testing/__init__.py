@@ -153,7 +153,7 @@ if TYPE_CHECKING:
         armed_environment,
         settings_override,
     )
-    from .factories import LaneInventoryFactory, build_settings
+    from .factories import LaneInventoryFactory, build_settings, load_settings
     from .gateway_verbs import (
         DEFAULT_ATTACH_AUTHORIZATION,
         DEFAULT_PRESET_LANE,
@@ -537,6 +537,7 @@ _LAZY_EXPORTS = {
     "settings_override": ("vaultspec_a2a.testing.environment", "settings_override"),
     "LaneInventoryFactory": ("vaultspec_a2a.testing.factories", "LaneInventoryFactory"),
     "build_settings": ("vaultspec_a2a.testing.factories", "build_settings"),
+    "load_settings": ("vaultspec_a2a.testing.factories", "load_settings"),
     "DEFAULT_ATTACH_AUTHORIZATION": (
         "vaultspec_a2a.testing.gateway_verbs",
         "DEFAULT_ATTACH_AUTHORIZATION",
@@ -887,6 +888,7 @@ __all__ = [
     "live_provider_catalog_selector_is_configured",
     "live_provider_override_selector_is_configured",
     "live_shared_holder_count",
+    "load_settings",
     "log_tail",
     "loopback_callback_bridge",
     "loopback_uvicorn",

@@ -10,10 +10,11 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from ...api.app import _bind_server_shutdown_owner, create_app
+from ...api.app import create_app
 from ...api.dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ...api.routes.gateway import admission_gate
 from ...control.drain import AdmissionState
+from ...lifecycle.shutdown import bind_shutdown_owner
 from ...testing import loopback_uvicorn, uvicorn_started
 from ...utils import bearer_header
 from ..routes import route_signature
@@ -79,7 +80,7 @@ async def test_shutdown_refuses_missing_or_malformed_owner_before_admission_clos
 async def test_production_uvicorn_owner_returns_202_before_cooperative_exit() -> None:
     app = _make_app()
     server = loopback_uvicorn(app, lifespan="off", log_level="error")
-    _bind_server_shutdown_owner(app, server)
+    bind_shutdown_owner(app, server)
     serving = asyncio.create_task(server.serve())
     try:
         base = await uvicorn_started(server, serving)

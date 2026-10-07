@@ -10,13 +10,13 @@ import pytest
 from fastapi import HTTPException
 
 from ...context.metadata import ThreadMetadata
-from ...control.config import settings
 from ...control.state_layout import state_layout
 from ...database import create_thread
 from ...testing import (
     DEFAULT_TEAM_PRESET,
     armed_desktop_app_home,
     async_catalog_run_fields,
+    settings_override,
     unvalidated_selection,
 )
 from ...tests._write_authority import make_test_write_authority
@@ -190,72 +190,80 @@ async def test_configured_unarmed_profile_confines_every_workspace_route(
     session_factory: Any,
     checkpointer: Any,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     managed = tmp_path / "managed"
     workspace = managed / "project"
     foreign = tmp_path / "foreign"
     workspace.mkdir(parents=True)
     foreign.mkdir()
-    monkeypatch.setattr(settings, "desktop_app_home", None)
-    monkeypatch.setattr(settings, "workspace_root", managed)
 
-    app = _secured_app(session_factory, checkpointer)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://gateway.test",
-        headers=bearer_header(SEATED_ATTACH_TOKEN),
-    ) as client:
-        for route in (PROVIDER_CATALOG_PATH, "/v1/presets", "/v1/runs"):
-            admitted = await client.get(
-                route, params={"workspace_root": str(workspace)}
-            )
-            refused = await client.get(route, params={"workspace_root": str(foreign)})
-            ancestor = await client.get(route, params={"workspace_root": str(tmp_path)})
-            assert admitted.status_code == 200, (route, admitted.text)
-            assert refused.status_code == 422, (route, refused.text)
-            assert ancestor.status_code == 422, (route, ancestor.text)
-
-        fields = await async_catalog_run_fields(client, workspace_root=str(workspace))
-        admitted_start = await client.post(
-            "/v1/runs",
-            json={
-                "run_id": "managed-workspace-admitted",
-                "team_preset": DEFAULT_TEAM_PRESET,
-                "message": "start",
-                "metadata": {"workspace_root": str(workspace)},
-                "selection": fields["selection"],
-            },
-        )
-        refused_start = await client.post(
-            "/v1/runs",
-            json={
-                "run_id": "managed-workspace-refused",
-                "team_preset": DEFAULT_TEAM_PRESET,
-                "message": "start",
-                "metadata": {"workspace_root": str(foreign)},
-                "selection": fields["selection"],
-            },
-        )
-        stage_refusals: list[httpx.Response] = []
-        for label, refused_root in (("foreign", foreign), ("ancestor", tmp_path)):
-            for stage in ("prepare", "commit"):
-                stage_refusals.append(
-                    await client.post(
-                        "/v1/runs",
-                        json={
-                            "stage": stage,
-                            "reservation_id": (
-                                f"reserved-{label}-root" if stage == "commit" else None
-                            ),
-                            "run_id": f"managed-{stage}-{label}-refused",
-                            "team_preset": DEFAULT_TEAM_PRESET,
-                            "message": "commit message" if stage == "commit" else "",
-                            "metadata": {"workspace_root": str(refused_root)},
-                            "selection": fields["selection"],
-                        },
-                    )
+    with settings_override(desktop_app_home=None, workspace_root=managed):
+        app = _secured_app(session_factory, checkpointer)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://gateway.test",
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
+        ) as client:
+            for route in (PROVIDER_CATALOG_PATH, "/v1/presets", "/v1/runs"):
+                admitted = await client.get(
+                    route, params={"workspace_root": str(workspace)}
                 )
+                refused = await client.get(
+                    route, params={"workspace_root": str(foreign)}
+                )
+                ancestor = await client.get(
+                    route, params={"workspace_root": str(tmp_path)}
+                )
+                assert admitted.status_code == 200, (route, admitted.text)
+                assert refused.status_code == 422, (route, refused.text)
+                assert ancestor.status_code == 422, (route, ancestor.text)
+
+            fields = await async_catalog_run_fields(
+                client, workspace_root=str(workspace)
+            )
+            admitted_start = await client.post(
+                "/v1/runs",
+                json={
+                    "run_id": "managed-workspace-admitted",
+                    "team_preset": DEFAULT_TEAM_PRESET,
+                    "message": "start",
+                    "metadata": {"workspace_root": str(workspace)},
+                    "selection": fields["selection"],
+                },
+            )
+            refused_start = await client.post(
+                "/v1/runs",
+                json={
+                    "run_id": "managed-workspace-refused",
+                    "team_preset": DEFAULT_TEAM_PRESET,
+                    "message": "start",
+                    "metadata": {"workspace_root": str(foreign)},
+                    "selection": fields["selection"],
+                },
+            )
+            stage_refusals: list[httpx.Response] = []
+            for label, refused_root in (("foreign", foreign), ("ancestor", tmp_path)):
+                for stage in ("prepare", "commit"):
+                    stage_refusals.append(
+                        await client.post(
+                            "/v1/runs",
+                            json={
+                                "stage": stage,
+                                "reservation_id": (
+                                    f"reserved-{label}-root"
+                                    if stage == "commit"
+                                    else None
+                                ),
+                                "run_id": f"managed-{stage}-{label}-refused",
+                                "team_preset": DEFAULT_TEAM_PRESET,
+                                "message": "commit message"
+                                if stage == "commit"
+                                else "",
+                                "metadata": {"workspace_root": str(refused_root)},
+                                "selection": fields["selection"],
+                            },
+                        )
+                    )
 
     assert admitted_start.status_code == 201, admitted_start.text
     assert refused_start.status_code == 422, refused_start.text
@@ -334,7 +342,6 @@ async def test_configured_profile_refuses_symlink_escape(
     session_factory: Any,
     checkpointer: Any,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     managed = tmp_path / "managed"
     foreign = tmp_path / "foreign"
@@ -342,36 +349,35 @@ async def test_configured_profile_refuses_symlink_escape(
     foreign.mkdir()
     escape = managed / "escape"
     escape.symlink_to(foreign, target_is_directory=True)
-    monkeypatch.setattr(settings, "desktop_app_home", None)
-    monkeypatch.setattr(settings, "workspace_root", managed)
 
-    app = _secured_app(session_factory, checkpointer)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://gateway.test",
-        headers=bearer_header(SEATED_ATTACH_TOKEN),
-    ) as client:
-        fields = await async_catalog_run_fields(client, workspace_root=str(managed))
-        response = await client.get(
-            PROVIDER_CATALOG_PATH, params={"workspace_root": str(escape)}
-        )
-        stage_responses = [
-            await client.post(
-                "/v1/runs",
-                json={
-                    "stage": stage,
-                    "reservation_id": (
-                        "reserved-symlink-root" if stage == "commit" else None
-                    ),
-                    "run_id": f"managed-{stage}-symlink-refused",
-                    "team_preset": DEFAULT_TEAM_PRESET,
-                    "message": "commit message" if stage == "commit" else "",
-                    "metadata": {"workspace_root": str(escape)},
-                    "selection": fields["selection"],
-                },
+    with settings_override(desktop_app_home=None, workspace_root=managed):
+        app = _secured_app(session_factory, checkpointer)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://gateway.test",
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
+        ) as client:
+            fields = await async_catalog_run_fields(client, workspace_root=str(managed))
+            response = await client.get(
+                PROVIDER_CATALOG_PATH, params={"workspace_root": str(escape)}
             )
-            for stage in ("prepare", "commit")
-        ]
+            stage_responses = [
+                await client.post(
+                    "/v1/runs",
+                    json={
+                        "stage": stage,
+                        "reservation_id": (
+                            "reserved-symlink-root" if stage == "commit" else None
+                        ),
+                        "run_id": f"managed-{stage}-symlink-refused",
+                        "team_preset": DEFAULT_TEAM_PRESET,
+                        "message": "commit message" if stage == "commit" else "",
+                        "metadata": {"workspace_root": str(escape)},
+                        "selection": fields["selection"],
+                    },
+                )
+                for stage in ("prepare", "commit")
+            ]
 
     assert response.status_code == 422, response.text
     assert "configured workspace root" in response.json()["detail"]

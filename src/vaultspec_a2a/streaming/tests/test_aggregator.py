@@ -38,6 +38,7 @@ from ...testing import (
     add_test_node,
     compile_test_graph,
     new_state_graph,
+    settings_override,
     simulator_command,
 )
 from ...thread.enums import ThreadStatus
@@ -2366,10 +2367,9 @@ class TestIngestStallWatchdog:
 
     @pytest.mark.asyncio
     async def test_stall_fails_loud_with_a_named_reason_not_a_silent_hang(
-        self, producer: RunEventProducer, monkeypatch: pytest.MonkeyPatch
+        self, producer: RunEventProducer
     ) -> None:
         """A graph that goes quiet past the stall budget fails fast, not forever."""
-        monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 0.05)
         queue = _relayed(producer, "thread-stall")
 
         graph = build_error_injecting_graph()
@@ -2377,17 +2377,18 @@ class TestIngestStallWatchdog:
         # The test's own outer bound: if the watchdog regressed to not firing
         # at all, this fails the test loudly in 5s rather than hanging the
         # suite for the graph's simulated hour-long stall.
-        outcome = await asyncio.wait_for(
-            _ingest(
-                producer,
-                thread_id="thread-stall",
-                agent_id="supervisor",
-                graph=graph,
-                graph_input={"stall_seconds": 3600},
-                config=config,
-            ),
-            timeout=5.0,
-        )
+        with settings_override(ingest_event_stall_timeout_seconds=0.05):
+            outcome = await asyncio.wait_for(
+                _ingest(
+                    producer,
+                    thread_id="thread-stall",
+                    agent_id="supervisor",
+                    graph=graph,
+                    graph_input={"stall_seconds": 3600},
+                    config=config,
+                ),
+                timeout=5.0,
+            )
 
         assert outcome == "failed"
 
@@ -2472,7 +2473,7 @@ class TestIngestStallWatchdog:
 
     @pytest.mark.asyncio
     async def test_stall_reason_is_retrievable_via_take_failure_reason(
-        self, producer: RunEventProducer, monkeypatch: pytest.MonkeyPatch
+        self, producer: RunEventProducer
     ) -> None:
         """The stall reason is exposed for the durable failure_reason column.
 
@@ -2480,20 +2481,20 @@ class TestIngestStallWatchdog:
         into emit_terminal_status(error_detail=...) — the S37 failure-reason
         persistence path. A consumed reason must never be popped twice.
         """
-        monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 0.05)
         graph = build_error_injecting_graph()
         config = {"configurable": {"thread_id": "thread-stall-reason"}}
-        outcome = await asyncio.wait_for(
-            _ingest(
-                producer,
-                thread_id="thread-stall-reason",
-                agent_id="supervisor",
-                graph=graph,
-                graph_input={"stall_seconds": 3600},
-                config=config,
-            ),
-            timeout=5.0,
-        )
+        with settings_override(ingest_event_stall_timeout_seconds=0.05):
+            outcome = await asyncio.wait_for(
+                _ingest(
+                    producer,
+                    thread_id="thread-stall-reason",
+                    agent_id="supervisor",
+                    graph=graph,
+                    graph_input={"stall_seconds": 3600},
+                    config=config,
+                ),
+                timeout=5.0,
+            )
         assert outcome == "failed"
 
         reason = producer.take_failure_reason("thread-stall-reason")
@@ -2504,7 +2505,7 @@ class TestIngestStallWatchdog:
 
     @pytest.mark.asyncio
     async def test_a_normal_completing_graph_never_trips_the_watchdog(
-        self, producer: RunEventProducer, monkeypatch: pytest.MonkeyPatch
+        self, producer: RunEventProducer
     ) -> None:
         """A graph that exhausts normally is unaffected by the bounded rewrite.
 
@@ -2512,23 +2513,23 @@ class TestIngestStallWatchdog:
         a manual, wait_for-bounded iteration: a fast, well-behaved run must
         still complete cleanly with no failure reason recorded.
         """
-        monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 5.0)
         graph = build_error_injecting_graph()
         config = {"configurable": {"thread_id": "thread-normal"}}
-        outcome = await _ingest(
-            producer,
-            thread_id="thread-normal",
-            agent_id="supervisor",
-            graph=graph,
-            graph_input={},
-            config=config,
-        )
+        with settings_override(ingest_event_stall_timeout_seconds=5.0):
+            outcome = await _ingest(
+                producer,
+                thread_id="thread-normal",
+                agent_id="supervisor",
+                graph=graph,
+                graph_input={},
+                config=config,
+            )
         assert outcome == "completed"
         assert producer.take_failure_reason("thread-normal") is None
 
     @pytest.mark.asyncio
     async def test_a_node_within_its_own_step_budget_is_not_killed_by_the_global_floor(
-        self, producer: RunEventProducer, monkeypatch: pytest.MonkeyPatch
+        self, producer: RunEventProducer
     ) -> None:
         """A silent stretch under the run's OWN step_timeout must not trip the
         watchdog, even when it exceeds the flat global default.
@@ -2546,23 +2547,23 @@ class TestIngestStallWatchdog:
         it well before astream yields) and passes once the effective
         bound is widened to the graph's own step_timeout.
         """
-        monkeypatch.setattr(domain_config, "ingest_event_stall_timeout_seconds", 0.1)
         graph = build_error_injecting_graph()
         # The compiler's own convention (``graph/compiler.py``): a team
         # preset's declared budget rides this plain attribute on the
         # compiled Pregel object, read defensively by ``ingest()``.
         graph.step_timeout = 0.5
         config = {"configurable": {"thread_id": "thread-long-step"}}
-        outcome = await asyncio.wait_for(
-            _ingest(
-                producer,
-                thread_id="thread-long-step",
-                agent_id="supervisor",
-                graph=graph,
-                graph_input={"stall_seconds": 0.3},
-                config=config,
-            ),
-            timeout=5.0,
-        )
+        with settings_override(ingest_event_stall_timeout_seconds=0.1):
+            outcome = await asyncio.wait_for(
+                _ingest(
+                    producer,
+                    thread_id="thread-long-step",
+                    agent_id="supervisor",
+                    graph=graph,
+                    graph_input={"stall_seconds": 0.3},
+                    config=config,
+                ),
+                timeout=5.0,
+            )
         assert outcome == "completed"
         assert producer.take_failure_reason("thread-long-step") is None

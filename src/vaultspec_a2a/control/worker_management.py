@@ -32,9 +32,9 @@ from ._worker_health import (
     WorkerState,
     _build_worker_restart_detail,
     _desktop_worker_port_clear,
-    _internal_auth_headers,
     _shared_worker_port_clear,
     _worker_stderr_log_path,
+    internal_auth_headers,
     probe_worker_health,
     sweep_orphan_worker_logs,
     worker_liveness,
@@ -493,7 +493,7 @@ class LazyWorkerSpawner:
 
             try:
                 async with httpx.AsyncClient(
-                    headers=_internal_auth_headers(self._config.internal_token),
+                    headers=internal_auth_headers(self._config.internal_token),
                     timeout=cooperative_budget,
                 ) as client:
                     response = await client.post(f"{self._config.url}/admin/shutdown")

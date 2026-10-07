@@ -44,6 +44,7 @@ from ..testing import (
     JsonReplyHandler,
     ProgressDeadline,
     ProgressStalledError,
+    armed_desktop_app_home,
     booted_gateway,
     broker_gateway_env,
     gateway_run_verbs,
@@ -51,7 +52,6 @@ from ..testing import (
     read_worker_ipc_secret,
     seat_app_home,
     serve_handler,
-    settings_override,
     wait_for,
     wait_for_run_status_async,
 )
@@ -193,8 +193,8 @@ def _assert_terminal_settlement(harness: _SettlementHarness, base_url: str) -> N
     commit = _prepare_and_commit(base_url)
     run_id = commit["run_id"]
     lease_id = commit["lease_id"]
-    with settings_override(
-        desktop_app_home=harness.app_home,
+    with armed_desktop_app_home(
+        harness.app_home,
         desktop_settlement_url=f"http://127.0.0.1:{harness.receiver_port}/settle",
     ):
         asyncio.run(_settle_completed_run(harness.app_home, run_id))

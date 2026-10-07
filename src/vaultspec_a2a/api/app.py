@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
-import uvicorn
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -35,7 +34,7 @@ from ..control._verdict_subscriber_config import VerdictSubscriberConfig
 from ..control._worker_health import (
     WorkerLiveness,
     WorkerState,
-    _internal_auth_headers,
+    internal_auth_headers,
 )
 from ..control.circuit_breaker import WorkerCircuitBreaker
 from ..control.clarification_service import (
@@ -84,7 +83,7 @@ from ..lifecycle.registration import (
     register_serve,
 )
 from ..lifecycle.registry import ProcRecord
-from ..lifecycle.shutdown import ShutdownDeadline, ShutdownServer, finish_before
+from ..lifecycle.shutdown import ShutdownDeadline, build_shutdown_server, finish_before
 from ..providers.in_process_catalog import in_process_lanes
 from ..streaming import RelayHub
 from ..telemetry import TelemetryMiddleware, configure_telemetry, trace_headers
@@ -602,7 +601,7 @@ def _start_worker_runtime(
     worker_client = httpx.AsyncClient(
         base_url=settings.worker_url,
         timeout=httpx.Timeout(30.0, connect=5.0),
-        headers=_internal_auth_headers(internal_token),
+        headers=internal_auth_headers(internal_token),
     )
     app.state.worker_client = worker_client
     logger.info("Worker client configured: %s", settings.worker_url)
@@ -850,15 +849,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
 
 
-def _bind_server_shutdown_owner(app: FastAPI, server: uvicorn.Server) -> None:
-    """Bind the served app to the cooperative transition of its Uvicorn owner."""
-
-    def request_shutdown() -> None:
-        server.should_exit = True
-
-    app.state.request_server_shutdown = request_shutdown
-
-
 def main() -> None:
     """Launch the vaultspec-a2a gateway.
 
@@ -871,22 +861,7 @@ def main() -> None:
     # reported by the process that starts the service, not by the first reader.
     build_now(domain_config)
     app = create_app()
-    config = uvicorn.Config(
-        app,
-        host=settings.host,
-        port=settings.port,
-        log_level=settings.log_level.value,
-        access_log=settings.access_log,
-        loop="auto",
-        timeout_graceful_shutdown=settings.shutdown_stream_grace_seconds,
-    )
-    server = ShutdownServer(
-        config,
-        app=app,
-        total_seconds=settings.shutdown_total_timeout_seconds,
-    )
-    _bind_server_shutdown_owner(app, server)
-    server.run()
+    build_shutdown_server(app, host=settings.host, port=settings.port).run()
 
 
 def create_app(lifespan: Any | None = None) -> FastAPI:

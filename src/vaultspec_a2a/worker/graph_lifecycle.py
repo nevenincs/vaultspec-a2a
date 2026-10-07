@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol, Unpack, cast, override
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from ..database import read_latest_checkpoint
+from ..database import CheckpointRead, read_latest_checkpoint
 from ..domain_config import domain_config
 from ..graph.compiler import compile_team_graph
 from ..ipc.schemas import canonical_project_root
@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from langchain_core.runnables import RunnableConfig
-    from langgraph.checkpoint.base import CheckpointTuple
     from langgraph.types import Command, Interrupt
 
     from ..authoring import DocumentProposalSubmitter, FeedbackContextReader
@@ -476,7 +475,7 @@ class GraphLifecycleManager:
 
     async def _durable_checkpoint(
         self, thread_id: str, *, checkpoint_deadline: float | None
-    ) -> CheckpointTuple | None:
+    ) -> CheckpointRead:
         """Read the run's latest durable checkpoint within the dispatch deadline.
 
         A timeout refuses the compilation; any other read failure propagates.
@@ -492,41 +491,35 @@ class GraphLifecycleManager:
             self._ports.checkpointer, thread_id, timeout=timeout
         )
         try:
-            return checkpoint.tuple_or_raise()
+            checkpoint.tuple_or_raise()
         except TimeoutError as exc:
             raise GraphCompilationError("durable checkpoint read timed out") from exc
+        return checkpoint
 
     async def _checkpoint_present(
         self, thread_id: str, *, checkpoint_deadline: float | None
     ) -> bool:
         """Check that a bound resume has a durable checkpoint to resume."""
-        return (
-            await self._durable_checkpoint(
-                thread_id, checkpoint_deadline=checkpoint_deadline
-            )
-            is not None
+        checkpoint = await self._durable_checkpoint(
+            thread_id, checkpoint_deadline=checkpoint_deadline
         )
+        return checkpoint.checkpoint_tuple is not None
 
     async def _checkpoint_compilation_digests(
         self, thread_id: str, *, checkpoint_deadline: float | None
     ) -> tuple[str, str] | None:
         """Read and validate the current assignment binding from checkpoint state."""
-        checkpoint_tuple = await self._durable_checkpoint(
+        checkpoint = await self._durable_checkpoint(
             thread_id, checkpoint_deadline=checkpoint_deadline
         )
-        if checkpoint_tuple is None:
+        if checkpoint.checkpoint_tuple is None:
             return None
-        checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
-        if not isinstance(checkpoint, dict):
+        values = checkpoint.strict_channel_values
+        if values is None:
             raise GraphCompilationError("durable checkpoint state is incompatible")
-        checkpoint_obj = cast("dict[str, object]", checkpoint)
-        values = checkpoint_obj.get("channel_values")
-        if not isinstance(values, dict):
-            raise GraphCompilationError("durable checkpoint state is incompatible")
-        values_obj = cast("dict[str, object]", values)
         return (
-            _validated_checkpoint_digest(values_obj, "model_assignment_digest"),
-            _validated_checkpoint_digest(values_obj, "graph_definition_digest"),
+            _validated_checkpoint_digest(values, "model_assignment_digest"),
+            _validated_checkpoint_digest(values, "graph_definition_digest"),
         )
 
     async def _send_graph_registered(

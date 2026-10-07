@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from ..database import read_latest_checkpoint
 from ..ipc.schemas import DispatchApplicationReceiptPayload
 from ..thread.action_receipts import GRAPH_ACTION_VERB
 from ..thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
-    read_checkpoint_evidence,
+    classify_checkpoint_evidence,
 )
 from ._run_registry import RunScopedRegistry
 
@@ -66,10 +67,13 @@ class DispatchReceiptReporter:
             # receipt is only a write held against the parked checkpoint;
             # reading committed channels alone would never report it, and
             # recovery would redeliver an answer the run already consumed.
-            evidence = await read_checkpoint_evidence(
-                checkpointer,
+            evidence = classify_checkpoint_evidence(
+                await read_latest_checkpoint(
+                    checkpointer,
+                    receipt.thread_id,
+                    timeout=checkpoint_read_timeout_seconds,
+                ),
                 receipt,
-                timeout_seconds=checkpoint_read_timeout_seconds,
             )
             if evidence.kind is CheckpointEvidenceKind.UNAVAILABLE:
                 # A read that failed says nothing about the checkpoint, and if

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from langgraph.checkpoint.serde.types import ERROR
 from pydantic import ValidationError
@@ -24,12 +23,13 @@ from .snapshots import unanswered_interrupt_values
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from ..database.checkpoints import Checkpointer
+    from langgraph.checkpoint.base import CheckpointTuple
 
 __all__ = [
     "CheckpointEvidence",
     "CheckpointEvidenceKind",
-    "read_checkpoint_evidence",
+    "CheckpointReadView",
+    "classify_checkpoint_evidence",
 ]
 
 # The channels a dispatch's receipt is written to, each with the reducer its
@@ -67,12 +67,35 @@ class CheckpointEvidence:
     incorporated: bool
 
 
+class CheckpointReadView(Protocol):
+    """One bounded checkpoint read, as the classifier needs to see it.
+
+    Declared here because the thread layer cannot import the read that
+    satisfies it: whoever performs the read hands it in.
+    """
+
+    @property
+    def unreadable(self) -> bool:
+        """Whether the store failed to answer, as opposed to holding nothing."""
+        ...
+
+    @property
+    def checkpoint_tuple(self) -> CheckpointTuple | None:
+        """The stored checkpoint, or ``None`` when the thread has none."""
+        ...
+
+    @property
+    def strict_channel_values(self) -> dict[str, object] | None:
+        """The checkpoint's channel values, or ``None`` when its shape is foreign."""
+        ...
+
+
 def _incompatible(checkpoint_id: str | None) -> CheckpointEvidence:
     return CheckpointEvidence(CheckpointEvidenceKind.INCOMPATIBLE, checkpoint_id, False)
 
 
 def _checkpoint_values(
-    checkpoint: Any, requested_checkpoint_id: str | None
+    read: CheckpointReadView, checkpoint: Any, requested_checkpoint_id: str | None
 ) -> tuple[str, dict[str, object]] | CheckpointEvidence:
     # Durable storage is untrusted despite the saver's declared TypedDict.
     checkpoint_id_raw = cast("object", checkpoint.checkpoint.get("id"))
@@ -83,11 +106,11 @@ def _checkpoint_values(
         and checkpoint_id_raw != requested_checkpoint_id
     ):
         return _incompatible(checkpoint_id_raw)
-    values_raw = cast("object", checkpoint.checkpoint.get("channel_values", {}))
+    values = read.strict_channel_values
     metadata_raw = cast("object", checkpoint.metadata)
-    if not isinstance(values_raw, dict) or not isinstance(metadata_raw, dict):
+    if values is None or not isinstance(metadata_raw, dict):
         return _incompatible(checkpoint_id_raw)
-    return checkpoint_id_raw, cast("dict[str, object]", values_raw)
+    return checkpoint_id_raw, values
 
 
 def _action_evidence(
@@ -222,62 +245,37 @@ def _pending_evidence(
     )
 
 
-async def read_checkpoint_evidence(
-    checkpointer: Checkpointer,
+def classify_checkpoint_evidence(
+    read: CheckpointReadView,
     receipt: GraphActionReceipt,
     *,
-    timeout_seconds: float,
     checkpoint_id: str | None = None,
 ) -> CheckpointEvidence:
-    """Read terminal truth without compiling providers or guessing scheduled work."""
-    checkpoint = await _read_checkpoint(
-        checkpointer,
-        receipt.thread_id,
-        checkpoint_id,
-        timeout_seconds=timeout_seconds,
-    )
-    if isinstance(checkpoint, CheckpointEvidence):
-        return checkpoint
-    return _classify_checkpoint(
-        checkpoint, receipt, requested_checkpoint_id=checkpoint_id
-    )
-
-
-async def _read_checkpoint(
-    checkpointer: Checkpointer,
-    thread_id: str,
-    checkpoint_id: str | None,
-    *,
-    timeout_seconds: float,
-) -> Any | CheckpointEvidence:
-    """The stored checkpoint, or the evidence that stands in for not having one.
+    """Read terminal truth off one checkpoint read, guessing nothing.
 
     A read that failed and a thread with nothing stored are both answers in
-    themselves, and neither leaves anything to classify.
+    themselves, and neither leaves anything to classify. *checkpoint_id* is the
+    checkpoint the read was asked for, when it was asked for one.
     """
-    configurable = {"thread_id": thread_id}
-    if checkpoint_id is not None:
-        configurable["checkpoint_id"] = checkpoint_id
-    try:
-        checkpoint = await asyncio.wait_for(
-            checkpointer.aget_tuple({"configurable": configurable}),
-            timeout=timeout_seconds,
-        )
-    except Exception:
+    if read.unreadable:
         return CheckpointEvidence(CheckpointEvidenceKind.UNAVAILABLE, None, False)
+    checkpoint = read.checkpoint_tuple
     if checkpoint is None:
         return CheckpointEvidence(CheckpointEvidenceKind.ABSENT, None, False)
-    return checkpoint
+    return _classify_checkpoint(
+        read, checkpoint, receipt, requested_checkpoint_id=checkpoint_id
+    )
 
 
 def _classify_checkpoint(
+    read: CheckpointReadView,
     checkpoint: Any,
     receipt: GraphActionReceipt,
     *,
     requested_checkpoint_id: str | None,
 ) -> CheckpointEvidence:
     """What one stored checkpoint says about the action the receipt names."""
-    parsed = _checkpoint_values(checkpoint, requested_checkpoint_id)
+    parsed = _checkpoint_values(read, checkpoint, requested_checkpoint_id)
     if isinstance(parsed, CheckpointEvidence):
         return parsed
     current_checkpoint_id, values = parsed

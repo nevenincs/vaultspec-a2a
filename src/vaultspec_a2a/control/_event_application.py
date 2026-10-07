@@ -146,8 +146,12 @@ async def proven_application_receipt(
     application: DispatchApplicationReceiptPayload,
     checkpointer: Checkpointer,
 ) -> GraphActionReceipt | None:
-    from ..database import get_control_action_by_dispatch_id, get_thread
-    from ..thread.checkpoint_evidence import read_checkpoint_evidence
+    from ..database import (
+        get_control_action_by_dispatch_id,
+        get_thread,
+        read_latest_checkpoint,
+    )
+    from ..thread.checkpoint_evidence import classify_checkpoint_evidence
     from .dispatch_receipts import validate_current_graph_receipt
 
     action = await get_control_action_by_dispatch_id(
@@ -171,12 +175,13 @@ async def proven_application_receipt(
     if stored_receipt is None:
         return None
     await db.commit()
-    from ..domain_config import domain_config
-
-    evidence = await read_checkpoint_evidence(
-        checkpointer,
+    evidence = classify_checkpoint_evidence(
+        await read_latest_checkpoint(
+            checkpointer,
+            stored_receipt.thread_id,
+            checkpoint_id=application.checkpoint_id,
+        ),
         stored_receipt,
-        timeout_seconds=domain_config.aget_state_timeout_seconds,
         checkpoint_id=application.checkpoint_id,
     )
     if not evidence.incorporated:

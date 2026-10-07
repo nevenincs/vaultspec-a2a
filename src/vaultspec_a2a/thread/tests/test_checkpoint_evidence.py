@@ -23,11 +23,12 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START
 from langgraph.types import Command, interrupt
 
+from ...database import read_latest_checkpoint
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..action_receipts import GraphActionReceipt, control_action_payload_fingerprint
 from ..checkpoint_evidence import (
     CheckpointEvidenceKind,
-    read_checkpoint_evidence,
+    classify_checkpoint_evidence,
 )
 from ..enums import ControlActionType
 
@@ -135,9 +136,10 @@ async def test_a_resume_that_only_parks_again_reads_as_incorporated(
         # have taken the resume's receipt never ran.
         assert committed["active_graph_action_receipt"]["dispatch_id"] == "ingest"
 
-        evidence = await read_checkpoint_evidence(
-            reader, reparking, timeout_seconds=_READ_TIMEOUT_SECONDS
+        latest = await read_latest_checkpoint(
+            reader, _THREAD, timeout=_READ_TIMEOUT_SECONDS
         )
+        evidence = classify_checkpoint_evidence(latest, reparking)
         assert evidence.kind is CheckpointEvidenceKind.INTERRUPTED
         assert evidence.incorporated is True
         assert evidence.checkpoint_id == stored.checkpoint["id"]
@@ -145,9 +147,7 @@ async def test_a_resume_that_only_parks_again_reads_as_incorporated(
         # The held writes must not make every receipt look applied: an action
         # this thread never received is still the prior-action answer that
         # lets recovery deliver it.
-        never_sent = await read_checkpoint_evidence(
-            reader, undelivered, timeout_seconds=_READ_TIMEOUT_SECONDS
-        )
+        never_sent = classify_checkpoint_evidence(latest, undelivered)
         assert never_sent.kind is CheckpointEvidenceKind.PRIOR_ACTION
         assert never_sent.incorporated is False
 
@@ -173,8 +173,9 @@ async def test_the_settling_resume_commits_what_the_re_park_only_held(
         graph = _graph(saver)
         await graph.ainvoke(_ingest_input(ingest), config)
         await graph.ainvoke(_resume(reparking, "revise"), config)
-        held = await read_checkpoint_evidence(
-            saver, reparking, timeout_seconds=_READ_TIMEOUT_SECONDS
+        held = classify_checkpoint_evidence(
+            await read_latest_checkpoint(saver, _THREAD, timeout=_READ_TIMEOUT_SECONDS),
+            reparking,
         )
         assert held.incorporated is True
 
@@ -227,8 +228,11 @@ async def test_a_receipt_write_the_store_cannot_parse_is_not_read_as_evidence(
         )
 
     async with AsyncSqliteSaver.from_conn_string(path) as reader:
-        evidence = await read_checkpoint_evidence(
-            reader, reparking, timeout_seconds=_READ_TIMEOUT_SECONDS
+        evidence = classify_checkpoint_evidence(
+            await read_latest_checkpoint(
+                reader, _THREAD, timeout=_READ_TIMEOUT_SECONDS
+            ),
+            reparking,
         )
         assert evidence.kind is CheckpointEvidenceKind.INCOMPATIBLE
         assert evidence.incorporated is False

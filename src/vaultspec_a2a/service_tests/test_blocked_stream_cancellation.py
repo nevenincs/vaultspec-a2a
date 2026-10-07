@@ -12,7 +12,6 @@ import pytest
 from ..control.action_lease import CONTROL_ACTION_LEASE_TTL
 from ..graph.enums import Provider
 from ..testing import (
-    WatchedProcess,
     await_ready,
     fetch_in_process_selection,
     json_object,
@@ -38,19 +37,17 @@ _PRESET_LANE = Provider.DETERMINISTIC.value
 def _start_lazy_gateway(stack: ServiceStack) -> None:
     env = stack._local_env()
     env["VAULTSPEC_A2A_AUTO_SPAWN_WORKER"] = "true"
-    process = stack.spawn_native(
+    gateway = stack.spawn_native(
         "vaultspec_a2a.api.app:create_app",
         port=stack.ports["gateway"],
         env=env,
         log_name="lazy-gateway.log",
     )
-    stack._gateway_proc = process
+    stack._gateway_proc = gateway
     await_ready(
         stack._gateway_http_ready,
         what="lazy gateway",
-        watch=[
-            WatchedProcess("gateway", process, stack.runtime_dir / "lazy-gateway.log")
-        ],
+        watch=[gateway],
         timeout=120.0,
         interval=0.2,
     )

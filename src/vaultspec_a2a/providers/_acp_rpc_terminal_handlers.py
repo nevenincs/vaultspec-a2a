@@ -16,8 +16,8 @@ from uuid import uuid4
 
 from ..control.provider_execution import native_execution_refusal_reason
 from ..desktop.native_isolation import NativeLaunchAuthority
+from ..utils import ProcessContainmentError
 from ..utils.async_cleanup import complete_cleanup
-from ..utils.process import ProcessContainmentError
 from ..workspace.environment import resolve_env_vars
 from ._acp_client_requests import AcpTerminalCreateRequest, AcpTerminalRequest
 from ._acp_request import jsonrpc_error, jsonrpc_result

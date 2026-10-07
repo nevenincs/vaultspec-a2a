@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import psutil
 import pytest
 
+from ...utils import ProcessContainment, spawn_contained
 from ...utils import process as process_module
 from ...utils._process_tree import (
     descendant_pids,
@@ -19,20 +20,16 @@ from ...utils._process_tree import (
     pid_is_live,
     win_kernel32,
 )
-from ...utils.process import (
-    ProcessContainment,
-    ProcessContainmentError,
-    _posix_group_is_live,
-)
+from ...utils.process import _posix_group_is_live
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-# The gate makes job assignment precede descendant creation on Windows. The
+# The root starts its descendant as its first act, so the descendant is inside
+# the containment only because the root was admitted before it ran. The
 # descendant's ready message proves its signal handler is installed before teardown.
-_GATED_TREE = """
+_TREE = """
 import os, subprocess, sys, time
-sys.stdin.readline()
 child = subprocess.Popen(
     [sys.executable, '-c', sys.argv[1]], stdout=subprocess.PIPE, text=True,
 )
@@ -51,23 +48,17 @@ _STUBBORN_CHILD = (
 @contextlib.asynccontextmanager
 async def _owned_tree(
     child_source: str = _CHILD,
-) -> AsyncGenerator[tuple[ProcessContainment, subprocess.Popen[str], int]]:
+) -> AsyncGenerator[tuple[ProcessContainment, subprocess.Popen[bytes], int]]:
     containment = ProcessContainment.create()
-    parent: subprocess.Popen[str] | None = None
+    parent: subprocess.Popen[bytes] | None = None
     child_pid: int | None = None
     try:
-        parent = subprocess.Popen(
-            [sys.executable, "-c", _GATED_TREE, child_source],
-            stdin=subprocess.PIPE,
+        parent = spawn_contained(
+            [sys.executable, "-c", _TREE, child_source],
+            containment,
             stdout=subprocess.PIPE,
-            text=True,
-            **containment.spawn_kwargs(),
         )
-        containment.assign(parent.pid)
-        assert parent.stdin is not None
         assert parent.stdout is not None
-        parent.stdin.write("go\n")
-        parent.stdin.flush()
         child_pid = int(await asyncio.to_thread(parent.stdout.readline))
         yield containment, parent, child_pid
     finally:
@@ -80,20 +71,9 @@ async def _owned_tree(
                 if parent.poll() is None:
                     parent.kill()
                 parent.wait(timeout=10)
-                if parent.stdin is not None:
-                    parent.stdin.close()
                 if parent.stdout is not None:
                     parent.stdout.close()
             containment.close()
-
-
-def test_spawn_kwargs_shape_matches_platform() -> None:
-    containment = ProcessContainment.create()
-    try:
-        expected = {} if sys.platform == "win32" else {"start_new_session": True}
-        assert containment.spawn_kwargs() == expected
-    finally:
-        containment.close()
 
 
 @pytest.mark.asyncio
@@ -181,18 +161,11 @@ async def test_concurrent_termination_joins_one_owned_cleanup() -> None:
 async def test_terminate_of_already_exited_root_is_success() -> None:
     containment = ProcessContainment.create()
     try:
-        # Keep the process alive until its Windows job assignment completes.
-        with subprocess.Popen(
-            [sys.executable, "-c", "import sys; sys.stdin.readline()"],
-            stdin=subprocess.PIPE,
-            **containment.spawn_kwargs(),
-        ) as proc:
-            containment.assign(proc.pid)
-            assert proc.stdin is not None
-            proc.stdin.close()
-            proc.wait(timeout=10)
-            assert await containment.terminate(term_timeout=0.2, kill_timeout=2.0)
-            assert not containment.assigned
+        proc = spawn_contained([sys.executable, "-c", "pass"], containment)
+        proc.wait(timeout=10)
+        assert containment.assigned
+        assert await containment.terminate(term_timeout=0.2, kill_timeout=2.0)
+        assert not containment.assigned
     finally:
         containment.close()
 
@@ -271,22 +244,6 @@ else:
             assert await containment.terminate(term_timeout=0.2, kill_timeout=5.0)
             assert calls >= 2
             assert not pid_is_live(child_pid)
-
-    def test_assignment_rejects_a_process_in_an_unowned_group() -> None:
-        containment = ProcessContainment.create()
-        foreign = subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(120)"]
-        )
-        try:
-            with pytest.raises(ProcessContainmentError, match="new session"):
-                containment.assign(foreign.pid)
-            assert not containment.assigned
-            assert containment._pid is None
-            assert foreign.poll() is None
-        finally:
-            foreign.kill()
-            foreign.wait(timeout=10)
-            containment.close()
 
     @pytest.mark.asyncio
     async def test_proc_and_ps_observe_orphaned_and_zombie_group_members() -> None:

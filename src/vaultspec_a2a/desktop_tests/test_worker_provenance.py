@@ -19,7 +19,6 @@ prepare still refuses for unavailable native isolation.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import subprocess
 import sys
@@ -38,14 +37,15 @@ from ..testing import (
     foreign_worker,
     free_port,
     gateway_run_verbs,
+    reap_contained,
     reap_process,
-    reap_tree,
     seat_app_home,
     spawn_gateway,
     status_and_json,
     unvalidated_selection,
     worker_lifecycle_gateway_script,
 )
+from ..utils import ProcessContainment, spawn_contained
 from ..utils._process_tree import pid_is_live
 
 if TYPE_CHECKING:
@@ -173,7 +173,7 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
     log_path = tmp_path / "gateway.log"
     request_log = tmp_path / f"squatter-{worker_port}.log"
     with foreign_worker(worker_port, body, request_log=request_log) as squatter:
-        proc = spawn_gateway(
+        gateway = spawn_gateway(
             script=_GATEWAY,
             gateway_port=gateway_port,
             env=armed_gateway_env(app_home)(gateway_port, worker_port),
@@ -181,7 +181,7 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
         )
         try:
             base = f"http://127.0.0.1:{gateway_port}"
-            await_gateway_ready(base, proc, log_path=log_path)
+            await_gateway_ready(base, gateway)
             status, prepared = _prepare(base, _AUTH, "run-provenance-url-echo")
             assert status == 503, prepared
             assert "OS isolation backend" in prepared["detail"]
@@ -192,7 +192,7 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
             requests = request_log.read_text(encoding="utf-8").splitlines()
             assert all(line.startswith("GET /health") for line in requests), requests
         finally:
-            reap_process(proc)
+            reap_process(gateway)
 
 
 def test_two_gateways_one_worker_authenticated_pairing(tmp_path: Path) -> None:
@@ -262,7 +262,6 @@ def test_two_gateways_one_worker_authenticated_pairing(tmp_path: Path) -> None:
 # for any code under test.
 _PRIOR_GENERATION_CONFLICT_DRIVER = """
 import asyncio
-import contextlib
 import json
 import subprocess
 import sys
@@ -276,6 +275,7 @@ from vaultspec_a2a.control.worker_management import (
     _spawn_worker_owned,
     _worker_stderr_log_path,
 )
+from vaultspec_a2a.testing.children import reap_contained
 
 squatter_file, worker_port_s, squatter_log, result_file = sys.argv[1:5]
 worker_port = int(worker_port_s)
@@ -290,9 +290,10 @@ body = {
     "paired_gateway_lifetime": GATEWAY_LIFETIME_ID,
     "worker_generation": "1",
 }
-# Detach the squatter's std streams: it outlives this driver (the parent reaps
-# it), so inheriting the driver's captured pipes would wedge the parent's read on
-# a pipe the squatter never closes.
+# Detach the squatter's std streams: it outlives this driver inside the driver's
+# containment (the parent reaps it through that), so inheriting the driver's
+# captured pipes would wedge the parent's read on a pipe the squatter never
+# closes.
 squatter = subprocess.Popen(
     [sys.executable, squatter_file, str(worker_port), json.dumps(body), squatter_log],
     stdin=subprocess.DEVNULL,
@@ -322,10 +323,8 @@ autospawn_log = _worker_stderr_log_path(worker_port)
 # the held port; reap its tree through that containment so the driver leaks
 # nothing, while still reporting that a spawn was attempted.
 if owned is not None:
-    _process, containment = owned
-    with contextlib.suppress(Exception):
-        asyncio.run(containment.terminate(term_timeout=5.0, kill_timeout=5.0))
-    containment.close()
+    process, containment = owned
+    reap_contained(process, containment, term_timeout=5.0, kill_timeout=5.0)
 
 with open(result_file, "w", encoding="utf-8") as handle:
     json.dump(
@@ -377,7 +376,10 @@ def test_failed_owner_authorized_eviction_is_conflict_without_adoption(
 
     env = armed_gateway_env(app_home)(free_port(), worker_port)
 
-    driver = subprocess.run(
+    # The squatter the driver starts outlives the driver inside the driver's own
+    # containment, so reaping that containment reaps the squatter too.
+    containment = ProcessContainment.create()
+    driver = spawn_contained(
         [
             sys.executable,
             str(driver_file),
@@ -386,17 +388,19 @@ def test_failed_owner_authorized_eviction_is_conflict_without_adoption(
             str(squatter_log),
             str(result_file),
         ],
+        containment,
         env=env,
-        capture_output=True,
-        text=True,
-        timeout=120,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
-    assert driver.returncode == 0, (
-        f"driver failed ({driver.returncode}):\n{driver.stdout}\n{driver.stderr}"
-    )
-    result = json.loads(result_file.read_text(encoding="utf-8"))
-    squatter_pid = int(result["squatter_pid"])
     try:
+        stdout, stderr = driver.communicate(timeout=120)
+        assert driver.returncode == 0, (
+            f"driver failed ({driver.returncode}):\n"
+            f"{stdout.decode(errors='replace')}\n{stderr.decode(errors='replace')}"
+        )
+        result = json.loads(result_file.read_text(encoding="utf-8"))
+        squatter_pid = int(result["squatter_pid"])
         assert result["armed"] is True, result
 
         # No adoption: the demand produced no worker handle.
@@ -421,5 +425,4 @@ def test_failed_owner_authorized_eviction_is_conflict_without_adoption(
             "the wedged prior-generation worker must survive a failed eviction"
         )
     finally:
-        with contextlib.suppress(Exception):
-            reap_tree(squatter_pid, term_timeout=5.0, kill_timeout=5.0)
+        reap_contained(driver, containment, term_timeout=5.0, kill_timeout=5.0)

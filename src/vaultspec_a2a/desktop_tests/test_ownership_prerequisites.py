@@ -75,9 +75,10 @@ from ..testing import (
 )
 
 if TYPE_CHECKING:
-    import subprocess
     from collections.abc import Generator
     from pathlib import Path
+
+    from ..testing import WatchedProcess
 
 # Raised by the runtime singleton when a second gateway contends one home.
 _CONFLICT_REFUSAL = "refusing to start a second gateway on one application home"
@@ -132,7 +133,7 @@ def _spawn_stray_worker(
     worker_port: int,
     secret: str,
     log_path: Path,
-) -> subprocess.Popen[bytes]:
+) -> WatchedProcess:
     """Start a real production worker that no gateway spawned.
 
     It holds the gateway-minted IPC *secret* over the same application home and
@@ -147,7 +148,10 @@ def _spawn_stray_worker(
     env.pop(setting_env("gateway_lifetime_id"), None)
     env.pop(setting_env("worker_generation"), None)
     return spawn_logged(
-        [sys.executable, "-m", "vaultspec_a2a.worker"], env=env, log_path=log_path
+        [sys.executable, "-m", "vaultspec_a2a.worker"],
+        name="stray worker",
+        env=env,
+        log_path=log_path,
     )
 
 

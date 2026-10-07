@@ -14,7 +14,6 @@ runbook, exactly like the sibling live suites, and a caller that declares
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import os
@@ -42,9 +41,10 @@ from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     LIVE_PROVIDER_PREREQUISITES,
     free_port,
+    reap_contained,
     selection_from_served_catalog,
 )
-from ..utils.process import ProcessContainment
+from ..utils import ProcessContainment, spawn_contained
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -381,10 +381,7 @@ def _force_engine_tree_exit(
     process: subprocess.Popen[bytes], containment: ProcessContainment
 ) -> None:
     """Boundedly terminate the OS-owned engine containment and reap its root."""
-    killed = asyncio.run(containment.terminate(term_timeout=5.0, kill_timeout=5.0))
-    if process.poll() is None:
-        process.wait(timeout=10)
-    if not killed:
+    if not reap_contained(process, containment, term_timeout=5.0, kill_timeout=5.0):
         raise AssertionError(f"engine process containment {process.pid} did not empty")
 
 
@@ -601,23 +598,17 @@ def _run_lost_ack_engine(
     }
     with options["engine_log"].open("wb") as output:
         containment = ProcessContainment.create()
-        # Pass the containment's session flag explicitly rather than
-        # ``**spawn_kwargs()`` so the binary-stdout Popen resolves to
-        # ``Popen[bytes]`` (the sanctioned worker-management spawn pattern);
-        # ``start_new_session`` is a no-op on Windows where the flag is unset.
-        new_session = bool(containment.spawn_kwargs().get("start_new_session"))
         process: subprocess.Popen[bytes] | None = None
         token: str | None = None
         try:
-            process = subprocess.Popen(
+            process = spawn_contained(
                 _engine_command(options["engine_port"], options["workspace"]),
+                containment,
                 cwd=options["workspace"],
                 env=environment,
                 stdout=output,
                 stderr=subprocess.STDOUT,
-                start_new_session=new_session,
             )
-            containment.assign(process.pid)
             token = _wait_for_engine(
                 options["workspace"], options["engine_base"], process
             )

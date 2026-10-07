@@ -38,7 +38,7 @@ from ..testing import (
     selection_from_served_catalog,
     wait_for_run_status,
 )
-from ..utils.process import ProcessContainment
+from ..utils import ProcessContainment, spawn_contained
 from .test_engine_broker_lost_ack_live import (
     _engine_command,
     _force_engine_tree_exit,
@@ -250,19 +250,17 @@ def _dashboard_engine(
     }
     with scenario.engine_log.open("wb") as output:
         containment = ProcessContainment.create()
-        new_session = bool(containment.spawn_kwargs().get("start_new_session"))
         process: subprocess.Popen[bytes] | None = None
         token: str | None = None
         try:
-            process = subprocess.Popen(
+            process = spawn_contained(
                 _engine_command(scenario.engine_port, scenario.workspace),
+                containment,
                 cwd=scenario.workspace,
                 env=environment,
                 stdout=output,
                 stderr=subprocess.STDOUT,
-                start_new_session=new_session,
             )
-            containment.assign(process.pid)
             token = _wait_for_engine(scenario.workspace, scenario.engine_base, process)
             yield token
         finally:

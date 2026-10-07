@@ -31,8 +31,8 @@ if TYPE_CHECKING:
 from ..control.config import settings
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
+from ..utils import ProcessContainmentError
 from ..utils.async_cleanup import complete_cleanup
-from ..utils.process import ProcessContainmentError
 from ..workspace.environment import resolve_env_vars
 from ._catalog_discovery import ProviderCatalogDiscovery, unavailable_discovery
 from ._claude_tool_policy import claude_bypass_declined_meta

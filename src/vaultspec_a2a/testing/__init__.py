@@ -134,7 +134,7 @@ if TYPE_CHECKING:
         child_tree_progress,
         file_size_fingerprint,
         measured_child_startup_s,
-        reap_tree,
+        reap_contained,
         run_child,
     )
     from .cli import run_cli
@@ -466,7 +466,7 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.children",
         "measured_child_startup_s",
     ),
-    "reap_tree": ("vaultspec_a2a.testing.children", "reap_tree"),
+    "reap_contained": ("vaultspec_a2a.testing.children", "reap_contained"),
     "run_child": ("vaultspec_a2a.testing.children", "run_child"),
     "run_cli": ("vaultspec_a2a.testing.cli", "run_cli"),
     "ResolvedService": ("vaultspec_a2a.testing.endpoints", "ResolvedService"),
@@ -805,8 +805,8 @@ __all__ = [
     "read_acp_frame",
     "read_frame",
     "read_frames_until",
+    "reap_contained",
     "reap_process",
-    "reap_tree",
     "register_lanes",
     "register_session",
     "registry_watch",

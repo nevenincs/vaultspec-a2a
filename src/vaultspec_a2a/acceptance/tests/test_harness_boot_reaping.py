@@ -18,17 +18,19 @@ discriminates rather than passing trivially.
 
 from __future__ import annotations
 
-import subprocess
+import os
 import sys
 from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing import reap_process, spawn_until_ready
+from ...testing import reap_process, spawn_logged, spawn_until_ready
 from ._harness import certified_gateway
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from ...testing import WatchedProcess
 
 # A real HTTP server answering 200 on every path, so readiness genuinely passes.
 _READY_CHILD = """
@@ -51,7 +53,7 @@ HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
 """
 
 
-def test_ready_gateway_is_returned_alive() -> None:
+def test_ready_gateway_is_returned_alive(tmp_path: Path) -> None:
     """Negative control: a gateway that answers is handed back still running.
 
     Proves the reaping proof's liveness assertion is discriminating. The same
@@ -59,21 +61,27 @@ def test_ready_gateway_is_returned_alive() -> None:
     cannot make both scenarios pass, and a helper that killed every child
     indiscriminately would fail this one.
     """
-    spawned: list[subprocess.Popen[bytes]] = []
+    spawned: list[WatchedProcess] = []
 
-    def _spawn(gateway_port: int, _worker_port: int) -> subprocess.Popen[bytes]:
-        proc = subprocess.Popen([sys.executable, "-c", _READY_CHILD, str(gateway_port)])
-        spawned.append(proc)
-        return proc
+    def _spawn(gateway_port: int, _worker_port: int) -> WatchedProcess:
+        child = spawn_logged(
+            [sys.executable, "-c", _READY_CHILD, str(gateway_port)],
+            name="ready child",
+            env=os.environ,
+            log_path=tmp_path / "ready-child.log",
+        )
+        spawned.append(child)
+        return child
 
     try:
-        proc, _gateway_port, _worker_port, base = spawn_until_ready(
+        gateway, _gateway_port, _worker_port, base = spawn_until_ready(
             _spawn,
-            log_path=None,
             attempts=3,
             timeout=20.0,
         )
-        assert proc.poll() is None, "a ready gateway must be returned running"
+        assert gateway.process.poll() is None, (
+            "a ready gateway must be returned running"
+        )
         assert base.startswith("http://127.0.0.1:")
     finally:
         for candidate in spawned:

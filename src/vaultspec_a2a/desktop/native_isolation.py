@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..utils.process import ProcessContainmentError
+from ..utils import ProcessContainmentError
 from ..utils.runtime_exec import is_frozen, module_command
 from ..workspace.environment import scrub_infrastructure_environment
 from ._filesystem_authority import (

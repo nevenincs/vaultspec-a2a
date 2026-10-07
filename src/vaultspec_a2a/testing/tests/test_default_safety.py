@@ -16,7 +16,13 @@ import sys
 from typing import TYPE_CHECKING
 
 from ...lifecycle import load_procs_config
-from ..children import await_child, child_tree_progress, measured_child_startup_s
+from ...utils import ProcessContainment, spawn_contained
+from ..children import (
+    await_child,
+    child_tree_progress,
+    measured_child_startup_s,
+    reap_contained,
+)
 from ..ports import free_port
 from ..sessions import SESSION_LEASE_KEY, effective_worker_count
 
@@ -80,8 +86,11 @@ def test_two_concurrent_processes_never_share_free_ports(tmp_path: Path) -> None
     env = dict(os.environ)
     env["VAULTSPEC_A2A_PROCS_HOME"] = str(tmp_path / "procs")
 
-    def _spawn(tag: str, peer: str) -> subprocess.Popen[bytes]:
-        return subprocess.Popen(
+    def _spawn(
+        tag: str, peer: str
+    ) -> tuple[subprocess.Popen[bytes], ProcessContainment]:
+        containment = ProcessContainment.create()
+        process = spawn_contained(
             [
                 sys.executable,
                 "-c",
@@ -90,26 +99,41 @@ def test_two_concurrent_processes_never_share_free_ports(tmp_path: Path) -> None
                 str(tmp_path / f"{peer}.json"),
                 str(tmp_path / f"{peer}.pid"),
             ],
+            containment,
             env=env,
         )
+        return process, containment
 
-    first, second = _spawn("one", "two"), _spawn("two", "one")
-    (tmp_path / "one.pid").write_text(str(first.pid))
-    (tmp_path / "two.pid").write_text(str(second.pid))
+    allocators = [_spawn("one", "two")]
+    try:
+        allocators.append(_spawn("two", "one"))
+        (first, _), (second, _) = allocators
+        (tmp_path / "one.pid").write_text(str(first.pid))
+        (tmp_path / "two.pid").write_text(str(second.pid))
 
-    # A child parked at the barrier makes no progress of its own while its peer
-    # is still importing, so each wait also watches the other child's tree.
-    def _both_children() -> object:
-        return (child_tree_progress(first.pid), child_tree_progress(second.pid))
+        # A child parked at the barrier makes no progress of its own while its
+        # peer is still importing, so each wait also watches the other child's
+        # tree.
+        def _both_children() -> object:
+            return (child_tree_progress(first.pid), child_tree_progress(second.pid))
 
-    # Both children poll at the barrier, which accrues CPU forever, so a pair
-    # wedged there is caught by a ceiling scaled to this host's start-up cost.
-    ceiling = max(60.0, 40 * measured_child_startup_s())
-    for child, what in ((first, "first allocator"), (second, "second allocator")):
-        exit_code = await_child(
-            child, what=what, fingerprint=_both_children, ceiling_s=ceiling
-        )
-        assert exit_code == 0, f"{what} failed"
+        # Both children poll at the barrier, which accrues CPU forever, so a pair
+        # wedged there is caught by a ceiling scaled to this host's start-up cost.
+        ceiling = max(60.0, 40 * measured_child_startup_s())
+        for (child, containment), what in zip(
+            allocators, ("first allocator", "second allocator"), strict=True
+        ):
+            exit_code = await_child(
+                child,
+                containment,
+                what=what,
+                fingerprint=_both_children,
+                ceiling_s=ceiling,
+            )
+            assert exit_code == 0, f"{what} failed"
+    finally:
+        for child, containment in allocators:
+            reap_contained(child, containment)
     one = set(json.loads((tmp_path / "one.json").read_text()))
     two = set(json.loads((tmp_path / "two.json").read_text()))
     assert len(one) == 10 and len(two) == 10
@@ -168,7 +192,8 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
     env.pop("PYTEST_ADDOPTS", None)
     env["VAULTSPEC_A2A_PROCS_HOME"] = str(home)
     env["VAULTSPEC_A2A_TEST_CPU_BUDGET"] = "4"
-    holder = subprocess.Popen(
+    holder_containment = ProcessContainment.create()
+    holder = spawn_contained(
         [
             sys.executable,
             "-m",
@@ -186,6 +211,7 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
             "no:cacheprovider",
             "-q",
         ],
+        holder_containment,
         cwd=suite,
         env=env,
         stdout=subprocess.PIPE,
@@ -247,7 +273,12 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
         # Released, then awaited: the holder ends the way a session ends -
         # unconfigure, lease release - and a wedged teardown is reaped.
         release_file.write_text("released", encoding="utf-8")
-        holder_exit = await_child(holder, what="the released holding session")
+        try:
+            holder_exit = await_child(
+                holder, holder_containment, what="the released holding session"
+            )
+        finally:
+            reap_contained(holder, holder_containment)
     assert holder_exit == 0, "the holding session did not end cleanly once released"
     assert second.returncode == 0, second.stdout + second.stderr
     assert "1 live peer test session(s); workers 4 -> 2" in second.stdout, second.stdout

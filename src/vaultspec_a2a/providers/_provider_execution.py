@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from ..control.config import settings
 from ..control.provider_execution import require_native_execution
 from ..desktop.native_isolation import NativeLaunchAuthority, linux_isolated_launch
-from ..utils.process import ProcessContainmentError
+from ..utils import ProcessContainmentError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

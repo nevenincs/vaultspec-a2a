@@ -346,11 +346,20 @@ class WorkerBridge:
             self._batch.flush_task = asyncio.create_task(self._deferred_flush(delay))
 
     async def _deferred_flush(self, delay: float | None = None) -> None:
-        """Wait for the flush interval then send accumulated events."""
+        """Wait for the flush interval then send accumulated events.
+
+        An event buffered while this flush was posting saw it as the pending
+        flush and armed none of its own, though the post had already taken its
+        snapshot. The finishing flush arms the next one, or a run that parks
+        right after such an event leaves its park in the buffer until some other
+        run's event happens to stir the bridge.
+        """
         await asyncio.sleep(
             settings.ipc_flush_interval_seconds if delay is None else delay
         )
         await self.flush_events()
+        if self._batch.events:
+            self._schedule_flush(settings.ipc_flush_interval_seconds)
 
     async def _post_event_batch(
         self,

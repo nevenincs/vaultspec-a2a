@@ -356,6 +356,40 @@ async def test_a_backlog_the_cadence_flush_failed_is_driven_again() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_event_buffered_during_a_cadence_post_is_delivered_unprompted() -> (
+    None
+):
+    """An event that arrives while the cadence flush is posting still goes out.
+
+    The in-flight flush has already taken its snapshot, yet the new event sees it
+    as the pending flush and arms none of its own. A run that parks right after
+    such an event emits nothing more, so unless the finishing flush arms the next
+    one, the park waits in the buffer for an unrelated run to stir the bridge.
+    """
+    gateway = _SizeRecordingGateway()
+    gateway.gate = asyncio.Event()
+    with settings_override(ipc_flush_interval_seconds=0.01):
+        bridge = _bridge_to(gateway.app)
+        try:
+            await bridge.send_event("run-bounds", _progress(0, size=32))
+            while gateway.in_flight == 0:
+                await asyncio.sleep(0.005)
+
+            await bridge.send_event(
+                "run-bounds", {"event_type": "permission_request", "request_id": "p"}
+            )
+            gateway.gate.set()
+            async with asyncio.timeout(5.0):
+                while len(gateway.events) < 2:
+                    await asyncio.sleep(0.01)
+        finally:
+            await bridge.close()
+
+    relayed = [event["payload"].get("event_type") for event in gateway.events]
+    assert relayed == ["message_chunk", "permission_request"]
+
+
+@pytest.mark.asyncio
 async def test_two_flushes_never_overlap_on_the_wire() -> None:
     """The cadence flush and a terminal's immediate flush take turns.
 

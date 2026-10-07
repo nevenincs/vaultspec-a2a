@@ -16,32 +16,17 @@ variables — the same path production takes.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control.config import Settings
 from ...desktop.profile import derive_state_paths
 from ...testing import armed_environment as _environment
+from ...testing.factories import build_settings
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
     from pathlib import Path
-
-
-class _SettingsEnvFileFactory(Protocol):
-    def __call__(self, *, _env_file: Path | None) -> Settings: ...
-
-
-def _settings() -> Settings:
-    """Construct with dotenv discovery disabled, typed for basedpyright.
-
-    ``BaseSettings.__init__`` accepts ``_env_file``, but pydantic's
-    dataclass-transform ``__init__`` synthesis for subclasses hides it from
-    static analysis; the cast recovers the real constructor signature (the
-    same pattern used in ``test_absolute_path_requirement.py``).
-    """
-    return cast("_SettingsEnvFileFactory", Settings)(_env_file=None)
 
 
 _CONFIG_LOGGER = "vaultspec_a2a.control.config"
@@ -95,7 +80,7 @@ def test_a_discarded_server_url_is_reported_without_its_password(
         caplog.at_level(logging.WARNING, logger=_CONFIG_LOGGER),
         _armed(app_home, VAULTSPEC_A2A_DATABASE_URL=supplied),
     ):
-        _settings()
+        build_settings(env_file=None)
 
     messages = _warnings(caplog)
     assert any("VAULTSPEC_A2A_DATABASE_URL" in message for message in messages)
@@ -115,7 +100,7 @@ def test_an_explicit_database_url_discarded_by_seating_is_reported(
         caplog.at_level(logging.WARNING, logger=_CONFIG_LOGGER),
         _armed(app_home, VAULTSPEC_A2A_DATABASE_URL=supplied),
     ):
-        armed = _settings()
+        armed = build_settings(env_file=None)
 
     messages = _warnings(caplog)
     assert len(messages) == 1, messages
@@ -136,7 +121,7 @@ def test_an_untouched_default_displaced_by_seating_stays_silent(
     state = derive_state_paths(app_home)
 
     with caplog.at_level(logging.WARNING, logger=_CONFIG_LOGGER), _armed(app_home):
-        armed = _settings()
+        armed = build_settings(env_file=None)
 
     assert _warnings(caplog) == []
     # Silence is not inaction: the seating still replaced every default.
@@ -162,7 +147,7 @@ def test_every_displaced_setting_is_named_individually(
             VAULTSPEC_A2A_HOME=str(elsewhere / "home"),
         ),
     ):
-        _settings()
+        build_settings(env_file=None)
 
     messages = _warnings(caplog)
     assert len(messages) == 4, messages
@@ -185,7 +170,7 @@ def test_an_unarmed_profile_never_warns(
             VAULTSPEC_A2A_DATABASE_URL=supplied,
         ),
     ):
-        unarmed = _settings()
+        unarmed = build_settings(env_file=None)
 
     assert _warnings(caplog) == []
     assert unarmed.database_url == supplied

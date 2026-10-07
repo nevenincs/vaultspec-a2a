@@ -1,16 +1,12 @@
 """Provider catalog settings must resolve one execution lane deterministically."""
 
 from pathlib import Path
-from typing import Protocol, cast
 
 import pytest
 from pydantic import ValidationError
 
+from ...testing.factories import build_settings
 from ..config import Settings
-
-
-class _SettingsEnvFileFactory(Protocol):
-    def __call__(self, *, _env_file: Path) -> Settings: ...
 
 
 def test_kimi_temporary_provider_uses_only_current_names() -> None:
@@ -88,7 +84,7 @@ def test_retired_kimi_names_in_a_real_env_file_are_ignored(tmp_path: Path) -> No
         encoding="utf-8",
     )
 
-    configured = cast("_SettingsEnvFileFactory", Settings)(_env_file=env_file)
+    configured = build_settings(env_file=env_file)
 
     assert configured.kimi_api_key is None
     assert configured.kimi_base_url is None

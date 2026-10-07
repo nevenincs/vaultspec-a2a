@@ -14,15 +14,15 @@ from dataclasses import dataclass
 from inspect import Parameter, Signature
 from typing import TYPE_CHECKING, Any, cast, override
 
-from sqlalchemy import select
-
 from ..database import (
     CheckpointRead,
     ControlActionModel,
     ThreadModel,
     begin_write_transaction,
+    get_control_action,
     get_control_action_by_idempotency_key,
     get_thread,
+    get_unapplied_control_actions,
     mark_control_action_applied,
     read_latest_checkpoint,
     settle_control_action_lease,
@@ -571,7 +571,7 @@ async def _claim_and_dispatch(
             failure_type=FailureType.INCOMPATIBLE_STATE,
             error_detail="Accepted action no longer owns the current run",
         )
-    action = await db.get(ControlActionModel, claim.action_id, populate_existing=True)
+    action = await get_control_action(db, claim.action_id, refresh=True)
     if action is None:
         raise RuntimeError("claimed clarification action disappeared")
     result = await _claimed_action_result(db, action, claim, context, thread_status)
@@ -684,19 +684,8 @@ async def redrive_clarification_actions(
 ) -> ClarificationRecoverySummary:
     """Settle receipted actions and redrive expired parked leases after restart."""
     async with session_factory() as db:
-        rows = (
-            (
-                await db.execute(
-                    select(ControlActionModel).where(
-                        ControlActionModel.idempotency_key.like(
-                            f"{CLARIFICATION_RESPONSE_KEY_PREFIX}%"
-                        ),
-                        ControlActionModel.applied_at.is_(None),
-                    )
-                )
-            )
-            .scalars()
-            .all()
+        rows = await get_unapplied_control_actions(
+            db, idempotency_key_prefix=CLARIFICATION_RESPONSE_KEY_PREFIX
         )
 
     applied = dispatched = deferred = conflicted = 0

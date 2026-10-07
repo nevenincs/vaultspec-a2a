@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ...database import get_thread
+from ...database import count_queued_continuations, get_thread
 from ...thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
@@ -33,7 +33,6 @@ from ..recovery_authority import (
     RecoveryTrigger,
     reconcile_run_checkpoint,
 )
-from ..repositories import count_queued_continuations
 from ._continuation import (
     FIRST_RECEIPT,
     RUN,

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 from ...thread import RunWriteAuthority, ThreadWriteExpectation
 from ...thread.enums import ControlActionType, InvalidTransitionError, ThreadStatus
-from ..permission_repository import create_control_action
+from ..control_action_repository import create_control_action
 from ..thread_repository import (
     ThreadStatusElectionOutcome,
     create_thread,

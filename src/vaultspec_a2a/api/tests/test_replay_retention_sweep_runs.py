@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from ...database.permission_repository import create_control_action
+from ...database import create_control_action
 from ...database.run_event_repository import RunEventRecord, RunEventStore
 from ...database.thread_repository import create_thread
 from ...testing import (

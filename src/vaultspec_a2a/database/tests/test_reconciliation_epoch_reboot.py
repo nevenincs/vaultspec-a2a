@@ -20,16 +20,16 @@ from ...database import (
     get_thread,
     record_permission_request,
 )
-from ...database.permission_repository import (
-    create_control_action,
-    get_control_action_by_idempotency_key,
-    get_or_create_control_action,
-)
 from ...database.reconciliation import reconcile_threads_on_startup
 from ...testing import current_execution_metadata
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionType
+from ..control_action_repository import (
+    create_control_action,
+    get_control_action_by_idempotency_key,
+    get_or_create_control_action,
+)
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig

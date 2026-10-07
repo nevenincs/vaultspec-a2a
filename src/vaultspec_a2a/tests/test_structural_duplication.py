@@ -98,15 +98,6 @@ _ACCEPTED: Final[tuple[frozenset[str], ...]] = (
             "database/artifact_repository.py::sum_cost_by_thread",
         }
     ),
-    # Same repository, two lookup keys onto one table. Merging them would take
-    # the key as a column name, which is how a typo becomes a runtime error
-    # instead of a name error.
-    frozenset(
-        {
-            "database/permission_repository.py::get_control_action_by_dispatch_id",
-            "database/permission_repository.py::get_control_action_by_idempotency_key",
-        }
-    ),
     # Same module, differing in which debounced event kind is broadcast.
     frozenset(
         {

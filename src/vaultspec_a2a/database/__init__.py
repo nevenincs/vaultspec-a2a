@@ -2,7 +2,8 @@
 
 :mod:`vaultspec_a2a.database.models` defines SQLAlchemy models, and
 :mod:`vaultspec_a2a.database.session` owns asynchronous sessions. Repository
-modules manage audit logs, authoring cursors, permissions, and threads.
+modules manage audit logs, authoring cursors, the control action journal,
+permissions, and threads.
 
 Migration support belongs to :mod:`vaultspec_a2a.database.migrations`.
 Persistence stores :mod:`vaultspec_a2a.thread` state for
@@ -35,6 +36,68 @@ from .checkpoints import read_latest_checkpoint as read_latest_checkpoint
 from .compatibility import SchemaCompatibilityError as SchemaCompatibilityError
 from .compatibility import supported_migration_head as supported_migration_head
 from .compatibility import validate_desktop_schema as validate_desktop_schema
+from .control_action_repository import (
+    ControlActionReservation as ControlActionReservation,
+)
+from .control_action_repository import (
+    acquire_control_action_lease as acquire_control_action_lease,
+)
+from .control_action_repository import (
+    commit_control_action_lease as commit_control_action_lease,
+)
+from .control_action_repository import (
+    count_queued_continuations as count_queued_continuations,
+)
+from .control_action_repository import create_control_action as create_control_action
+from .control_action_repository import enqueue_continuation as enqueue_continuation
+from .control_action_repository import get_control_action as get_control_action
+from .control_action_repository import (
+    get_control_action_by_dispatch_id as get_control_action_by_dispatch_id,
+)
+from .control_action_repository import (
+    get_control_action_by_idempotency_key as get_control_action_by_idempotency_key,
+)
+from .control_action_repository import (
+    get_latest_control_action as get_latest_control_action,
+)
+from .control_action_repository import (
+    get_unapplied_control_actions as get_unapplied_control_actions,
+)
+from .control_action_repository import (
+    has_live_queued_continuation_lease as has_live_queued_continuation_lease,
+)
+from .control_action_repository import (
+    idempotency_key_admitted as idempotency_key_admitted,
+)
+from .control_action_repository import (
+    mark_control_action_applied as mark_control_action_applied,
+)
+from .control_action_repository import (
+    mark_control_action_duplicate as mark_control_action_duplicate,
+)
+from .control_action_repository import (
+    mark_control_action_superseded as mark_control_action_superseded,
+)
+from .control_action_repository import next_queue_position as next_queue_position
+from .control_action_repository import (
+    overdue_recovery_actions as overdue_recovery_actions,
+)
+from .control_action_repository import (
+    persist_graph_action_receipt as persist_graph_action_receipt,
+)
+from .control_action_repository import (
+    read_next_queued_continuation as read_next_queued_continuation,
+)
+from .control_action_repository import (
+    reject_queued_continuations as reject_queued_continuations,
+)
+from .control_action_repository import (
+    release_control_action_lease as release_control_action_lease,
+)
+from .control_action_repository import reserve_control_action as reserve_control_action
+from .control_action_repository import (
+    settle_control_action_lease as settle_control_action_lease,
+)
 from .migrate import build_migration_config as build_migration_config
 from .migrate import migration_script_location as migration_script_location
 from .migrate import run_migrations as run_migrations
@@ -53,45 +116,17 @@ from .models import RunEventModel as RunEventModel
 from .models import ThreadDeletionSagaModel as ThreadDeletionSagaModel
 from .models import ThreadExecutionStateModel as ThreadExecutionStateModel
 from .models import ThreadModel as ThreadModel
-from .permission_repository import (
-    ControlActionReservation as ControlActionReservation,
-)
 from .permission_repository import PendingPermission as PendingPermission
-from .permission_repository import (
-    acquire_control_action_lease as acquire_control_action_lease,
-)
 from .permission_repository import (
     actionable_pending_permissions as actionable_pending_permissions,
 )
 from .permission_repository import (
-    commit_control_action_lease as commit_control_action_lease,
-)
-from .permission_repository import create_control_action as create_control_action
-from .permission_repository import (
     expire_pending_permission_requests as expire_pending_permission_requests,
-)
-from .permission_repository import (
-    get_control_action_by_dispatch_id as get_control_action_by_dispatch_id,
-)
-from .permission_repository import (
-    get_control_action_by_idempotency_key as get_control_action_by_idempotency_key,
-)
-from .permission_repository import (
-    get_latest_control_action as get_latest_control_action,
 )
 from .permission_repository import (
     get_pending_permission_requests as get_pending_permission_requests,
 )
 from .permission_repository import get_permission_request as get_permission_request
-from .permission_repository import (
-    mark_control_action_applied as mark_control_action_applied,
-)
-from .permission_repository import (
-    mark_control_action_duplicate as mark_control_action_duplicate,
-)
-from .permission_repository import (
-    mark_control_action_superseded as mark_control_action_superseded,
-)
 from .permission_repository import (
     mark_permission_request_applied as mark_permission_request_applied,
 )
@@ -108,16 +143,7 @@ from .permission_repository import (
     record_permission_response_submission as record_permission_response_submission,
 )
 from .permission_repository import (
-    release_control_action_lease as release_control_action_lease,
-)
-from .permission_repository import (
-    reserve_control_action as reserve_control_action,
-)
-from .permission_repository import (
     reset_permission_response_submission as reset_permission_response_submission,
-)
-from .permission_repository import (
-    settle_control_action_lease as settle_control_action_lease,
 )
 from .permission_repository import (
     supersede_permission_requests as supersede_permission_requests,
@@ -254,14 +280,17 @@ __all__ = [
     "configure_sqlite_engine",
     "configure_sqlite_transactions",
     "count_pending_sdd_backfill",
+    "count_queued_continuations",
     "create_control_action",
     "create_thread",
     "delete_thread",
     "due_recovery_attempt_ids",
     "elect_thread_deleting",
     "elect_thread_status",
+    "enqueue_continuation",
     "expire_pending_permission_requests",
     "get_authoring_cursor",
+    "get_control_action",
     "get_control_action_by_dispatch_id",
     "get_control_action_by_idempotency_key",
     "get_db",
@@ -273,6 +302,9 @@ __all__ = [
     "get_session_factory",
     "get_thread",
     "get_thread_execution_state",
+    "get_unapplied_control_actions",
+    "has_live_queued_continuation_lease",
+    "idempotency_key_admitted",
     "init_db",
     "inspect_sqlite_database",
     "list_active_thread_page",
@@ -283,14 +315,19 @@ __all__ = [
     "mark_control_action_superseded",
     "mark_permission_request_applied",
     "migration_script_location",
+    "next_queue_position",
     "normalize_workspace_identity",
     "outstanding_permission_pause",
+    "overdue_recovery_actions",
     "path_safe_run_id_clause",
     "pending_document_approval_thread",
+    "persist_graph_action_receipt",
     "read_latest_checkpoint",
+    "read_next_queued_continuation",
     "record_permission_request",
     "record_permission_response_submission",
     "record_thread_execution_state",
+    "reject_queued_continuations",
     "release_control_action_lease",
     "release_recovery_claim",
     "reschedule_recovery_claim",

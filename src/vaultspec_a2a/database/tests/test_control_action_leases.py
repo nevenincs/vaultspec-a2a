@@ -16,8 +16,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...thread.enums import ControlActionType
-from ..models import ControlActionModel
-from ..permission_repository import (
+from ..control_action_repository import (
     acquire_control_action_lease,
     commit_control_action_lease,
     create_control_action,
@@ -26,6 +25,7 @@ from ..permission_repository import (
     reserve_control_action,
     settle_control_action_lease,
 )
+from ..models import ControlActionModel
 from ..thread_repository import create_thread, delete_thread
 
 

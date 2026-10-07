@@ -15,7 +15,9 @@ from ..database import (
     ThreadStatusElectionOutcome,
     elect_thread_status,
     get_control_action_by_dispatch_id,
+    has_live_queued_continuation_lease,
     mark_control_action_applied,
+    read_next_queued_continuation,
     thread_write_expectation,
 )
 from ..thread.checkpoint_evidence import (
@@ -41,8 +43,6 @@ from .repositories.continuation_queue import (
     open_promoted_continuation,
     promoted_turn_deadline,
     promotion_dispatch_pending,
-    promotion_owner_holds_run,
-    read_next_queued_continuation,
     run_lifetime_deadline,
 )
 from .terminal_settlement import TerminalEvidence, lock_terminal_run, settle_terminal
@@ -382,7 +382,7 @@ async def reconcile_run_checkpoint(
     observed_at = datetime.now(UTC)
     lifetime_deadline_at = run_lifetime_deadline(thread.created_at)
     promotion_pending = promotion_dispatch_pending(action, observed_at=observed_at)
-    queue_owned = await promotion_owner_holds_run(
+    queue_owned = await has_live_queued_continuation_lease(
         db, thread_id=thread_id, observed_at=observed_at
     )
     # The checkpoint store is a different transaction owner. Release this read

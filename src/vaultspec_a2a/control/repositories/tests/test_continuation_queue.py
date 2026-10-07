@@ -21,15 +21,17 @@ from ....control.repositories import (
     ContinuationQueueLimits,
     QueuedContinuationDisposition,
     QueuedContinuationRequest,
-    count_queued_continuations,
-    count_service_queued_continuations,
-    next_queue_position,
-    read_next_queued_continuation,
     reserve_queued_continuation,
     run_lifetime_deadline,
     served_continuation_queue_limits,
 )
-from ....database import create_thread, get_thread
+from ....database import (
+    count_queued_continuations,
+    create_thread,
+    get_thread,
+    next_queue_position,
+    read_next_queued_continuation,
+)
 from ....database.models import ControlActionModel
 from ....domain_config import domain_config
 from ....ipc.schemas import DispatchRequest
@@ -266,7 +268,7 @@ async def test_the_service_cap_refuses_a_second_run_with_room_of_its_own(
     assert refused.disposition is QueuedContinuationDisposition.QUEUE_FULL
     async with migrated_session_factory() as session:
         assert await count_queued_continuations(session, thread_id=other) == 0
-        assert await count_service_queued_continuations(session) == 1
+        assert await count_queued_continuations(session) == 1
 
 
 @pytest.mark.asyncio
@@ -345,7 +347,7 @@ async def test_a_run_whose_lifetime_is_spent_admits_nothing(
         await session.rollback()
 
     async with migrated_session_factory() as session:
-        assert await count_service_queued_continuations(session) == 0
+        assert await count_queued_continuations(session) == 0
 
 
 def test_the_served_limits_and_lifetime_come_from_configuration() -> None:

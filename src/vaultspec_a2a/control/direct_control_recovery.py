@@ -20,8 +20,8 @@ from ..database import (
     get_control_action_by_dispatch_id,
     get_thread,
     mark_control_action_applied,
+    overdue_recovery_actions,
     release_control_action_lease,
-    thread_owned_by,
     thread_write_expectation,
 )
 from ..domain_config import domain_config
@@ -29,7 +29,6 @@ from ..thread.action_receipts import GRAPH_ACTION_VERB
 from ..thread.dispatch_policy import FailureType
 from ..thread.enums import (
     NON_ACTIVE_STATUSES,
-    RECOVERY_ACTION_TYPES,
     ControlActionResultStatus,
     ControlActionType,
     RecoveryCondition,
@@ -103,26 +102,7 @@ async def _expire_overdue_actions(
     observed_at: datetime,
     page_size: int,
 ) -> int:
-    rows = (
-        await db.execute(
-            select(ControlActionModel, ThreadModel)
-            .join(ThreadModel, ThreadModel.id == ControlActionModel.thread_id)
-            .where(
-                ControlActionModel.action_type.in_(
-                    action.value for action in RECOVERY_ACTION_TYPES
-                ),
-                ControlActionModel.applied_at.is_(None),
-                ControlActionModel.recovery_deadline_at.is_not(None),
-                ControlActionModel.recovery_deadline_at <= observed_at,
-                ThreadModel.is_active.is_(True),
-                thread_owned_by(
-                    ControlActionModel.action_type, ControlActionModel.dispatch_id
-                ),
-            )
-            .order_by(ControlActionModel.recovery_deadline_at)
-            .limit(page_size)
-        )
-    ).all()
+    rows = await overdue_recovery_actions(db, observed_at=observed_at, limit=page_size)
     # Every overdue row is snapshotted before the first settlement, because a
     # refused item rolls the session back and a rollback expires every loaded
     # row: reading one afterwards would attempt implicit async I/O. Each
@@ -141,7 +121,7 @@ async def _expire_overdue_actions(
             worker_generation=row.worker_generation,
             recovery_deadline_at=row.recovery_deadline_at,
         )
-        for row, _thread in rows
+        for row in rows
         if row.dispatch_id is not None and row.recovery_deadline_at is not None
     ]
     await db.rollback()
@@ -289,14 +269,11 @@ async def _settle_permanent_refusal(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    row = await db.scalar(
-        select(ControlActionModel)
-        .where(
-            ControlActionModel.thread_id == action.thread_id,
-            ControlActionModel.dispatch_id == action.identity.dispatch_id,
-        )
-        .with_for_update()
-        .execution_options(populate_existing=True)
+    row = await get_control_action_by_dispatch_id(
+        db,
+        thread_id=action.thread_id,
+        dispatch_id=action.identity.dispatch_id,
+        lock=True,
     )
     if (
         thread is None

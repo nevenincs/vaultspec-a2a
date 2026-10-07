@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from ...database.permission_repository import create_control_action
+from ...database import create_control_action
 from ...database.thread_repository import create_thread
 from ...desktop.credentials import WORKER_IPC_CREDENTIAL_NAME
 from ...desktop.profile import derive_state_paths

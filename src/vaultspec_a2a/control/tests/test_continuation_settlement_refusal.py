@@ -26,6 +26,7 @@ import pytest
 from ...database import (
     ThreadStatusElectionOutcome,
     begin_write_transaction,
+    count_queued_continuations,
     create_control_action,
     create_thread,
     elect_thread_status,
@@ -47,7 +48,6 @@ from ..circuit_breaker import WorkerCircuitBreaker
 from ..dispatch import redispatch_reconciling_threads
 from ..dispatch_receipts import prepare_graph_action_receipt
 from ..event_handlers import _handle_terminal_event
-from ..repositories import count_queued_continuations
 from ._continuation import (
     FIRST_RECEIPT,
     RUN,

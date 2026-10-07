@@ -21,7 +21,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
-from ..database import begin_write_transaction, outstanding_permission_pause
+from ..database import (
+    begin_write_transaction,
+    idempotency_key_admitted,
+    outstanding_permission_pause,
+)
 from ..thread.dispatch_policy import FailureType
 from ..thread.enums import ControlActionType, PermissionRequestStatus, ThreadStatus
 from ..thread.message_policy import (
@@ -34,7 +38,6 @@ from .leased_dispatch import DispatchRefusal, build_followon_dispatch
 from .repositories.continuation_queue import (
     QueuedContinuationDisposition,
     QueuedContinuationRequest,
-    continuation_already_admitted,
     lock_run_for_continuation_decision,
     reserve_queued_continuation,
     run_lifetime_deadline,
@@ -183,7 +186,7 @@ async def send_followup_message(
     # A repeat of an accepted key is not a new offer, so the run's current
     # state is not an answer to it: the caller is asking what became of a turn
     # it already sent. Eligibility decides new work only.
-    replaying = await continuation_already_admitted(
+    replaying = await idempotency_key_admitted(
         db,
         thread_id=options["thread_id"],
         idempotency_key=options["idempotency_key"],

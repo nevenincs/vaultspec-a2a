@@ -30,8 +30,8 @@ from ...thread.enums import (
     ControlActionType,
     ThreadStatus,
 )
+from ..control_action_repository import create_control_action
 from ..models import ControlActionModel, ThreadModel
-from ..permission_repository import create_control_action
 from ..thread_repository import create_thread
 from ._backends import downgrade, empty_database_url, synchronous_url, upgrade
 

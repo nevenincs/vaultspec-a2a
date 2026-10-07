@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...database import get_thread
+from ...database import count_queued_continuations, get_thread
 from ...domain_config import domain_config
 from ...thread.enums import ControlActionResultStatus, ThreadStatus
 from ..recovery_authority import (
@@ -28,7 +28,7 @@ from ..recovery_authority import (
     RecoveryTrigger,
     reconcile_run_checkpoint,
 )
-from ..repositories import count_queued_continuations, run_lifetime_deadline
+from ..repositories import run_lifetime_deadline
 from ._continuation import (
     RUN,
     BusyRun,

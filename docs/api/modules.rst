@@ -395,6 +395,9 @@ Persistence
 .. py:module:: vaultspec_a2a.database.authoring_cursor_repository
    :synopsis: Authoring cursor persistence operations.
 
+.. py:module:: vaultspec_a2a.database.control_action_repository
+   :synopsis: Control-action journal, lease and continuation-queue persistence.
+
 .. py:module:: vaultspec_a2a.database.permission_repository
    :synopsis: Permission persistence operations.
 

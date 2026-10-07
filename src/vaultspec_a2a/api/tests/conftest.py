@@ -99,13 +99,14 @@ class _InProcessWorker:
     The dispatch route is guarded by the worker's own bearer dependency and
     refuses at capacity with the worker's own refusal, so the gateway classifies
     a genuine definite non-delivery from the response the real worker sends.
-    The client presents the gateway's own worker-IPC header.
+    The client presents the worker-IPC header for *internal_token*, the secret the
+    gateway under test seated.
 
     Attributes:
         dispatches: All dispatch request bodies received so far.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, internal_token: str | None) -> None:
         self.dispatches: list[DispatchPayload] = []
         self.dispatch_received = asyncio.Event()
         self.release_dispatch = asyncio.Event()
@@ -141,7 +142,7 @@ class _InProcessWorker:
         self._client = httpx.AsyncClient(
             transport=ASGITransport(app=_app),
             base_url="http://test-worker:8001",
-            headers=_internal_auth_headers(),
+            headers=_internal_auth_headers(internal_token),
         )
 
     @property
@@ -300,7 +301,7 @@ def make_app(
     if aggregator is None:
         aggregator = EventAggregator()
 
-    worker = _InProcessWorker()
+    worker = _InProcessWorker(app.state.internal_token)
 
     # ONE catalog service for the whole session, not one per app.
     #

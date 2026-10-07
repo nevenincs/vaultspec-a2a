@@ -46,7 +46,9 @@ def _gateway_app() -> FastAPI:
     app.include_router(internal_router)
     # Deliberately NOT seating a liveness record: the accessor is the thing under
     # test, and an app that declares nothing is the case a reader used to have to
-    # guess about.
+    # guess about. The internal token is seated as None, which the development
+    # environment reads as no authentication.
+    app.state.internal_token = None
     app.state.aggregator = None
     app.state.db_session_factory = None
     return app

@@ -29,6 +29,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+# The IPC secret the gateway under test presents when it evicts a foreign worker.
+_EVICTION_TOKEN = "foreign-eviction-token"
+
+
 class _ShutdownObservation(TypedDict):
     called: bool
     authorization: str | None
@@ -180,13 +184,15 @@ async def test_auto_spawn_refuses_retained_foreign_worker() -> None:
         "gateway_url": "http://127.0.0.1:59999",
     }
     with _worker_like(body) as (url, port, log):
-        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=True)
+        spawner = LazyWorkerSpawner(
+            worker_url=url,
+            worker_port=port,
+            auto_spawn=True,
+            internal_token=_EVICTION_TOKEN,
+        )
         await spawner.ensure_worker()
         still_healthy = await probe_worker_health(url)
-    expected_authorization = (
-        None if settings.internal_token is None else f"Bearer {settings.internal_token}"
-    )
-    assert log == {"called": True, "authorization": expected_authorization}
+    assert log == {"called": True, "authorization": f"Bearer {_EVICTION_TOKEN}"}
     assert still_healthy == WorkerHealthProbe(healthy=True, body=body)
     assert spawner.spawned is False
     assert spawner.process is None
@@ -226,6 +232,7 @@ def test_subprocess_auto_spawn_sends_configured_shutdown_authorization(
                 WorkerHealthProbe,
                 probe_worker_health,
             )
+            from vaultspec_a2a.control.config import settings
             from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
 
 
@@ -240,6 +247,7 @@ def test_subprocess_auto_spawn_sends_configured_shutdown_authorization(
                     worker_url=worker_url,
                     worker_port={port},
                     auto_spawn=True,
+                    internal_token=settings.internal_token,
                 )
                 await spawner.ensure_worker()
                 assert spawner.spawned is False

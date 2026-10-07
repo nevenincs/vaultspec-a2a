@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from vaultspec_core.config import ConfigurationError
 
+from ...domain_config import DomainSettingsConfig
 from ...testing import armed_environment
 from ..config import Settings
 from ..settings_base import ENV_FILE_ENV, PROJECT_ROOT_ENV, read_configuration
@@ -94,7 +95,7 @@ def test_every_rejected_value_is_named_with_its_variable_and_shape(
                 PROJECT_ROOT_ENV: str(tmp_path),
                 ENV_FILE_ENV: None,
                 "VAULTSPEC_A2A_PORT": "notaport",
-                "VAULTSPEC_A2A_MAX_CONCURRENT_THREADS": "lots",
+                "VAULTSPEC_A2A_WORKER_PORT": "lots",
             }
         ),
         pytest.raises(ConfigurationError) as refusal,
@@ -103,10 +104,31 @@ def test_every_rejected_value_is_named_with_its_variable_and_shape(
 
     reported = str(refusal.value)
     assert "VAULTSPEC_A2A_PORT must be int, got 'notaport'" in reported
-    assert "VAULTSPEC_A2A_MAX_CONCURRENT_THREADS must be int, got 'lots'" in reported
+    assert "VAULTSPEC_A2A_WORKER_PORT must be int, got 'lots'" in reported
     # The field names pydantic would have reported instead say nothing about
     # which variable to edit, so they are not what an operator is handed.
     assert "\nport " not in reported
+
+
+def test_a_rejected_domain_value_is_named_with_its_variable_and_shape(
+    tmp_path: Path,
+) -> None:
+    """The behavioural knobs are refused through the same one-line contract."""
+    with (
+        armed_environment(
+            **{
+                PROJECT_ROOT_ENV: str(tmp_path),
+                ENV_FILE_ENV: None,
+                "VAULTSPEC_A2A_MAX_CONCURRENT_THREADS": "lots",
+            }
+        ),
+        pytest.raises(ConfigurationError) as refusal,
+    ):
+        read_configuration(DomainSettingsConfig)
+
+    assert "VAULTSPEC_A2A_MAX_CONCURRENT_THREADS must be int, got 'lots'" in str(
+        refusal.value
+    )
 
 
 def test_a_rejected_credential_is_named_without_its_value(tmp_path: Path) -> None:

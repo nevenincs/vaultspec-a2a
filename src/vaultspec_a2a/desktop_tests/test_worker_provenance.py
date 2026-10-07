@@ -316,7 +316,14 @@ worker_url = f"http://127.0.0.1:{worker_port}"
 # generation=2 makes the reported generation 1 a PRIOR_GENERATION verdict, which
 # authorizes eviction under the armed profile; the squatter's refusal to release
 # the port makes that eviction fail.
-owned = asyncio.run(_spawn_worker_owned(worker_url, worker_port, generation=2))
+owned = asyncio.run(
+    _spawn_worker_owned(
+        worker_url,
+        worker_port,
+        generation=2,
+        internal_token=settings.internal_token,
+    )
+)
 autospawn_log = _worker_stderr_log_path(worker_port)
 
 # Were the conflict guard absent, the seam would spawn a real contained worker onto

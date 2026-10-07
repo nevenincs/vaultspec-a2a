@@ -18,6 +18,7 @@ _ATTACH = "attach-credential-abcdef0123456789ffff"
 def _internal_app() -> FastAPI:
     app = FastAPI()
     app.include_router(internal_router)
+    app.state.internal_token = _WORKER_IPC
     return app
 
 
@@ -33,9 +34,7 @@ async def _get_health(headers: dict[str, str]) -> httpx.Response:
 @pytest.mark.asyncio
 async def test_internal_health_requires_worker_ipc() -> None:
     """The internal readiness probe rejects a request with no worker IPC bearer."""
-    with _settings_override(
-        environment=Environment.TESTING, internal_token=_WORKER_IPC
-    ):
+    with _settings_override(environment=Environment.TESTING):
         response = await _get_health({})
     assert response.status_code == 401
 
@@ -43,9 +42,7 @@ async def test_internal_health_requires_worker_ipc() -> None:
 @pytest.mark.asyncio
 async def test_internal_health_rejects_attach_credential() -> None:
     """The attach credential is not interchangeable with the worker IPC one."""
-    with _settings_override(
-        environment=Environment.TESTING, internal_token=_WORKER_IPC
-    ):
+    with _settings_override(environment=Environment.TESTING):
         response = await _get_health({"Authorization": f"Bearer {_ATTACH}"})
     assert response.status_code == 401
 
@@ -53,9 +50,7 @@ async def test_internal_health_rejects_attach_credential() -> None:
 @pytest.mark.asyncio
 async def test_internal_health_accepts_worker_ipc() -> None:
     """The worker IPC bearer passes the internal gate."""
-    with _settings_override(
-        environment=Environment.TESTING, internal_token=_WORKER_IPC
-    ):
+    with _settings_override(environment=Environment.TESTING):
         response = await _get_health({"Authorization": f"Bearer {_WORKER_IPC}"})
     assert response.status_code == 200
     assert response.json()["service"] == "gateway"
@@ -66,9 +61,7 @@ async def test_internal_heartbeat_rejects_attach_credential() -> None:
     """Event/heartbeat traffic likewise refuses the attach credential."""
     app = _internal_app()
     transport = ASGITransport(app=app)
-    with _settings_override(
-        environment=Environment.TESTING, internal_token=_WORKER_IPC
-    ):
+    with _settings_override(environment=Environment.TESTING):
         async with httpx.AsyncClient(
             transport=transport, base_url="http://gateway.test"
         ) as client:

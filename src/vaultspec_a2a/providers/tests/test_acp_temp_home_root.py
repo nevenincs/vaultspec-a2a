@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 def test_the_default_profile_keeps_temporary_homes_in_its_state_home() -> None:
     settings = Settings()
 
-    root = settings.temp_homes_dir
+    root = settings.state_layout.temp_homes_dir
 
     assert root == settings.a2a_home / "tmp" / "homes"
     # The configured state home may itself be under the OS temporary parent,
@@ -38,7 +38,7 @@ def test_the_armed_profile_keeps_them_inside_its_application_home(
     app_home.mkdir()
     settings = Settings(desktop_app_home=app_home)
 
-    resolved = settings.temp_homes_dir
+    resolved = settings.state_layout.temp_homes_dir
 
     assert resolved == derive_state_paths(app_home).temp_homes_dir
     assert app_home in resolved.parents

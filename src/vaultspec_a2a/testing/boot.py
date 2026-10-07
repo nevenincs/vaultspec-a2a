@@ -907,23 +907,25 @@ async def loopback_callback_bridge(
     client; only the callback destination is local to the test. With no
     *gateway* the callbacks are accepted and dropped; given the gateway app
     under test, they reach its real internal routes, so the worker's own frames
-    drive the relay a deployed gateway runs.
+    drive the relay a deployed gateway runs. The bridge presents the internal
+    token that gateway seated, since that is the secret its relay routes verify.
     """
-    from ..control.config import settings
     from ..worker.ipc import WorkerBridge
 
+    internal_token: str | None = None
     if gateway is None:
         app = FastAPI()
         for path in ("/internal/events/batch", "/internal/heartbeat"):
             app.add_api_route(path, _accept_callback, methods=["POST"])
     else:
         app = gateway
+        internal_token = gateway.state.internal_token
 
     async with serve_on_loopback(app, lifespan="off") as base:
         bridge = WorkerBridge(
             api_url=base,
             worker_id="loopback-callback-worker",
-            internal_token=settings.internal_token,
+            internal_token=internal_token,
         )
         try:
             yield bridge

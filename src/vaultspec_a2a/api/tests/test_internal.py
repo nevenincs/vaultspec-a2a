@@ -212,6 +212,8 @@ def _make_test_app(
     """
     app = FastAPI()
     app.include_router(internal_router)
+    # No token seated, which the development environment reads as no authentication.
+    app.state.internal_token = None
 
     # Seat the liveness record the way the gateway lifespan does, so these apps
     # exercise the same seam production writes through.

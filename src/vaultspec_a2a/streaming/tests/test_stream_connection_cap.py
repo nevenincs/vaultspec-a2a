@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import pytest
 
-from ...control.config import Settings
 from ...domain_config import domain_config
 from ...thread.errors import EventAggregatorError
 from ..aggregator import EventAggregator
@@ -37,17 +36,6 @@ def _fill(aggregator: EventAggregator, count: int, *, prefix: str = "client") ->
 def test_the_limit_has_a_bounded_positive_default() -> None:
     """An absent or zero default would leave the registry unbounded."""
     assert 0 < domain_config.max_stream_connections <= 10_000
-
-
-def test_the_domain_and_infrastructure_views_report_one_limit() -> None:
-    """Both layers must read a single value, not two that can drift apart.
-
-    The registry enforces the bound and the SSE route pre-checks it, so the two
-    reads have to be the same number. Declaring the field twice would satisfy
-    every other test here while letting the enforced limit and the advertised one
-    diverge, which is precisely the failure this guards.
-    """
-    assert Settings().max_stream_connections == domain_config.max_stream_connections
 
 
 def test_the_registry_admits_subscribers_up_to_the_cap(

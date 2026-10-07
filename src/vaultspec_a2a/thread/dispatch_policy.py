@@ -63,9 +63,6 @@ class FailureAction:
     should_mark_failed: bool
     """Whether the thread should transition to FAILED status."""
 
-    is_circuit_open: bool
-    """Whether the caller should surface a 503 / circuit-open error."""
-
 
 _POLICY: dict[str, FailureAction] = {
     # An open circuit, a saturated worker and an unreachable one are all
@@ -73,25 +70,17 @@ _POLICY: dict[str, FailureAction] = {
     # recovery coordinator already scheduled, so none of them may move the run
     # to a failed status: doing so quarantines a run that nothing is wrong with
     # and strands work that was going to be delivered.
-    FailureType.CIRCUIT_OPEN: FailureAction(
-        should_mark_failed=False, is_circuit_open=True
-    ),
-    FailureType.AT_CAPACITY: FailureAction(
-        should_mark_failed=False, is_circuit_open=False
-    ),
-    FailureType.UNREACHABLE: FailureAction(
-        should_mark_failed=False, is_circuit_open=False
-    ),
-    FailureType.REJECTED: FailureAction(should_mark_failed=True, is_circuit_open=False),
+    FailureType.CIRCUIT_OPEN: FailureAction(should_mark_failed=False),
+    FailureType.AT_CAPACITY: FailureAction(should_mark_failed=False),
+    FailureType.UNREACHABLE: FailureAction(should_mark_failed=False),
+    FailureType.REJECTED: FailureAction(should_mark_failed=True),
     # The worker already holds this run's slot, so the dispatch was a duplicate
     # of work that IS being done. Failing the run here would kill the very turn
     # the refusal is reporting as alive.
-    FailureType.RUN_BUSY: FailureAction(
-        should_mark_failed=False, is_circuit_open=False
-    ),
+    FailureType.RUN_BUSY: FailureAction(should_mark_failed=False),
 }
 
-_DEFAULT = FailureAction(should_mark_failed=True, is_circuit_open=False)
+_DEFAULT = FailureAction(should_mark_failed=True)
 
 
 def classify_dispatch_failure(failure_type: str | None) -> FailureAction:
@@ -106,7 +95,7 @@ def classify_dispatch_failure(failure_type: str | None) -> FailureAction:
         and error responses.
     """
     if failure_type is None:
-        return FailureAction(should_mark_failed=False, is_circuit_open=False)
+        return FailureAction(should_mark_failed=False)
     return _POLICY.get(failure_type, _DEFAULT)
 
 

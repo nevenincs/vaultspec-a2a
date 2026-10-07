@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
-from ...api._dispatch_refusals import refused_cancel
 from ...control.cancel_service import CancelResult
 from ...thread.dispatch_policy import FailureType
+from .._dispatch_refusals import refused_cancel
 
 
 def _result(

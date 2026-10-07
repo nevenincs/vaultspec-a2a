@@ -14,7 +14,6 @@ from ...thread.dispatch_policy import (
 def test_evaluate_returns_no_failure_for_none() -> None:
     policy, typed_failure = evaluate_dispatch_failure(None)
     assert policy.should_mark_failed is False
-    assert policy.is_circuit_open is False
     assert typed_failure is None
 
 

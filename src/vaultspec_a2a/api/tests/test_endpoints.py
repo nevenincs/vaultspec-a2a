@@ -3428,7 +3428,7 @@ class TestCancelThread:
         # The refusal really crossed the wire; this is not a pre-flight rejection.
         assert len(worker.dispatches) == 1
         assert worker.dispatches[0]["action"] == "cancel"
-        assert cancel_resp.status_code == 502
+        assert cancel_resp.status_code == 503
         assert cancel_resp.json()["detail"] == "Cancel dispatch failed"
 
     def test_ambiguous_cancel_dispatch_keeps_the_accepted_cancellation(

@@ -192,7 +192,7 @@ async def test_cancelling_a_settled_run_is_a_conflict_not_a_bad_gateway(
         assert cancel.status_code == 409, cancel.text
         # The refusal names the state, so the caller learns to re-read the run
         # rather than to retry a request that can never succeed.
-        assert settled_status in cancel.json()["detail"]
+        assert settled_status in cancel.json()["detail"]["message"]
 
 
 @pytest.mark.asyncio(loop_scope="function")

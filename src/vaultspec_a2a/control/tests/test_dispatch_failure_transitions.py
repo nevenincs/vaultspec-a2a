@@ -227,6 +227,7 @@ async def test_a_failed_dispatch_records_its_reason_and_condition(
             title="Failed dispatch",
             repair_status="healthy",
         )
+        await _seed_accepted_initial_action(session, thread.id)
         await session.commit()
 
     async with session_factory() as session:
@@ -270,6 +271,7 @@ async def test_an_undelivered_resume_does_not_stamp_a_failure_on_a_live_run(
             title="Undelivered resume",
             repair_status="healthy",
         )
+        await _seed_accepted_initial_action(session, thread.id)
         await session.commit()
 
     async with session_factory() as session:
@@ -388,6 +390,7 @@ async def test_a_reasonless_failure_still_carries_a_condition(
             title="Reasonless failure",
             repair_status="healthy",
         )
+        await _seed_accepted_initial_action(session, thread.id)
         await session.commit()
 
     async with session_factory() as session:

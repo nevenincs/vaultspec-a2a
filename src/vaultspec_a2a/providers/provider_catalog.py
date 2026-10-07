@@ -53,6 +53,7 @@ class CatalogRefreshSuppressedError(RuntimeError):
 
 
 __all__ = [
+    "CATALOG_SCHEMA_VERSION",
     "DEFAULT_FAILURE_TTL",
     "MAX_CAPABILITIES",
     "MAX_CONTROLS",
@@ -66,6 +67,7 @@ __all__ = [
     "MAX_PUBLIC_ID_LENGTH",
     "MAX_TEXT_LENGTH",
     "PUBLIC_ID_PATTERN",
+    "SELECTION_SCHEMA_VERSION",
     "AdmissionState",
     "AuthenticationState",
     "CacheFreshness",

@@ -84,8 +84,8 @@ from ..graph.acp_options import narrowest_option_id
 from ..graph.enums import ServerEventType, ToolKind
 from ..streaming.sse_frames import iter_sse_events
 from .catalog import (
-    NoSelectableLaneError,
     async_fetch_provider_catalog,
+    in_process_lane_required,
     in_process_selection,
     override_selection_from_served_catalog,
     selection_from_served_catalog,
@@ -324,29 +324,6 @@ async def _served_catalog(gateway_url: str, workspace_root: str) -> JsonObject:
     return json_object(payload, at="gateway provider-catalog response")
 
 
-def _deterministic_selection(
-    catalog: JsonObject, external_prerequisite: ExternalPrerequisiteRule
-) -> JsonObject:
-    """Select an in-process lane for a case that makes no provider claim.
-
-    The deterministic lanes assert on the document loop and its gates, not on
-    which provider produced the text, so any in-process lane satisfies them.
-    "Any SELECTABLE lane" is a different and much wider thing: on a host holding
-    a live provider session that resolves to a real metered lane, which would
-    have this suite billing a provider for a case whose whole point is that no
-    provider claim is being made. The mechanism cannot return one.
-    """
-    try:
-        return in_process_selection(catalog)
-    except NoSelectableLaneError as exc:
-        external_prerequisite.absent(
-            "in-process-lanes",
-            f"a deterministic case cannot present a valid selection: {exc}. "
-            "Cases that DO make a provider claim declare their lane explicitly "
-            "instead",
-        )
-
-
 async def resolve_selection(
     case: AcceptanceCase,
     gateway_url: str,
@@ -367,7 +344,14 @@ async def resolve_selection(
     catalog = await _served_catalog(gateway_url, workspace_root)
 
     if case.lane_provider is None and not case.requires_live_selection:
-        return _deterministic_selection(catalog, external_prerequisite), {}
+        # The deterministic lanes assert on the document loop and its gates, not
+        # on which provider produced the text, so any in-process lane satisfies
+        # them. "Any SELECTABLE lane" is a much wider thing: on a host holding a
+        # live provider session it resolves to a real metered lane, which would
+        # have this suite billing a provider for a case that makes no provider
+        # claim. The in-process mechanism cannot return one.
+        with in_process_lane_required(external_prerequisite):
+            return in_process_selection(catalog), {}
 
     claim = (
         f"certifies the {case.lane_provider!r} provider"

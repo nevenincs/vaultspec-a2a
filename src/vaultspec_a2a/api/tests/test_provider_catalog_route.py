@@ -20,6 +20,7 @@ from ...api.schemas.provider_catalog import ProviderCatalogResponse
 from ...database.thread_repository import normalize_workspace_identity
 from ...providers.lane_admission import is_catalog_lane_admissible
 from ...providers.provider_catalog import (
+    CATALOG_SCHEMA_VERSION,
     AdmissionState,
     AuthenticationState,
     CatalogState,
@@ -42,6 +43,7 @@ from ...providers.provider_catalog_service import (
     validate_public_catalog_bounds,
 )
 from ...testing import settings_override
+from ..routes import PROVIDER_CATALOG_PATH
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
@@ -71,7 +73,7 @@ async def test_unit_app_catalog_uses_only_real_in_process_registrations(
         transport=ASGITransport(app=app), base_url="http://desktop.test"
     ) as client:
         response = await client.get(
-            "/v1/provider-catalog", params={"workspace_root": str(Path.cwd())}
+            PROVIDER_CATALOG_PATH, params={"workspace_root": str(Path.cwd())}
         )
 
     assert response.status_code == 200, response.text
@@ -98,7 +100,7 @@ async def test_route_rejects_workspace_before_discovery(
         transport=ASGITransport(app=app), base_url="http://desktop.test"
     ) as client:
         response = await client.get(
-            "/v1/provider-catalog",
+            PROVIDER_CATALOG_PATH,
             params={"workspace_root": invalid},
             headers={"Authorization": f"Bearer {_TOKEN}"},
         )
@@ -118,12 +120,12 @@ async def test_route_rejects_refresh_and_duplicate_workspace_queries(
         transport=ASGITransport(app=app), base_url="http://desktop.test"
     ) as client:
         refresh = await client.get(
-            "/v1/provider-catalog",
+            PROVIDER_CATALOG_PATH,
             params={"workspace_root": str(workspace), "refresh": "true"},
             headers=headers,
         )
         duplicate = await client.get(
-            "/v1/provider-catalog",
+            PROVIDER_CATALOG_PATH,
             params=[
                 ("workspace_root", str(workspace)),
                 ("workspace_root", str(workspace)),
@@ -153,7 +155,7 @@ async def test_authenticated_route_serves_all_registered_lanes_in_order(
             timeout=30,
         ) as client:
             response = await client.get(
-                "/v1/provider-catalog",
+                PROVIDER_CATALOG_PATH,
                 params={"workspace_root": str(workspace)},
                 headers={"Authorization": f"Bearer {_TOKEN}"},
             )
@@ -169,7 +171,10 @@ async def test_authenticated_route_serves_all_registered_lanes_in_order(
         "zai",
         "zhipu",
     ]
-    assert all(record["catalog"]["schema_version"] == 1 for record in body["providers"])
+    assert all(
+        record["catalog"]["schema_version"] == CATALOG_SCHEMA_VERSION
+        for record in body["providers"]
+    )
     assert all("provider_value" not in str(record) for record in body["providers"])
     parsed = ProviderCatalogResponse.model_validate(body)
     by_provider = {record.provider_id: record for record in parsed.providers}
@@ -279,7 +284,7 @@ def test_overlong_public_identifier_is_rejected_per_catalog_lane() -> None:
                             "checked_at": now,
                         },
                         "catalog": {
-                            "schema_version": 1,
+                            "schema_version": CATALOG_SCHEMA_VERSION,
                             "state": {
                                 "status": "available",
                                 "checked_at": now,
@@ -355,7 +360,9 @@ def test_wire_projection_omits_provider_execution_values() -> None:
     ).model_dump(mode="json")
     serialized = str(response)
     assert response["api_version"] == "v1"
-    assert response["providers"][0]["catalog"]["schema_version"] == 1
+    assert (
+        response["providers"][0]["catalog"]["schema_version"] == CATALOG_SCHEMA_VERSION
+    )
     assert "provider_value" not in serialized
     assert "secret-provider-model-value" not in serialized
     assert "secret-provider-option-value" not in serialized

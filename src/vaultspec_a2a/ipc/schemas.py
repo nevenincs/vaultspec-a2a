@@ -22,7 +22,11 @@ from pydantic import (
 
 from ..thread.action_receipts import GraphActionReceipt
 from ..thread.actor_tokens import ActorTokenBundle
-from ..thread.constants import DEFAULT_SUPERVISOR_ID
+from ..thread.constants import (
+    DEFAULT_SUPERVISOR_ID,
+    MAX_RUN_ID_CHARS,
+    MAX_RUN_MESSAGE_CHARS,
+)
 from ..thread.enums import ControlActionType
 from ..thread.executable_graph import FrozenGraphDefinition
 
@@ -151,7 +155,7 @@ class SeedTranscriptMessage(BaseModel):
     """A bounded conversation turn copied into a successor's first graph input."""
 
     role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=65536)
+    content: str = Field(min_length=1, max_length=MAX_RUN_MESSAGE_CHARS)
 
 
 class DispatchRequest(BaseModel):
@@ -165,12 +169,12 @@ class DispatchRequest(BaseModel):
     action: Literal["ingest", "resume", "cancel"] = Field(
         description="'ingest' | 'resume' | 'cancel'"
     )
-    thread_id: str = Field(min_length=1, max_length=128)
+    thread_id: str = Field(min_length=1, max_length=MAX_RUN_ID_CHARS)
     graph_action_receipt: GraphActionReceipt | None = None
     graph_definition: FrozenGraphDefinition | None = None
     agent_id: str = Field(default=DEFAULT_SUPERVISOR_ID, min_length=1, max_length=128)
     # For ingest: user message content
-    content: str | None = Field(default=None, max_length=65536)
+    content: str | None = Field(default=None, max_length=MAX_RUN_MESSAGE_CHARS)
     # For resume: permission response option
     # (str for tool perms, dict for plan approval)
     option_id: str | dict[str, object] | None = None
@@ -312,9 +316,9 @@ class HeartbeatRequest(BaseModel):
 
     type: Literal["heartbeat"] = "heartbeat"
     worker_id: str = Field(default="", max_length=128)
-    active_threads: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(
-        default_factory=list, max_length=1024
-    )
+    active_threads: list[
+        Annotated[str, Field(min_length=1, max_length=MAX_RUN_ID_CHARS)]
+    ] = Field(default_factory=list, max_length=1024)
     timestamp: str | None = Field(default=None, max_length=128)
     uptime_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 

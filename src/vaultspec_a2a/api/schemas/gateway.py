@@ -20,7 +20,6 @@ a bearer credential; release applies only to an uncommitted reservation.
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal
@@ -31,18 +30,32 @@ from ...context.metadata import ThreadMetadata
 from ...control.worker_status import WorkerConnectionStatus
 from ...graph.enums import SemanticPhase
 from ...providers.conditions import ProviderCondition
+from ...providers.provider_catalog import (
+    MAX_CONTROL_ID_LENGTH,
+    MAX_CONTROLS,
+    MAX_DISPLAY_LENGTH,
+    MAX_FALLBACKS,
+    MAX_PUBLIC_ID_LENGTH,
+    MAX_TEXT_LENGTH,
+)
 from ...team.preset_origin import PresetOrigin
 from ...team.team_config import AuthoringCapability, DocumentCapability, TopologyType
 from ...thread.actor_tokens import MAX_ROLES_PER_RUN, ActorTokenBundle
 from ...thread.clarification import (
     MAX_QUESTIONS_PER_REQUEST,
-    MAX_RUN_MESSAGE_CHARS,
     AnswerText,
     ClarificationRequest,
     ContinuationPrompt,
     QuestionId,
 )
-from ...thread.constants import MAX_FEATURE_TAG_LENGTH
+from ...thread.constants import (
+    MAX_DISCOVERY_RESULTS,
+    MAX_FEATURE_TAG_LENGTH,
+    MAX_ROLE_ID_CHARS,
+    MAX_RUN_ID_CHARS,
+    MAX_RUN_MESSAGE_CHARS,
+    RUN_ID_PATTERN,
+)
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import (
     ApprovalStatus,
@@ -62,9 +75,6 @@ from .gateway_readiness import (
 )
 from .snapshots import ThreadStateSnapshot
 
-# ``MAX_RUN_MESSAGE_CHARS`` is imported to BOUND a field, not to be republished:
-# the bound belongs to ``thread.clarification`` beside the continuation prompt it
-# also bounds, and being carried on the wire does not make this a second home.
 __all__ = [
     "ActiveRunRecord",
     "ActiveRunsResponse",
@@ -94,22 +104,14 @@ __all__ = [
     "TopologyPosition",
 ]
 
-_PATH_SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
+# The run identity type, shared by the reservation identity (the server-minted
+# opaque handle for a prepared admission slot) and the lease identity (the
+# non-secret, run-scoped handle the dashboard revokes at terminal settlement).
+# Both are minted in the run-id path-safe shape so they are addressable and
+# log-safe, and neither is ever a bearer.
 PathSafeRunId = Annotated[
     str,
-    Field(min_length=1, max_length=128, pattern=_PATH_SAFE_RUN_ID.pattern),
-]
-# A reservation identity is a server-minted opaque handle for a prepared
-# admission slot; a lease identity is the non-secret, run-scoped handle the
-# dashboard revokes at terminal settlement. Both share the run-id path-safe
-# shape so they are addressable and log-safe, and neither is ever a bearer.
-ReservationId = Annotated[
-    str,
-    Field(min_length=1, max_length=128, pattern=_PATH_SAFE_RUN_ID.pattern),
-]
-LeaseId = Annotated[
-    str,
-    Field(min_length=1, max_length=128, pattern=_PATH_SAFE_RUN_ID.pattern),
+    Field(min_length=1, max_length=MAX_RUN_ID_CHARS, pattern=RUN_ID_PATTERN),
 ]
 
 
@@ -119,14 +121,14 @@ class ProviderCatalogSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[1]
-    provider_id: str = Field(min_length=1, max_length=512)
-    execution_mode: str = Field(min_length=1, max_length=512)
-    catalog_revision: str = Field(min_length=1, max_length=512)
-    entry_id: str = Field(min_length=1, max_length=512)
+    provider_id: str = Field(min_length=1, max_length=MAX_PUBLIC_ID_LENGTH)
+    execution_mode: str = Field(min_length=1, max_length=MAX_PUBLIC_ID_LENGTH)
+    catalog_revision: str = Field(min_length=1, max_length=MAX_PUBLIC_ID_LENGTH)
+    entry_id: str = Field(min_length=1, max_length=MAX_PUBLIC_ID_LENGTH)
     controls: dict[
-        Annotated[str, Field(min_length=1, max_length=128)],
-        Annotated[str, Field(min_length=1, max_length=512)],
-    ] = Field(default_factory=dict, max_length=32)
+        Annotated[str, Field(min_length=1, max_length=MAX_CONTROL_ID_LENGTH)],
+        Annotated[str, Field(min_length=1, max_length=MAX_PUBLIC_ID_LENGTH)],
+    ] = Field(default_factory=dict, max_length=MAX_CONTROLS)
 
 
 class RunStage(StrEnum):
@@ -159,7 +161,7 @@ class RunStartRequest(BaseModel):
     stage: RunStage = RunStage.START
     # The prepared reservation a ``commit`` binds to. Required on ``commit``,
     # forbidden on ``prepare`` and ``start`` (there is nothing to bind yet).
-    reservation_id: ReservationId | None = None
+    reservation_id: PathSafeRunId | None = None
     # A non-empty preset is mandatory on the v1 verb: the engine-facing contract
     # never creates the internal surface's non-dispatched draft.
     team_preset: str = Field(min_length=1, max_length=64)
@@ -191,10 +193,11 @@ class RunStartRequest(BaseModel):
     # workspace catalog before admission.
     selection: ProviderCatalogSelection
     overrides: dict[
-        Annotated[str, Field(min_length=1, max_length=63)], ProviderCatalogSelection
-    ] = Field(default_factory=dict, max_length=64)
+        Annotated[str, Field(min_length=1, max_length=MAX_ROLE_ID_CHARS)],
+        ProviderCatalogSelection,
+    ] = Field(default_factory=dict, max_length=MAX_ROLES_PER_RUN)
     fallbacks: list[ProviderCatalogSelection] = Field(
-        default_factory=list, max_length=8
+        default_factory=list, max_length=MAX_FALLBACKS
     )
     # feedback-loop: an OPAQUE engine feedback-batch id for a revision run. a2a
     # never parses or owns batch content; it transports only the id
@@ -238,25 +241,27 @@ class RunStartRequest(BaseModel):
 class FrozenNativeControlSummary(BaseModel):
     """One exact provider-native value frozen for historical disclosure."""
 
-    control_id: str = Field(min_length=1, max_length=1024)
-    option_id: str = Field(min_length=1, max_length=1024)
-    provider_value: str = Field(min_length=1, max_length=1024)
-    display_name: str | None = Field(default=None, max_length=256)
-    option_display_name: str | None = Field(default=None, max_length=256)
+    control_id: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    option_id: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    provider_value: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    display_name: str | None = Field(default=None, max_length=MAX_DISPLAY_LENGTH)
+    option_display_name: str | None = Field(default=None, max_length=MAX_DISPLAY_LENGTH)
 
 
 class FrozenExecutionSnapshotSummary(BaseModel):
     """Catalog provenance and exact provider inputs for one execution lane."""
 
-    provider_id: str = Field(min_length=1, max_length=1024)
-    provider_display_name: str | None = Field(default=None, max_length=256)
-    execution_mode: str = Field(min_length=1, max_length=1024)
-    catalog_revision: str = Field(min_length=1, max_length=1024)
-    entry_id: str = Field(min_length=1, max_length=1024)
-    model_name: str = Field(min_length=1, max_length=1024)
-    model_display_name: str | None = Field(default=None, max_length=256)
+    provider_id: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    provider_display_name: str | None = Field(
+        default=None, max_length=MAX_DISPLAY_LENGTH
+    )
+    execution_mode: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    catalog_revision: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    entry_id: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    model_name: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    model_display_name: str | None = Field(default=None, max_length=MAX_DISPLAY_LENGTH)
     controls: list[FrozenNativeControlSummary] = Field(
-        default_factory=list, max_length=32
+        default_factory=list, max_length=MAX_CONTROLS
     )
 
 
@@ -269,10 +274,10 @@ class FrozenSelectionProvenanceSummary(BaseModel):
 class FrozenRoleAssignmentSummary(FrozenExecutionSnapshotSummary):
     """One role's exact primary and ordered fallback execution snapshots."""
 
-    role_id: str = Field(min_length=1, max_length=1024)
-    agent_id: str | None = Field(default=None, max_length=1024)
+    role_id: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    agent_id: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
     fallbacks: list[FrozenExecutionSnapshotSummary] = Field(
-        default_factory=list, max_length=8
+        default_factory=list, max_length=MAX_FALLBACKS
     )
     provenance: FrozenSelectionProvenanceSummary
 
@@ -324,8 +329,8 @@ class RunPrepareResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     stage: Literal["prepared"] = "prepared"
-    reservation_id: ReservationId
-    lease_id: LeaseId
+    reservation_id: PathSafeRunId
+    lease_id: PathSafeRunId
     # The roles commit's actor-token bundle must cover, one per required role.
     required_roles: list[str] = Field(
         default_factory=list, max_length=MAX_ROLES_PER_RUN
@@ -352,7 +357,7 @@ class RunCommitResponse(BaseModel):
     stage: Literal["committed"] = "committed"
     run_id: PathSafeRunId
     status: str
-    lease_id: LeaseId
+    lease_id: PathSafeRunId
     semantic_status: SemanticPhase = SemanticPhase.STARTING
     nickname: str | None = None
     # As on RunStartResponse, this is the exact execution authority disclosure.
@@ -364,7 +369,7 @@ class RunReleaseResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     stage: Literal["released"] = "released"
-    reservation_id: ReservationId
+    reservation_id: PathSafeRunId
     released: bool
 
 
@@ -388,7 +393,9 @@ class ActiveRunsResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     state: Literal["active", "all"] = "active"
-    runs: list[ActiveRunRecord] = Field(default_factory=list, max_length=100)
+    runs: list[ActiveRunRecord] = Field(
+        default_factory=list, max_length=MAX_DISCOVERY_RESULTS
+    )
     truncated: bool = False
     #: Total matching runs. Present only for the history reading; ``None`` in
     #: discovery, where a capped projection cannot honestly report one.
@@ -446,7 +453,9 @@ class RunSummariesResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     state: Literal["all"] = "all"
-    runs: list[RunSummaryRecord] = Field(default_factory=list, max_length=100)
+    runs: list[RunSummaryRecord] = Field(
+        default_factory=list, max_length=MAX_DISCOVERY_RESULTS
+    )
     truncated: bool = False
     total: int
 
@@ -568,10 +577,10 @@ class RunStatusResponse(BaseModel):
     # Non-secret staged-admission lease identity. It lets the dashboard repair
     # a locally reserved hash bundle after a process crash that followed remote
     # commit but preceded the local binding write.
-    lease_id: LeaseId | None = None
+    lease_id: PathSafeRunId | None = None
     # The persisted prepare reservation paired with ``lease_id``. This lets a
     # dashboard reconcile only the exact local reservation after a lost reply.
-    reservation_id: ReservationId | None = None
+    reservation_id: PathSafeRunId | None = None
     # The bounded questionnaire this run is currently parked on, read from the
     # run's own checkpoint. This is the AUTHORITATIVE disclosure of a pending
     # question: a client that reloaded, or that never saw the progress frame
@@ -714,7 +723,7 @@ class RunMessageRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    content: str = Field(min_length=1, max_length=65536)
+    content: str = Field(min_length=1, max_length=MAX_RUN_MESSAGE_CHARS)
     agent_id: str | None = Field(default=None, max_length=128)
 
 
@@ -1041,7 +1050,7 @@ class TerminalSettlement(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     run_id: PathSafeRunId
-    lease_id: LeaseId
+    lease_id: PathSafeRunId
     terminal_status: ThreadStatus
 
 

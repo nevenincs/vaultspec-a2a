@@ -22,7 +22,11 @@ if TYPE_CHECKING:
     from sqlalchemy.sql import Select
     from sqlalchemy.sql.elements import ColumnElement
 
-from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
+from ..thread.constants import (
+    MAX_FEATURE_TAG_LENGTH,
+    MAX_WORKSPACE_ROOT_LENGTH,
+    RUN_ID_PATTERN,
+)
 from ..thread.enums import (
     ACTIVE_STATUSES,
     NON_ACTIVE_STATUSES,
@@ -169,10 +173,10 @@ def path_safe_run_id_clause() -> ColumnElement[bool]:
     """Return the cross-dialect persisted run-id grammar predicate.
 
     The one canonical predicate for "is this durable id the shape the gateway's
-    ``PathSafeRunId``/``ReservationId``/``LeaseId`` types admit" - public so a
-    query outside this module can apply it rather than re-deriving the regex.
+    ``PathSafeRunId`` type admits" - public so a query outside this module can
+    apply it rather than re-deriving the regex.
     """
-    return ThreadModel.id.regexp_match(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
+    return ThreadModel.id.regexp_match(RUN_ID_PATTERN)
 
 
 def normalize_workspace_identity(value: str | os.PathLike[str]) -> str:

@@ -48,6 +48,7 @@ from pydantic import (
     model_validator,
 )
 
+from .constants import MAX_REQUEST_ID_CHARS, MAX_RUN_MESSAGE_CHARS
 from .snapshots import project_checkpoint_tuple
 
 if TYPE_CHECKING:
@@ -63,7 +64,6 @@ __all__ = [
     "MAX_OPTION_CHARS",
     "MAX_PROMPT_CHARS",
     "MAX_QUESTIONS_PER_REQUEST",
-    "MAX_RUN_MESSAGE_CHARS",
     "ClarificationAnswers",
     "ClarificationContinuation",
     "ClarificationDecline",
@@ -131,15 +131,14 @@ MAX_QUESTIONS_PER_REQUEST = 4
 MAX_OPTIONS_PER_QUESTION = 4
 
 # String bounds. Sized so a whole request stays small enough to sit inside a
-# checkpoint and inside the status response without special handling.
+# checkpoint and inside the status response without special handling. The
+# request handle and the continuation prompt are bounded by the shared
+# request-id and run-message caps: a continuation is a new human turn in the
+# existing run.
 MAX_IDENTIFIER_CHARS = 64
-MAX_REQUEST_ID_CHARS = 128
 MAX_PROMPT_CHARS = 512
 MAX_OPTION_CHARS = 128
 MAX_ANSWER_CHARS = 2048
-# A continuation is a new human turn in the existing run, so it carries the
-# same character budget as the opening run message.
-MAX_RUN_MESSAGE_CHARS = 65536
 
 # Question and request identifiers are correlation handles that travel in a URL
 # path and in JSON object keys, so they are restricted to a path- and key-safe

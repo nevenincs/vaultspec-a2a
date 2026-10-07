@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from langgraph.runtime import Runtime
 
     from ..authoring import FeedbackContextReader
+    from ..thread.clarification import ClarificationRequest
     from .nodes.worker import WorkerNode
     from .protocols import CostPort, ProviderFactoryProtocol, RuntimeIdentityPort
     from .run_context import RunContext
@@ -24,7 +25,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.types import Command
 
 from ..authoring.contract import RESEARCH_ADR_ROLES
-from ..thread.clarification import MAX_REQUEST_ID_CHARS, ClarificationRequest
+from ..thread.constants import MAX_REQUEST_ID_CHARS
 from ..thread.errors import ConfigError
 from ..thread.state import (
     TeamState,  # noqa: TC001 - LangGraph inspects route annotations

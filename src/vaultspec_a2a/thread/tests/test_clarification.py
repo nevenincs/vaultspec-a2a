@@ -20,7 +20,6 @@ from ..clarification import (
     MAX_OPTION_CHARS,
     MAX_PROMPT_CHARS,
     MAX_QUESTIONS_PER_REQUEST,
-    MAX_RUN_MESSAGE_CHARS,
     ClarificationAnswers,
     ClarificationContinuation,
     ClarificationDecline,
@@ -34,6 +33,7 @@ from ..clarification import (
     strip_control_characters,
     validate_clarification_answers,
 )
+from ..constants import MAX_RUN_MESSAGE_CHARS
 
 
 def _choice(

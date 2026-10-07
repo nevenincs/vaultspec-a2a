@@ -22,10 +22,13 @@ from ..authoring._relay_client import RELAY_CALL_PATH, RELAY_PROOF_DOMAIN
 from ..authoring._tool_calls import private_tool_call_journal_path
 from ..authoring.catalog import make_tool_dispatch
 from ..authoring.discovery import resolve_engine
+from ..thread.constants import MAX_ROLE_ID_CHARS, ROLE_ID_PATTERN
 
 if TYPE_CHECKING:
     from .catalog_store import RunCatalogStore
     from .token_store import RunTokenStore
+
+__all__ = ["AuthoringRelay", "RelayCall", "router"]
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +37,9 @@ class RelayCall(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     run_id: str = Field(min_length=1, max_length=160)
-    role: str = Field(min_length=1, max_length=63, pattern=r"^[A-Za-z_][A-Za-z0-9_-]*$")
+    role: str = Field(
+        min_length=1, max_length=MAX_ROLE_ID_CHARS, pattern=ROLE_ID_PATTERN
+    )
     name: str = Field(min_length=1, max_length=160)
     arguments: dict[str, Any]
     tool_call_id: str | None = Field(default=None, min_length=1, max_length=160)

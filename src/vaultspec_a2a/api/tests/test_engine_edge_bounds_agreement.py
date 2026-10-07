@@ -40,7 +40,8 @@ import pytest
 
 from ...authoring.discovery import HEARTBEAT_STALE_MS
 from ...thread.actor_tokens import MAX_ROLES_PER_RUN
-from ...thread.clarification import MAX_ANSWER_CHARS, MAX_REQUEST_ID_CHARS
+from ...thread.clarification import MAX_ANSWER_CHARS
+from ...thread.constants import MAX_REQUEST_ID_CHARS
 
 # Where the engine's a2a edge module lives inside the consuming project's tree.
 _EDGE_MODULE = Path("engine/crates/vaultspec-api/src/routes/ops/a2a.rs")

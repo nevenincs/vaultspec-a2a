@@ -11,17 +11,89 @@ whole job is to describe bytes on a wire — measured at +0.67s and +360 modules
 on an otherwise cold import of ``api.schemas.gateway``. This module costs 0.01s
 and imports nothing, so every layer can share one declaration at no cost. The
 columns are spelled in terms of these names; see ``database.models``.
+
+The identifier grammars and the text bounds of the run edge live here for the
+same reason. A grammar is consumed by more than one regex engine - pydantic-core
+compiles a schema ``pattern``, the database dispatches a ``regexp_match`` to its
+own engine, and Python's ``re`` checks a persisted value - so each consumer
+compiles the shared text rather than restating it.
 """
 
 __all__ = [
     "DEFAULT_SUPERVISOR_ID",
+    "MAX_DISCOVERY_RESULTS",
     "MAX_FEATURE_TAG_LENGTH",
     "MAX_PERMISSION_DESCRIPTION_CHARS",
+    "MAX_REQUEST_ID_CHARS",
+    "MAX_ROLE_ID_CHARS",
+    "MAX_RUN_ID_CHARS",
+    "MAX_RUN_MESSAGE_CHARS",
+    "MAX_TOOL_CALL_CHARS",
     "MAX_WORKSPACE_ROOT_LENGTH",
+    "ROLE_ID_PATTERN",
+    "RUN_ID_PATTERN",
 ]
 
 DEFAULT_SUPERVISOR_ID: str = "vaultspec-supervisor"
 """The agent_id used when no explicit agent is specified."""
+
+MAX_RUN_ID_CHARS: int = 128
+"""Longest run identity, for every reader of one.
+
+A run id is caller-supplied and travels in URL paths, log lines, and SSE ids,
+so it is bounded and confined to :data:`RUN_ID_PATTERN`. Reservation and lease
+identities are minted in the same grammar, so this bound is theirs too.
+"""
+
+RUN_ID_PATTERN: str = rf"^[A-Za-z0-9_][A-Za-z0-9_-]{{0,{MAX_RUN_ID_CHARS - 1}}}$"
+"""The path-safe run-id grammar, anchored at both ends.
+
+One text decides both which persisted rows a listing returns (the repository's
+SQL predicate) and whether a response model serializes (the wire schema's
+pattern). A filter looser than the pattern would let one legacy row through to
+fail the whole listing at serialization, so the two compile this one string.
+The length quantifier is derived from :data:`MAX_RUN_ID_CHARS` so the pattern
+and the length bound cannot disagree.
+"""
+
+MAX_ROLE_ID_CHARS: int = 63
+"""Longest role identity a run's team may name."""
+
+ROLE_ID_PATTERN: str = rf"^[A-Za-z_][A-Za-z0-9_-]{{0,{MAX_ROLE_ID_CHARS - 1}}}$"
+"""The role-id grammar, anchored at both ends.
+
+A role id keys the per-role actor token, the authoring relay's call scope, and
+a run's per-role selection overrides. Python callers must apply it with
+``re.fullmatch``: ``$`` alone also matches before a trailing newline.
+"""
+
+MAX_RUN_MESSAGE_CHARS: int = 65536
+"""How long one conversation turn may be, in CHARACTERS rather than bytes.
+
+The opening run message, a follow-up turn, a clarification continuation, and
+each turn of the transcript a successor inherits share this one budget.
+Characters, because the bound is a proxy for model token consumption and tokens
+track characters; a byte bound would hand a CJK or emoji author a quarter of
+the turn an ASCII author gets.
+"""
+
+MAX_REQUEST_ID_CHARS: int = 128
+"""Longest interrupt request handle, for every party that correlates on one.
+
+Clarification and permission requests are answered by the handle the run
+minted, so every frame and model carrying one must admit the full minted
+length: a truncated handle names a request that does not exist.
+"""
+
+MAX_TOOL_CALL_CHARS: int = 128
+"""How much of a permission request's tool-call label the stream carries."""
+
+MAX_DISCOVERY_RESULTS: int = 100
+"""The most runs one listing page returns.
+
+The route refuses a larger ``limit``, the discovery service refuses one too, and
+the response models bound their run lists by it, so the three cannot disagree.
+"""
 
 MAX_PERMISSION_DESCRIPTION_CHARS: int = 4096
 """How much of a permission description exists, for every reader of one.
@@ -29,7 +101,7 @@ MAX_PERMISSION_DESCRIPTION_CHARS: int = 4096
 The description is worker-influenced text, so it needs a bound. The bound has
 to be a single declaration rather than an agreed number because two readers act
 on it at different times: ``control/event_handlers`` truncates before writing
-the durable row, and ``api/schemas/events`` truncates the streamed frame built
+the durable row, and ``streaming/sse_frames`` truncates the streamed frame built
 from the same text. A stream permitted to carry more than the row stores shows
 an operator text live that vanishes on the reload that re-reads the row. Both
 sides read this name, so raising it raises both or neither.
@@ -37,8 +109,7 @@ sides read this name, so raising it raises both or neither.
 It lives in the thread domain rather than on either reader because neither
 reader owns the other: the persistence layer stores the description in an
 unbounded ``Text`` column and imposes no width, so the cap is a domain policy
-about permission text and not a restatement of a storage constraint. That makes
-it the odd one out among the bounds here, which are storage widths.
+about permission text and not a restatement of a storage constraint.
 """
 
 MAX_WORKSPACE_ROOT_LENGTH: int = 4096

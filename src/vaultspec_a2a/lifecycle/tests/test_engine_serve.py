@@ -210,6 +210,18 @@ def test_serve_reaps_descendants_when_engine_root_exits(tmp_path: Path) -> None:
 
 
 def test_wrapper_termination_reaps_engine_and_descendant(tmp_path: Path) -> None:
+    """A terminated wrapper fells the engine tree it owns, grandchild included.
+
+    Deliberately a BARE spawn with a bare ``terminate()``, where the rest of this
+    module uses contained spawns. The subject is the wrapper's own signal
+    handling: SIGTERM must reach the wrapper process itself, be handled there, and
+    make the wrapper reap its engine tree - which the exit status 143 then
+    attests. Seating the wrapper in a containment and reaping through that would
+    fell the engine tree directly, from outside, and the wrapper's reaping would
+    no longer be the thing proven. The ``finally`` still fells anything left, by
+    pid, because the processes it clears were started by a grandchild this test
+    never had a handle on.
+    """
     engine_code = (
         "import os,pathlib,subprocess,sys,time; "
         "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)']); "

@@ -14,7 +14,7 @@ import pytest
 from langgraph.graph import END, START
 from langgraph.runtime import Runtime
 
-from ...streaming import RunEventProducer
+from ...streaming import GraphInvocation, RunEventProducer
 from ...team.team_config import load_agent_config, load_team_config
 from ...testing import (
     add_test_node,
@@ -26,8 +26,6 @@ from ..compiler import compile_team_graph
 from ..run_context import RunContext, run_thread_id
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
-
     from ...streaming.types import StreamableGraph
     from ...thread.state import TeamState
     from ..protocols import ProviderFactoryProtocol
@@ -75,15 +73,16 @@ async def test_ingest_delivers_the_run_context_to_graph_nodes() -> None:
     graph = cast("StreamableGraph", compile_test_graph(builder))
 
     producer = RunEventProducer()
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
     outcome = await asyncio.wait_for(
-        ingest(
-            thread_id="ctx-thread",
-            agent_id="supervisor",
-            graph=graph,
-            graph_input={"seen": ""},
-            config={"configurable": {"thread_id": "ctx-thread"}},
-            context=_CONTEXT,
+        producer.ingest(
+            "ctx-thread",
+            "supervisor",
+            graph,
+            GraphInvocation(
+                graph_input={"seen": ""},
+                config={"configurable": {"thread_id": "ctx-thread"}},
+                context=_CONTEXT,
+            ),
         ),
         timeout=10.0,
     )

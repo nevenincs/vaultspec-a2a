@@ -8,7 +8,7 @@ under test is what ingest reports once LangGraph raises.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import pytest
 from langgraph.graph import END, START
@@ -17,11 +17,10 @@ from langgraph.types import TimeoutPolicy
 from ...graph.events import ErrorOccurred
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import RunEventProducer
+from ..ingest import GraphInvocation
 from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
-
     from ..types import StreamableGraph
 
 
@@ -52,15 +51,16 @@ def _graph_with_node_budget(run_timeout: float) -> StreamableGraph:
 async def test_a_node_timeout_fails_the_run_naming_the_node_and_limit() -> None:
     producer = RunEventProducer()
     events = relayed_events(producer)
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     outcome = await asyncio.wait_for(
-        ingest(
-            thread_id="thread-node-timeout",
-            agent_id="supervisor",
-            graph=_graph_with_node_budget(0.2),
-            graph_input={"note": ""},
-            config={"configurable": {"thread_id": "thread-node-timeout"}},
+        producer.ingest(
+            "thread-node-timeout",
+            "supervisor",
+            _graph_with_node_budget(0.2),
+            GraphInvocation(
+                graph_input={"note": ""},
+                config={"configurable": {"thread_id": "thread-node-timeout"}},
+            ),
         ),
         timeout=10.0,
     )

@@ -73,26 +73,9 @@ from ..graph_lifecycle import (
 from ..ipc import WorkerBridge
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
-
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-    from langgraph.types import Command
 
-    from ...streaming.types import StreamableGraph
     from ...thread.state import TeamState
-
-
-if TYPE_CHECKING:
-    _Ingest = Callable[
-        [
-            str,
-            str,
-            StreamableGraph,
-            dict[str, Any] | Command[Any] | None,
-            dict[str, Any],
-        ],
-        Awaitable[str],
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -2263,13 +2246,14 @@ class TestTheFailureStashCannotOutliveItsRun:
         try:
             # Run A fails through a real ingest, which classifies it and
             # stashes both halves exactly as production does.
-            ingest = cast("_Ingest", executor._producer.ingest)
-            outcome = await ingest(
+            outcome = await executor._producer.ingest(
                 thread_id,
                 "supervisor",
                 self._throttled_graph(executor),
-                {"messages": []},
-                {"configurable": {"thread_id": thread_id}},
+                GraphInvocation(
+                    graph_input={"messages": []},
+                    config={"configurable": {"thread_id": thread_id}},
+                ),
             )
             assert outcome == ThreadStatus.FAILED
 

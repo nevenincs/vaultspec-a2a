@@ -14,21 +14,19 @@ absence of something the same park otherwise produces.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ...graph.events import ClarificationPending, ErrorOccurred
 from ..aggregator import RunEventProducer
+from ..ingest import GraphInvocation
 from ._error_injecting_graph import InjectedSignal
 from ._parked_signal_graph import build_parked_then_signalled_graph
 from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
-
     from ..types import SequencedEvent
-    from ._parked_signal_graph import ParkedSignalInput
 
 
 async def _ingest_parked_run(
@@ -40,17 +38,17 @@ async def _ingest_parked_run(
     the ingest raises: what the viewer was told before the signal surfaced is
     the thing under test.
     """
-    graph_input: ParkedSignalInput = {
-        "request_id": f"{thread_id}-question",
-        "raise_signal": raise_signal,
-    }
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
-    return await ingest(
-        thread_id=thread_id,
-        agent_id="supervisor",
-        graph=build_parked_then_signalled_graph(),
-        graph_input=graph_input,
-        config={"configurable": {"thread_id": thread_id}},
+    return await producer.ingest(
+        thread_id,
+        "supervisor",
+        build_parked_then_signalled_graph(),
+        GraphInvocation(
+            graph_input={
+                "request_id": f"{thread_id}-question",
+                "raise_signal": raise_signal,
+            },
+            config={"configurable": {"thread_id": thread_id}},
+        ),
     )
 
 

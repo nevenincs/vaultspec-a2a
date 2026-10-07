@@ -27,10 +27,9 @@ from langgraph.types import Command, interrupt
 
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import RunEventProducer
+from ..ingest import GraphInvocation
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
-
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.base import (
         ChannelVersions,
@@ -108,15 +107,16 @@ async def test_ingest_commits_each_superstep_before_the_next_one_starts(
     await saver.setup()
     graph = _two_step_graph(saver, log)
     producer = RunEventProducer()
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     outcome = await asyncio.wait_for(
-        ingest(
-            thread_id="thread-durability",
-            agent_id="supervisor",
-            graph=graph,
-            graph_input={"note": ""},
-            config={"configurable": {"thread_id": "thread-durability"}},
+        producer.ingest(
+            "thread-durability",
+            "supervisor",
+            graph,
+            GraphInvocation(
+                graph_input={"note": ""},
+                config={"configurable": {"thread_id": "thread-durability"}},
+            ),
         ),
         timeout=30.0,
     )
@@ -172,15 +172,13 @@ async def test_a_resume_commits_its_superstep_before_the_next_one_starts(
     await saver.setup()
     graph = _gated_graph(saver, log)
     producer = RunEventProducer()
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     parked = await asyncio.wait_for(
-        ingest(
-            thread_id="thread-durability-resume",
-            agent_id="supervisor",
-            graph=graph,
-            graph_input={"note": ""},
-            config=config,
+        producer.ingest(
+            "thread-durability-resume",
+            "supervisor",
+            graph,
+            GraphInvocation(graph_input={"note": ""}, config=config),
         ),
         timeout=30.0,
     )
@@ -188,12 +186,11 @@ async def test_a_resume_commits_its_superstep_before_the_next_one_starts(
     log.append("--resumed--")
 
     resumed = await asyncio.wait_for(
-        ingest(
-            thread_id="thread-durability-resume",
-            agent_id="supervisor",
-            graph=graph,
-            graph_input=Command(resume="allow_once"),
-            config=config,
+        producer.ingest(
+            "thread-durability-resume",
+            "supervisor",
+            graph,
+            GraphInvocation(graph_input=Command(resume="allow_once"), config=config),
         ),
         timeout=30.0,
     )

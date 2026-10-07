@@ -47,12 +47,11 @@ from .compiler import (
     _ROLE_TO_PHASE,
     _add_node,
     _compile_worker_node,
-    _loop_route,
     _route_from_supervisor,
 )
 from .nodes._config_contract import accepting_runnable_config
 from .nodes.action_completion import GRAPH_COMPLETION_NODE
-from .nodes.phase_gate import review_requests_revision
+from .nodes.phase_gate import review_requests_revision, revision_granted
 from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
 from .nodes.vault_reader import create_mount_node
 
@@ -520,14 +519,17 @@ def _compile_pipeline_loop(
     # Loop-back target is the mount node before the loop target worker.
     loop_target_worker: str = pre_loop[-1] if pre_loop else all_sequential[0]
     loop_target_mount: str = mount_map[loop_target_worker]
-    max_loops = team_config.topology.max_loops
+    # ``max_loops`` counts passes of the loop node, the first one included, so it
+    # grants one revision fewer than it has passes.
+    revision_budget = team_config.topology.max_loops - 1
 
     def _loop_router(state: TeamState) -> str:
-        return _loop_route(
+        granted = revision_granted(
             revision_requested=review_requests_revision(state.get("messages") or []),
-            loop_count=state.get("loop_count", 0),
-            max_loops=max_loops,
+            spent=state.get("loop_count", 0),
+            budget=revision_budget,
         )
+        return "revise" if granted else "FINISH"
 
     builder.add_conditional_edges(
         loop_node_id,

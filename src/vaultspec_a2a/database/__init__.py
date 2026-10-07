@@ -98,6 +98,9 @@ from .permission_repository import (
     outstanding_permission_pause as outstanding_permission_pause,
 )
 from .permission_repository import (
+    pending_document_approval_thread as pending_document_approval_thread,
+)
+from .permission_repository import (
     record_permission_request as record_permission_request,
 )
 from .permission_repository import (
@@ -253,6 +256,7 @@ __all__ = [
     "normalize_workspace_identity",
     "outstanding_permission_pause",
     "path_safe_run_id_clause",
+    "pending_document_approval_thread",
     "read_latest_checkpoint",
     "record_permission_request",
     "record_permission_response_submission",

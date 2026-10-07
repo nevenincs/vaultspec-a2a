@@ -21,8 +21,8 @@ Each decision payload carries ``{decision, comment, proposal_id, changeset_id,
 approval_id, resulting_status, resulting_revision}``. Every frame is replayed
 over ``GET /authoring/v1/events`` and decoded by the subscriber's SSE parser;
 the verdict + reviewer notes are extracted, and each decision correlates to the
-right run seeded into a real ``AsyncSqliteSaver`` checkpoint by its
-proposal/changeset id. The end-to-end resume dispatch runs through the real
+right run through the pending document-approval row seeded under its proposal
+id. The end-to-end resume dispatch runs through the real
 ``safe_dispatch`` path (a real - here unreachable - worker, so no double),
 proving the subscriber reaches the resume with no crash; the worker-side landing
 of the resumed graph belongs to the phase-gate topology and the service harness,
@@ -81,6 +81,7 @@ from ...database import (
     get_control_action_by_idempotency_key,
     get_permission_request,
     get_thread,
+    pending_document_approval_thread,
     record_permission_request,
     update_thread_status,
 )
@@ -344,6 +345,18 @@ async def _seed_parked(
             session, write_authority=make_test_write_authority(), thread_id=thread_id
         )
         await update_thread_status(session, thread_id, ThreadStatus.INPUT_REQUIRED)
+        # The gate parks under its proposal id; this row is what a verdict
+        # correlates to.
+        await record_permission_request(
+            session,
+            request_id=proposal_id,
+            thread_id=thread_id,
+            pause_reason_type="document_approval_request",
+            description="Approve the document",
+            allowed_options=[
+                {"option_id": "approve", "name": "Approve", "kind": "allow_once"}
+            ],
+        )
         await session.commit()
 
 
@@ -411,6 +424,7 @@ async def _seed_verdict_round_trip(
 async def _assert_verdict_round_trip(
     client: AuthoringClient,
     subscriber: VerdictSubscriber,
+    session_factory: async_sessionmaker[AsyncSession],
     round_trip: _VerdictRoundTrip,
 ) -> None:
     lifecycle = [
@@ -440,7 +454,10 @@ async def _assert_verdict_round_trip(
             f"{verdict_kind} rode {frame.event_kind}, expected {want_kind}"
         )
         assert info["proposal_id"] in frame.correlation_ids()
-        thread_id = await subscriber._find_parked_thread(frame.correlation_ids())
+        async with session_factory() as db:
+            thread_id = await pending_document_approval_thread(
+                db, request_ids=frame.correlation_ids()
+            )
         assert thread_id is not None
         assert thread_id == round_trip.seeds[verdict_kind][0]
         matched[verdict_kind] = thread_id
@@ -498,7 +515,9 @@ async def test_live_verdict_round_trip_parks_and_resumes(
                 recursion_limit=25,
             )
         )
-        await _assert_verdict_round_trip(client, subscriber, round_trip)
+        await _assert_verdict_round_trip(
+            client, subscriber, session_factory, round_trip
+        )
 
     await db_engine.dispose()
 

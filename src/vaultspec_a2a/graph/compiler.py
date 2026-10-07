@@ -76,7 +76,6 @@ __all__ = [
     "_add_node",
     "_agent_node_metadata",
     "_compile_worker_node",
-    "_loop_route",
     "_route_from_supervisor",
     "_wire_diverge_stage",
     "compile_team_graph",
@@ -593,22 +592,6 @@ def _route_from_supervisor(state: TeamState) -> str:
             "the supervisor->route edge ran"
         )
     return next_route
-
-
-def _loop_route(*, revision_requested: bool, loop_count: int, max_loops: int) -> str:
-    """Decide a pipeline-loop node's next hop: ``"revise"`` or ``"FINISH"``.
-
-    The pure routing decision behind the ``_loop_router`` closure, lifted to
-    module scope so it is testable without compiling a graph. The loop goes
-    round again only when the loop node's own verdict asks for revision; the
-    ``max_loops`` guard forces ``"FINISH"`` once the counter reaches the
-    ceiling, whatever the verdict. The early exit used to wait for a literal
-    ``"FINISH"`` in ``next``, which no worker writes, so every loop ran to its
-    ceiling.
-    """
-    if loop_count >= max_loops:
-        return "FINISH"
-    return "revise" if revision_requested else "FINISH"
 
 
 class _CompileTeamOptional(TypedDict, total=False):

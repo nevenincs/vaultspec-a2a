@@ -67,10 +67,10 @@ from .._compiler_retry import (
 )
 from ..compiler import (
     STEP_BACKSTOP_GRACE_SECONDS,
-    _loop_route,
     _route_from_supervisor,
     compile_team_graph,
 )
+from ..nodes.phase_gate import revision_granted
 from .conftest import deterministic_model_assignment
 
 
@@ -687,26 +687,23 @@ async def test_compile_pipeline_empty_order_raises(
         )
 
 
-def test_loop_route_follows_the_loop_verdict_under_the_guard() -> None:
-    """The real ``_loop_route`` decision, exercised directly (not compile-only).
+def test_revision_granted_follows_the_verdict_under_the_budget() -> None:
+    """The one review-budget rule, exercised directly (not compile-only).
 
-    The loop goes round again only when the loop node's own verdict asks for
-    revision, and the max_loops guard forces FINISH once the counter reaches
-    the ceiling whatever the verdict says.
+    A review loop goes round again only when its reviewer's verdict asks for
+    revision, and a spent budget ends it whatever the verdict says.
     """
     # A verdict that asks for nothing more ends the loop early.
-    assert _loop_route(revision_requested=False, loop_count=0, max_loops=3) == (
-        "FINISH"
-    )
-    assert _loop_route(revision_requested=False, loop_count=2, max_loops=3) == (
-        "FINISH"
-    )
-    # A revision request sends the loop round again while below the guard.
-    assert _loop_route(revision_requested=True, loop_count=0, max_loops=3) == ("revise")
-    assert _loop_route(revision_requested=True, loop_count=2, max_loops=3) == ("revise")
-    # The guard wins over any verdict once the ceiling is reached.
-    assert _loop_route(revision_requested=True, loop_count=3, max_loops=3) == ("FINISH")
-    assert _loop_route(revision_requested=True, loop_count=4, max_loops=3) == ("FINISH")
+    assert not revision_granted(revision_requested=False, spent=0, budget=2)
+    assert not revision_granted(revision_requested=False, spent=2, budget=2)
+    # A revision request sends the loop round again while the budget lasts.
+    assert revision_granted(revision_requested=True, spent=0, budget=2)
+    assert revision_granted(revision_requested=True, spent=2, budget=2)
+    # The budget wins over any verdict once it is spent.
+    assert not revision_granted(revision_requested=True, spent=3, budget=2)
+    assert not revision_granted(revision_requested=True, spent=4, budget=2)
+    # A zero budget refuses even the first revision asked for.
+    assert not revision_granted(revision_requested=True, spent=1, budget=0)
 
 
 # ---------------------------------------------------------------------------

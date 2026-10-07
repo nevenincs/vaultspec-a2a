@@ -20,7 +20,6 @@ from ..lifecycle import (
     GapSignal,
     LifecycleEvent,
     StreamError,
-    changeset_status_verdict,
     parse_sse_frame,
     verdict_from_event,
 )
@@ -208,12 +207,3 @@ def test_malformed_and_unknown_frames_are_dropped() -> None:
     assert parse_sse_frame("lifecycle", "not-json") is None
     assert parse_sse_frame("lifecycle", json.dumps({"no": "seq"})) is None
     assert parse_sse_frame("message", json.dumps({"any": "thing"})) is None
-
-
-def test_changeset_status_verdict_maps_only_terminal_decisions() -> None:
-    assert changeset_status_verdict("approved") == VERDICT_APPROVED
-    assert changeset_status_verdict("rejected") == VERDICT_REJECTED
-    # Non-terminal / non-verdict statuses carry no reviewer decision.
-    assert changeset_status_verdict("needs_review") is None
-    assert changeset_status_verdict("draft") is None
-    assert changeset_status_verdict("applied") is None

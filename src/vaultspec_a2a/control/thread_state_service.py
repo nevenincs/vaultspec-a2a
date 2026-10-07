@@ -48,7 +48,11 @@ from ..thread.enums import (
     TranscriptAvailability,
 )
 from ..thread.snapshots import ThreadStateData, project_checkpoint_tuple
-from ..utils.coercion import coerce_string_list, decode_json_object
+from ..utils.coercion import (
+    coerce_nonempty_str,
+    coerce_string_list,
+    decode_json_object,
+)
 from .execution_authority import (
     ExecutionAuthorityError,
     resolve_execution_authority_from_fields,
@@ -240,11 +244,6 @@ class ThreadStateCapture:
     transcript: TranscriptAvailability
 
 
-def _optional_str(value: object) -> str | None:
-    """Return *value* when it is a non-empty string, else None."""
-    return value if isinstance(value, str) and value else None
-
-
 def derive_run_semantic_context(
     projection: CheckpointProjection | None,
 ) -> SemanticContext:
@@ -253,8 +252,8 @@ def derive_run_semantic_context(
         return SemanticContext(feature_tag=None, authoring_session_id=None)
     values = projection.channel_values
     return SemanticContext(
-        feature_tag=_optional_str(values.get(ACTIVE_FEATURE_FIELD)),
-        authoring_session_id=_optional_str(values.get(AUTHORING_SESSION_FIELD)),
+        feature_tag=coerce_nonempty_str(values.get(ACTIVE_FEATURE_FIELD)),
+        authoring_session_id=coerce_nonempty_str(values.get(AUTHORING_SESSION_FIELD)),
     )
 
 

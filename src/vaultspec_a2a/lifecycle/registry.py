@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from ..utils._process_tree import pid_is_live, port_has_listener
 from ..utils.atomic_write import atomic_write_text
-from ..utils.coercion import coerce_string_list
+from ..utils.coercion import coerce_nonempty_str, coerce_string_list
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -183,8 +183,7 @@ def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
         return v if isinstance(v, str) else ""
 
     def _opt_str_or_none(key: str) -> str | None:
-        v = data.get(key)
-        return v if isinstance(v, str) and v else None
+        return coerce_nonempty_str(data.get(key))
 
     def _opt_int(key: str) -> int:
         v = data.get(key)

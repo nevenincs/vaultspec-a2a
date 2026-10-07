@@ -12,6 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..utils import package_version
 from ..utils.async_cleanup import complete_cleanup
+from ..utils.coercion import coerce_nonempty_str
 from ._acp_request import encode_frame
 from ._cleanup import cancel_owned_tasks, run_independent_cleanups
 from ._codex_permission import (
@@ -272,8 +273,7 @@ class _CodexAppServerClient:
         msg_id = (
             raw_id if isinstance(raw_id, int) and not isinstance(raw_id, bool) else None
         )
-        raw_method = message.get("method")
-        method = raw_method if isinstance(raw_method, str) and raw_method else None
+        method = coerce_nonempty_str(message.get("method"))
         # Server-initiated request (has both id and method). The tool-approval
         # request is answered on its own terms; anything else is still refused,
         # but LOUDLY. A silent method-not-found here is what made every bridged

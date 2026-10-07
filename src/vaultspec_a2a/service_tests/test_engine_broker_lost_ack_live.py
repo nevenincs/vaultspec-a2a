@@ -37,7 +37,7 @@ from ..testing import (
     selection_from_served_catalog,
 )
 from ..utils import bearer_header
-from ..utils.coercion import coerce_object_mapping
+from ..utils.coercion import coerce_nonempty_str, coerce_object_mapping
 from ._dashboard_engine import dashboard_engine, provision_workspace
 
 if TYPE_CHECKING:
@@ -130,7 +130,7 @@ def _actor_token_from_body(parsed_body: Mapping[str, object]) -> str | None:
         else None
     )
     token = tokens.get("vaultspec-coder") if tokens is not None else None
-    return token if isinstance(token, str) and token else None
+    return coerce_nonempty_str(token)
 
 
 def _record_relay_stage(

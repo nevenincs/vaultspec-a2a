@@ -70,7 +70,7 @@ from ...providers.team_selection import (
     freeze_team_selection,
     normalize_replay_selection,
 )
-from ...utils.coercion import decode_json_object
+from ...utils.coercion import coerce_nonempty_str, decode_json_object
 from ..auth import authenticate_request
 from ..run_admission import (
     replay_digest_matches,
@@ -504,7 +504,7 @@ def _persisted_request_digest(metadata_json: str | None) -> str | None:
     """
     data = decode_json_object(metadata_json)
     digest = data.get(_REQUEST_DIGEST_METADATA_KEY) if data is not None else None
-    return digest if isinstance(digest, str) and digest else None
+    return coerce_nonempty_str(digest)
 
 
 def _replay_identity_or_conflict(

@@ -31,7 +31,7 @@ from ..thread.enums import (
     VERDICT_REJECTED,
     VERDICT_REQUEST_CHANGES,
 )
-from ..utils.coercion import coerce_int
+from ..utils.coercion import coerce_int, coerce_nonempty_str
 
 # The verdict vocabulary is imported to MAP ONTO, not to offer a second way in:
 # thread.enums holds it precisely because this module and the graph's phase gate
@@ -176,8 +176,7 @@ def _lifecycle_from_record(record: dict[str, Any]) -> LifecycleEvent | None:
 
 def _notes(event: LifecycleEvent) -> str | None:
     """Extract the reviewer comment to thread through as resume ``notes``."""
-    comment = event.data.get("comment")
-    return comment if isinstance(comment, str) and comment else None
+    return coerce_nonempty_str(event.data.get("comment"))
 
 
 def verdict_from_event(event: LifecycleEvent) -> tuple[str, str | None] | None:

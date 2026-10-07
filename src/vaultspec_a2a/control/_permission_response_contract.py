@@ -14,6 +14,7 @@ from ..thread.snapshots import (
     PERMISSION_REQUEST_EVENT_TYPES,
     PLAN_APPROVAL_PAUSE_CAUSES,
 )
+from ..utils.coercion import coerce_nonempty_str
 from .permission_options import answer_is_rejection
 
 if TYPE_CHECKING:
@@ -202,8 +203,7 @@ def existing_rejection_error(existing_action: object) -> str | None:
         return None
     if not _is_json_object(payload):
         return None
-    error_detail = payload.get("error_detail")
-    return error_detail if isinstance(error_detail, str) and error_detail else None
+    return coerce_nonempty_str(payload.get("error_detail"))
 
 
 @dataclass(frozen=True, slots=True)

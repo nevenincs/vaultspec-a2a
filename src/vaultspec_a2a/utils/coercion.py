@@ -18,6 +18,7 @@ from pydantic import TypeAdapter, ValidationError
 
 __all__ = [
     "coerce_int",
+    "coerce_nonempty_str",
     "coerce_object_list",
     "coerce_object_mapping",
     "coerce_string_list",
@@ -50,6 +51,27 @@ def coerce_int(value: object) -> int | None:
     if isinstance(value, float) and value.is_integer():
         return int(value)
     return None
+
+
+def coerce_nonempty_str(value: object) -> str | None:
+    """Return *value* when it is a non-empty ``str``, or ``None`` otherwise.
+
+    The scalar counterpart to :func:`coerce_string_list`'s ``drop_empty``: an
+    empty string names nothing, so a field holding one is read as absent rather
+    than as a blank value that travels on as though it were an identifier. The
+    string is returned exactly as given - never stripped - so a whitespace-only
+    string is non-empty here, and a caller that treats blank text as absent
+    decides that at its own site. Every non-``str`` value, ``bytes`` included,
+    is refused rather than converted.
+
+    Args:
+        value: A parsed JSON scalar or unstructured runtime value of unknown type.
+
+    Returns:
+        *value* unchanged when it is a ``str`` with at least one character,
+        otherwise ``None``.
+    """
+    return value if isinstance(value, str) and value else None
 
 
 def coerce_object_mapping(value: object) -> dict[str, object] | None:

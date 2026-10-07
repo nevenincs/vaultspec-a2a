@@ -32,7 +32,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from ..authoring import resolve_engine
 from ..control._verdict_subscriber_config import VerdictSubscriberConfig
-from ..control._worker_health import WorkerLiveness, WorkerState
+from ..control._worker_health import (
+    WorkerLiveness,
+    WorkerState,
+    _internal_auth_headers,
+)
 from ..control.circuit_breaker import WorkerCircuitBreaker
 from ..control.clarification_service import (
     ClarificationRuntime,
@@ -81,8 +85,12 @@ from ..lifecycle.shutdown import ShutdownDeadline, ShutdownServer, finish_before
 from ..streaming.aggregator import EventAggregator
 from ..telemetry import TelemetryMiddleware, configure_telemetry, trace_headers
 from ..telemetry.aggregator_hook import OTelAggregatorHook
-from ..utils import configure_logging, package_version, reconfigure_console_utf8
-from ..utils.ipc_auth import BearerVerdict
+from ..utils import (
+    BearerVerdict,
+    configure_logging,
+    package_version,
+    reconfigure_console_utf8,
+)
 from .auth import verify_attach_bearer
 from .internal import internal_router
 from .routes import register_routes
@@ -590,11 +598,7 @@ def _start_worker_runtime(
     worker_client = httpx.AsyncClient(
         base_url=settings.worker_url,
         timeout=httpx.Timeout(30.0, connect=5.0),
-        headers=(
-            {"Authorization": f"Bearer {settings.internal_token}"}
-            if settings.internal_token is not None
-            else None
-        ),
+        headers=_internal_auth_headers(),
     )
     app.state.worker_client = worker_client
     logger.info("Worker client configured: %s", settings.worker_url)

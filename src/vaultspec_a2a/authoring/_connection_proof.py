@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+from typing import TYPE_CHECKING
 
 import anyio
 import h11
@@ -14,9 +15,28 @@ import httpx
 from ._engine_trust import CHALLENGE_HEADER, PROOF_HEADER, TrustedEngineRecord
 from ._errors import AuthoringError
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+__all__ = [
+    "EngineConnectionError",
+    "ProofMessage",
+    "authenticated_client",
+    "proof_digest",
+]
+
+#: Builds the bytes a listener's proof signs from its reported
+#: ``(port, pid, started_ms)``, the proof request target, and the challenge.
+type ProofMessage = Callable[[int, int, int, str, str], bytes]
+
 
 class EngineConnectionError(AuthoringError):
     """The connected listener has not proved possession of the engine key."""
+
+
+def proof_digest(key: str, message: bytes) -> str:
+    """Return the HMAC a listener holding *key* answers a proof *message* with."""
+    return hmac.new(key.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
 async def _prove_stream(
@@ -25,7 +45,7 @@ async def _prove_stream(
     port: int,
     bearer: str,
     proof_path: str,
-    proof_domain: str | None,
+    proof_message: ProofMessage | None,
 ) -> None:
     challenge = secrets.token_hex(32)
     protocol = h11.Connection(h11.CLIENT, max_incomplete_event_size=16_384)
@@ -70,15 +90,12 @@ async def _prove_stream(
         started = int(headers.get("x-vaultspec-engine-started-ms", ""))
         if pid <= 0 or started <= 0:
             raise ValueError("invalid lifecycle")
-        identity = TrustedEngineRecord(port, pid, started, bearer)
         message = (
-            identity.proof_message(challenge)
-            if proof_domain is None
-            else (
-                f"{proof_domain}:1\n{port}\n{pid}\n{started}\n{proof_path}\n{challenge}"
-            ).encode("ascii")
+            TrustedEngineRecord(port, pid, started, bearer).proof_message(challenge)
+            if proof_message is None
+            else proof_message(port, pid, started, proof_path, challenge)
         )
-        expected = hmac.new(bearer.encode("utf-8"), message, hashlib.sha256).hexdigest()
+        expected = proof_digest(bearer, message)
     except (ValueError, UnicodeError) as exc:
         raise EngineConnectionError("engine connection identity is invalid") from exc
     proof = headers.get(PROOF_HEADER, "")
@@ -92,7 +109,7 @@ def authenticated_client(
     timeout: float,
     *,
     proof_path: str = "/health",
-    proof_domain: str | None = None,
+    proof_message: ProofMessage | None = None,
 ) -> httpx.AsyncClient:
     """Gate every new connection, including reconnects; reused streams stay proven.
 
@@ -125,7 +142,7 @@ def authenticated_client(
                     port=origin.port or 0,
                     bearer=bearer,
                     proof_path=proof_path,
-                    proof_domain=proof_domain,
+                    proof_message=proof_message,
                 )
         except (h11.RemoteProtocolError, h11.LocalProtocolError) as exc:
             with anyio.CancelScope(shield=True):

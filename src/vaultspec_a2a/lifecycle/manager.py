@@ -26,6 +26,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
+from ..utils import bearer_header
 from ..utils._process_tree import (
     ListenerOwnership,
     classify_listener_ownership,
@@ -645,8 +646,7 @@ def _worker_auth_headers(
     """
     if not (is_worker and internal_token_file):
         return {}
-    token = read_internal_token(internal_token_file, label=label)
-    return {"Authorization": f"Bearer {token}"}
+    return bearer_header(read_internal_token(internal_token_file, label=label))
 
 
 def _health_probe_for(

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import hmac
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from ..utils.ipc_auth import BearerVerdict
+from ..utils import BearerVerdict, bearer_matches
 
 __all__ = ["authenticate_request", "verify_attach_bearer"]
 
@@ -64,11 +63,7 @@ def verify_attach_bearer(
     """
     if not isinstance(expected, str) or not expected:
         return BearerVerdict.MISCONFIGURED
-    # Constant-time compare so verifying the attach credential never leaks its
-    # bytes through data-dependent timing; parity with the internal-IPC and
-    # lifecycle gates on the neighbouring credential planes.
-    supplied = (authorization or "").encode("utf-8")
-    if not hmac.compare_digest(supplied, f"Bearer {expected}".encode()):
+    if not bearer_matches(authorization, expected):
         return BearerVerdict.UNAUTHORIZED
     return BearerVerdict.OK
 

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import SplitResult, urlsplit
 
 from .control.config import settings
+from .utils import bearer_header
 
 if TYPE_CHECKING:
     from .desktop.credentials import DesktopCredentialPaths
@@ -102,4 +103,4 @@ def gateway_auth_headers(url: str) -> dict[str, str]:
 
     if token is None:
         return {}
-    return {"Authorization": f"Bearer {token}"}
+    return bearer_header(token)

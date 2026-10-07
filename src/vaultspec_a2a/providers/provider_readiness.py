@@ -14,6 +14,7 @@ from ._factory_commands import (
     classify_provider_command,
     kimi_temporary_model_configuration_reason,
 )
+from .in_process_catalog import in_process_lane
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -87,10 +88,10 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
         reason = native_execution_refusal_reason()
         if reason is not None:
             return ProviderReadiness(provider=provider, ready=False, reason=reason)
-    if provider in (Provider.MOCK, Provider.DETERMINISTIC):
-        # Neither provider needs a credential or launch command. This readiness
-        # probe says construction can proceed, not that MOCK's external tape
-        # server is reachable or that it can satisfy the completion floor.
+    if in_process_lane(provider) is not None:
+        # A held in-process lane needs no credential or launch command. This
+        # readiness probe says construction can proceed, not that a lane's own
+        # dependency - the mock lane's tape server - is reachable.
         return ProviderReadiness(provider=provider, ready=True)
 
     if provider in (Provider.CLAUDE, Provider.CODEX):

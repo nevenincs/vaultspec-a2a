@@ -5,9 +5,9 @@ description  = """
 Deterministic driver variant of vaultspec-adr-research for the standing
 acceptance harness. Identical research_adr topology and the SAME five worker
 agent_ids (so the actor-token bundle keys and the submitter role keys are
-unchanged); only the provider is set to Provider.DETERMINISTIC, the in-process
-DeterministicResearchAdrChatModel, so the full Research -> ADR -> Plan contract
-runs with no Docker, no VidaiMock tape server, and no real provider credentials.
+unchanged); a run selects the in-process deterministic lane, which a source-run
+gateway holds only through its lane plugins, so the full Research -> ADR -> Plan
+contract runs with no Docker, no tape server, and no real provider credentials.
 Not a product preset: it exists to certify the loop reproducibly and fast. Real-provider
 collaboration is proven by running the same harness against the vaultspec-adr-research
 preset (or a mixed-provider profile).

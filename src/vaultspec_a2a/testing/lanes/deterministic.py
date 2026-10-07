@@ -2,8 +2,9 @@
 
 ``DeterministicResearchAdrChatModel`` is a first-class ``BaseChatModel`` that
 runs entirely in-process: no live model spend, no external service, no
-credential. It is selected through the real ``ProviderFactory``, so every run it
-answers crosses the same worker, graph and permission seams a real lane does.
+credential. Its lane is registered through the product's lane-plugin seam, so it
+is selected through the real ``ProviderFactory`` and every run it answers
+crosses the same worker, graph and permission seams a real lane does.
 
 Two kinds of turn come out of it, both keyed by the ``AgentConfig.id`` the
 factory injects:
@@ -39,10 +40,10 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
-from ..authoring.contract import RESEARCH_ADR_ROLES
-from ..team.team_config import AgentConfig
-from ..thread.constants import DEFAULT_SUPERVISOR_ID
-from ._acp_types import PermissionCallback
+from ...authoring.contract import RESEARCH_ADR_ROLES
+from ...providers._acp_types import PermissionCallback
+from ...team.team_config import AgentConfig
+from ...thread.constants import DEFAULT_SUPERVISOR_ID
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +246,7 @@ def _supervisor_route(messages: list[BaseMessage]) -> str:
 class DeterministicResearchAdrChatModel(BaseChatModel):
     """In-process ``BaseChatModel`` returning fixed role content or a scenario.
 
-    Selected through the real provider path via ``Provider.DETERMINISTIC``; the
+    Selected through the real provider path by its registered lane; the
     factory injects the run's ``AgentConfig`` so the model resolves its role or
     its scenario. The output is deterministic and derives only from the agent
     id, feature tag, topic, the turn's messages and the permission answer, never

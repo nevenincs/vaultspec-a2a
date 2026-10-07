@@ -2,8 +2,9 @@
 
 Agent Client Protocol (ACP) exceptions load eagerly.
 :class:`vaultspec_a2a.providers.acp_chat_model.AcpChatModel`,
-:class:`vaultspec_a2a.providers.mock_chat_model.MockChatModel`, and
-:class:`vaultspec_a2a.providers.factory.ProviderFactory` load lazily.
+:class:`vaultspec_a2a.providers.mock_chat_model.MockChatModel`,
+:class:`vaultspec_a2a.providers.factory.ProviderFactory`, and the in-process
+lane-plugin seam of :mod:`vaultspec_a2a.providers.lane_registry` load lazily.
 
 The lazy boundary breaks the providers, team, and graph import cycle. It also
 keeps heavyweight implementation modules unloaded until a caller requests
@@ -28,6 +29,9 @@ from .warmup import warm_model_imports as warm_model_imports
 if TYPE_CHECKING:
     from .acp_chat_model import AcpChatModel as AcpChatModel
     from .factory import ProviderFactory as ProviderFactory
+    from .lane_registry import LanePluginError as LanePluginError
+    from .lane_registry import LaneRegistration as LaneRegistration
+    from .lane_registry import LaneRegistry as LaneRegistry
     from .mock_chat_model import MockChatModel as MockChatModel
 
 # Lazy imports to break circular dependency:
@@ -35,6 +39,9 @@ if TYPE_CHECKING:
 #   -> providers.factory -> providers.acp_chat_model
 _LAZY_IMPORTS = {
     "AcpChatModel": ".acp_chat_model",
+    "LanePluginError": ".lane_registry",
+    "LaneRegistration": ".lane_registry",
+    "LaneRegistry": ".lane_registry",
     "MockChatModel": ".mock_chat_model",
     "ProviderFactory": ".factory",
 }
@@ -58,6 +65,9 @@ __all__ = [
     "AcpPromptCancelledError",
     "AcpPromptError",
     "AcpSessionError",
+    "LanePluginError",
+    "LaneRegistration",
+    "LaneRegistry",
     "MockChatModel",
     "ProviderCondition",
     "ProviderFactory",

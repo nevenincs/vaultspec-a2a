@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from ..testing import fetch_in_process_selection_at
+from ..testing.catalog import unvalidated_selection
 from ..testing.ports import free_port
 from ..tests.gateway_boot import (
     armed_gateway_env,
@@ -140,9 +140,6 @@ def _armed_gateway_on_worker_port(
                 app_home,
                 gateway_port=gateway_port,
                 worker_port=worker_port,
-                # This module admits runs against the in-process mock lane
-                # (see ``_catalog.py``); the gateway must serve one to select.
-                extra={"VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true"},
             ),
             log_handle=log_handle,
         )
@@ -175,16 +172,10 @@ def _prepare(base: str, auth: str, run_id: str) -> tuple[int, dict[str, Any]]:
                 "stage": "prepare",
                 "autonomous": True,
                 "run_id": run_id,
-                # The workspace anchors the selection, which run start
-                # revalidates against the catalog served for it.
                 "metadata": {"workspace_root": workspace},
-                "selection": fetch_in_process_selection_at(
-                    base,
-                    workspace,
-                    headers={"Authorization": auth},
-                    prefer_provider_id="mock",
-                    cache=True,
-                ),
+                # Desktop execution is refused before run start reads the
+                # catalog, so a well-formed selection is all the request needs.
+                "selection": unvalidated_selection(),
             },
         )
     try:
@@ -277,9 +268,6 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
                 app_home,
                 gateway_port=gateway_port,
                 worker_port=worker_port,
-                # This module admits runs against the in-process mock lane
-                # (see ``_catalog.py``); the gateway must serve one to select.
-                extra={"VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true"},
             ),
             log_handle=log_handle,
         )

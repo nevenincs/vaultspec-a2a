@@ -13,12 +13,13 @@ from typing import Any
 
 import pytest
 
-from ...providers.in_process_catalog import IN_PROCESS_EXECUTION_MODES
+from ...providers.in_process_catalog import BUILT_IN_LANES
 from ..catalog import (
     NoSelectableLaneError,
     in_process_selection,
     named_lane_selection,
 )
+from ..lanes import LANES
 
 
 def _lane(
@@ -109,7 +110,7 @@ def test_an_unserved_preference_falls_back_within_the_in_process_lanes() -> None
     )
     assert selection["provider_id"] == "deterministic"
     assert selection["provider_id"] in {
-        provider.value for provider in IN_PROCESS_EXECUTION_MODES
+        lane.provider.value for lane in (*LANES, *BUILT_IN_LANES)
     }
 
 

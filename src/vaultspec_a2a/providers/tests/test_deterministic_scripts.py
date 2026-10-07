@@ -1,8 +1,9 @@
 """Direct production-provider proofs for the deterministic scripted scenarios.
 
-These tests construct each model through ``ProviderFactory`` and then exercise the
-real worker/graph or async-provider boundary. They intentionally do not model ACP
-or VidaiMock SSE semantics; tape scenarios remain supplemental coverage.
+These tests construct each model through ``ProviderFactory``, with the lane held
+through its plugin, and then exercise the real worker/graph or async-provider
+boundary. They intentionally do not model ACP or VidaiMock SSE semantics; tape
+scenarios remain supplemental coverage.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from ...testing import (
     compile_test_graph,
     new_state_graph,
 )
-from ..deterministic_chat_model import DeterministicResearchAdrChatModel
+from ...testing.lanes import DeterministicResearchAdrChatModel, seated_lanes
 from ..factory import ProviderFactory
 
 if TYPE_CHECKING:
@@ -43,9 +44,10 @@ def _scenario_model(
     team = load_team_config(team_id)
     assert len(team.workers) == 1
     agent = load_agent_config(team.workers[0].agent_id)
-    model = ProviderFactory().create(
-        Provider.DETERMINISTIC, model="deterministic", agent_config=agent
-    )
+    with seated_lanes():
+        model = ProviderFactory().create(
+            Provider.DETERMINISTIC, model="deterministic", agent_config=agent
+        )
     assert isinstance(model, DeterministicResearchAdrChatModel)
     return model, agent
 

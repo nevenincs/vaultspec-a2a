@@ -68,8 +68,9 @@ from .execution_modes import (
     external_execution_mode,
 )
 from .in_process_catalog import (
-    IN_PROCESS_EXECUTION_MODES,
     discover_in_process_catalog,
+    in_process_lane,
+    in_process_lanes,
     served_in_process_lanes,
 )
 from .kimi_catalog import discover_kimi_catalog
@@ -97,11 +98,11 @@ class UnsupportedExecutionLaneError(ValueError):
 
 def validate_current_execution_lane(provider: Provider, execution_mode: str) -> None:
     """Refuse a structurally impossible provider/mode pair without construction."""
-    expected = (
-        external_execution_mode(provider, settings.acp_backend)
-        if provider in EXTERNAL_EXECUTION_MODES
-        else IN_PROCESS_EXECUTION_MODES.get(provider)
-    )
+    if provider in EXTERNAL_EXECUTION_MODES:
+        expected = external_execution_mode(provider, settings.acp_backend)
+    else:
+        lane = in_process_lane(provider)
+        expected = lane.execution_mode if lane is not None else None
     if expected != execution_mode:
         raise UnsupportedExecutionLaneError(
             f"Provider {provider.value!r} cannot execute mode {execution_mode!r}"
@@ -112,13 +113,10 @@ def validate_current_native_controls(
     provider: Provider, controls: dict[str, str]
 ) -> None:
     """Validate provider-specific frozen control structure before construction."""
-    no_control_lanes = {
-        Provider.DETERMINISTIC,
-        Provider.MOCK,
-        Provider.OPENAI,
-        Provider.ZHIPU,
-    }
-    if provider in no_control_lanes and controls:
+    no_control_lanes = {Provider.OPENAI, Provider.ZHIPU}
+    if controls and (
+        provider in no_control_lanes or in_process_lane(provider) is not None
+    ):
         raise ValueError(
             f"Provider {provider.value!r} has no exact native-control executor"
         )
@@ -143,13 +141,13 @@ def validate_current_native_controls(
 logger = logging.getLogger(__name__)
 
 
+# The external lanes this factory constructs; an in-process lane is supported
+# exactly when this process holds its registration.
 _SUPPORTED_PROVIDERS: frozenset[Provider] = frozenset(
     {
         Provider.CLAUDE,
         Provider.CODEX,
-        Provider.DETERMINISTIC,
         Provider.KIMI,
-        Provider.MOCK,
         Provider.ZAI,
         Provider.ZHIPU,
         Provider.OPENAI,
@@ -578,7 +576,7 @@ def _admit_and_resolve_model_name(provider: Provider, model: object) -> str:
     Raises:
         ValueError: If the provider is unsupported or no exact value is supplied.
     """
-    if provider not in _SUPPORTED_PROVIDERS:
+    if provider not in _SUPPORTED_PROVIDERS and in_process_lane(provider) is None:
         logger.error("Failed to instantiate: Unsupported provider %s", provider)
         raise ValueError(f"Unsupported provider: {provider}")
 
@@ -887,21 +885,6 @@ def _create_openai_compatible_model(
     return ChatOpenAI(**kwargs)
 
 
-def _create_in_process_model(
-    provider: Provider, agent_config: AgentConfig | None, kwargs: dict[str, Any]
-) -> BaseChatModel:
-    if provider == Provider.MOCK:
-        from .mock_chat_model import MockChatModel
-
-        return MockChatModel(agent_config=agent_config)
-    if provider != Provider.DETERMINISTIC:
-        raise ValueError(f"Unsupported provider: {provider}")
-    from .deterministic_chat_model import DeterministicResearchAdrChatModel
-
-    det_kwargs = {key: kwargs[key] for key in ("feature_tag", "topic") if key in kwargs}
-    return DeterministicResearchAdrChatModel(agent_config=agent_config, **det_kwargs)
-
-
 def _bind_create_options(
     args: tuple[object, ...], kwargs: dict[str, Any]
 ) -> tuple[AgentConfig | None, Path | None, str | None]:
@@ -928,6 +911,12 @@ def _bind_create_options(
 
 class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
+
+    def __init__(self) -> None:
+        # Resolving the in-process lane set here makes a lane plugin that cannot
+        # be honoured refuse the process that builds its factory at startup,
+        # rather than surface at the first run that reaches a lane.
+        in_process_lanes()
 
     def catalog_registrations(
         self, workspace_root: Path, *, serve_in_process_lanes: bool | None = None
@@ -1063,8 +1052,9 @@ class ProviderFactory:
             model_name,
         )
 
-        if provider in {Provider.MOCK, Provider.DETERMINISTIC}:
-            return _create_in_process_model(provider, agent_config, kwargs)
+        lane = in_process_lane(provider)
+        if lane is not None:
+            return lane.create_model(agent_config)
 
         if provider == Provider.CODEX:
             return _create_codex_model(

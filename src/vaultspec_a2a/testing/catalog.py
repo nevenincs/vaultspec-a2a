@@ -39,10 +39,14 @@ resolves, on any developer machine holding a live provider session, to a real
 paid lane - and a certification suite whose whole point is in-process replay
 would have been billing a provider while still reporting green.
 
-The wire shape is :class:`~vaultspec_a2a.api.schemas.gateway.ProviderCatalogSelection`
-and the in-process lane identities are
-:data:`~vaultspec_a2a.providers.in_process_catalog.IN_PROCESS_EXECUTION_MODES`;
-both are read from production rather than restated here, so neither can drift.
+The wire shape is :class:`~vaultspec_a2a.api.schemas.gateway.ProviderCatalogSelection`,
+read from production rather than restated here so it cannot drift. The
+in-process lane identities are the registrations themselves: the lanes this
+package contributes (:data:`~vaultspec_a2a.testing.lanes.LANES`) and the ones
+production compiles in
+(:data:`~vaultspec_a2a.providers.in_process_catalog.BUILT_IN_LANES`). They are
+read from the registrations, not from this process's own lane set, because the
+gateway that serves a payload is usually another process with its own arming.
 
 HTTP stays with the caller's CLIENT. The tiers legitimately differ - an ASGI
 transport, a real socket, a sync or async client, an attach bearer - and a
@@ -68,6 +72,7 @@ if TYPE_CHECKING:
 
     from ..api.schemas.gateway import ProviderCatalogSelection
     from ..graph.enums import Provider
+    from ..providers import LaneRegistration
     from ..providers.provider_catalog import ProviderRecord, SelectionReference
 
 __all__ = [
@@ -90,6 +95,7 @@ __all__ = [
     "named_lane_selection",
     "override_selection_from_served_catalog",
     "selection_from_served_catalog",
+    "unvalidated_selection",
 ]
 
 _CATALOG_PATH: Final = "/v1/provider-catalog"
@@ -157,14 +163,20 @@ def _is_selectable(record: dict[str, Any]) -> bool:
     return bool(health.get("selectable")) and bool(catalog.get("models"))
 
 
+def _known_in_process_lanes() -> tuple[LaneRegistration, ...]:
+    """Every in-process lane a test gateway can hold, plugin lanes first."""
+    from ..providers.in_process_catalog import BUILT_IN_LANES
+    from .lanes import LANES
+
+    return (*LANES, *BUILT_IN_LANES)
+
+
 def _is_in_process(record: dict[str, Any]) -> bool:
     """Whether the record is one of the lanes that execute inside the gateway."""
-    from ..providers.in_process_catalog import IN_PROCESS_EXECUTION_MODES
-
     return any(
-        provider.value == record.get("provider_id")
-        and execution_mode == record.get("execution_mode")
-        for provider, execution_mode in IN_PROCESS_EXECUTION_MODES.items()
+        lane.provider.value == record.get("provider_id")
+        and lane.execution_mode == record.get("execution_mode")
+        for lane in _known_in_process_lanes()
     )
 
 
@@ -212,11 +224,16 @@ def _choose_in_process(
         if _is_in_process(record) and _is_selectable(record)
     ]
     if not candidates:
+        from .lanes import armed_lane_environment
+
+        arming = " ".join(
+            f"{name}={value}" for name, value in armed_lane_environment().items()
+        )
         raise NoSelectableLaneError(
             "no selectable in-process lane is served, so this run cannot present "
-            "a selection. Arm them on the gateway with "
-            "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES=true (the mock lane additionally "
-            "needs VAULTSPEC_A2A_MOCK_API_BASE). Served: " + _served_summary(records)
+            f"a selection. Arm them on the gateway with {arming} (the mock lane "
+            "additionally needs VAULTSPEC_A2A_MOCK_API_BASE). Served: "
+            + _served_summary(records)
         )
     record = next(
         (item for item in candidates if item["provider_id"] == prefer_provider_id),
@@ -469,6 +486,31 @@ async def async_catalog_run_fields(
     }
 
 
+def unvalidated_selection() -> dict[str, Any]:
+    """Return a well-formed selection no catalog serves, for a refused request.
+
+    A request whose refusal precedes selection validation - desktop execution is
+    refused before run start reads the catalog - still has to pass the schema, so
+    it needs a selection of the right shape and no more. Fetching a served one
+    would demand a lane the refusing gateway has no business serving. The lane it
+    names is a real external identity read from production, at a revision no
+    catalog issued, so a refusal that ever stopped preceding validation fails
+    validation rather than reaching a provider.
+    """
+    from ..api.schemas.gateway import ProviderCatalogSelection
+    from ..graph.enums import Provider
+    from ..providers.execution_modes import EXTERNAL_EXECUTION_MODES
+    from ..providers.provider_catalog import SELECTION_SCHEMA_VERSION
+
+    return ProviderCatalogSelection(
+        schema_version=SELECTION_SCHEMA_VERSION,
+        provider_id=Provider.CODEX.value,
+        execution_mode=EXTERNAL_EXECUTION_MODES[Provider.CODEX],
+        catalog_revision="unvalidated",
+        entry_id="unvalidated",
+    ).model_dump(mode="json")
+
+
 def in_process_lane_selection(
     provider: Provider,
 ) -> tuple[ProviderRecord, SelectionReference]:
@@ -479,11 +521,14 @@ def in_process_lane_selection(
     service would have stamped on it. The reference takes the lane's first entry
     under the same rule as :func:`in_process_selection`: legal on a lane that
     bills nothing, and only there.
+
+    Raises:
+        ValueError: If *provider* names no in-process lane a test gateway holds.
     """
     from datetime import UTC, datetime
 
     from ..providers.in_process_catalog import (
-        discover_in_process_catalog,
+        build_in_process_catalog,
         in_process_catalog_key,
     )
     from ..providers.provider_catalog import (
@@ -498,10 +543,16 @@ def in_process_lane_selection(
     )
     from ..providers.provider_catalog_service import stamp_catalog_expiry
 
-    key = in_process_catalog_key(provider)
+    lane = next(
+        (lane for lane in _known_in_process_lanes() if lane.provider is provider),
+        None,
+    )
+    if lane is None:
+        raise ValueError(f"provider {provider.value} is not an in-process lane")
+    key = in_process_catalog_key(lane)
     record = ProviderRecord(
         provider_id=key.provider_id,
-        display_name=f"{provider.value.capitalize()} (in-process)",
+        display_name=lane.display_name,
         execution_mode=key.execution_mode,
         health=StructuredProviderHealth.derive(
             axes=ProviderHealthAxes(
@@ -513,7 +564,7 @@ def in_process_lane_selection(
             ),
             checked_at=datetime.now(UTC),
         ),
-        catalog=stamp_catalog_expiry(discover_in_process_catalog(key).catalog),
+        catalog=stamp_catalog_expiry(build_in_process_catalog(lane)),
     )
     reference = SelectionReference(
         provider_id=key.provider_id,

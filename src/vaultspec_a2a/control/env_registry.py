@@ -18,9 +18,11 @@ a failure rather than a credential quietly left ungated.
 
 A credential never chains to a shared framework name, so each spelling a field
 accepts is its own entry, canonical a2a name first and the owning tool's own
-name behind it. The non-secret entry is the operator environment file itself -
+name behind it. The non-secret entries are the operator environment file itself -
 a2a's replacement for reading settings out of the workspace, resolved through
-the same accessor so that a blank value means unset here too.
+the same accessor so that a blank value means unset here too - and the lane
+plugins setting, declared so the registry records that a workspace can never
+supply the modules a process imports.
 """
 
 from typing import Final
@@ -36,6 +38,7 @@ from .env_prefix import ENV_PREFIX
 __all__ = [
     "CREDENTIAL_VARIABLES",
     "ENV_FILE_VARIABLE",
+    "LANE_PLUGINS_VARIABLE",
 ]
 
 #: The distribution name whose install mode gates the workspace ``.env``.
@@ -84,6 +87,21 @@ ENV_FILE_VARIABLE: Final = ConfigVariable(
     ),
 )
 
+#: The modules whose in-process lanes a process imports. A setting, never a
+#: credential: neither a workspace ``.env`` nor the project store may supply it,
+#: so it reaches a process only through the environment its launcher hands it.
+LANE_PLUGINS_VARIABLE: Final = ConfigVariable(
+    env_name=f"{ENV_PREFIX}LANE_PLUGINS",
+    attr_name=None,
+    var_type=str,
+    default=None,
+    description=(
+        "Comma-separated module paths, each exposing register_lanes(registry). "
+        "Honoured only while the in-process lanes are armed outside the desktop "
+        "profile; any other non-empty value refuses startup."
+    ),
+)
+
 #: Every settings field a workspace ``.env`` may supply, mapped to the names it
 #: is accepted under, canonical first. A field absent from this mapping is a
 #: setting, and the workspace never supplies it.
@@ -120,6 +138,7 @@ register_registry(
     PACKAGE,
     (
         ENV_FILE_VARIABLE,
+        LANE_PLUGINS_VARIABLE,
         *(entry for entries in CREDENTIAL_VARIABLES.values() for entry in entries),
     ),
 )

@@ -10,6 +10,7 @@ import pytest
 from httpx import ASGITransport
 
 from ...api.app import create_app
+from ...api.routes._gateway_action_endpoints import route_signature
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -89,12 +90,10 @@ def _make_gated_app():
 
 def test_v1_surface_is_not_expanded() -> None:
     """The versioned surface carries exactly the reviewed members, no more."""
-    app = _make_gated_app()
     v1_routes = {
-        f"{method.upper()} {path}"
-        for path, operations in app.openapi().get("paths", {}).items()
-        if path.startswith("/v1")
-        for method in operations
+        signature
+        for signature in route_signature(_make_gated_app())
+        if signature.partition(" ")[2].startswith("/v1")
     }
     assert v1_routes == _EXPECTED_V1_ROUTES
 

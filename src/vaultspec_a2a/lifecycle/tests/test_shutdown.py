@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 from contextlib import asynccontextmanager
 
 import httpx
 import pytest
-import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 
-from ...testing import uvicorn_started
+from ...testing import loopback_uvicorn, uvicorn_started
 from ..shutdown import ShutdownDeadline, ShutdownServer
 
 
@@ -38,15 +38,12 @@ async def test_parked_sse_is_cancelled_inside_the_server_shutdown_clock() -> Non
 
         return StreamingResponse(body(), media_type="text/event-stream")
 
-    config = uvicorn.Config(
+    server = loopback_uvicorn(
         app,
-        host="127.0.0.1",
-        port=0,
         log_level="error",
-        lifespan="on",
         timeout_graceful_shutdown=1,
+        server_factory=functools.partial(ShutdownServer, app=app, total_seconds=3.0),
     )
-    server = ShutdownServer(config, app=app, total_seconds=3.0)
     serving = asyncio.create_task(server.serve())
     try:
         base = await uvicorn_started(server, serving)

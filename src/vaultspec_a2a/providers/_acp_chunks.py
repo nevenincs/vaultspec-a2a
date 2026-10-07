@@ -3,6 +3,8 @@
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.outputs import ChatGenerationChunk
 
+__all__ = ["notify_chunk"]
+
 
 async def notify_chunk(
     run_manager: AsyncCallbackManagerForLLMRun | None,

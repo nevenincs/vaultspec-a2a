@@ -1,9 +1,9 @@
 """Bounded relay delivery drops the oldest event, not the newest.
 
-Three relay call sites had grown their own copy of this policy. The rule they
-share is lossy on purpose, so which event is lost matters: a viewer that cannot
-keep up is better served by recent state than by a stale prefix, and what was
-dropped is recovered by checkpoint re-projection rather than from the stream.
+One drop rule serves every bounded relay queue. It is lossy on purpose, so which
+event is lost matters: a viewer that cannot keep up is better served by recent
+state than by a stale prefix, and what was dropped is recovered by checkpoint
+re-projection rather than from the stream.
 
 Real queues throughout - the behaviour under test is queue behaviour.
 """

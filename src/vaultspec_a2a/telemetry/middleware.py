@@ -81,7 +81,7 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
 
     Propagates W3C TraceContext (``traceparent`` / ``tracestate``) from
     incoming request headers so that distributed traces from upstream CLIs or
-    the React frontend are correctly linked.
+    the dashboard are correctly linked.
 
     Recorded span attributes (OTel Semantic Conventions v1.23+):
         http.request.method: GET, POST, etc.

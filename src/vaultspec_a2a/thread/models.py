@@ -21,8 +21,9 @@ class PlanEntry:
     """A single entry in the agent's execution plan.
 
     Fields use plain ``str`` so the domain layer stays free of wire-protocol
-    enum imports.  Values correspond to ``PlanEntryStatus`` / ``PlanEntryPriority``
-    members defined in ``api.schemas.enums``.
+    enum imports.  Values follow the ACP plan-entry vocabularies: status
+    ``pending`` / ``in_progress`` / ``completed``, priority ``high`` / ``medium``
+    / ``low``.
     """
 
     content: str

@@ -136,7 +136,7 @@ class Settings(InfraConfig):
         """Seat every mutable path under the explicit desktop application home.
 
         The desktop profile is armed only when ``desktop_app_home`` is set. While
-        unarmed (the Compose and development profiles), this is a no-op and the
+        unarmed (the development profile), this is a no-op and the
         configuration is byte-for-byte unchanged — including the import surface,
         since the desktop path authority is imported only on the armed branch.
 
@@ -152,7 +152,7 @@ class Settings(InfraConfig):
             return self
 
         # Imported lazily and only when armed: unarmed construction never pulls
-        # the desktop package, preserving the Compose/dev import surface.
+        # the desktop package, preserving the development import surface.
         from ..desktop.profile import derive_state_paths
 
         state = derive_state_paths(self.desktop_app_home)
@@ -365,9 +365,9 @@ class Settings(InfraConfig):
         authority for those references; it derives them through the desktop profile
         path authority rather than restating the layout.
 
-        Returns ``None`` while the profile is unarmed (the Compose and development
-        profiles), so no credential path resolves relative to a launch directory and
-        the unarmed import surface never pulls the desktop package.
+        Returns ``None`` while the profile is unarmed (the development profile),
+        so no credential path resolves relative to a launch directory and the
+        unarmed import surface never pulls the desktop package.
         """
         if self.desktop_app_home is None:
             return None

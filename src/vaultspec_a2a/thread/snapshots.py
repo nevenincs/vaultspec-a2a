@@ -113,9 +113,8 @@ PLAN_APPROVAL_PAUSE_CAUSES: frozenset[str] = frozenset(
 # The subset of PLAN_APPROVAL_PAUSE_CAUSES this repository's own respond route
 # may resolve. Excludes the document approval pause: that pause is decided
 # solely by the engine review surface, correlated back into the run by the
-# verdict subscriber (the amended a2a-orchestration-edge contract: no second
-# approval authority in A2A). Consumed only by control/permission_service.py's
-# respond-route gating.
+# verdict subscriber (A2A holds no second approval authority). Consumed only by
+# control/permission_service.py's respond-route gating.
 LOCALLY_RESPONDABLE_PAUSE_CAUSES: frozenset[str] = PLAN_APPROVAL_PAUSE_CAUSES - {
     InterruptType.DOCUMENT_APPROVAL_REQUEST.value
 }
@@ -587,7 +586,7 @@ def build_agent_descriptor(
     *,
     thread_id: str,
 ) -> AgentData:
-    """Project one aggregator node summary onto the canonical descriptor.
+    """Project one node summary of the live-state mirror onto the canonical descriptor.
 
     The single seam shared by every agent-listing surface, so a field carried on
     :class:`AgentData` reaches the REST route, the thread snapshot, and the

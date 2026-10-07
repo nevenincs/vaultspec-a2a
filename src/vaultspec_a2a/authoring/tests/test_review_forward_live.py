@@ -1,4 +1,4 @@
-"""Live proof of the review-decision + apply-request delivery path (F30).
+"""Live proof of the review-decision + apply-request delivery path.
 
 No mocks: this drives a real engine on loopback, resolved through the same
 discovery-file contract every other live-engine suite in this package uses
@@ -90,7 +90,7 @@ def _whole_document_op(feature: str) -> dict[str, Any]:
                 "provisional_doc_id": f"prov:{feature}",
                 "doc_type": "research",
                 "feature": feature,
-                "title": "F30 delivery-path live proof",
+                "title": "Review-forward delivery-path live proof",
                 "collision_status": "available",
             }
         },
@@ -105,9 +105,9 @@ def _whole_document_op(feature: str) -> dict[str, Any]:
                 "modified: '2026-08-05'\n"
                 "related: []\n"
                 "---\n\n"
-                f"# `{feature}` research: `f30 delivery-path live proof`\n\n"
+                f"# `{feature}` research: `review-forward delivery-path live proof`\n\n"
                 "## Summary\n\n"
-                "Live proof body for the F30 review-decision + request-apply "
+                "Live proof body for the review-decision + request-apply "
                 "delivery path. Disposable test artifact, deleted by the test "
                 "that materializes it.\n"
             ),
@@ -158,7 +158,7 @@ async def _propose_and_submit(
     changeset_id = session.new_changeset_id(label)
     created = await session.create_proposal(
         changeset_id=changeset_id,
-        summary=f"f30 {label} live proof",
+        summary=f"review-forward {label} live proof",
         operations=[_whole_document_op(feature)],
         idempotency_key=derive_idempotency_key(run_id, label, "create_proposal"),
     )
@@ -168,7 +168,7 @@ async def _propose_and_submit(
     submitted = await session.submit(
         changeset_id=changeset_id,
         expected_revision=revision,
-        summary=f"submit f30 {label} proof",
+        summary=f"submit review-forward {label} proof",
         idempotency_key=derive_idempotency_key(run_id, label, "submit"),
     )
     assert isinstance(submitted, AuthoringResponse), f"submit denied: {submitted}"
@@ -190,7 +190,7 @@ async def _create_review_proposal(
 
     session = AuthoringSession(client, run_id, project_scope=scope)
     created_session = await session.create_session(
-        title=f"f30 {run_id}",
+        title=f"review-forward {run_id}",
         idempotency_key=derive_idempotency_key(run_id, "create_session"),
     )
     assert isinstance(created_session, AuthoringResponse)
@@ -301,7 +301,7 @@ async def test_decide_and_apply_materializes_a_file_with_single_application(
 ) -> None:
     """approve -> request_apply lands a real file, and a retried apply is a no-op.
 
-    This is the F30 proof: the missing half of the delivery path is these two
+    This is the delivery proof: the missing half of the delivery path is these two
     engine calls, and this asserts a file exists on disk at the exact path the
     apply receipt reports — not a 2xx, not an approval recorded, a file. The
     retried apply reuses the SAME idempotency key an operator retry would
@@ -309,8 +309,8 @@ async def test_decide_and_apply_materializes_a_file_with_single_application(
     that key is enforced by the ENGINE, so a matching mtime/content after the
     retry is a real proof, not a same-process artifact of a stable key alone.
     """
-    run_id = f"f30-{uuid.uuid4().hex[:10]}"
-    feature = f"f30-review-proof-{uuid.uuid4().hex[:8]}"
+    run_id = f"fwd-{uuid.uuid4().hex[:10]}"
+    feature = f"review-proof-{uuid.uuid4().hex[:8]}"
     scope = engine_scope_token(_PROJECT)
 
     endpoint = live_engine.base_url, live_engine.bearer_token
@@ -330,8 +330,8 @@ async def test_self_approval_is_a_denial_not_a_silent_success(
 
     A Denial, never a silently-accepted 2xx approval.
     """
-    run_id = f"f30-self-{uuid.uuid4().hex[:10]}"
-    feature = f"f30-self-approval-{uuid.uuid4().hex[:8]}"
+    run_id = f"fwd-self-{uuid.uuid4().hex[:10]}"
+    feature = f"self-approval-{uuid.uuid4().hex[:8]}"
     scope = engine_scope_token(_PROJECT)
 
     endpoint = live_engine.base_url, live_engine.bearer_token
@@ -341,7 +341,7 @@ async def test_self_approval_is_a_denial_not_a_silent_success(
 
         session = AuthoringSession(client, run_id, project_scope=scope)
         created_session = await session.create_session(
-            title=f"f30-self {run_id}",
+            title=f"fwd-self {run_id}",
             idempotency_key=derive_idempotency_key(run_id, "create_session"),
         )
         assert isinstance(created_session, AuthoringResponse)
@@ -387,8 +387,8 @@ async def test_stale_reviewed_revision_is_a_typed_409_not_silently_decided(
     failure mode a forwarding caller must be able to tell apart from success —
     a transport-level typed error, not a Denial value.
     """
-    run_id = f"f30-stale-{uuid.uuid4().hex[:10]}"
-    feature = f"f30-stale-revision-{uuid.uuid4().hex[:8]}"
+    run_id = f"fwd-stale-{uuid.uuid4().hex[:10]}"
+    feature = f"stale-revision-{uuid.uuid4().hex[:8]}"
     scope = engine_scope_token(_PROJECT)
 
     endpoint = live_engine.base_url, live_engine.bearer_token
@@ -401,7 +401,7 @@ async def test_stale_reviewed_revision_is_a_typed_409_not_silently_decided(
 
         session = AuthoringSession(client, run_id, project_scope=scope)
         created_session = await session.create_session(
-            title=f"f30-stale {run_id}",
+            title=f"fwd-stale {run_id}",
             idempotency_key=derive_idempotency_key(run_id, "create_session"),
         )
         assert isinstance(created_session, AuthoringResponse)
@@ -420,7 +420,7 @@ async def test_stale_reviewed_revision_is_a_typed_409_not_silently_decided(
                 approval_id=approval_id,
                 proposal_id=proposal_id,
                 decision=REVIEW_DECISION_APPROVE,
-                reviewed_revision="changeset:f30stalefence0000000000000000000000000",
+                reviewed_revision="changeset:fwdstalefence0000000000000000000000000",
                 idempotency_key=derive_idempotency_key(
                     run_id, approval_id, "fence-probe"
                 ),

@@ -15,8 +15,8 @@ terminal run is already durable, and a lost callback is reconciled by the
 dashboard's own status reconciliation, not by retrying forever here.
 
 Configuration is resolved fail-soft: when no dashboard settlement endpoint is
-configured (the Compose and development profiles, or a desktop install whose
-dashboard has not published one) the callback is simply skipped, never errored.
+configured (the development profile, or a desktop install whose dashboard has
+not published one) the callback is simply skipped, never errored.
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from ..thread.enums import ThreadStatus
 
 __all__ = [
+    "SettlementResult",
     "emit_run_settlement",
 ]
 

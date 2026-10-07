@@ -2,9 +2,9 @@
 
 Mounts the run, preset, and service verbs under ``/v1`` as the engine-facing
 edge, including bounded discovery and the droppable ``run-stream`` companion to
-the authoritative status snapshot. Each verb reshapes an existing service
-rather than reinventing it, so there is a single code path: the richer internal
-``/api`` surface and these verbs call the same services beneath.
+the authoritative status snapshot. Each verb reshapes an existing
+:mod:`vaultspec_a2a.control` service rather than reinventing it, so there is a
+single code path beneath the edge.
 
 Run start composes :mod:`vaultspec_a2a.control.admission` and
 :mod:`vaultspec_a2a.control.health` into ``start``, readiness-gated ``prepare``,
@@ -118,6 +118,9 @@ __all__ = [
     "_replay_identity_or_conflict",
     "_string_field",
     "_validate_and_freeze_selection_or_refuse",
+    "admission_broker",
+    "admission_gate",
+    "provider_catalog_service",
     "router",
 ]
 

@@ -7,9 +7,9 @@ provider payload, or the free-form ``metadata`` dict. A frame type absent from
 the catalog is degraded to its identity keys rather than relayed. It is also
 bounded: an authenticated caller cannot open an unbounded number of streams.
 
-These drive the real edge over a real TCP socket behind the production discovery
+These drive the real edge over a real TCP socket behind the app's seated attach
 bearer - no mocks, no auth bypass - relaying forbidden content into the same
-aggregator the live server reads from and asserting it never crosses the encoded
+relay hub the live server reads from and asserting it never crosses the encoded
 boundary while the permitted fields do. Every exclusion assertion is paired with
 a permitted-field assertion, so an empty or dropped frame cannot satisfy it.
 """
@@ -242,7 +242,7 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
     ``team_status.agents[].agent_id``/``state`` drive roster liveness, and
     ``error.message`` is the rendered fault reason. All three survive today only
     because their types are now enumerated - before the catalog closed they rode
-    the default-allow path. Each is relayed through the real aggregator and read
+    the default-allow path. Each is relayed through the real relay hub and read
     back off a real socket.
     """
     app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())

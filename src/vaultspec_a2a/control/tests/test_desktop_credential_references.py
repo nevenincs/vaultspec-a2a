@@ -25,7 +25,7 @@ def _app_home(tmp_path: Path) -> Path:
 
 
 def test_unarmed_profile_exposes_no_credential_references() -> None:
-    """The Compose and development profiles surface no credential paths."""
+    """The unarmed development profile surfaces no credential paths."""
     settings = Settings(desktop_app_home=None)
     assert settings.desktop_credential_paths is None
 

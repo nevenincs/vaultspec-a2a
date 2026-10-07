@@ -8,9 +8,8 @@ internal-IPC rule on top of them: when the token is unset, auth is disabled in
 DEVELOPMENT but a hard misconfiguration in every other environment; otherwise
 the ``Authorization`` header must be exactly ``Bearer <token>``. Framework-free
 by design - the caller maps the verdict onto its transport's error (an HTTP
-500/401, a WebSocket close), so per-caller nuances (the worker's
-``WWW-Authenticate`` header, a WS close code) stay with the caller while the
-rule itself lives in one place.
+500/401), so per-caller nuances (the worker's ``WWW-Authenticate`` header)
+stay with the caller while the rule itself lives in one place.
 """
 
 from __future__ import annotations

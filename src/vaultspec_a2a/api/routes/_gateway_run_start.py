@@ -162,7 +162,7 @@ async def run_start_endpoint(
     verb set: ``prepare`` reserves bounded capacity without tokens or a durable
     run; ``commit`` binds the exact actor-token role set to that reservation;
     ``release`` frees only an uncommitted reservation; and ``start`` (the
-    default) preserves the one-shot engine/Compose path.
+    default) preserves the one-shot engine path.
     """
     db, _aggregator, checkpointer, worker_client = services
     runtime = _RunRuntime(
@@ -488,8 +488,7 @@ async def _create_run_core(
     # from it by whichever of these ends its execution first: the worker's
     # terminal event (``control.event_handlers._handle_terminal_event``, the
     # primary release for any run that actually executes), a dispatch failure
-    # that settled the run FAILED - the start-path one below, or a follow-up
-    # one in the messages route or the WS dispatch handler - a cancel that
+    # that settled the run FAILED - the start-path one below - a cancel that
     # settles the run terminally (``run_cancel_endpoint``), or here, in the
     # finally, on EVERY path that leaves no durable run. Release is an
     # idempotent discard, so more than one of them firing is harmless.

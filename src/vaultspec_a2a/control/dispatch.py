@@ -4,8 +4,8 @@ Single entry point for all gateway-to-worker dispatch calls.  Handles
 the common core: ensure worker is spawned, circuit breaker check,
 HTTP POST to ``/dispatch``, and success/failure recording.
 
-Protocol-agnostic: does NOT raise ``HTTPException``.  Callers are
-responsible for translating errors into HTTP or WebSocket responses.
+Edge-agnostic: does NOT raise ``HTTPException``.  Callers are
+responsible for translating its typed errors into HTTP responses.
 """
 
 from __future__ import annotations
@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
+    "DispatchOutcome",
     "redispatch_reconciling_threads",
     "safe_dispatch",
 ]

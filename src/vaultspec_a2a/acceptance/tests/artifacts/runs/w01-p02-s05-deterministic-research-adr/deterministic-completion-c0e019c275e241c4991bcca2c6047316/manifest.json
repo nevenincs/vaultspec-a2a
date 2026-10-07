@@ -8,7 +8,6 @@
   },
   "bundle_id": "w01-p02-s05-deterministic-research-adr:deterministic-completion-c0e019c275e241c4991bcca2c6047316",
   "review": {
-    "required_step": "W01.P02.S31",
     "status": "pending"
   },
   "run_id": "deterministic-completion-c0e019c275e241c4991bcca2c6047316",

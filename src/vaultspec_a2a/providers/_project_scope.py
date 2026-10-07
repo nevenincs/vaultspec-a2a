@@ -2,13 +2,15 @@
 
 A run is admitted against one project, and every lane's tools take that project
 as an argument rather than inheriting it, so the escape is argument-borne and the
-check has to run where calls pass. Both lanes have such a place - the ACP
-permission handler and the Codex approval rung - and this is the single scan they
-share, so the two cannot come to disagree about what "another project" means.
+check has to run where calls pass. That place is the permission decision both
+lanes share, ``_tool_policy.decide``, which runs the foreign-project scan here
+ahead of either lane's rung, so the two cannot come to disagree about what
+"another project" means.
 
 A tool that takes no project still takes a PATH, and a path reaches just as far:
 the lanes' own read built-ins read whatever file they are handed, so the second
-scan here measures a call's path arguments against the same bound project.
+scan here measures a call's path arguments against the same bound project; the
+ACP permission handler applies it to a native read call.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ if TYPE_CHECKING:
     from ._json_contract import JsonObject, JsonValue
 
 __all__ = [
+    "PathArgumentScan",
     "RunProjectScope",
     "foreign_project_argument",
     "path_arguments_in_project",

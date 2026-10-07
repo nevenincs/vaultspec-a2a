@@ -1,8 +1,7 @@
 """Streaming types, protocols, and stateless classification helpers.
 
-Extracted from the monolithic ``aggregator.py`` during the aggregator
-decomposition.  Contains no mutable state — pure data definitions
-and lookup tables only.
+Shared by the worker's ``RunEventProducer`` and its composed managers.
+Contains no mutable state — pure data definitions and lookup tables only.
 """
 
 import json
@@ -21,6 +20,7 @@ __all__ = [
     "StreamableGraph",
     "action_detail_projection",
     "classify_tool_kind",
+    "evict_oldest",
     "map_action_item_status",
     "parse_action_detail",
 ]
@@ -32,8 +32,8 @@ class SequencedEvent:
 
     The sequence is a wire-protocol concern and does not belong
     on the domain event itself.  This lightweight wrapper carries both values
-    through the subscriber queues and broadcast hooks so the worker's relay can
-    serialize the pair with ``ipc.serializers.sequenced_to_dict()``.
+    through the producer's debounce buffers and broadcast hooks so the worker's
+    relay can serialize the pair with ``ipc.serializers.sequenced_to_dict()``.
     """
 
     event: DomainEvent
@@ -173,7 +173,7 @@ def classify_tool_kind(tool_name: str) -> ToolKind:
 
 
 # ---------------------------------------------------------------------------
-# Provider action items (F17) — a provider-internal action (an ACP CLI's own
+# Provider action items — a provider-internal action (an ACP CLI's own
 # built-in tools; Codex's commandExecution/fileChange/mcpToolCall) never goes
 # through a real LangChain BaseTool/ToolNode, so it never produces the
 # on_tool_start/on_tool_end pair or a ToolMessage a genuine tool call would.
@@ -184,7 +184,7 @@ def classify_tool_kind(tool_name: str) -> ToolKind:
 # These helpers are the ONE place that shape is read, so the live stream
 # (streaming.transformer, watching astream_events as it happens) and a
 # settled run's REST snapshot (control.snapshot, reading the same shape back
-# out of checkpointed AIMessage.tool_calls after the aggregator's in-memory
+# out of checkpointed AIMessage.tool_calls after the gateway's in-memory run
 # state has been pruned) classify the identical detail identically — a
 # provider action can never be reported COMPLETED on one surface and PENDING
 # on the other because it was reached through two independent guesses.
@@ -204,10 +204,8 @@ def map_action_item_status(raw_status: object) -> ToolCallStatus:
     ``in_progress``, ``pending``) is honoured directly. Anything else -- a
     policy rejection, an abort, a spelling this lane has not been observed
     using yet -- is treated as FAILED rather than risking a silent COMPLETED
-    on a call that did not succeed. That silent-success risk is the exact
-    shape of F17: one of the 15 stuck-pending tool calls in the reference
-    incident was a policy-rejected command the model narrated but the record
-    never showed as anything but pending.
+    on a call that did not succeed. A policy-rejected command the model
+    narrated would otherwise show as anything but failed.
     """
     if isinstance(raw_status, str) and raw_status in _KNOWN_ACTION_ITEM_STATUSES:
         return ToolCallStatus(raw_status)

@@ -13,9 +13,10 @@ composes the recovery snapshot, active-run discovery projects bounded durable
 identities, and the operator verbs roll up cancel, preset listing, and health.
 
 The run-start models expose ``start``, ``prepare``, ``commit``, and ``release``
-for :mod:`vaultspec_a2a.api.routes.gateway`. Commit binds the exact role set to
-the exact replay request. ``lease_id`` is non-secret coordination metadata, not
-a bearer credential; release applies only to an uncommitted reservation.
+for the run-start verb mounted by :mod:`vaultspec_a2a.api.routes`. Commit binds
+the exact role set to the exact replay request. ``lease_id`` is non-secret
+coordination metadata, not a bearer credential; release applies only to an
+uncommitted reservation.
 """
 
 from __future__ import annotations
@@ -85,19 +86,30 @@ from ...thread.snapshots import QueuedMessageCount, RepairReason, ThreadStateDat
 __all__ = [
     "ActiveRunRecord",
     "ActiveRunsResponse",
+    "FrozenTeamAssignmentSummary",
     "PathSafeRunId",
     "PresetSummary",
     "PresetsListResponse",
     "ProviderCatalogSelection",
     "RoleState",
+    "RunAgentSummary",
+    "RunArchiveResponse",
     "RunCancelResponse",
     "RunClarificationRespondRequest",
     "RunClarificationRespondResponse",
     "RunCommitResponse",
+    "RunDeleteResponse",
+    "RunHistoryResponse",
     "RunMessageRefusalCode",
     "RunMessageRefusalDetail",
     "RunMessageRefusalResponse",
+    "RunMessageRequest",
+    "RunMessageResponse",
+    "RunPendingPermission",
+    "RunPermissionDecision",
     "RunPermissionRefusalResponse",
+    "RunPermissionRespondRequest",
+    "RunPermissionRespondResponse",
     "RunPrepareResponse",
     "RunReleaseResponse",
     "RunStage",
@@ -107,6 +119,7 @@ __all__ = [
     "RunSummariesResponse",
     "RunSummaryRecord",
     "ServiceStateResponse",
+    "TeamStatusV1Response",
     "TerminalSettlement",
     "TopologyPosition",
 ]
@@ -1026,7 +1039,7 @@ class ServiceStateResponse(BaseModel):
     # constant, so under this contract they are prose and not a vocabulary.
     degraded_reasons: list[str] = Field(default_factory=list)
     # Sorted "METHOD path" signature of the live route table (see
-    # ``route_signature`` in ``api.routes.gateway``). The doctor CLI diffs this
+    # ``route_signature``, exported by ``api.routes``). The doctor CLI diffs this
     # against the installed source's expected signature to catch a resident
     # process started before a route landed - there is no hot-reload, so a
     # stale resident silently 404s otherwise.

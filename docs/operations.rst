@@ -196,9 +196,8 @@ implemented by :mod:`vaultspec_a2a.lifecycle.discovery`.
 
 Authentication is implemented by
 :func:`vaultspec_a2a.api.auth.authenticate_request` and wired by
-:func:`vaultspec_a2a.api.app.create_app`. The
-``allow_unauthenticated_v1_for_testing`` application option is test-only and
-must never be enabled by an operator deployment.
+:func:`vaultspec_a2a.api.app.create_app`, which takes no option that disables
+the requirement.
 
 Semantic search server
 ----------------------
@@ -236,7 +235,9 @@ any store, while anything listens on the configured gateway or worker port,
 whether or not that listener would answer an unauthenticated request. A
 checkpoint that an open read transaction blocks fails the ``compact`` stage,
 leaves the log as it was, and skips ``VACUUM``; the result's ``detail`` says how
-much of the log was written back.
+much of the log was written back. The verb works on the application home's own
+stores under ``state/``, so a development store that
+``VAULTSPEC_A2A_DATABASE_URL`` places elsewhere cannot be compacted with it.
 
 Active-run discovery
 --------------------

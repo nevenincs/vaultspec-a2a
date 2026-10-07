@@ -1,10 +1,10 @@
 """Bounded delivery into a per-client relay queue.
 
 A slow client must not stall the relay for everyone else, so each client owns a
-bounded queue and a full queue evicts to make room. Two relay paths implemented
-that rule independently - the server-sent-event subscriber registry and the
-WebSocket connection manager - and a backpressure policy that exists twice will
-eventually be two policies.
+bounded queue and a full queue evicts to make room. Both bounded event buffers -
+the gateway's per-subscriber relay queues and the worker's outbound batch -
+evict through the one rule here, because a backpressure policy that exists twice
+will eventually be two policies.
 
 The drop is deliberate and lossy. A client that cannot keep up loses the oldest
 events rather than the newest, because a viewer reconnecting mid-run is better

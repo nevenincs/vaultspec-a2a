@@ -2,7 +2,8 @@
 
 Creates the ASGI application with:
 - Lifespan management (init/close DB, the relay hub, telemetry)
-- REST router from per-resource route modules
+- The versioned ``/v1`` router and the administrative shutdown router from
+  ``routes/``
 - Internal router from ``internal.py`` (worker relay)
 
 The gateway NO LONGER runs agent execution locally.  All graph
@@ -68,7 +69,7 @@ from ..database import (
     validate_desktop_schema,
 )
 from ..domain_config import domain_config
-from ..ipc.body_limit import BoundedHttpBodyMiddleware, gateway_body_limit
+from ..ipc import BoundedHttpBodyMiddleware, gateway_body_limit
 from ..lifecycle.discovery import (
     HEARTBEAT_REFRESH_SECONDS,
     another_resident_is_live,
@@ -237,9 +238,9 @@ async def _desktop_discovery_heartbeat(
     """Refresh the versioned desktop discovery record every cadence.
 
     The desktop profile publishes the versioned, secret-free record rather than
-    the Compose ``ServiceInfo`` record; this keeps its heartbeat fresh so a
-    contender never reads a live gateway as stale. Non-fatal: a transient write
-    failure is logged and retried on the next tick.
+    the development profile's ``ServiceInfo`` record; this keeps its heartbeat
+    fresh so a contender never reads a live gateway as stale. Non-fatal: a
+    transient write failure is logged and retried on the next tick.
     """
     while True:
         try:
@@ -916,7 +917,7 @@ def create_app(lifespan: Any | None = None) -> FastAPI:
         the gateway's dependencies.
 
         Both profiles PROBE rather than read off app state - the DB here and, on
-        Compose and development, the checkpointer and worker as well - because a
+        the development profile, the checkpointer and worker as well - because a
         healthcheck that only reports what the process believes about itself
         cannot notice a dependency that has gone away.
         """

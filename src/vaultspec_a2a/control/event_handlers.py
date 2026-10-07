@@ -2,11 +2,12 @@
 
 Business-logic handlers that persist worker events into the database,
 journal permission requests, re-project the run's pause, and release the
-relay hub's run state on thread termination.  Extracted from ``api/internal.py``
-to decouple protocol translation from domain logic.
+relay hub's run state on thread termination.  They live here, not in
+``api/internal.py``, so the route keeps to protocol translation and the domain
+logic stays out of it.
 
-The :func:`relay_event` orchestrator consolidates the duplicated 4-handler
-call sequence that previously appeared in 3 call sites.
+The :func:`relay_event` orchestrator runs the one handler sequence every
+relayed worker event goes through.
 """
 
 from __future__ import annotations
@@ -1006,11 +1007,7 @@ async def relay_event(
     payload: dict[str, object],
     services: RelayServices | None = None,
 ) -> None:
-    """Consolidated relay: run every event handler in sequence.
-
-    This replaces the 3x duplicated handler call sequence that previously
-    appeared in ``_relay_worker_event``, ``receive_worker_event``, and
-    ``receive_worker_event_batch``.
+    """Run every event handler in sequence for one relayed worker event.
 
     Callers are responsible for routing execution-state projections before this
     general relay, fanning the frame out through the relay hub, and mirroring

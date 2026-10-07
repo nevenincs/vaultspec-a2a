@@ -12,6 +12,9 @@ __all__ = [
     "RECOVERY_ACTION_TYPES",
     "TERMINAL_STATUSES",
     "TERMINAL_STATUS_VALUES",
+    "VERDICT_APPROVED",
+    "VERDICT_REJECTED",
+    "VERDICT_REQUEST_CHANGES",
     "ApprovalStatus",
     "CleanupKind",
     "ControlActionResultStatus",
@@ -102,12 +105,12 @@ class ReplayStatus(StrEnum):
     Answers a different question from :class:`RepairStatus`: that one classifies
     what is WRONG with a run, this one classifies how far the reader got. A
     ``durable`` replay walked the stored history whole; ``best_effort`` served
-    what the live aggregator held because the durable history was not reachable;
-    ``gap_detected`` walked it and found a hole. ``unknown`` is the honest
-    starting value and the answer whenever the checkpoint could not be read at
-    all - deliberately not collapsed into ``gap_detected``, because "there is a
-    hole here" and "I could not look" are different claims and only the first
-    accuses the store.
+    what the gateway's live relay state held because the durable history was not
+    reachable; ``gap_detected`` walked it and found a hole. ``unknown`` is the
+    honest starting value and the answer whenever the checkpoint could not be
+    read at all - deliberately not collapsed into ``gap_detected``, because
+    "there is a hole here" and "I could not look" are different claims and only
+    the first accuses the store.
     """
 
     DURABLE = "durable"

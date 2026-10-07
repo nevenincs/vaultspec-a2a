@@ -1070,13 +1070,11 @@ async def test_run_status_carries_reconnect_cursor(
     reconnect reconciliation comes from run-status (last_sequence), not from the
     droppable SSE progress stream.
 
-    F66: this test previously asserted only the field's TYPE
-    (``isinstance(..., int)``), which a permanently-zero cursor also satisfies
-    -- so it passed against the F19 defect (last_sequence always 0 after a run
-    settles) for as long as that defect existed, naming a contract it did not
-    actually check. Widened to number five relayed frames through the real
-    sequence allocator, settle the run through the SAME terminal handler
-    production dispatch uses, and assert the value the LIVE HTTP read recovers
+    Asserting only the field's TYPE (``isinstance(..., int)``) would not do: a
+    permanently-zero cursor (``last_sequence`` always 0 after a run settles)
+    also satisfies it. This test numbers five relayed frames through the real
+    sequence allocator, settles the run through the SAME terminal handler
+    production dispatch uses, and asserts the value the LIVE HTTP read recovers
     is the one the allocator issued before settle -- the read that actually
     exercises the reconnect-cursor contract, since a reconnecting client only
     ever reads run-status after a run has already ended.
@@ -1577,7 +1575,7 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
         lines = resp.aiter_lines()
 
         # Wait for the SSE handler to register its subscriber, then emit an
-        # event into the same aggregator the live server is serving from.
+        # event into the same relay hub the live server is serving from.
         await _wait_until(
             lambda: agg.subscriber_count() > 0,
             what="the SSE subscriber to register",
@@ -2161,7 +2159,7 @@ async def test_pairing_identity_is_authenticated_surface_only(
 ) -> None:
     """The gateway's lifetime identity never reaches an ungated health body.
 
-    Under the Compose and development profiles ``GET /health`` is
+    Under the unarmed development profile ``GET /health`` is
     unauthenticated and serves the full readiness aggregate - the very dict the
     pairing echo is assembled into - verbatim. The gateway's lifetime identity
     must not ride along: the armed adoption check trusts a worker's reported

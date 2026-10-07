@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from ...utils.enums import Environment
-from ...utils.ipc_auth import BearerVerdict, verify_internal_bearer
+from ...utils.ipc_auth import (
+    BearerVerdict,
+    bearer_header,
+    bearer_matches,
+    verify_internal_bearer,
+)
 
 
 def test_dev_mode_unset_token_disables_auth() -> None:
@@ -68,9 +73,11 @@ def test_comparison_path_uses_the_constant_time_helper() -> None:
     """
     import inspect
 
-    source = inspect.getsource(verify_internal_bearer)
+    source = inspect.getsource(bearer_matches)
     assert "hmac.compare_digest" in source
-    assert 'f"Bearer {token}"' in source
+    assert 'f"Bearer {secret}"' in source
+    assert bearer_matches(bearer_header("s3cr3t")["Authorization"], "s3cr3t")
+    assert not bearer_matches("Bearer s3cr3tX", "s3cr3t")
 
 
 class TestOmissionIsNotConsent:

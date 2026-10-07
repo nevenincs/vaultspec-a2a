@@ -10,8 +10,11 @@ climbing every tick and the breaker flapping open; post-fix it stays 0 and close
 
 from __future__ import annotations
 
+import contextlib
+import http.server
 import sys
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -20,8 +23,33 @@ from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.health import assemble_health_status
 from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
-from ...testing import adopted_spawner, free_port, health_listener
+from ...testing import JsonReplyHandler, adopted_spawner, free_port, serve_handler
 from ...utils import ProcessContainment, spawn_contained
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+
+class _ReadyWorkerHandler(JsonReplyHandler, http.server.BaseHTTPRequestHandler):
+    """Answers ``/health`` exactly as a ready worker does, and nothing else.
+
+    The generic affirmative peer in the test kit answers an empty object, which
+    the gateway's worker probe reads as "something is serving /health", not as a
+    ready worker - the gateway serves that path too. These tests are about what
+    the watchdog DOES with a healthy worker, so the stand-in has to be one.
+    """
+
+    def do_GET(self) -> None:
+        if self.path == "/health":
+            self._reply(200, {"status": "ok", "service": "worker"})
+        else:
+            self._reply_empty(404)
+
+
+@contextlib.contextmanager
+def _ready_worker_listener() -> Generator[int]:
+    with serve_handler(_ReadyWorkerHandler) as port:
+        yield port
 
 
 def _stale_app_state(**singletons: object) -> SimpleNamespace:
@@ -106,7 +134,7 @@ def test_restart_cooldown_gate() -> None:
 
 @pytest.mark.asyncio
 async def test_external_healthy_worker_stale_heartbeat_is_not_restarted() -> None:
-    with health_listener() as port:
+    with _ready_worker_listener() as port:
         spawner = adopted_spawner(f"http://127.0.0.1:{port}", port)
         app_state = _stale_app_state(
             circuit_breaker=WorkerCircuitBreaker(3, 30.0),
@@ -137,7 +165,7 @@ async def test_adopted_worker_recovers_from_transient_down_to_up() -> None:
     owned-worker state machine's "down stays down until a real recovery" guard would
     freeze a healthy adopted worker at "down" and make plain /health readiness lie.
     """
-    with health_listener() as port:
+    with _ready_worker_listener() as port:
         # auto_spawn True with no owned process is the same-gateway adoption shape.
         spawner = LazyWorkerSpawner(
             f"http://127.0.0.1:{port}", port, auto_spawn=True, internal_token=None

@@ -403,11 +403,13 @@ def _resolve_catalog_selection(
     what the caller chose, and choosing on their behalf is how a CLI quietly
     decides what a provider charges for.
     """
+    from ..api.routes._gateway_action_endpoints import PROVIDER_CATALOG_PATH
+
     # The catalog is resolved in the caller's project: what a lane serves is a
     # property of the workspace the run will execute in, not of the gateway.
     resp = _request(
         "GET",
-        f"{base}/v1/provider-catalog",
+        f"{base}{PROVIDER_CATALOG_PATH}",
         params={"workspace_root": workspace_root},
         timeout=_RUN_START_TIMEOUT,
     )

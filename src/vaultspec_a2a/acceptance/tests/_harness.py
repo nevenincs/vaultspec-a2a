@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from ...conftest import ExternalPrerequisiteRule
+from ...graph.enums import Provider
 from ...testing import NoSelectableLaneError, fetch_in_process_selection
 from ...tests.gateway_boot import (
     FIRST_DEMAND_TIMEOUT,
@@ -71,6 +72,11 @@ __all__ = [
 # a published wheel, which is why this harness is source-only.
 DEFAULT_TEAM_PRESET = "mock-success-single"
 DEFAULT_REQUIRED_ROLE = "mock-coder-success"
+
+# The in-process lane DEFAULT_TEAM_PRESET is pinned to. Every run this stack
+# drives presents ONE selection, so the preference is that preset's rather than a
+# verb's own team_preset default, which no caller overrides.
+_DEFAULT_PRESET_LANE = Provider.MOCK.value
 
 
 @dataclass(slots=True)
@@ -113,7 +119,11 @@ class CertifiedGateway:
         serving rather than freezing whichever provider the host has installed.
         """
         return {
-            "selection": self._selection(),
+            "selection": self.served_in_process_selection(
+                str(self.workspace_root),
+                prefer_provider_id=_DEFAULT_PRESET_LANE,
+                cache=True,
+            ),
             "metadata": {"workspace_root": str(self.workspace_root)},
         }
 
@@ -125,25 +135,31 @@ class CertifiedGateway:
         lane the harness actually selected, rather than restating a literal that
         would keep passing if the resolution ever picked something else.
         """
-        return str(self._selection()["provider_id"])
+        return str(self.run_fields()["selection"]["provider_id"])
 
-    def _selection(self) -> dict[str, Any]:
-        """Resolve this stack's one in-process selection.
+    def served_in_process_selection(
+        self,
+        workspace_root: str,
+        *,
+        prefer_provider_id: str,
+        cache: bool = False,
+    ) -> dict[str, Any]:
+        """Select an in-process lane from the catalog this stack serves.
 
-        The first catalog read for a workspace builds it cold, probing every
-        registered lane; its budget is deliberately its own rather than a verb
-        helper's. This stack's runs all execute DEFAULT_TEAM_PRESET (see
-        run_fields' own docstring: every verb presents ONE selection) - so the
-        preference this resolves must be that preset's, not the run-start verb's
-        own default team_preset argument, which no caller overrides.
+        This stack arms in-process serving itself, so a catalog without a
+        selectable lane means the arming failed. That is reported as the absent
+        ``in-process-lanes`` prerequisite, naming what is missing, rather than
+        freezing whichever external provider the host happens to have installed.
+        Keeping a billable lane out is the shared mechanism's own guarantee, so the
+        refusal is the only thing decided here.
         """
         try:
-            with self.client(timeout=240.0) as client:
+            with self.client() as client:
                 return fetch_in_process_selection(
                     client,
-                    str(self.workspace_root),
-                    prefer_provider_id="mock",
-                    cache=True,
+                    workspace_root,
+                    prefer_provider_id=prefer_provider_id,
+                    cache=cache,
                 )
         except NoSelectableLaneError as exc:
             ExternalPrerequisiteRule().absent("in-process-lanes", str(exc))

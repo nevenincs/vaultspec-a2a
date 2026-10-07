@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 __all__ = [
     "CheckpointEvidence",
     "CheckpointEvidenceKind",
-    "CheckpointReadView",
     "classify_checkpoint_evidence",
 ]
 
@@ -67,7 +66,7 @@ class CheckpointEvidence:
     incorporated: bool
 
 
-class CheckpointReadView(Protocol):
+class _CheckpointReadView(Protocol):
     """One bounded checkpoint read, as the classifier needs to see it.
 
     Declared here because the thread layer cannot import the read that
@@ -95,7 +94,7 @@ def _incompatible(checkpoint_id: str | None) -> CheckpointEvidence:
 
 
 def _checkpoint_values(
-    read: CheckpointReadView, checkpoint: Any, requested_checkpoint_id: str | None
+    read: _CheckpointReadView, checkpoint: Any, requested_checkpoint_id: str | None
 ) -> tuple[str, dict[str, object]] | CheckpointEvidence:
     # Durable storage is untrusted despite the saver's declared TypedDict.
     checkpoint_id_raw = cast("object", checkpoint.checkpoint.get("id"))
@@ -246,7 +245,7 @@ def _pending_evidence(
 
 
 def classify_checkpoint_evidence(
-    read: CheckpointReadView,
+    read: _CheckpointReadView,
     receipt: GraphActionReceipt,
     *,
     checkpoint_id: str | None = None,
@@ -268,7 +267,7 @@ def classify_checkpoint_evidence(
 
 
 def _classify_checkpoint(
-    read: CheckpointReadView,
+    read: _CheckpointReadView,
     checkpoint: Any,
     receipt: GraphActionReceipt,
     *,

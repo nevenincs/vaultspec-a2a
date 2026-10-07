@@ -60,7 +60,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FIRST_RECEIPT",
-    "ROOMY",
     "RUN",
     "BusyRun",
     "checkpoint_count",
@@ -68,7 +67,6 @@ __all__ = [
     "envelope",
     "finish_turn",
     "journal_action",
-    "probe_graph",
     "queue_continuation",
     "seed_busy_run",
     "start_busy_run",
@@ -76,7 +74,7 @@ __all__ = [
 
 RUN = "promotion-run"
 FIRST_RECEIPT = "first-turn-dispatch"
-ROOMY = ContinuationQueueLimits(per_run_depth=3, service_cap=9)
+_ROOMY = ContinuationQueueLimits(per_run_depth=3, service_cap=9)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,7 +174,7 @@ def _work(_state: TeamState) -> dict[str, object]:
     return {}
 
 
-def probe_graph(saver: AsyncSqliteSaver) -> CompiledTeamGraph:
+def _probe_graph(saver: AsyncSqliteSaver) -> CompiledTeamGraph:
     """Compile the smallest real graph that records a completion receipt."""
     builder = new_state_graph(TeamState)
     add_test_node(builder, "work", _work)
@@ -192,7 +190,7 @@ def probe_graph(saver: AsyncSqliteSaver) -> CompiledTeamGraph:
 async def finish_turn(saver: AsyncSqliteSaver, receipt: GraphActionReceipt) -> None:
     """Run the real graph so the checkpoint proves this turn completed."""
     config: RunnableConfig = {"configurable": {"thread_id": RUN}}
-    await probe_graph(saver).ainvoke(
+    await _probe_graph(saver).ainvoke(
         {
             "active_graph_action_receipt": receipt.model_dump(mode="json"),
             "graph_action_receipts": {
@@ -223,7 +221,7 @@ async def queue_continuation(
                 lifetime_deadline_at=(
                     lifetime_deadline_at or datetime.now(UTC) + timedelta(hours=6)
                 ),
-                limits=ROOMY,
+                limits=_ROOMY,
             ),
         )
         await db.commit()

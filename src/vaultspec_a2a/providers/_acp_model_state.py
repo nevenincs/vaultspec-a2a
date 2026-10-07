@@ -10,8 +10,6 @@ from ._json_contract import JsonObject
 __all__ = [
     "AcpModelState",
     "AcpSessionBusyError",
-    "AcpSessionState",
-    "AcpTransportState",
     "model_state_or_none",
     "model_state_path",
     "read_model_state",
@@ -20,7 +18,7 @@ __all__ = [
 
 
 @dataclass(slots=True)
-class AcpTransportState:
+class _AcpTransportState:
     """Subprocess handles and the lock serializing writes to its stdin."""
 
     process: asyncio.subprocess.Process | None = None
@@ -29,7 +27,7 @@ class AcpTransportState:
 
 
 @dataclass(slots=True)
-class AcpSessionState:
+class _AcpSessionState:
     """Mutable state for the currently negotiated ACP session."""
 
     active_session_id: str | None = None
@@ -49,8 +47,8 @@ class AcpModelState:
     """Configuration, transport, and session state owned by one model."""
 
     config: AcpModelConfig
-    transport: AcpTransportState = field(default_factory=AcpTransportState)
-    session: AcpSessionState = field(default_factory=AcpSessionState)
+    transport: _AcpTransportState = field(default_factory=_AcpTransportState)
+    session: _AcpSessionState = field(default_factory=_AcpSessionState)
 
     @classmethod
     def from_config(
@@ -63,7 +61,7 @@ class AcpModelState:
         return cls(
             config=config,
             transport=previous.transport,
-            session=AcpSessionState(
+            session=_AcpSessionState(
                 active_session_id=previous.session.active_session_id,
                 response_futures=previous.session.response_futures,
                 session_busy=previous.session.session_busy,

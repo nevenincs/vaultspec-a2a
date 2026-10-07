@@ -36,9 +36,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
-    "MAX_OUTPUT_BYTES",
     "OutputBudget",
-    "OutputBudgetLike",
     "ProtocolErrorFactory",
     "drain_stderr",
     "read_response",
@@ -46,10 +44,10 @@ __all__ = [
 
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
-MAX_OUTPUT_BYTES: Final = 1_048_576
+_MAX_OUTPUT_BYTES: Final = 1_048_576
 
 
-class OutputBudgetLike(Protocol):
+class _OutputBudgetLike(Protocol):
     """The subset of an output budget this reader charges against."""
 
     def charge(self, size: int) -> None:
@@ -70,7 +68,7 @@ class _ReadResponseOptions(TypedDict):
 
     request_id: int
     timeout: float
-    output_budget: OutputBudgetLike
+    output_budget: _OutputBudgetLike
     max_frames: int
     max_frame_bytes: int
     protocol_error: ProtocolErrorFactory
@@ -88,7 +86,7 @@ class OutputBudget:
     """
 
     protocol_error: ProtocolErrorFactory
-    limit: int = MAX_OUTPUT_BYTES
+    limit: int = _MAX_OUTPUT_BYTES
     consumed: int = 0
 
     def charge(self, size: int) -> None:
@@ -102,7 +100,7 @@ async def drain_stderr(
     stderr: asyncio.StreamReader | None,
     process: asyncio.subprocess.Process,
     metadata: Mapping[str, object] | None,
-    output_budget: OutputBudgetLike,
+    output_budget: _OutputBudgetLike,
 ) -> None:
     """Consume the child's stderr against *output_budget*, reaping it on refusal.
 

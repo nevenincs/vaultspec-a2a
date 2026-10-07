@@ -25,8 +25,6 @@ if TYPE_CHECKING:
     from ..context.harness import HarnessReadiness
 
 __all__ = [
-    "ProviderConfiguration",
-    "ProviderReadiness",
     "probe_harness_ready",
     "probe_provider_configuration",
     "probe_provider_readiness",
@@ -36,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
-class ProviderReadiness:
+class _ProviderReadiness:
     """No-instantiation readiness verdict for one provider. Never holds a secret."""
 
     provider: Provider
@@ -45,7 +43,7 @@ class ProviderReadiness:
 
 
 @dataclass(frozen=True, slots=True)
-class ProviderConfiguration:
+class _ProviderConfiguration:
     """Whether one lane's own settings are present. Never holds a secret.
 
     ``state`` is ``AVAILABLE`` when the settings the lane reads are present,
@@ -67,13 +65,13 @@ def _has_text(value: str | None) -> bool:
     return bool(value and value.strip())
 
 
-def _present(present: bool, missing: str) -> ProviderConfiguration:
+def _present(present: bool, missing: str) -> _ProviderConfiguration:
     if present:
-        return ProviderConfiguration(state=HealthState.AVAILABLE)
-    return ProviderConfiguration(state=HealthState.UNAVAILABLE, reason=missing)
+        return _ProviderConfiguration(state=HealthState.AVAILABLE)
+    return _ProviderConfiguration(state=HealthState.UNAVAILABLE, reason=missing)
 
 
-def _kimi_configuration() -> ProviderConfiguration:
+def _kimi_configuration() -> _ProviderConfiguration:
     # Without a temporary definition Kimi runs on its persisted config or device
     # session, which this probe cannot read; an explicit home names where that
     # state lives. Only a partial definition is a refusal.
@@ -86,13 +84,13 @@ def _kimi_configuration() -> ProviderConfiguration:
         kimi_temporary_model_capabilities=settings.kimi_temporary_model_capabilities,
     )
     if reason is not None:
-        return ProviderConfiguration(state=HealthState.UNAVAILABLE, reason=reason)
+        return _ProviderConfiguration(state=HealthState.UNAVAILABLE, reason=reason)
     if _has_text(key) or _has_text(settings.kimi_code_home):
-        return ProviderConfiguration(state=HealthState.AVAILABLE)
-    return ProviderConfiguration(state=HealthState.UNKNOWN)
+        return _ProviderConfiguration(state=HealthState.AVAILABLE)
+    return _ProviderConfiguration(state=HealthState.UNKNOWN)
 
 
-def probe_provider_configuration(provider: Provider) -> ProviderConfiguration:
+def probe_provider_configuration(provider: Provider) -> _ProviderConfiguration:
     """Report whether ``provider``'s own settings are present.
 
     Readiness gates on this answer and catalog discovery serves it as the lane's
@@ -115,10 +113,10 @@ def probe_provider_configuration(provider: Provider) -> ProviderConfiguration:
         )
     if provider == Provider.KIMI:
         return _kimi_configuration()
-    return ProviderConfiguration(state=HealthState.UNKNOWN)
+    return _ProviderConfiguration(state=HealthState.UNKNOWN)
 
 
-def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
+def probe_provider_readiness(provider: Provider) -> _ProviderReadiness:
     """Report whether ``provider`` is runnable without instantiating anything.
 
     Profile execution authority, then presence/resolvability (never quota
@@ -131,15 +129,15 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
         # The desktop profile refuses every lane launched as a native subprocess.
         reason = native_execution_refusal_reason()
         if reason is not None:
-            return ProviderReadiness(provider=provider, ready=False, reason=reason)
+            return _ProviderReadiness(provider=provider, ready=False, reason=reason)
     if in_process_lane(provider) is not None:
         # A held in-process lane needs no credential or launch command.
-        return ProviderReadiness(provider=provider, ready=True)
+        return _ProviderReadiness(provider=provider, ready=True)
 
     # A missing configuration is refused before any command is resolved.
     configuration = probe_provider_configuration(provider)
     if configuration.reason is not None:
-        return ProviderReadiness(
+        return _ProviderReadiness(
             provider=provider, ready=False, reason=configuration.reason
         )
 
@@ -149,14 +147,14 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
         return _command_readiness(provider)
 
     if provider in (Provider.OPENAI, Provider.ZHIPU):
-        return ProviderReadiness(provider=provider, ready=True)
+        return _ProviderReadiness(provider=provider, ready=True)
 
-    return ProviderReadiness(
+    return _ProviderReadiness(
         provider=provider, ready=False, reason=f"unsupported provider {provider.value}"
     )
 
 
-def _command_readiness(provider: Provider) -> ProviderReadiness:
+def _command_readiness(provider: Provider) -> _ProviderReadiness:
     """Check a subprocess provider's command resolves via the factory classifier.
 
     The reason string is path-free by construction: the classifier's exception can
@@ -169,10 +167,10 @@ def _command_readiness(provider: Provider) -> ProviderReadiness:
         detail = str(exc)
     else:
         if command.resolved:
-            return ProviderReadiness(provider=provider, ready=True)
+            return _ProviderReadiness(provider=provider, ready=True)
         detail = f"{command.command_executable!r} not found on PATH"
     logger.debug("provider %s command not resolvable: %s", provider.value, detail)
-    return ProviderReadiness(
+    return _ProviderReadiness(
         provider=provider,
         ready=False,
         reason="provider launch command is not installed or resolvable",

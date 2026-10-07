@@ -16,7 +16,6 @@ __all__ = [
     "RELAY_PROOF_PATH",
     "AuthoringRelayClient",
     "relay_proof_message",
-    "relay_proof_path",
 ]
 
 _RELAY_PROOF_DOMAIN = "vaultspec-authoring-relay"
@@ -24,7 +23,7 @@ RELAY_CALL_PATH = "/internal/authoring/call"
 RELAY_PROOF_PATH = "/internal/authoring/proof"
 
 
-def relay_proof_path(run_id: str, role: str) -> str:
+def _relay_proof_path(run_id: str, role: str) -> str:
     return f"{RELAY_PROOF_PATH}?{urlencode({'run_id': run_id, 'role': role})}"
 
 
@@ -53,7 +52,7 @@ class AuthoringRelayClient:
             origin,
             actor,
             180.0,
-            proof_path=relay_proof_path(run_id, role),
+            proof_path=_relay_proof_path(run_id, role),
             proof_message=relay_proof_message,
         )
 

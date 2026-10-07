@@ -56,8 +56,6 @@ if TYPE_CHECKING:
     from ..thread.checkpoint_evidence import CheckpointEvidence
 
 __all__ = [
-    "AWAITING_PROMOTION_DISPATCH",
-    "CONTINUATION_NOT_PROMOTABLE",
     "CONTINUATION_PROMOTED",
     "HOLDS_QUEUED_CONTINUATION",
     "PROMOTION_OWNED_CONDITIONS",
@@ -90,15 +88,15 @@ class RecoveryTrigger(StrEnum):
 #: could not be made into one, so nothing was settled and nothing was
 #: promoted; the third says a promoted turn is still owed its delivery.
 CONTINUATION_PROMOTED = "continuation_promoted"
-CONTINUATION_NOT_PROMOTABLE = "continuation_not_promotable"
-AWAITING_PROMOTION_DISPATCH = "awaiting_promotion_dispatch"
+_CONTINUATION_NOT_PROMOTABLE = "continuation_not_promotable"
+_AWAITING_PROMOTION_DISPATCH = "awaiting_promotion_dispatch"
 HOLDS_QUEUED_CONTINUATION = "holds_queued_continuation"
 
 #: The conditions that say a promoter, not a dead writer, explains this run.
 #: A startup pass counts these apart from its repair backlog, because an
 #: owned run needs nobody's attention.
 PROMOTION_OWNED_CONDITIONS = frozenset(
-    {AWAITING_PROMOTION_DISPATCH, HOLDS_QUEUED_CONTINUATION}
+    {_AWAITING_PROMOTION_DISPATCH, HOLDS_QUEUED_CONTINUATION}
 )
 
 #: Why a run past its total lifetime refuses the continuations still waiting on
@@ -153,7 +151,7 @@ def _promotion_owner(decision: _CheckpointDecision) -> str | None:
         decision.promotion_pending
         and decision.evidence.kind is CheckpointEvidenceKind.PRIOR_ACTION
     ):
-        return AWAITING_PROMOTION_DISPATCH
+        return _AWAITING_PROMOTION_DISPATCH
     if decision.queue_owned:
         return HOLDS_QUEUED_CONTINUATION
     return None
@@ -289,7 +287,7 @@ async def _refuse_promotion(
     )
     return RecoveryObservation(
         decision.status,
-        CONTINUATION_NOT_PROMOTABLE,
+        _CONTINUATION_NOT_PROMOTABLE,
         decision.evidence.checkpoint_id,
         False,
     )

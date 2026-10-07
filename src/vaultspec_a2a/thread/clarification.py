@@ -59,7 +59,6 @@ __all__ = [
     "CLARIFICATION_DECLINE_MARKER",
     "CLARIFICATION_TOPOLOGIES",
     "MAX_ANSWER_CHARS",
-    "MAX_IDENTIFIER_CHARS",
     "MAX_OPTIONS_PER_QUESTION",
     "MAX_OPTION_CHARS",
     "MAX_PROMPT_CHARS",
@@ -135,7 +134,7 @@ MAX_OPTIONS_PER_QUESTION = 4
 # request handle and the continuation prompt are bounded by the shared
 # request-id and run-message caps: a continuation is a new human turn in the
 # existing run.
-MAX_IDENTIFIER_CHARS = 64
+_MAX_IDENTIFIER_CHARS = 64
 MAX_PROMPT_CHARS = 512
 MAX_OPTION_CHARS = 128
 MAX_ANSWER_CHARS = 2048
@@ -147,7 +146,7 @@ _IDENTIFIER_PATTERN = r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$"
 
 QuestionId = Annotated[
     str,
-    Field(min_length=1, max_length=MAX_IDENTIFIER_CHARS, pattern=_IDENTIFIER_PATTERN),
+    Field(min_length=1, max_length=_MAX_IDENTIFIER_CHARS, pattern=_IDENTIFIER_PATTERN),
 ]
 ClarificationRequestId = Annotated[
     str,

@@ -27,14 +27,13 @@ from typing import Any, Protocol
 from langgraph.types import interrupt
 
 __all__ = [
-    "RequestScopedParser",
     "await_request_scoped_resume",
 ]
 
 _logger = logging.getLogger(__name__)
 
 
-class RequestScopedParser[T](Protocol):
+class _RequestScopedParser[T](Protocol):
     """Read a resume value as the answer to one request, or refuse it."""
 
     def __call__(self, payload: object, /, *, request_id: str) -> T:
@@ -50,7 +49,7 @@ class RequestScopedParser[T](Protocol):
 def await_request_scoped_resume[T](
     payload: dict[str, Any],
     request_id: str,
-    parse: RequestScopedParser[T],
+    parse: _RequestScopedParser[T],
 ) -> T:
     """Park on *payload* until a resume value answers *request_id*.
 

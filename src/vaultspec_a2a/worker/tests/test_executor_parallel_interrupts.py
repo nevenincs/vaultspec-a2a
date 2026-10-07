@@ -17,7 +17,7 @@ from langgraph.types import Command, Send, interrupt
 
 from ...providers.team_selection import model_assignment_digest
 from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ...thread import PermissionAnswer
+from ...thread.resume_values import PermissionAnswer
 from ..executor import Executor
 from ..state_projection import ResumeRefusalCause
 from .test_executor import (

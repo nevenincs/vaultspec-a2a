@@ -18,7 +18,8 @@ from langgraph.config import get_config
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Interrupt, interrupt
 
-from ...thread import InterruptType, PermissionAnswer, canonical_digest
+from ...thread import InterruptType, canonical_digest
+from ...thread.resume_values import PermissionAnswer
 from ...thread.state import read_untrusted_state_value
 from ..acp_options import is_remembering, valid_option_ids
 

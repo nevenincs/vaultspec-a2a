@@ -50,7 +50,6 @@ if TYPE_CHECKING:
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
-    "DispatchOutcome",
     "redispatch_reconciling_threads",
     "safe_dispatch",
 ]
@@ -64,7 +63,7 @@ _REDISPATCH_LOG_EVERY_N = 5
 
 
 @dataclass(frozen=True, slots=True)
-class DispatchOutcome:
+class _DispatchOutcome:
     """Result of a :func:`safe_dispatch` call."""
 
     success: bool
@@ -636,10 +635,10 @@ async def safe_dispatch(
     worker_spawner: LazyWorkerSpawner,
     *,
     trace_headers: dict[str, str] | None = None,
-) -> DispatchOutcome:
+) -> _DispatchOutcome:
     """Non-raising wrapper around :func:`dispatch_to_worker`.
 
-    Returns a :class:`DispatchOutcome` instead of raising dispatch errors,
+    Returns a :class:`_DispatchOutcome` instead of raising dispatch errors,
     making it easier for callers to handle failures without try/except
     boilerplate.
     """
@@ -651,9 +650,9 @@ async def safe_dispatch(
             worker_spawner,
             trace_headers=trace_headers,
         )
-        return DispatchOutcome(success=True)
+        return _DispatchOutcome(success=True)
     except IncompatibleDispatchAuthorityError as exc:
-        return DispatchOutcome(
+        return _DispatchOutcome(
             success=False,
             failure_type="incompatible_state",
             exception=exc,
@@ -666,7 +665,7 @@ async def safe_dispatch(
             dispatch_request.thread_id,
             exc.detail,
         )
-        return DispatchOutcome(
+        return _DispatchOutcome(
             success=False,
             failure_type="circuit_open",
             exception=exc,
@@ -678,7 +677,7 @@ async def safe_dispatch(
             dispatch_request.dispatch_id,
             dispatch_request.thread_id,
         )
-        return DispatchOutcome(
+        return _DispatchOutcome(
             success=False,
             failure_type=FailureType.AT_CAPACITY.value,
             exception=exc,
@@ -691,7 +690,7 @@ async def safe_dispatch(
             dispatch_request.dispatch_id,
             dispatch_request.thread_id,
         )
-        return DispatchOutcome(
+        return _DispatchOutcome(
             success=False,
             failure_type="unreachable",
             exception=exc,
@@ -704,7 +703,7 @@ async def safe_dispatch(
             dispatch_request.thread_id,
             exc.status_code,
         )
-        return DispatchOutcome(
+        return _DispatchOutcome(
             success=False,
             failure_type=_rejected_failure_type(exc).value,
             exception=exc,

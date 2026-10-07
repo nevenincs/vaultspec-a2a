@@ -51,7 +51,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ContinuationQueueLimits",
-    "QueuedContinuation",
     "QueuedContinuationDisposition",
     "QueuedContinuationRequest",
     "open_promoted_continuation",
@@ -105,7 +104,7 @@ class QueuedContinuationDisposition(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class QueuedContinuation:
+class _QueuedContinuation:
     """The outcome of one admission attempt and the place it was given.
 
     *result_status* is the journal row's own current status, which a replay
@@ -241,7 +240,7 @@ def open_promoted_continuation(
 
 async def reserve_queued_continuation(
     session: AsyncSession, request: QueuedContinuationRequest
-) -> QueuedContinuation:
+) -> _QueuedContinuation:
     """Reserve one waiting continuation inside the caller's write transaction.
 
     Never commits and never dispatches. A repeat of the same idempotency key
@@ -281,7 +280,7 @@ async def reserve_queued_continuation(
     if action.dispatch_id is None:
         raise RuntimeError("reserved continuation has no stable dispatch id")
     if not reservation.payload_matches:
-        return QueuedContinuation(
+        return _QueuedContinuation(
             QueuedContinuationDisposition.CONFLICT,
             action.id,
             action.dispatch_id,
@@ -290,7 +289,7 @@ async def reserve_queued_continuation(
             action.result_status,
         )
     if not reservation.created:
-        return QueuedContinuation(
+        return _QueuedContinuation(
             QueuedContinuationDisposition.REPLAYED,
             action.id,
             action.dispatch_id,
@@ -300,7 +299,7 @@ async def reserve_queued_continuation(
         )
     claim_token = await take_action_lease(session, action.id, now=instant)
     position = await enqueue_continuation(session, action)
-    return QueuedContinuation(
+    return _QueuedContinuation(
         QueuedContinuationDisposition.QUEUED,
         action.id,
         action.dispatch_id,
@@ -311,12 +310,12 @@ async def reserve_queued_continuation(
 
 async def _queue_refusal(
     session: AsyncSession, request: QueuedContinuationRequest
-) -> QueuedContinuation | None:
+) -> _QueuedContinuation | None:
     """Refuse when either configured limit is already spent."""
     per_run = await count_queued_continuations(session, thread_id=request.thread_id)
     service = await count_queued_continuations(session)
     if per_run >= request.limits.per_run_depth or service >= request.limits.service_cap:
-        return QueuedContinuation(
+        return _QueuedContinuation(
             QueuedContinuationDisposition.QUEUE_FULL,
             "",
             request.dispatch_id,

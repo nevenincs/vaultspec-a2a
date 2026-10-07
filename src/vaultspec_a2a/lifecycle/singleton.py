@@ -49,7 +49,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SINGLETON_RECORD_VERSION",
-    "RecordedProcess",
     "RuntimeSingleton",
     "SingletonConflictError",
     "SingletonHeldError",
@@ -171,7 +170,7 @@ def current_process_fingerprint() -> str | None:
     return process_start_identity(os.getpid())
 
 
-class RecordedProcess(Protocol):
+class _RecordedProcess(Protocol):
     """A durable record naming the process that wrote it."""
 
     @property
@@ -264,7 +263,7 @@ def _parse_record(record: dict[str, object]) -> SingletonRecord | None:
     )
 
 
-def recorded_process_is_live(record: RecordedProcess) -> bool:
+def recorded_process_is_live(record: _RecordedProcess) -> bool:
     """Return ``True`` when the record's recorded process is provably still alive.
 
     Pid-liveness is the primary signal; the start fingerprint is a pid-reuse guard.

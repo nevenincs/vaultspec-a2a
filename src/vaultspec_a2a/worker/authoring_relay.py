@@ -42,12 +42,12 @@ if TYPE_CHECKING:
     from .catalog_store import RunCatalogStore
     from .token_store import RunTokenStore
 
-__all__ = ["AuthoringRelay", "RelayCall", "router"]
+__all__ = ["AuthoringRelay", "router"]
 
 logger = logging.getLogger(__name__)
 
 
-class RelayCall(BaseModel):
+class _RelayCall(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     run_id: str = Field(
@@ -76,7 +76,7 @@ class AuthoringRelay:
             raise HTTPException(403, "authoring authority is unavailable")
         return actor
 
-    def authorize(self, call: RelayCall, authorization: str | None) -> str:
+    def authorize(self, call: _RelayCall, authorization: str | None) -> str:
         actor = self.actor(call.run_id, call.role)
         if not bearer_matches(authorization, actor):
             raise HTTPException(403, "authoring authority is unavailable")
@@ -106,7 +106,7 @@ class AuthoringRelay:
         )
 
     async def dispatch(
-        self, call: RelayCall, authorization: str | None
+        self, call: _RelayCall, authorization: str | None
     ) -> dict[str, Any]:
         self.authorize(call, authorization)
         lock = self._locks.setdefault((call.run_id, call.role), asyncio.Lock())
@@ -159,7 +159,7 @@ async def prove_authoring(request: Request, run_id: str, role: str) -> Response:
 
 
 @router.post(RELAY_CALL_PATH, include_in_schema=False)
-async def dispatch_authoring(request: Request, call: RelayCall) -> dict[str, Any]:
+async def dispatch_authoring(request: Request, call: _RelayCall) -> dict[str, Any]:
     try:
         return await _relay(request).dispatch(
             call, request.headers.get("authorization")

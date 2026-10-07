@@ -18,14 +18,13 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
-    "ProviderLaunch",
     "provider_execution_command",
     "provider_execution_launch",
 ]
 
 
 @dataclass(frozen=True, slots=True)
-class ProviderLaunch:
+class _ProviderLaunch:
     command: tuple[str, ...]
     environment: Mapping[str, str] | None = field(repr=False)
     cwd: str | None
@@ -67,11 +66,11 @@ def provider_execution_launch(
     cwd: str | None,
     native_authority: NativeLaunchAuthority | None = None,
     supervise: bool = False,
-) -> ProviderLaunch:
+) -> _ProviderLaunch:
     """Prepare a launch before acquisition or cached proof, retaining refusal."""
     execution = provider_execution_command(command, supervise=supervise)
     if native_authority is None:
-        return ProviderLaunch(
+        return _ProviderLaunch(
             command=tuple(execution),
             environment=(
                 MappingProxyType(dict(environment)) if environment is not None else None
@@ -88,4 +87,4 @@ def provider_execution_launch(
         cwd=cwd if cwd is not None else str(native_authority.workspace.path),
         environment=environment if environment is not None else os.environ,
     )
-    return ProviderLaunch(isolated.command, isolated.environment, isolated.cwd)
+    return _ProviderLaunch(isolated.command, isolated.environment, isolated.cwd)

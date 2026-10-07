@@ -41,7 +41,6 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from langgraph.types import Command
 
-from ...thread import parse_approval_verdict
 from ...thread.enums import (
     VERDICT_APPROVED,
     VERDICT_REJECTED,
@@ -49,6 +48,7 @@ from ...thread.enums import (
     InterruptType,
 )
 from ...thread.errors import DocumentConformanceError
+from ...thread.resume_values import parse_approval_verdict
 from ._interrupts import await_request_scoped_resume
 
 if TYPE_CHECKING:

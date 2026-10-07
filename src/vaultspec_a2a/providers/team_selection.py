@@ -30,7 +30,6 @@ __all__ = [
     "FrozenLaneAssignment",
     "FrozenNativeControl",
     "FrozenTeamSelection",
-    "LaneProvenance",
     "ModelAssignment",
     "TeamSelectionError",
     "digest_record",
@@ -78,7 +77,7 @@ class FrozenNativeControl(BaseModel):
     option_display_name: _DisplayText | None = None
 
 
-class LaneProvenance(BaseModel):
+class _LaneProvenance(BaseModel):
     """Which part of the run's selection a compiled role's lane came from."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -110,7 +109,7 @@ class FrozenLaneAssignment(BaseModel):
     fallbacks: tuple[FrozenLaneAssignment, ...] = Field(
         default=(), max_length=MAX_FALLBACKS
     )
-    provenance: LaneProvenance | None = None
+    provenance: _LaneProvenance | None = None
 
     @model_validator(mode="after")
     def _closed_lane(self) -> FrozenLaneAssignment:
@@ -269,7 +268,7 @@ class FrozenTeamSelection:
         return lane.model_copy(
             update={
                 "fallbacks": self.fallbacks,
-                "provenance": LaneProvenance(selection_source=source),
+                "provenance": _LaneProvenance(selection_source=source),
             }
         )
 

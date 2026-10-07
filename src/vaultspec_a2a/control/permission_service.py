@@ -25,7 +25,6 @@ from ..database import (
     reset_permission_response_submission,
     set_thread_approval_state,
 )
-from ..thread import permission_resume_value
 from ..thread.dispatch_policy import FailureType
 from ..thread.enums import (
     TERMINAL_STATUSES,
@@ -40,6 +39,7 @@ from ..thread.idempotency import (
     permission_response_action_key,
 )
 from ..thread.repair_policy import RepairPhase, repair_state_for_action
+from ..thread.resume_values import permission_resume_value
 from ..thread.snapshots import (
     LOCALLY_RESPONDABLE_PAUSE_CAUSES,
     PLAN_APPROVAL_PAUSE_CAUSES,

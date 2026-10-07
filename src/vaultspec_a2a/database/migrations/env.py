@@ -41,16 +41,6 @@ from vaultspec_a2a.database.write_authority_schema import (  # absolute-import-o
     write_authority_receipt_index_matches,
 )
 
-__all__ = [
-    "do_run_migrations",
-    "include_name",
-    "resolve_database_url",
-    "run_async_migrations",
-    "run_migrations_offline",
-    "run_migrations_online",
-    "target_metadata",
-]
-
 # -- Alembic config object ---------------------------------------------------
 config = context.config
 

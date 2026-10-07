@@ -66,10 +66,6 @@ if TYPE_CHECKING:
     from .models import PlanEntry as PlanEntry
     from .models import PlanStep as PlanStep
     from .models import TokenUsageEntry as TokenUsageEntry
-    from .resume_values import ApprovalVerdict as ApprovalVerdict
-    from .resume_values import PermissionAnswer as PermissionAnswer
-    from .resume_values import parse_approval_verdict as parse_approval_verdict
-    from .resume_values import permission_resume_value as permission_resume_value
     from .snapshots import (
         LOCALLY_RESPONDABLE_PAUSE_CAUSES as LOCALLY_RESPONDABLE_PAUSE_CAUSES,
     )
@@ -138,10 +134,6 @@ _LAZY_IMPORTS = {
     "PlanEntry": ".models",
     "PlanStep": ".models",
     "TokenUsageEntry": ".models",
-    "ApprovalVerdict": ".resume_values",
-    "PermissionAnswer": ".resume_values",
-    "parse_approval_verdict": ".resume_values",
-    "permission_resume_value": ".resume_values",
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES": ".snapshots",
     "PLAN_APPROVAL_PAUSE_CAUSES": ".snapshots",
     "CheckpointProjection": ".snapshots",
@@ -185,7 +177,6 @@ __all__ = [
     "AgentConfigNotFoundError",
     "AgentProcessError",
     "ApprovalStatus",
-    "ApprovalVerdict",
     "ArtifactRef",
     "CheckpointProjection",
     "ClarificationAnswers",
@@ -203,7 +194,6 @@ __all__ = [
     "InvalidTransitionError",
     "LiveInterrupt",
     "NicknameConflictError",
-    "PermissionAnswer",
     "PermissionDeniedError",
     "PermissionRequestStatus",
     "PlanEntry",
@@ -233,9 +223,7 @@ __all__ = [
     "named_request_id",
     "normalize_artifacts",
     "normalize_plan_entries",
-    "parse_approval_verdict",
     "pending_clarification",
-    "permission_resume_value",
     "project_checkpoint_tuple",
     "sha256_hex",
     "stamp_message_created_at",

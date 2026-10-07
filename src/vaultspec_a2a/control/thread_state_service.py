@@ -75,9 +75,6 @@ __all__ = [
     "AUTHORING_SESSION_FIELD",
     "CHANGESET_ID_FIELD",
     "PROPOSAL_ID_FIELD",
-    "MetadataView",
-    "SemanticContext",
-    "ThreadStateCapture",
     "capture_thread_state",
     "derive_run_authoring_ids",
     "derive_run_semantic_context",
@@ -193,7 +190,7 @@ async def _document_authoring_required(db: AsyncSession, thread_id: str) -> bool
 
 
 @dataclass(frozen=True, slots=True)
-class SemanticContext:
+class _SemanticContext:
     """A run's target feature and produced authoring session id (run-status)."""
 
     feature_tag: str | None
@@ -201,7 +198,7 @@ class SemanticContext:
 
 
 @dataclass(frozen=True, slots=True)
-class MetadataView:
+class _MetadataView:
     """A thread's stored metadata, decoded once for every reader of its capture.
 
     ``fields`` is the JSON object the blob holds, for the readers of one keyed
@@ -214,7 +211,7 @@ class MetadataView:
 
 
 @dataclass(frozen=True, slots=True)
-class ThreadStateCapture:
+class _ThreadStateCapture:
     """One coherent durable and checkpoint-backed run-status read.
 
     The gateway must derive every response field from this capture.  Keeping the
@@ -242,7 +239,7 @@ class ThreadStateCapture:
     snapshot: ThreadStateData
     checkpoint_projection: CheckpointProjection | None
     team_preset: str | None
-    metadata: MetadataView
+    metadata: _MetadataView
     proposal_ids: list[str]
     changeset_ids: list[str]
     transcript: TranscriptAvailability
@@ -250,18 +247,18 @@ class ThreadStateCapture:
 
 def derive_run_semantic_context(
     projection: CheckpointProjection | None,
-) -> SemanticContext:
+) -> _SemanticContext:
     """Derive the target feature and authoring session from one projection."""
     if projection is None:
-        return SemanticContext(feature_tag=None, authoring_session_id=None)
+        return _SemanticContext(feature_tag=None, authoring_session_id=None)
     values = projection.channel_values
-    return SemanticContext(
+    return _SemanticContext(
         feature_tag=coerce_nonempty_str(values.get(ACTIVE_FEATURE_FIELD)),
         authoring_session_id=coerce_nonempty_str(values.get(AUTHORING_SESSION_FIELD)),
     )
 
 
-def _view_metadata(thread_id: str, text: str | None) -> MetadataView:
+def _view_metadata(thread_id: str, text: str | None) -> _MetadataView:
     """Decode *text* once into the view every reader of the capture shares.
 
     Absent metadata is stored as null OR as an empty string depending on how the
@@ -285,7 +282,7 @@ def _view_metadata(thread_id: str, text: str | None) -> MetadataView:
                 "reporting it absent",
                 thread_id,
             )
-    return MetadataView(fields=fields, provenance=provenance)
+    return _MetadataView(fields=fields, provenance=provenance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -399,7 +396,7 @@ async def capture_thread_state(
     thread_id: str,
     relay_hub: RelayHub,
     checkpointer: Checkpointer,
-) -> ThreadStateCapture | None:
+) -> _ThreadStateCapture | None:
     """Capture a coherent thread snapshot and its checkpoint projection.
 
     A single durable thread/permission read is reconciled against exactly one
@@ -492,7 +489,7 @@ async def capture_thread_state(
         checkpoint_error=checkpoint_error,
         thread_status=thread.status,
     )
-    return ThreadStateCapture(
+    return _ThreadStateCapture(
         snapshot=finalized_snapshot,
         checkpoint_projection=captured_projection,
         team_preset=thread.team_preset,

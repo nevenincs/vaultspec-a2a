@@ -32,8 +32,6 @@ from ..graph.enums import ServerEventType, StreamFrameKind
 from ..thread.snapshots import wire_event_type
 
 __all__ = [
-    "PROTECTED_WIRE_TYPES",
-    "DeliveryOutcome",
     "deliver_bounded",
     "is_protected_payload",
     "pop_oldest_droppable",
@@ -41,7 +39,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-PROTECTED_WIRE_TYPES = frozenset(
+_PROTECTED_WIRE_TYPES = frozenset(
     {ServerEventType.ERROR, StreamFrameKind.THREAD_TERMINAL}
 )
 """Relayed frame types that outlive their queue position under backpressure.
@@ -60,7 +58,7 @@ def is_protected_payload(payload: object) -> bool:
     """
     if not isinstance(payload, Mapping):
         return False
-    return wire_event_type(cast("Mapping[str, Any]", payload)) in PROTECTED_WIRE_TYPES
+    return wire_event_type(cast("Mapping[str, Any]", payload)) in _PROTECTED_WIRE_TYPES
 
 
 def pop_oldest_droppable[T](
@@ -116,7 +114,7 @@ def _evict_one(queue: asyncio.Queue[Any]) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
-class DeliveryOutcome:
+class _DeliveryOutcome:
     """What one bounded delivery did, including what it cost.
 
     ``delivered`` alone was not enough to answer the consumer's question. A drop
@@ -140,7 +138,7 @@ def deliver_bounded(
     payload: object,
     *,
     client_id: str,
-) -> DeliveryOutcome:
+) -> _DeliveryOutcome:
     """Put *payload* on *queue*, evicting the oldest droppable event when full.
 
     Args:
@@ -149,7 +147,7 @@ def deliver_bounded(
         client_id: Identifier used in the backpressure warnings.
 
     Returns:
-        A :class:`DeliveryOutcome` saying whether the payload was enqueued and
+        A :class:`_DeliveryOutcome` saying whether the payload was enqueued and
         how many events this delivery cost the client.
     """
     dropped = 0
@@ -167,5 +165,5 @@ def deliver_bounded(
             "Relay event dropped for client %s - queue still full",
             client_id,
         )
-        return DeliveryOutcome(delivered=False, dropped=dropped + 1)
-    return DeliveryOutcome(delivered=True, dropped=dropped)
+        return _DeliveryOutcome(delivered=False, dropped=dropped + 1)
+    return _DeliveryOutcome(delivered=True, dropped=dropped)

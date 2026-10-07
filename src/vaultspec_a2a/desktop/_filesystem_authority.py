@@ -28,13 +28,11 @@ if TYPE_CHECKING:
 __all__ = [
     "DirectoryAuthority",
     "PrivateFileError",
-    "PrivateFileRefusal",
     "assert_directory_authority",
     "confined_file_descriptor",
     "create_anonymous_file",
     "create_private_file",
     "directory_lease",
-    "open_shared_read_descriptor",
     "publish_no_replace",
     "read_private_file",
     "resolve_directory_authority",
@@ -689,7 +687,7 @@ def _confirm_confined_file(descriptor: int, *, write: bool) -> None:
         os.ftruncate(descriptor, 0)
 
 
-def open_shared_read_descriptor(path: Path) -> int:
+def _open_shared_read_descriptor(path: Path) -> int:
     """Open *path* read-only in a way that does not block a concurrent publish.
 
     Returns an OS descriptor the caller owns and must close.
@@ -730,7 +728,7 @@ def open_shared_read_descriptor(path: Path) -> int:
         raise
 
 
-class PrivateFileRefusal(StrEnum):
+class _PrivateFileRefusal(StrEnum):
     """Why :func:`read_private_file` refused a file, worded to follow its name."""
 
     INACCESSIBLE = "is not accessible"
@@ -749,7 +747,7 @@ class PrivateFileError(OSError):
     Carries the refusal and the path, never anything read from the file.
     """
 
-    def __init__(self, reason: PrivateFileRefusal, path: Path) -> None:
+    def __init__(self, reason: _PrivateFileRefusal, path: Path) -> None:
         super().__init__(errno.EACCES, f"private file {reason}", str(path))
         self.reason = reason
 
@@ -767,13 +765,13 @@ def _inspect_private_name(
     try:
         named = _lstat_leased(leased, target)
     except OSError as exc:
-        raise PrivateFileError(PrivateFileRefusal.INACCESSIBLE, target) from exc
+        raise PrivateFileError(_PrivateFileRefusal.INACCESSIBLE, target) from exc
     if not stat.S_ISREG(named.st_mode) or path_is_link_like(target):
-        raise PrivateFileError(PrivateFileRefusal.NOT_REGULAR, target)
+        raise PrivateFileError(_PrivateFileRefusal.NOT_REGULAR, target)
     if not credential_file_is_owner_restricted(target):
-        raise PrivateFileError(PrivateFileRefusal.NOT_OWNER_RESTRICTED, target)
+        raise PrivateFileError(_PrivateFileRefusal.NOT_OWNER_RESTRICTED, target)
     if named.st_size > max_bytes:
-        raise PrivateFileError(PrivateFileRefusal.OVERSIZE, target)
+        raise PrivateFileError(_PrivateFileRefusal.OVERSIZE, target)
     return named
 
 
@@ -789,9 +787,9 @@ def _open_private_name(leased: DirectoryAuthority, target: Path) -> int:
                 dir_fd=leased.dir_fd,
             )
         # DELETE sharing keeps a secret read from blocking a concurrent publication.
-        return open_shared_read_descriptor(target)
+        return _open_shared_read_descriptor(target)
     except OSError as exc:
-        raise PrivateFileError(PrivateFileRefusal.UNOPENABLE, target) from exc
+        raise PrivateFileError(_PrivateFileRefusal.UNOPENABLE, target) from exc
 
 
 def _read_leased_private_file(
@@ -802,12 +800,12 @@ def _read_leased_private_file(
     descriptor = _open_private_name(leased, target)
     try:
         if not confirm_opened_secret(descriptor, named=named, path=target):
-            raise PrivateFileError(PrivateFileRefusal.CHANGED, target)
+            raise PrivateFileError(_PrivateFileRefusal.CHANGED, target)
         opened = os.fstat(descriptor)
         if not is_single_regular_file(opened):
-            raise PrivateFileError(PrivateFileRefusal.MULTIPLY_LINKED, target)
+            raise PrivateFileError(_PrivateFileRefusal.MULTIPLY_LINKED, target)
         if opened.st_size > max_bytes:
-            raise PrivateFileError(PrivateFileRefusal.OVERSIZE, target)
+            raise PrivateFileError(_PrivateFileRefusal.OVERSIZE, target)
         with os.fdopen(descriptor, "rb") as handle:
             descriptor = -1
             contents = handle.read(max_bytes + 1)
@@ -815,17 +813,17 @@ def _read_leased_private_file(
         if descriptor != -1:
             os.close(descriptor)
     if len(contents) > max_bytes:
-        raise PrivateFileError(PrivateFileRefusal.OVERSIZE, target)
+        raise PrivateFileError(_PrivateFileRefusal.OVERSIZE, target)
     assert_directory_authority(leased)
     try:
         after = _lstat_leased(leased, target)
     except OSError as exc:
-        raise PrivateFileError(PrivateFileRefusal.CHANGED, target) from exc
+        raise PrivateFileError(_PrivateFileRefusal.CHANGED, target) from exc
     if path_is_link_like(target) or (after.st_dev, after.st_ino) != (
         opened.st_dev,
         opened.st_ino,
     ):
-        raise PrivateFileError(PrivateFileRefusal.CHANGED, target)
+        raise PrivateFileError(_PrivateFileRefusal.CHANGED, target)
     return contents
 
 
@@ -851,16 +849,18 @@ def read_private_file(
     try:
         authority = resolve_directory_authority(path.parent)
         if private_parent and not path_is_owner_restricted(authority.path):
-            raise PrivateFileError(PrivateFileRefusal.PARENT_NOT_OWNER_RESTRICTED, path)
+            raise PrivateFileError(
+                _PrivateFileRefusal.PARENT_NOT_OWNER_RESTRICTED, path
+            )
         with directory_lease(authority) as leased:
             return _read_leased_private_file(leased, path.name, max_bytes=max_bytes)
     except PrivateFileError:
         raise
     except OSError as exc:
         reason = (
-            PrivateFileRefusal.CHANGED
+            _PrivateFileRefusal.CHANGED
             if exc.errno == errno.ESTALE
-            else PrivateFileRefusal.INACCESSIBLE
+            else _PrivateFileRefusal.INACCESSIBLE
         )
         raise PrivateFileError(reason, path) from exc
 

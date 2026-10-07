@@ -7,10 +7,10 @@ actually executes: the agent SDK's shipped type declaration for the ACP lane,
 and the app-server's own generated protocol schema for the Codex lane.
 
 Each reader tells the two ways an artefact can disappoint apart. One that is not
-installed raises :class:`MissingInstalledVocabularyError`, naming the external
+installed raises :class:`_MissingInstalledVocabularyError`, naming the external
 prerequisite it reports, which :func:`read_installed` routes through the
 repository's prerequisite rule. One that is installed but no longer carries the
-vocabulary raises :class:`InstalledVocabularyDriftError`, which nothing converts:
+vocabulary raises :class:`_InstalledVocabularyDriftError`, which nothing converts:
 that is the regression these readers exist to catch, and reporting it as a skip
 would hide it behind the same word as a host that never had the adapter.
 """
@@ -32,8 +32,6 @@ if TYPE_CHECKING:
     from ...conftest import ExternalPrerequisiteRule
 
 __all__ = [
-    "InstalledVocabularyDriftError",
-    "MissingInstalledVocabularyError",
     "acp_adapter_error_kinds",
     "acp_adapter_failure_categories",
     "acp_adapter_permission_mode_ids",
@@ -49,7 +47,7 @@ _ACP_ADAPTER_PREREQUISITE = "claude-acp-adapter"
 _CODEX_CLI_PREREQUISITE = "codex-cli"
 
 
-class MissingInstalledVocabularyError(RuntimeError):
+class _MissingInstalledVocabularyError(RuntimeError):
     """The installed artefact a vocabulary is read from is not on this host.
 
     ``prerequisite`` is the id of the external prerequisite whose absence this
@@ -61,7 +59,7 @@ class MissingInstalledVocabularyError(RuntimeError):
         self.prerequisite = prerequisite
 
 
-class InstalledVocabularyDriftError(RuntimeError):
+class _InstalledVocabularyDriftError(RuntimeError):
     """The artefact is installed but no longer carries the vocabulary read from it.
 
     The vocabulary moved, shrank, or could not be generated: a real regression
@@ -79,7 +77,7 @@ def read_installed[T](
     """
     try:
         return reader()
-    except MissingInstalledVocabularyError as exc:
+    except _MissingInstalledVocabularyError as exc:
         external_prerequisite.absent(exc.prerequisite, str(exc))
 
 
@@ -120,13 +118,13 @@ def acp_error_kinds() -> frozenset[str]:
 
     declaration = _ACP_ERROR_KIND_DECLARATION.search(source)
     if declaration is None:
-        raise InstalledVocabularyDriftError(
+        raise _InstalledVocabularyDriftError(
             "the installed agent SDK no longer declares SDKAssistantMessageError "
             f"in {types_path}; the ACP error-kind vocabulary moved"
         )
     kinds = frozenset(_STRING_LITERAL.findall(declaration.group(1)))
     if not kinds:
-        raise InstalledVocabularyDriftError(
+        raise _InstalledVocabularyDriftError(
             "the installed SDKAssistantMessageError declaration lists no string "
             f"members in {types_path}"
         )
@@ -153,7 +151,7 @@ def _read_adapter_artefact(path: Path, artefact: str) -> str:
     try:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise MissingInstalledVocabularyError(
+        raise _MissingInstalledVocabularyError(
             _ACP_ADAPTER_PREREQUISITE,
             f"the installed {artefact} is unavailable at {path} "
             "(run the project's npm install)",
@@ -221,14 +219,14 @@ def acp_adapter_permission_mode_ids() -> frozenset[str]:
     """
     builder = _ACP_AVAILABLE_MODES.search(acp_adapter_session_mode_source())
     if builder is None:
-        raise InstalledVocabularyDriftError(
+        raise _InstalledVocabularyDriftError(
             "the installed ACP adapter no longer builds its available modes in "
             f"{_acp_adapter_dist() / _ACP_SESSION_MODE_MODULE}; the "
             "permission-mode vocabulary moved"
         )
     ids = frozenset(_ACP_MODE_ID.findall(builder.group(1)))
     if not ids:
-        raise InstalledVocabularyDriftError(
+        raise _InstalledVocabularyDriftError(
             "the installed ACP adapter's mode builder lists no mode ids in "
             f"{_acp_adapter_dist() / _ACP_SESSION_MODE_MODULE}"
         )
@@ -254,14 +252,14 @@ def acp_adapter_shell_tool_names() -> frozenset[str]:
     """
     table = _ACP_REPORTER_TABLE.search(_acp_adapter_module_source(_ACP_REPORTER_MODULE))
     if table is None:
-        raise InstalledVocabularyDriftError(
+        raise _InstalledVocabularyDriftError(
             "the installed ACP adapter no longer binds tool reporters in "
             f"{_acp_adapter_dist() / _ACP_REPORTER_MODULE}; the shell-tool "
             "vocabulary moved"
         )
     names = frozenset(_ACP_SHELL_REPORTER.findall(table.group(1)))
     if not names:
-        raise InstalledVocabularyDriftError(
+        raise _InstalledVocabularyDriftError(
             "the installed ACP adapter's reporter table binds no tool to its "
             f"shell reporter in {_acp_adapter_dist() / _ACP_REPORTER_MODULE}"
         )
@@ -297,7 +295,7 @@ def acp_adapter_failure_categories() -> dict[str, str]:
     """
     body = _ACP_FAILURE_SWITCH.search(_acp_adapter_module_source(_ACP_FAILURE_MODULE))
     if body is None:
-        raise InstalledVocabularyDriftError(
+        raise _InstalledVocabularyDriftError(
             "the installed ACP adapter no longer classifies provider failures in "
             f"{_acp_adapter_dist() / _ACP_FAILURE_MODULE}; the category "
             "vocabulary moved"
@@ -308,7 +306,7 @@ def acp_adapter_failure_categories() -> dict[str, str]:
         for kind in _ACP_FAILURE_CASE.findall(cases)
     }
     if not categories:
-        raise InstalledVocabularyDriftError(
+        raise _InstalledVocabularyDriftError(
             "the installed ACP adapter's failure classifier lists no error kinds "
             f"in {_acp_adapter_dist() / _ACP_FAILURE_MODULE}"
         )
@@ -352,7 +350,7 @@ def _parse_codex_error_info_variants(schema_path: Path) -> frozenset[str]:
     try:
         raw_schema: object = json.loads(schema_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise InstalledVocabularyDriftError(
+        raise _InstalledVocabularyDriftError(
             f"the generated codex protocol schema is unreadable at {schema_path}"
         ) from exc
     assert isinstance(raw_schema, dict)
@@ -367,7 +365,7 @@ def _parse_codex_error_info_variants(schema_path: Path) -> frozenset[str]:
     if isinstance(error_info, dict):
         branches = cast("dict[str, object]", error_info).get("oneOf")
     if not isinstance(branches, list) or not branches:
-        raise InstalledVocabularyDriftError(
+        raise _InstalledVocabularyDriftError(
             "the generated codex protocol schema no longer declares CodexErrorInfo "
             f"as a union in {schema_path}; the error vocabulary moved"
         )
@@ -376,7 +374,7 @@ def _parse_codex_error_info_variants(schema_path: Path) -> frozenset[str]:
     for raw_branch in cast("list[object]", branches):
         variants.update(_codex_error_branch_names(raw_branch))
     if not variants:
-        raise InstalledVocabularyDriftError(
+        raise _InstalledVocabularyDriftError(
             f"the generated CodexErrorInfo union lists no variants in {schema_path}"
         )
     return frozenset(variants)
@@ -396,7 +394,7 @@ def codex_error_info_variants(destination: Path) -> frozenset[str]:
     """
     executable = resolve_provider_cli_executable(Provider.CODEX)
     if executable is None:
-        raise MissingInstalledVocabularyError(
+        raise _MissingInstalledVocabularyError(
             _CODEX_CLI_PREREQUISITE,
             "the codex CLI is not on PATH, so the app-server protocol schema "
             "cannot be generated from the installed binary",
@@ -410,7 +408,7 @@ def codex_error_info_variants(destination: Path) -> frozenset[str]:
         check=False,
     )
     if completed.returncode != 0:
-        raise InstalledVocabularyDriftError(
+        raise _InstalledVocabularyDriftError(
             "the installed codex CLI could not generate its protocol schema "
             f"(exit {completed.returncode}): {completed.stderr.strip()[:400]}"
         )

@@ -43,7 +43,6 @@ from .repositories.continuation_queue import (
     promotion_dispatch_pending,
     promotion_owner_holds_run,
     read_next_queued_continuation,
-    refuse_queued_continuations,
     run_lifetime_deadline,
 )
 from .terminal_settlement import TerminalEvidence, lock_terminal_run, settle_terminal
@@ -101,6 +100,10 @@ HOLDS_QUEUED_CONTINUATION = "holds_queued_continuation"
 PROMOTION_OWNED_CONDITIONS = frozenset(
     {AWAITING_PROMOTION_DISPATCH, HOLDS_QUEUED_CONTINUATION}
 )
+
+#: Why a run past its total lifetime refuses the continuations still waiting on
+#: it: no further turn may start, so none of them can be promoted.
+_LIFETIME_SPENT_REFUSAL = "the run's total lifetime is spent"
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +204,8 @@ async def _promote_queued_continuation(
     thread: ThreadModel,
     settled_action_id: str,
     decision: _CheckpointDecision,
+    *,
+    promoted_at: datetime,
 ) -> RecoveryObservation | None:
     """Hand the run to the continuation waiting behind this proven turn.
 
@@ -209,25 +214,11 @@ async def _promote_queued_continuation(
     settlement and defers it or meets a settled run. There is no third
     outcome, and that is what keeps a terminal state from ever being reopened.
 
-    Returns ``None`` when nothing is waiting, and when nothing may be
-    promoted any more, which leaves the caller to settle exactly as it always
-    has.
+    Returns ``None`` when nothing is waiting, which leaves the caller to settle
+    exactly as it always has.
     """
     waiting = await read_next_queued_continuation(db, thread_id=decision.thread_id)
     if waiting is None:
-        return None
-    promoted_at = datetime.now(UTC)
-    if promoted_at >= decision.lifetime_deadline_at:
-        # A queue must not make a run immortal. The run ends with the terminal
-        # its last turn actually reached, and everything still waiting is
-        # refused in the same transaction rather than left on a settled run
-        # waiting for a promotion that can never come.
-        await refuse_queued_continuations(
-            db,
-            thread_id=decision.thread_id,
-            refused_at=promoted_at,
-            reason="the run's total lifetime is spent",
-        )
         return None
     deadline_at = promoted_turn_deadline(
         waiting,
@@ -315,9 +306,18 @@ async def _reconcile_completed_checkpoint(
     locked = await lock_terminal_run(db, decision.thread_id)
     if locked is not None:
         thread = locked
-    promoted = await _promote_queued_continuation(db, thread, action_id, decision)
-    if promoted is not None:
-        return promoted
+    observed_at = datetime.now(UTC)
+    # A queue must not make a run immortal. Past its lifetime the run ends with
+    # the terminal its last turn actually reached, and the settlement refuses
+    # everything still waiting rather than leaving it on a settled run waiting
+    # for a promotion that can never come.
+    lifetime_spent = observed_at >= decision.lifetime_deadline_at
+    if not lifetime_spent:
+        promoted = await _promote_queued_continuation(
+            db, thread, action_id, decision, promoted_at=observed_at
+        )
+        if promoted is not None:
+            return promoted
     outcome = await settle_terminal(
         db,
         thread,
@@ -327,6 +327,7 @@ async def _reconcile_completed_checkpoint(
             action_id=action_id,
             action_type=decision.receipt.action_type,
             action_receipt_id=decision.receipt.dispatch_id,
+            queue_refusal_reason=_LIFETIME_SPENT_REFUSAL if lifetime_spent else None,
         ),
         last_sequence=decision.last_sequence,
     )

@@ -14,7 +14,6 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
@@ -22,8 +21,6 @@ import httpx
 
 from ..database import (
     ThreadStatusElectionOutcome,
-    begin_write_transaction,
-    elect_thread_status,
     get_control_action_by_dispatch_id,
     get_session_factory,
     list_threads,
@@ -40,6 +37,7 @@ from ._thread_metadata import workspace_root_from_metadata
 from .accepted_input import AcceptedActionInput, restore_accepted_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
+from .terminal_settlement import TerminalEvidence, lock_terminal_run, settle_terminal
 from .workspace import canonical_workspace_root, require_admitted_workspace_root
 
 if TYPE_CHECKING:
@@ -47,7 +45,6 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database import ThreadStatusElectionResult
     from ..database.models import ThreadModel
     from ..providers.team_selection import FrozenLaneAssignment
     from .circuit_breaker import DispatchAdmission, WorkerCircuitBreaker
@@ -371,26 +368,45 @@ def _reconciling_metadata(thread: ThreadModel) -> dict[str, object]:
     return coerce_object_mapping(raw_metadata) or {}
 
 
-async def _refuse_queue_on_settlement(
+async def _fail_reconciling_run(
     db: AsyncSession,
-    thread_id: str,
-    election: ThreadStatusElectionResult,
-    reason: str,
-) -> None:
-    """Answer a settling run's queue in the transaction that settles it.
+    thread: ThreadModel,
+    *,
+    failure_reason: str,
+    queue_refusal_reason: str,
+) -> ThreadStatusElectionOutcome:
+    """Settle one listed run FAILED on the writer authority it already holds.
 
-    The sweep's per-thread refusals are terminal settlements like any other,
-    so a continuation waiting on one would be left on a run that can never
-    promote it. Bound to the won election and written before the commit, so a
-    lost election refuses nothing: either the run settles and its queue is
-    answered, or neither happens.
+    The sweep proves nothing about the run's turn, so the election's witness is
+    the one the run was listed under, taken before the lock re-reads the row: a
+    run that moved since the listing loses the election and is left alone.
+    There is no stream position to record, so the settlement skips it. A run
+    whose row or journal action is gone resolves to the outcome the election
+    itself would have reported. Ending the transaction stays with the caller.
     """
-    from .repositories.continuation_queue import refuse_queued_continuations
-
-    if election.outcome is not ThreadStatusElectionOutcome.WON:
-        return
-    await refuse_queued_continuations(
-        db, thread_id=thread_id, refused_at=datetime.now(UTC), reason=reason
+    expectation = thread_write_expectation(thread)
+    authority = expectation.authority
+    locked = await lock_terminal_run(db, thread.id)
+    if locked is None:
+        return ThreadStatusElectionOutcome.NOT_FOUND
+    action = await get_control_action_by_dispatch_id(
+        db, thread_id=thread.id, dispatch_id=authority.action_receipt_id
+    )
+    if action is None:
+        return ThreadStatusElectionOutcome.RECEIPT_MISMATCH
+    return await settle_terminal(
+        db,
+        locked,
+        ThreadStatus.FAILED,
+        evidence=TerminalEvidence(
+            expectation=expectation,
+            action_id=action.id,
+            action_type=authority.action_type,
+            action_receipt_id=authority.action_receipt_id,
+            failure_reason=failure_reason,
+            queue_refusal_reason=queue_refusal_reason,
+        ),
+        last_sequence=None,
     )
 
 
@@ -402,28 +418,20 @@ async def _refuse_incompatible_authority(
     exc: ExecutionAuthorityError,
 ) -> None:
     """Fail one incompatible stored run while allowing the sweep to continue."""
-    expectation = thread_write_expectation(thread)
-    await begin_write_transaction(db)
-    election = await elect_thread_status(
+    outcome = await _fail_reconciling_run(
         db,
-        thread.id,
-        expectation=expectation,
-        status=ThreadStatus.FAILED,
-        action_type=expectation.authority.action_type,
-        action_receipt_id=expectation.authority.action_receipt_id,
+        thread,
         failure_reason=(
             f"stored execution authority is incompatible ({exc.reason.value})"
         ),
-    )
-    await _refuse_queue_on_settlement(
-        db, thread.id, election, "the run's stored execution authority is incompatible"
+        queue_refusal_reason="the run's stored execution authority is incompatible",
     )
     await db.commit()
-    if election.outcome is not ThreadStatusElectionOutcome.WON:
+    if outcome is not ThreadStatusElectionOutcome.WON:
         logger.warning(
             "Skipped stale reconciliation refusal for thread %s: %s",
             thread.id,
-            election.outcome.value,
+            outcome.value,
         )
         return
     _log_redispatch_failure_ladder(
@@ -443,29 +451,21 @@ async def _refuse_missing_project(
     failure_thread_ids: dict[str, list[str]],
 ) -> None:
     """Fail one run with no active project and keep healthy runs moving."""
-    expectation = thread_write_expectation(thread)
-    await begin_write_transaction(db)
-    election = await elect_thread_status(
+    outcome = await _fail_reconciling_run(
         db,
-        thread.id,
-        expectation=expectation,
-        status=ThreadStatus.FAILED,
-        action_type=expectation.authority.action_type,
-        action_receipt_id=expectation.authority.action_receipt_id,
+        thread,
         failure_reason=(
             "run carries no active project: its stored metadata "
             "names no workspace_root, so it cannot be re-sited"
         ),
-    )
-    await _refuse_queue_on_settlement(
-        db, thread.id, election, "the run carries no active project"
+        queue_refusal_reason="the run carries no active project",
     )
     await db.commit()
-    if election.outcome is not ThreadStatusElectionOutcome.WON:
+    if outcome is not ThreadStatusElectionOutcome.WON:
         logger.warning(
             "Skipped stale project refusal for thread %s: %s",
             thread.id,
-            election.outcome.value,
+            outcome.value,
         )
         return
     _log_redispatch_failure_ladder(

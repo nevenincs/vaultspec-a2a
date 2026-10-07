@@ -12,7 +12,7 @@ from ..database import (
     get_thread_execution_state,
 )
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
-from .permission_options import extract_allowed_option_ids
+from .permission_options import decode_allowed_options
 from .repositories.continuation_queue import count_queued_continuations
 
 if TYPE_CHECKING:
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
         ThreadModel,
     )
 
+from ..graph.acp_options import option_id_of, option_kind, valid_option_ids
 from ..graph.enums import PermissionOptionKind, PermissionType
 from ..ipc.schemas import ExecutionTaskProjectionPayload
 from ..streaming.types import classify_tool_kind
@@ -209,11 +210,11 @@ def clear_permissions_without_checkpoint_truth(
 
 def _permission_data_from_model(
     permission: PermissionRequestModel,
-) -> PermissionData:
-    raw_options = _decode_json_list(
-        permission.allowed_options_json,
-        field_name="allowed_options_json",
-    )
+) -> PermissionData | None:
+    """Project one durable permission row, or None when its options are unreadable."""
+    raw_options = decode_allowed_options(permission.allowed_options_json)
+    if raw_options is None:
+        return None
     tool_call = permission.tool_call
     if (
         tool_call in (None, "")
@@ -227,13 +228,9 @@ def _permission_data_from_model(
             continue
         options.append(
             PermissionOptionData(
-                option_id=str(option.get("option_id", "")),
+                option_id=option_id_of(option) or "",
                 name=str(option.get("name", "")),
-                kind=str(
-                    _coerce_permission_kind(
-                        option.get("kind", PermissionOptionKind.ALLOW_ONCE.value)
-                    )
-                ),
+                kind=str(option_kind(option)),
             )
         )
     return PermissionData(
@@ -243,13 +240,6 @@ def _permission_data_from_model(
         tool_call=tool_call,
         tool_kind=str(classify_tool_kind(tool_call)) if tool_call else None,
     )
-
-
-def _coerce_permission_kind(value: object) -> PermissionOptionKind:
-    try:
-        return PermissionOptionKind(str(value))
-    except ValueError:
-        return PermissionOptionKind.ALLOW_ONCE
 
 
 def _permission_data_from_interrupt(
@@ -267,30 +257,16 @@ def _permission_data_from_interrupt(
                 typed_option = coerce_object_mapping(option)
                 if typed_option is None:
                     continue
+                option_id = option_id_of(typed_option) or "allow_once"
                 options.append(
                     PermissionOptionData(
-                        option_id=str(
-                            typed_option.get(
-                                "optionId",
-                                typed_option.get("option_id", "allow_once"),
-                            )
-                        ),
+                        option_id=option_id,
                         name=str(
                             typed_option.get(
-                                "name",
-                                typed_option.get(
-                                    "label",
-                                    typed_option.get("optionId", "allow_once"),
-                                ),
+                                "name", typed_option.get("label", option_id)
                             )
                         ),
-                        kind=str(
-                            _coerce_permission_kind(
-                                typed_option.get(
-                                    "kind", PermissionOptionKind.ALLOW_ONCE.value
-                                )
-                            )
-                        ),
+                        kind=str(option_kind(typed_option)),
                     )
                 )
         return PermissionData(
@@ -522,17 +498,15 @@ def durable_approval(
     ]
     if not plan_approvals:
         return None, None
-    try:
-        for permission in plan_approvals:
-            _decode_json_list(
-                permission.allowed_options_json, field_name="allowed_options_json"
-            )
-    except ValueError:
+    decoded = [
+        decode_allowed_options(permission.allowed_options_json)
+        for permission in plan_approvals
+    ]
+    if any(options is None for options in decoded):
         return None, None
-    latest = plan_approvals[-1]
-    if not extract_allowed_option_ids(latest.allowed_options_json):
+    if not valid_option_ids(decoded[-1]):
         return None, None
-    return ApprovalStatus.PENDING, latest.request_id
+    return ApprovalStatus.PENDING, plan_approvals[-1].request_id
 
 
 def _merge_durable_permissions(
@@ -544,9 +518,8 @@ def _merge_durable_permissions(
     for permission in durable_permissions:
         if permission.request_id in existing:
             continue
-        try:
-            projected = _permission_data_from_model(permission)
-        except (TypeError, ValueError, json.JSONDecodeError):
+        projected = _permission_data_from_model(permission)
+        if projected is None:
             mark_degraded(
                 snapshot,
                 DegradedReason.PERMISSION_PROJECTION_UNREADABLE,

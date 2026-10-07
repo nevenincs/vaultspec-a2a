@@ -19,7 +19,16 @@ from langgraph.errors import GraphBubbleUp
 from ..control.config import settings
 from ..control.workspace import configured_workspace_boundary
 from ..desktop._filesystem_authority import confined_file_descriptor
-from ..graph.acp_options import option_id_of, valid_option_ids
+from ..graph.acp_options import (
+    is_approval,
+    is_remembering,
+    narrowest_option_id,
+    offered_option,
+    option_id_of,
+    option_id_of_kind,
+    valid_option_ids,
+)
+from ..graph.enums import PermissionOptionKind
 from ._acp_client_requests import AcpSessionRequest
 from ._acp_fs_read import AcpFileReadRange, AcpFileReadRequest, read_text_lines
 from ._acp_rpc_terminal_handlers import on_terminal_create as on_terminal_create
@@ -293,52 +302,6 @@ def _option_id_at(options: list[JsonObject], index: int, *, default: str) -> str
     return option_id_of(options[index]) or default
 
 
-def _is_approval_option(option: JsonObject) -> bool:
-    """Whether one offered option would let the tool call proceed.
-
-    Asked by the refusal paths so none of them can answer with an approval. Read
-    from the kind where the backend states one and from the id's own spelling
-    where it does not, because a fail-closed path that trusts only the typed
-    field is one malformed option away from granting what it meant to refuse.
-    """
-    option_id = (option_id_of(option) or "").lower()
-    return option.get("kind") in ("allow_once", "allow_always") or (
-        "allow" in option_id or "approve" in option_id
-    )
-
-
-def _offered_refusal_option_id(options: list[JsonObject]) -> str | None:
-    """Return an offered refusal of any spelling, or ``None`` if none is offered."""
-    for option in options:
-        option_id = option_id_of(option)
-        if option_id and (
-            option.get("kind") in ("reject_once", "reject_always")
-            or "reject" in option_id.lower()
-            or "deny" in option_id.lower()
-        ):
-            return option_id
-    return None
-
-
-def _refusal_option_id(options: list[JsonObject]) -> str:
-    """Return the id every refusing path answers with.
-
-    An offered refusal first, whatever the backend spells it. Failing that, the
-    last option - conventionally the most restrictive - but ONLY when it is not
-    an approval, and otherwise the literal ``"reject"``. The literal is a
-    deliberate answer rather than a gap: an id the agent does not recognise makes
-    it decline the tool call, which is the direction a refusal must fail in,
-    while any scan that could land on an approval turns one malformed or unusual
-    option list into a grant.
-    """
-    offered = _offered_refusal_option_id(options)
-    if offered is not None:
-        return offered
-    if options and not _is_approval_option(options[-1]):
-        return option_id_of(options[-1]) or "reject"
-    return "reject"
-
-
 def _selected_outcome(rpc_id: AcpRpcId, option_id: str) -> JsonObject:
     """Build the response frame selecting one offered option."""
     return {
@@ -351,20 +314,17 @@ def _selected_outcome(rpc_id: AcpRpcId, option_id: str) -> JsonObject:
 def _refused_outcome(rpc_id: AcpRpcId, options: list[JsonObject]) -> JsonObject:
     """Build the response frame that refuses one tool call.
 
-    A refusal is expressed by SELECTING an offered refusal wherever the request
-    offers one, because that is the answer the agent can act on: the pinned
-    adapter turns it into a denial the model is told about while the turn
+    A refusal is expressed by SELECTING the narrowest offered refusal wherever
+    the request offers one, because that is the answer the agent can act on: the
+    pinned adapter turns it into a denial the model is told about while the turn
     continues. Where the request offers nothing to refuse with, the protocol's
     own ``cancelled`` outcome is the answer - it carries no option id at all, so
     it cannot be mistaken for a selection, and the adapter aborts the tool use.
     Never an approval, and never an empty frame.
     """
-    offered = _offered_refusal_option_id(options)
-    if offered is not None:
-        return _selected_outcome(rpc_id, offered)
-    last_id = option_id_of(options[-1]) if options else None
-    if last_id and not _is_approval_option(options[-1]):
-        return _selected_outcome(rpc_id, last_id)
+    refusal = narrowest_option_id(options, approving=False)
+    if refusal is not None:
+        return _selected_outcome(rpc_id, refusal)
     return {
         "jsonrpc": "2.0",
         "id": rpc_id,
@@ -372,66 +332,44 @@ def _refused_outcome(rpc_id: AcpRpcId, options: list[JsonObject]) -> JsonObject:
     }
 
 
-def _approval_option_id(options: list[JsonObject]) -> str:
-    """Return the id of the NARROWEST offered approval.
-
-    ``allow_once`` is preferred over ``allow_always`` strictly, never by list
-    order. Taking the first approval-kind option could grant a whole server for
-    a session on the strength of one allowlisted tool, making undeclared verbs
-    reachable through an overly broad approval.
-    """
-    for kind in ("allow_once", "allow_always"):
-        for option in options:
-            option_id = option_id_of(option)
-            if option.get("kind") == kind and option_id:
-                return option_id
-    return _option_id_at(options, 0, default="approve")
-
-
-def _is_always_option(option: JsonObject) -> bool:
-    """Whether one offered option commits the CLI to remember an approval."""
-    option_id = option_id_of(option) or ""
-    return option.get("kind") == "allow_always" or "always" in option_id.lower()
-
-
 def _narrowed_to_one_use(option_id: str, options: list[JsonObject]) -> str:
-    """Return the once-only spelling of a chosen approval.
+    """Return the once-only spelling of a chosen answer.
 
-    An "always" approval is not this project's to give. The CLI persists it as a
+    A remembered answer is not this project's to give. The CLI persists it as a
     permission rule in the operator's own settings, outside anything a run can
-    see or retract, and a rule written that way widens every later run on that
-    machine - including the unattended ones, whose whole posture is that nothing
-    is approved that was not approved for them. A human at the prompt is
-    answering for THIS call, so this call is what the answer is applied to.
+    see or retract, and a rule written that way widens or narrows every later
+    run on that machine - including the unattended ones, whose whole posture is
+    that nothing is approved that was not approved for them. A human at the
+    prompt is answering for THIS call, so this call is what the answer is
+    applied to.
 
-    The narrowest offered approval is chosen through the same reader the
-    autonomous rung uses, so both rungs answer the same way about the same
-    option list. If a session offers no once-only approval at all, the choice is
-    left as made rather than converted into a refusal the human did not give -
-    and that case is logged, because it is the one where an approval outlives
-    its call.
+    The answer keeps its polarity: a remembered approval becomes the once-only
+    approval and a remembered refusal the once-only refusal, read through the
+    same option kinds the autonomous rung answers from, so both rungs answer the
+    same way about the same option list. If a session offers no once-only answer
+    of that polarity, the choice is left as made rather than converted into one
+    the human did not give - and that case is logged, because it is the one
+    where an answer outlives its call.
     """
-    chosen = next(
-        (
-            option
-            for option in options
-            if option_id_of(option) == option_id and _is_always_option(option)
-        ),
-        None,
-    )
-    if chosen is None:
+    chosen = offered_option(options, option_id)
+    if chosen is None or not is_remembering(chosen):
         return option_id
-    narrowed = _approval_option_id(options)
-    if narrowed == option_id:
+    once = (
+        PermissionOptionKind.ALLOW_ONCE
+        if is_approval(chosen)
+        else PermissionOptionKind.REJECT_ONCE
+    )
+    narrowed = option_id_of_kind(options, once)
+    if narrowed is None:
         logger.warning(
-            "Permission option %r remembers the approval and the session offers "
+            "Permission option %r remembers the answer and the session offers "
             "no single-use alternative; the CLI will persist a rule this run "
             "cannot retract",
             option_id,
         )
         return option_id
     logger.info(
-        "Narrowed a remembered permission approval to a single use: %r -> %r",
+        "Narrowed a remembered permission answer to a single use: %r -> %r",
         option_id,
         narrowed,
     )
@@ -487,26 +425,36 @@ def _autonomous_option_id(
     name and its names carry no scope: a title reducing to exactly ``Grep`` was
     approved whatever host path the call named. The floor is therefore the one
     branch that reads the ARGUMENTS as well as the name.
+
+    An approval is the NARROWEST offered one: taking the first approval-kind
+    option could grant a whole server for a session on the strength of one
+    allowlisted tool. A refusal is the narrowest offered refusal, and otherwise
+    the literal ``"reject"``. The literal is a deliberate answer rather than a
+    gap: an id the agent does not recognise makes it decline the tool call,
+    which is the direction a refusal must fail in, while any scan that could
+    land on an approval turns one malformed or unusual option list into a grant.
     """
     canonical = _canonical_tool_identity(name, config)
     composed = set(config.allowed_tools) | {
         _strip_mcp_prefix(tool) for tool in config.allowed_tools
     }
-    if canonical in composed:
-        return _approval_option_id(options)
-    if canonical in _native_read_tools(config):
-        if _floor_call_is_confined(config, args, locations):
-            return _approval_option_id(options)
-        # The refused path is not logged, as above: a caller-chosen path is
-        # agent-supplied payload.
-        logger.warning(
-            "Refused a native read tool at the autonomous rung: tool=%s named no "
-            "path inside the run's bound project (bound=%s)",
-            name,
-            config.project_scope.bound_project_root(),
+    approved = canonical in composed
+    if not approved and canonical in _native_read_tools(config):
+        approved = _floor_call_is_confined(config, args, locations)
+        if not approved:
+            # The refused path is not logged, as above: a caller-chosen path is
+            # agent-supplied payload.
+            logger.warning(
+                "Refused a native read tool at the autonomous rung: tool=%s named "
+                "no path inside the run's bound project (bound=%s)",
+                name,
+                config.project_scope.bound_project_root(),
+            )
+    if approved:
+        return narrowest_option_id(options, approving=True) or _option_id_at(
+            options, 0, default="approve"
         )
-        return _refusal_option_id(options)
-    return _refusal_option_id(options)
+    return narrowest_option_id(options, approving=False) or "reject"
 
 
 async def on_request_permission(

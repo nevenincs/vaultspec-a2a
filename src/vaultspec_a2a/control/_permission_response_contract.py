@@ -8,9 +8,8 @@ from typing import TYPE_CHECKING, TypeIs
 
 from ..graph.enums import PermissionType
 from ..thread.enums import ApprovalStatus, PermissionRequestStatus
-from ..thread.permission_fsm import response_is_rejection
 from .accepted_input import AcceptedActionInput
-from .permission_options import extract_allowed_option_ids
+from .permission_options import extract_allowed_option_ids, response_is_rejection
 
 if TYPE_CHECKING:
     import httpx

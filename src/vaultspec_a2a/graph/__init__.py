@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 
 # Lazy imports to break a circular dependency: the ``.compiler`` tree pulls in
 # ``graph.nodes.supervisor``, which imports ``context.token_budget``, which
-# imports ``thread.state`` — and ``thread`` (via ``snapshots``/``permission_fsm``)
-# imports the Layer-1 leaf ``graph.enums``. Importing that leaf runs this package
+# imports ``thread.state`` — and ``thread`` (via ``snapshots``) imports the
+# Layer-1 leaf ``graph.enums``. Importing that leaf runs this package
 # ``__init__``; eagerly loading ``.compiler`` here would therefore close the cycle
 # through a partially-initialized ``context.token_budget``. Deferring the compiler
 # exports keeps ``graph.enums`` importable without dragging the compiler tree in.

@@ -11,6 +11,7 @@ from ..ipc.schemas import DispatchApplicationReceiptPayload
 from ..thread.action_receipts import GRAPH_ACTION_VERB
 from ..thread.enums import ThreadStatus
 from ..thread.permission_fsm import compute_permission_resolution_effects
+from .permission_options import response_is_rejection
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,9 +55,10 @@ async def apply_permission_resolution(
     if permission is None or permission.request_status != "answered_pending_apply":
         return
     fx_res = compute_permission_resolution_effects(
-        permission.response_option_id,
         permission.pause_reason_type,
-        permission.allowed_options_json,
+        rejected=response_is_rejection(
+            permission.allowed_options_json, permission.response_option_id
+        ),
     )
     await mark_permission_request_applied(
         db, request_id=request_id, status=fx_res.target_status

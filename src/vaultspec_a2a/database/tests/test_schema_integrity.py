@@ -61,7 +61,7 @@ from ...tests._write_authority import (
     make_test_thread_authority_columns,
     make_test_write_authority,
 )
-from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
+from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS, MAX_TOOL_CALL_CHARS
 from ...thread.enums import ControlActionResultStatus, RepairStatus, ThreadStatus
 from ..migrate import build_migration_config
 from ..models import Base, ControlActionModel, ThreadModel
@@ -367,13 +367,13 @@ class TestPermissionTextIsBounded:
 
     def test_oversize_tool_call_is_truncated_not_refused(self) -> None:
         """An over-long tool identifier is shortened rather than fatal."""
-        tool_call = "t" * 4096
+        tool_call = "t" * (MAX_TOOL_CALL_CHARS * 3)
         frame = _served_permission_frame(description="fine", tool_call=tool_call)
 
         served = frame["tool_call"]
         assert isinstance(served, str)
         assert frame["request_id"] == "req-1"
-        assert 0 < len(served) < len(tool_call)
+        assert len(served) == MAX_TOOL_CALL_CHARS
         assert tool_call.startswith(served)
 
     def test_text_within_the_bound_is_untouched(self) -> None:

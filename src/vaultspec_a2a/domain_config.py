@@ -21,6 +21,7 @@ from .control.settings_base import (
     built_at_first_use,
     read_configuration,
 )
+from .thread.constants import MAX_SEED_TRANSCRIPT_MESSAGES
 
 
 class DomainConfig(ProjectSettings):
@@ -218,7 +219,7 @@ class DomainConfig(ProjectSettings):
     successor_transcript_depth: int = Field(
         default=20,
         ge=1,
-        le=100,
+        le=MAX_SEED_TRANSCRIPT_MESSAGES,
         description=(
             "Maximum number of predecessor user and assistant messages "
             "seeded into a successor run."

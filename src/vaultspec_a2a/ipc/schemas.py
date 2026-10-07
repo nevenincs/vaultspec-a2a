@@ -24,8 +24,11 @@ from ..thread.action_receipts import GRAPH_ACTION_VERB, GraphActionReceipt
 from ..thread.actor_tokens import ActorTokenBundle
 from ..thread.constants import (
     DEFAULT_SUPERVISOR_ID,
+    MAX_AGENT_ID_CHARS,
+    MAX_FEEDBACK_BATCH_ID_CHARS,
     MAX_RUN_ID_CHARS,
     MAX_RUN_MESSAGE_CHARS,
+    MAX_SEED_TRANSCRIPT_MESSAGES,
 )
 from ..thread.enums import ControlActionType
 from ..thread.executable_graph import FrozenGraphDefinition
@@ -130,7 +133,9 @@ class DispatchRequest(BaseModel):
     thread_id: str = Field(min_length=1, max_length=MAX_RUN_ID_CHARS)
     graph_action_receipt: GraphActionReceipt | None = None
     graph_definition: FrozenGraphDefinition | None = None
-    agent_id: str = Field(default=DEFAULT_SUPERVISOR_ID, min_length=1, max_length=128)
+    agent_id: str = Field(
+        default=DEFAULT_SUPERVISOR_ID, min_length=1, max_length=MAX_AGENT_ID_CHARS
+    )
     # For ingest: user message content
     content: str | None = Field(default=None, max_length=MAX_RUN_MESSAGE_CHARS)
     # For resume: permission response option
@@ -147,7 +152,7 @@ class DispatchRequest(BaseModel):
     metadata_json: str | None = None
     context_preamble: str | None = None
     seed_transcript: list[SeedTranscriptMessage] = Field(
-        default_factory=list, max_length=100
+        default_factory=list, max_length=MAX_SEED_TRANSCRIPT_MESSAGES
     )
     recursion_limit: int = Field(ge=1, le=500)
     # SDD blackboard fields
@@ -156,7 +161,9 @@ class DispatchRequest(BaseModel):
     # forwarded to the worker so it retrieves the authoritative batch from the
     # engine read route. a2a never parses it; None when not
     # feedback-driven.
-    feedback_batch_id: str | None = Field(default=None, max_length=256)
+    feedback_batch_id: str | None = Field(
+        default=None, max_length=MAX_FEEDBACK_BATCH_ID_CHARS
+    )
     pipeline_phase: str | None = None
     vault_index: dict[str, list[str]] = Field(default_factory=dict)
     validation_errors: list[str] = Field(default_factory=list)
@@ -299,7 +306,7 @@ class WorkerEventEnvelope(BaseModel):
     The default keeps an unstamped entry sorting first rather than refusing it.
     """
 
-    thread_id: str = Field(min_length=1, max_length=128)
+    thread_id: str = Field(min_length=1, max_length=MAX_RUN_ID_CHARS)
     payload: dict[str, Any] = Field(min_length=1)
     ts: float = Field(default=0.0, allow_inf_nan=False)
 

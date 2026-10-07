@@ -35,18 +35,18 @@ from ..thread.clarification import (
     ClarificationRequest,
     topology_honours_clarification,
 )
+from ..thread.constants import ROLE_ID_PATTERN
 from ..thread.errors import (
     AgentConfigNotFoundError,
     ConfigError,
     TeamConfigNotFoundError,
 )
 
-# Safe agent_id pattern — alphanumeric, underscores, hyphens only.
-# Prevents path traversal attacks via crafted agent_id values (e.g. "../../etc").
-# Must be a valid Python identifier (validated in
-# AgentConfig.validate_id_is_identifier), but this pattern adds an explicit
-# safeguard for use in load_agent_config.
-_SAFE_AGENT_ID_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_\-]{0,62}$")
+# Agent and team ids name a TOML file, so they are confined to the role-id
+# grammar before any path is built from one (e.g. "../../etc" is refused). Applied
+# with ``fullmatch``: the grammar's ``$`` alone also matches before a trailing
+# newline.
+_SAFE_AGENT_ID_RE = re.compile(ROLE_ID_PATTERN)
 
 
 __all__ = [
@@ -321,10 +321,10 @@ class AgentConfig(BaseModel):
     @model_validator(mode="after")
     def validate_id_is_identifier(self) -> "AgentConfig":
         """Ensure agent.id matches _SAFE_AGENT_ID_RE."""
-        if not _SAFE_AGENT_ID_RE.match(self.id):
+        if not _SAFE_AGENT_ID_RE.fullmatch(self.id):
             raise ValueError(
                 f"Invalid agent.id {self.id!r}: must match pattern "
-                f"{_SAFE_AGENT_ID_RE.pattern!r} (alphanumeric, underscores, hyphens)."
+                f"{ROLE_ID_PATTERN!r} (alphanumeric, underscores, hyphens)."
             )
         return self
 
@@ -757,10 +757,10 @@ def load_agent_config(
     """
     # Validate agent_id before using it in path construction to prevent
     # path traversal attacks (e.g. agent_id="../../etc/passwd").
-    if not _SAFE_AGENT_ID_RE.match(agent_id):
+    if not _SAFE_AGENT_ID_RE.fullmatch(agent_id):
         raise ConfigError(
             f"Invalid agent_id {agent_id!r}: must match pattern "
-            r"[a-zA-Z_][a-zA-Z0-9_\-]{{0,62}} (alphanumeric, underscores, hyphens)."
+            f"{ROLE_ID_PATTERN!r} (alphanumeric, underscores, hyphens)."
         )
 
     path = _resolve_preset_path(
@@ -791,10 +791,9 @@ def load_team_config(
                                   bundled preset exists.
         pydantic.ValidationError: If the TOML data fails schema validation.
     """
-    if not _SAFE_AGENT_ID_RE.match(team_id):
+    if not _SAFE_AGENT_ID_RE.fullmatch(team_id):
         raise ConfigError(
-            f"Invalid team_id {team_id!r}: must match pattern "
-            r"[a-zA-Z_][a-zA-Z0-9_\-]{{0,62}}."
+            f"Invalid team_id {team_id!r}: must match pattern {ROLE_ID_PATTERN!r}."
         )
 
     path = _resolve_preset_path(

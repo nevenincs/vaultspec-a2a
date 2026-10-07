@@ -65,6 +65,7 @@ from typing import Final, TypeGuard, cast
 from ..graph.enums import ServerEventType, StreamFrameKind, research_adr_semantic_phase
 from ..thread.constants import (
     MAX_PERMISSION_DESCRIPTION_CHARS,
+    MAX_PERMISSION_OPTION_ID_CHARS,
     MAX_REQUEST_ID_CHARS,
     MAX_ROLE_ID_CHARS,
     MAX_RUN_ID_CHARS,
@@ -277,6 +278,9 @@ def _project_fields(
 # catalog, and dropping it would be the refusal semantics the channel rejects.
 _ENUM = _Text(64)
 
+# A graph node's name, which the agent-status and team-status frames both carry.
+_NODE_NAME = _Text(128)
+
 # Fields shared verbatim by the two tool-call frame types, declared once.
 _TOOL_CALL_FIELDS: dict[str, _FieldSpec] = {
     "tool_call_id": _Text(128),
@@ -334,7 +338,7 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     },
     ServerEventType.AGENT_STATUS: {
         "state": _ENUM,
-        "node_name": _Text(128),
+        "node_name": _NODE_NAME,
         "detail": _Text(256),
     },
     ServerEventType.TEAM_STATUS: {
@@ -345,7 +349,7 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
                 "thread_id": _Text(MAX_RUN_ID_CHARS),
                 "agent_id": _Text(MAX_ROLE_ID_CHARS),
                 "state": _ENUM,
-                "node_name": _Text(128),
+                "node_name": _NODE_NAME,
                 "provider": _Text(64),
                 "model_name": _Text(128),
                 "role": _Text(64),
@@ -392,7 +396,12 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
         "tool_kind": _ENUM,
         "description": _Text(MAX_PERMISSION_DESCRIPTION_CHARS),
         "options": _ObjectList(
-            16, {"option_id": _Text(64), "name": _Text(128), "kind": _ENUM}
+            16,
+            {
+                "option_id": _Text(MAX_PERMISSION_OPTION_ID_CHARS),
+                "name": _Text(128),
+                "kind": _ENUM,
+            },
         ),
     },
     # The clarification nudge enumerates ONE field, and the shortness of this

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -22,6 +23,7 @@ from .lane_admission import (
 from .provider_catalog import (
     MAX_CONTROL_ID_LENGTH,
     MAX_PUBLIC_ID_LENGTH,
+    PUBLIC_ID_PATTERN,
     AdmissionState,
     AuthenticationState,
     CacheFreshness,
@@ -347,7 +349,9 @@ def _health_for(
 
 def _valid_public_id(value: str, *, max_length: int) -> bool:
     return (
-        value == value.strip() and 0 < len(value) <= max_length and value.isprintable()
+        value == value.strip()
+        and 0 < len(value) <= max_length
+        and re.fullmatch(PUBLIC_ID_PATTERN, value) is not None
     )
 
 

@@ -66,6 +66,7 @@ __all__ = [
     "MAX_PROVIDER_LANES",
     "MAX_PUBLIC_ID_LENGTH",
     "MAX_TEXT_LENGTH",
+    "PUBLIC_ID_PATTERN",
     "AdmissionState",
     "AuthenticationState",
     "CacheFreshness",
@@ -104,6 +105,10 @@ MAX_HEALTH_REASONS: Final = 16
 MAX_PUBLIC_ID_LENGTH: Final = 512
 MAX_CONTROL_ID_LENGTH: Final = 128
 MAX_PROVIDER_LANES: Final = 128
+# The character rule every public identifier shares: no C0 control and no DEL.
+# The served schema and the discovery-time lane check both compile this text, so
+# a lane that passes discovery cannot fail the whole response at serialization.
+PUBLIC_ID_PATTERN: Final = r"^[^\x00-\x1f\x7f]+$"
 
 
 def required_text(

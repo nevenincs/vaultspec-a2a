@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError
 
+from .constants import MAX_RUN_ID_CHARS
 from .enums import ControlActionType
 from .write_authority import RECEIPT_ID_MAX_LENGTH
 
@@ -63,7 +64,9 @@ class GraphActionReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: Literal["graph-action-v1"]
-    thread_id: Annotated[str, Field(min_length=1, max_length=128, pattern=r"^\S+$")]
+    thread_id: Annotated[
+        str, Field(min_length=1, max_length=MAX_RUN_ID_CHARS, pattern=r"^\S+$")
+    ]
     action_id: _Identity
     action_type: Annotated[ControlActionType, AfterValidator(_graph_action_type)]
     payload_fingerprint: _Fingerprint

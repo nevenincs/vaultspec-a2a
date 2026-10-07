@@ -49,14 +49,12 @@ it, never a pass.
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 import yaml
 
 from ..acceptance.tests._harness import (
@@ -65,21 +63,12 @@ from ..acceptance.tests._harness import (
     certified_gateway,
 )
 from ..testing.tests._support.payloads import json_object, json_object_list
-from ._net import tape_server_listening
+from ._net import TAPE_SERVER_ENV, tape_server_base
 
 if TYPE_CHECKING:
     from ..acceptance.tests._harness import CertifiedGateway
+    from ..conftest import ExternalPrerequisiteRule
     from ..providers._json_contract import JsonObject
-
-# The scripted backend the mock provider proxies to. The compose service publishes
-# it on this loopback port; an environment that already runs one points at it with
-# the same variable the production provider reads.
-_TAPE_SERVER_DEFAULT = "http://127.0.0.1:8100"
-_TAPE_SERVER_ENV = "VAULTSPEC_A2A_MOCK_API_BASE"
-
-_SUPPLY_TAPE_SERVER = (
-    "docker compose -f service/docker-compose.integration.yml up -d vidaimock"
-)
 
 # The bundled tape defining this preset worker's scripted turns - the script this
 # test asserts content equality against.
@@ -144,11 +133,6 @@ def _scripted_final_text() -> str:
     return str(text)
 
 
-def _tape_server_base() -> str:
-    """The scripted backend's base URL, overridable by the production variable."""
-    return (os.environ.get(_TAPE_SERVER_ENV) or "").strip() or _TAPE_SERVER_DEFAULT
-
-
 def _await_terminal(
     gateway: CertifiedGateway, run_id: str, *, budget: float
 ) -> JsonObject:
@@ -170,6 +154,7 @@ def _await_terminal(
 
 def test_real_worker_run_reaches_terminal_state_with_scripted_content(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """A gateway-owned worker executes a real graph and completes with the script.
 
@@ -181,19 +166,14 @@ def test_real_worker_run_reaches_terminal_state_with_scripted_content(
     """
     expected_text = _scripted_final_text()
 
-    tape_server = _tape_server_base()
-    if not tape_server_listening(tape_server):
-        pytest.skip(
-            f"the scripted model backend is unavailable at {tape_server} "
-            f"(set {_TAPE_SERVER_ENV} to an existing one, or supply it: "
-            f"{_SUPPLY_TAPE_SERVER})"
-        )
+    tape_server = tape_server_base()
+    external_prerequisite("tape-server", f"nothing is listening at {tape_server}")
 
     run_id = f"runtime-proof-{uuid.uuid4().hex[:12]}"
     with certified_gateway(
         tmp_path,
         **{
-            _TAPE_SERVER_ENV: tape_server,
+            TAPE_SERVER_ENV: tape_server,
             "VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS": _WORKER_READY_BUDGET_SECONDS,
         },
     ) as gateway:

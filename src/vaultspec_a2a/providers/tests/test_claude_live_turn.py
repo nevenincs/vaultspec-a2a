@@ -37,7 +37,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from ...control.config import settings
 from ...graph.enums import Provider
 from ...service_tests._provider_catalog_live import declared_lane_model_value
-from .._factory_commands import _classify_acp_command, claude_acp_entry
+from .._factory_commands import _classify_acp_command
 from .._subprocess import kill_process_tree
 from ..acp_chat_model import AcpChatModel
 from ..factory import ProviderFactory, claude_auth_env
@@ -95,11 +95,7 @@ async def test_claude_live_turn_completes_and_returns_content(
     aggregated result carries the same completed content. An unauthenticated
     host fails with the provider's own auth error, which is the contract.
     """
-    if settings.acp_backend != "binary" and not claude_acp_entry().exists():
-        pytest.skip(
-            "Claude ACP node entry not installed; run 'npm install' "
-            "(@agentclientprotocol/claude-agent-acp) per the ACP runbook"
-        )
+    external_prerequisite("claude-acp-adapter")
 
     # The lane's turn PROOF runs on the model the operator declared. A
     # capability tier stood here until production stopped accepting one for an

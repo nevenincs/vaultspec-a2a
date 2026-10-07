@@ -310,7 +310,7 @@ async def test_solo_coder_invokes_bridged_authoring_tool_midturn(
     feature = f"s20-solo-coder-{int(time.time())}"
     case = _solo_coder_case(feature)
     selection, overrides = await _resolve_selection(
-        case, gateway_url, str(vault_root.parent)
+        case, gateway_url, str(vault_root.parent), external_prerequisite
     )
     harness = AcceptanceHarness(
         case=case,

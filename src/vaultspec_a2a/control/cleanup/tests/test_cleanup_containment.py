@@ -31,6 +31,7 @@ from ....database.models import ArtifactModel, ThreadModel
 from ....tests._write_authority import make_test_thread_authority_columns
 
 if TYPE_CHECKING:
+    from ....conftest import ExternalPrerequisiteRule
     from ....control.repositories import CleanupItemResult
 
 
@@ -145,7 +146,9 @@ async def test_parent_traversal_is_refused(tmp_path: pathlib.Path) -> None:
     assert outsider.read_text(encoding="utf-8") == "precious"
 
 
-def test_symlink_escaping_the_workspace_is_refused(tmp_path: pathlib.Path) -> None:
+def test_symlink_escaping_the_workspace_is_refused(
+    tmp_path: pathlib.Path, external_prerequisite: ExternalPrerequisiteRule
+) -> None:
     """A symlink inside the root resolving outside it is refused at build.
 
     Resolution happens before the containment check, so the link target is what
@@ -160,7 +163,7 @@ def test_symlink_escaping_the_workspace_is_refused(tmp_path: pathlib.Path) -> No
     try:
         link.symlink_to(outsider)
     except (OSError, NotImplementedError) as exc:
-        pytest.skip(f"host cannot create symlinks: {exc}")
+        external_prerequisite.absent("symlinks", str(exc))
 
     assert resolve_contained_artifact_path(workspace, "link.txt") is None
     assert outsider.read_text(encoding="utf-8") == "precious"

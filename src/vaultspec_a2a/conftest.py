@@ -17,10 +17,14 @@ from typing import TYPE_CHECKING, Any, NoReturn
 import pytest
 import pytest_asyncio
 
+from .service_tests._net import tape_server_base, tape_server_listening
 from .service_tests._provider_catalog_live import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
+    LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON,
     live_provider_catalog_selector_is_configured,
+    live_provider_override_selector_is_configured,
 )
+from .testing import apply_layer_markers
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -105,6 +109,18 @@ def _on_path(*names: str) -> Callable[[], bool]:
 
 def _env_set(name: str) -> Callable[[], bool]:
     return lambda: bool((os.environ.get(name) or "").strip())
+
+
+def _module_present(name: str) -> Callable[[], bool]:
+    def probe() -> bool:
+        from importlib.util import find_spec
+
+        try:
+            return find_spec(name) is not None
+        except (ImportError, ValueError):
+            return False
+
+    return probe
 
 
 # --- Provider credentials ---------------------------------------------------
@@ -278,13 +294,16 @@ def _docker_compose_present() -> bool:
     return completed.returncode == 0
 
 
-def _mcp_streamable_http_present() -> bool:
-    from importlib.util import find_spec
+def _tape_server_present() -> bool:
+    return tape_server_listening(tape_server_base())
 
-    try:
-        return find_spec("mcp.client.streamable_http") is not None
-    except (ImportError, ValueError):
-        return False
+
+def _claude_acp_adapter_present() -> bool:
+    """The Node ACP adapter is installed, or the binary backend replaces it."""
+    from .control.config import settings
+    from .providers._factory_commands import claude_acp_entry
+
+    return settings.acp_backend == "binary" or claude_acp_entry().exists()
 
 
 EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
@@ -328,6 +347,36 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         probe=live_provider_catalog_selector_is_configured,
     ),
     ExternalPrerequisite(
+        "provider-catalog-override-selection",
+        what="an explicitly opted-in second provider catalog selection",
+        supply=(
+            "choose an entry on a different lane from the primary selection, then "
+            "export "
+            + ", ".join(LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON)
+            + " as its opaque provider/lane/entry/control/option identifiers"
+        ),
+        probe=live_provider_override_selector_is_configured,
+    ),
+    ExternalPrerequisite(
+        "provider-capacity",
+        what="a provider that admits work instead of refusing it for rate",
+        supply=(
+            "wait for the provider's rate limit or subscription window to reset, "
+            "then re-run"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
+        "provider-refusal-armed",
+        what="a provider lane armed to refuse work, with its condition declared",
+        supply=(
+            "arm the stack so a lane will really refuse work, then export "
+            "VAULTSPEC_A2A_PROVIDER_CONDITION_EXPECT as the condition it will "
+            "produce"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
         "loopback-stack",
         what="a reachable loopback engine plus a2a gateway and worker",
         supply=(
@@ -349,6 +398,58 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         probe=None,
     ),
     ExternalPrerequisite(
+        "in-process-lanes",
+        what="a served provider catalog with a selectable in-process lane",
+        supply=(
+            "boot this branch's gateway so the catalog it serves for the run's "
+            "workspace lists a selectable `deterministic` or `mock` lane"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
+        "tape-server",
+        what="the scripted model backend",
+        supply=(
+            "run `docker compose -f service/docker-compose.integration.yml up -d "
+            "vidaimock`, or export VAULTSPEC_A2A_MOCK_API_BASE pointing at an "
+            "existing one"
+        ),
+        probe=_tape_server_present,
+    ),
+    ExternalPrerequisite(
+        "outbound-network",
+        what="outbound network access to the public internet",
+        supply=(
+            "run on a host that can reach the public hosts the proof retrieves "
+            "from and is not rate-limited by them"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
+        "dashboard-source",
+        what="a dashboard repository checkout whose engine sources are readable",
+        supply=(
+            "check out the dashboard repository and export "
+            "VAULTSPEC_A2A_ENGINE_SOURCE as its root"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
+        "vaultspec-core",
+        what="the locked vaultspec-core tooling in the active environment",
+        supply="uv sync --locked",
+        probe=_module_present("vaultspec_core"),
+    ),
+    ExternalPrerequisite(
+        "symlinks",
+        what="a host that permits creating symlinks",
+        supply=(
+            "enable Windows Developer Mode, or run elevated, so unprivileged "
+            "symlink creation is permitted"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
         "codex-cli",
         what="the Codex CLI on PATH",
         supply=(
@@ -366,6 +467,15 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         skip_reason_tokens=("claude cli", "claude acp cli"),
     ),
     ExternalPrerequisite(
+        "claude-acp-adapter",
+        what="the Claude ACP node adapter",
+        supply=(
+            "run `npm install` for @agentclientprotocol/claude-agent-acp per the "
+            "ACP runbook"
+        ),
+        probe=_claude_acp_adapter_present,
+    ),
+    ExternalPrerequisite(
         "kimi-cli",
         what="the Kimi CLI on PATH",
         supply=("install Kimi Code per https://moonshotai.github.io/kimi-code/"),
@@ -376,8 +486,14 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         "mcp-streamable-http",
         what="the mcp package's streamable-http client transport",
         supply="uv sync --locked --group all",
-        probe=_mcp_streamable_http_present,
+        probe=_module_present("mcp.client.streamable_http"),
         skip_reason_tokens=("mcp streamable-http",),
+    ),
+    ExternalPrerequisite(
+        "otlp-grpc-exporter",
+        what="the OTLP gRPC exporter package",
+        supply="uv sync --locked --extra server --group tooling",
+        probe=None,
     ),
     ExternalPrerequisite(
         "zai-credential",
@@ -609,7 +725,10 @@ def _collection_prerequisites(item: pytest.Item) -> frozenset[str]:
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Deselect opt-in live proofs until callers explicitly authorize every resource.
+    """Mark every test directory by layer, then deselect opt-in live proofs.
+
+    The layer marks are the repository's one table of per-directory rules
+    (``testing.markers``), applied here once for the whole session.
 
     A configured live provider turn can spend a real credential.  It is
     therefore neither a skip nor an implicit service test: normal collection
@@ -618,6 +737,7 @@ def pytest_collection_modifyitems(
     refuses that explicit request before collection if a declared resource is
     actually absent.
     """
+    apply_layer_markers(items)
     declared = declared_prerequisites()
     selected: list[pytest.Item] = []
     deselected: list[pytest.Item] = []

@@ -15,7 +15,6 @@ no worker double is exercised on the proven path.
 
 from __future__ import annotations
 
-import shutil
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -30,6 +29,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from ...conftest import ExternalPrerequisiteRule
 
 _AUTHORING = "vaultspec-adr-research"
 
@@ -46,10 +47,10 @@ def _authoring_roles() -> tuple[str, ...]:
     return tuple(worker.agent_id for worker in load_team_config(_AUTHORING).workers)
 
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("vaultspec-core") is None and shutil.which("uvx") is None,
-    reason="vaultspec-core CLI not resolvable; cannot provision a real workspace",
-)
+@pytest.fixture(autouse=True)
+def _require_core(external_prerequisite: ExternalPrerequisiteRule) -> None:
+    """Every test here provisions a real workspace with a genuine core install."""
+    external_prerequisite("vaultspec-core")
 
 
 def _full_bundle() -> dict[str, Any]:

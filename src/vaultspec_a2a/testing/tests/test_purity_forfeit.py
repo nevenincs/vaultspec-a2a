@@ -34,18 +34,19 @@ from pathlib import Path
 
 import pytest
 
-from vaultspec_a2a.testing import apply_layer_markers
+from vaultspec_a2a.testing import LayerRule, apply_layer_markers
 
-_PACKAGE_DIR = str(Path(__file__).resolve().parent)
-
-
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    apply_layer_markers(
-        items,
-        package_dir=_PACKAGE_DIR,
+_RULES = {
+    Path(__file__).resolve().parent: LayerRule(
+        "core",
         middleware_files=frozenset({"test_infra.py"}),
         impure_files=frozenset({"test_named_impure.py"}),
     )
+}
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    apply_layer_markers(items, _RULES)
 '''
 
 # One file holding a pure test beside two that testify against themselves. The

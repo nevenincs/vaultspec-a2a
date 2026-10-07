@@ -35,8 +35,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import httpx
-import pytest
 
+from ...conftest import ExternalPrerequisiteRule
 from ...testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
@@ -158,7 +158,7 @@ class CertifiedGateway:
                 prefer_provider_id="mock",
             )
         except NoSelectableLaneError as exc:
-            pytest.skip(f"this certification stack cannot present a selection: {exc}")
+            ExternalPrerequisiteRule().absent("in-process-lanes", str(exc))
         self._run_fields = {
             "provider_id": selection["provider_id"],
             "selection": selection,

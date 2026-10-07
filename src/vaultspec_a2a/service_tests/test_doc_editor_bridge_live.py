@@ -102,7 +102,7 @@ async def _codex_authoring_harness(
     feature = f"codex-doc-editor-{int(time.time())}"
     case = _codex_authoring_case(feature)
     selection, overrides = await _resolve_selection(
-        case, gateway_url, str(vault_root.parent)
+        case, gateway_url, str(vault_root.parent), external_prerequisite
     )
     harness = AcceptanceHarness(
         case=case,

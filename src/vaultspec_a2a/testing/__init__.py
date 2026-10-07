@@ -47,7 +47,7 @@ if TYPE_CHECKING:
         lease_home,
     )
     from .links import plant_link_to_file
-    from .markers import apply_layer_markers
+    from .markers import LayerRule, apply_layer_markers
     from .ports import (
         SCRATCH_ROLE,
         PortAllocationError,
@@ -142,6 +142,7 @@ _LAZY_EXPORTS = {
     "hold_lease": ("vaultspec_a2a.testing.leases", "hold_lease"),
     "lease_home": ("vaultspec_a2a.testing.leases", "lease_home"),
     "plant_link_to_file": ("vaultspec_a2a.testing.links", "plant_link_to_file"),
+    "LayerRule": ("vaultspec_a2a.testing.markers", "LayerRule"),
     "apply_layer_markers": ("vaultspec_a2a.testing.markers", "apply_layer_markers"),
     "SCRATCH_ROLE": ("vaultspec_a2a.testing.ports", "SCRATCH_ROLE"),
     "PortAllocationError": ("vaultspec_a2a.testing.ports", "PortAllocationError"),
@@ -217,6 +218,7 @@ __all__ = [
     "SCRATCH_ROLE",
     "SERVICE_MARKER",
     "SESSION_LEASE_KEY",
+    "LayerRule",
     "Lease",
     "LeaseAcquisitionTimeoutError",
     "LivenessWatch",

@@ -43,30 +43,22 @@ this deterministic certification must never do.
 
 from __future__ import annotations
 
-import os
 import time
 import tomllib
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import pytest
-
 from ..acceptance.tests._harness import certified_gateway
 from ..testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
     in_process_selection,
 )
-from ._net import tape_server_listening
+from ._net import TAPE_SERVER_ENV, tape_server_base
 
 if TYPE_CHECKING:
     from ..acceptance.tests._harness import CertifiedGateway
-
-_TAPE_SERVER_DEFAULT = "http://127.0.0.1:8100"
-_TAPE_SERVER_ENV = "VAULTSPEC_A2A_MOCK_API_BASE"
-_SUPPLY_TAPE_SERVER = (
-    "docker compose -f service/docker-compose.integration.yml up -d vidaimock"
-)
+    from ..conftest import ExternalPrerequisiteRule
 
 # A multi-role preset, so agreement is asserted across several roles in one run
 # rather than generalised from a single worker.
@@ -92,21 +84,19 @@ def _preset_roles() -> list[str]:
     return roles
 
 
-def _tape_server_base() -> str:
-    return (os.environ.get(_TAPE_SERVER_ENV) or "").strip() or _TAPE_SERVER_DEFAULT
-
-
 def _served_in_process_selection(
-    gateway: CertifiedGateway, workspace_root: str
+    gateway: CertifiedGateway,
+    workspace_root: str,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> dict[str, Any]:
-    """Resolve the served in-process lane's selection, or skip naming the gap.
+    """Resolve the served in-process lane's selection, or report the missing lane.
 
     A deterministic certification run must freeze the in-process lane: the
     freeze wins outright at compilation, so a selection naming any other served
     lane would hand every role to a real external provider. Keeping a billable
     lane out is the shared mechanism's own guarantee - it will not hand one back
     even when it is the only selectable thing this stack serves - so what remains
-    local is the shape of the refusal: a loud skip naming the missing serving,
+    local is the shape of the refusal: a loud report naming the missing serving,
     never a run that quietly spends on whichever external lane the host happens
     to have installed.
     """
@@ -118,7 +108,7 @@ def _served_in_process_selection(
     try:
         return in_process_selection(response.json(), prefer_provider_id="mock")
     except NoSelectableLaneError as exc:
-        pytest.skip(f"a deterministic certification run cannot be selected here: {exc}")
+        external_prerequisite.absent("in-process-lanes", str(exc))
 
 
 def _await_terminal(
@@ -141,28 +131,26 @@ def _await_terminal(
 
 def test_advertised_assignment_is_the_assignment_the_worker_executes(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """Every role executes on the provider and capability admission advertised."""
     roles = _preset_roles()
 
-    tape_server = _tape_server_base()
-    if not tape_server_listening(tape_server):
-        pytest.skip(
-            f"the scripted model backend is unavailable at {tape_server} "
-            f"(set {_TAPE_SERVER_ENV} to an existing one, or supply it: "
-            f"{_SUPPLY_TAPE_SERVER})"
-        )
+    tape_server = tape_server_base()
+    external_prerequisite("tape-server", f"nothing is listening at {tape_server}")
 
     run_id = f"assignment-agreement-{uuid.uuid4().hex[:12]}"
     with certified_gateway(
         tmp_path,
         **{
-            _TAPE_SERVER_ENV: tape_server,
+            TAPE_SERVER_ENV: tape_server,
             "VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS": _WORKER_READY_BUDGET_SECONDS,
         },
     ) as gateway:
         workspace_root = str(tmp_path)
-        selection = _served_in_process_selection(gateway, workspace_root)
+        selection = _served_in_process_selection(
+            gateway, workspace_root, external_prerequisite
+        )
         with gateway.client(timeout=90.0) as client:
             started = client.post(
                 "/v1/runs",

@@ -25,6 +25,8 @@ from fastapi import FastAPI
 if TYPE_CHECKING:
     from types import TracebackType
 
+    from ...conftest import ExternalPrerequisiteRule
+
 from ...desktop._platform_acl import windows_file_is_restricted
 from ..discovery import (
     DiscoveryState,
@@ -349,7 +351,9 @@ def test_removing_a_malformed_record_also_clears_its_credential(tmp_path: Path) 
     assert not credential.exists()
 
 
-def test_credential_removal_refuses_a_link_like_destination(tmp_path: Path) -> None:
+def test_credential_removal_refuses_a_link_like_destination(
+    tmp_path: Path, external_prerequisite: ExternalPrerequisiteRule
+) -> None:
     """A symlink where the credential belongs must not be followed on removal.
 
     Otherwise anyone able to write the discovery directory could redirect the
@@ -363,7 +367,7 @@ def test_credential_removal_refuses_a_link_like_destination(tmp_path: Path) -> N
     try:
         link.symlink_to(outsider)
     except (OSError, NotImplementedError) as exc:
-        pytest.skip(f"host cannot create symlinks: {exc}")
+        external_prerequisite.absent("symlinks", str(exc))
 
     assert remove_service_json_if_owned(path, os.getpid()) is True
 

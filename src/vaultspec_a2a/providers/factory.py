@@ -53,7 +53,6 @@ from ._native_role import (
 )
 from .acp_catalog import discover_acp_catalog
 from .antigravity_catalog import discover_antigravity_catalog
-from .antigravity_cli import resolve_antigravity_command
 from .binary_version import BinaryVersionProbeError, probe_binary_version
 from .cli_resolution import (
     ClaudeCliResolution,
@@ -81,6 +80,7 @@ from .provider_catalog import (
     HealthState,
     ProviderCatalogKey,
 )
+from .provider_readiness import probe_provider_configuration
 
 __all__ = [
     "ProviderCatalogRegistration",
@@ -413,7 +413,8 @@ async def _discover_antigravity_catalog(
     Transport health follows the catalog: this lane's only surface IS the CLI
     invocation, so a listing that came back is a reachable transport and one
     that did not is an unreachable one. There is no separate handshake to
-    distinguish the two.
+    distinguish the two. Configuration is the lane's own evidence, because
+    resolving the CLI is the listing's first step.
     """
     discovered = await discover_antigravity_catalog(
         key,
@@ -424,15 +425,6 @@ async def _discover_antigravity_catalog(
     available = discovered.catalog.state.status is CatalogStatus.AVAILABLE
     return replace(
         discovered,
-        configured=(
-            HealthState.AVAILABLE
-            if resolve_antigravity_command(
-                cli_path=settings.antigravity_cli_path,
-                home=settings.antigravity_cli_home,
-            )
-            is not None
-            else HealthState.UNAVAILABLE
-        ),
         transport=HealthState.AVAILABLE if available else HealthState.UNAVAILABLE,
     )
 
@@ -448,11 +440,31 @@ async def _discover_kimi_catalog(
             raise ValueError("Kimi Code CLI is not resolvable")
     except ValueError:
         command = None
+    configuration = probe_provider_configuration(Provider.KIMI)
+    if configuration.reason is not None:
+        return unavailable_discovery(
+            key,
+            reason=configuration.reason,
+            configured=configuration.state,
+            transport=(
+                HealthState.AVAILABLE
+                if command is not None
+                else HealthState.UNAVAILABLE
+            ),
+        )
+    if command is None:
+        return unavailable_discovery(
+            key,
+            reason="provider catalog command is unavailable",
+            configured=configuration.state,
+            transport=HealthState.UNAVAILABLE,
+        )
     api_key = (
         settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
     )
-    try:
-        injected = _build_kimi_env(
+    env = resolve_env_vars(workspace_root)
+    env.update(
+        _build_kimi_env(
             kimi_api_key=api_key,
             kimi_base_url=settings.kimi_base_url,
             kimi_temporary_model_name=settings.kimi_temporary_model_name,
@@ -463,28 +475,8 @@ async def _discover_kimi_catalog(
                 settings.kimi_temporary_model_capabilities
             ),
         )
-        injected.update(_kimi_home_env(settings.kimi_code_home))
-    except ValueError:
-        return unavailable_discovery(
-            key,
-            reason="temporary Kimi provider configuration is incomplete",
-            configured=HealthState.UNAVAILABLE,
-            transport=(
-                HealthState.AVAILABLE
-                if command is not None
-                else HealthState.UNAVAILABLE
-            ),
-        )
-    configured = HealthState.AVAILABLE if injected else HealthState.UNKNOWN
-    if command is None:
-        return unavailable_discovery(
-            key,
-            reason="provider catalog command is unavailable",
-            configured=configured,
-            transport=HealthState.UNAVAILABLE,
-        )
-    env = resolve_env_vars(workspace_root)
-    env.update(injected)
+    )
+    env.update(_kimi_home_env(settings.kimi_code_home))
     # Discovery is a sibling command, never `kimi acp provider list`.
     discovered = await discover_kimi_catalog(
         (command[0],),
@@ -493,7 +485,7 @@ async def _discover_kimi_catalog(
         key=key,
         metadata={"provider": Provider.KIMI.value, **metadata},
     )
-    normalized = replace(discovered, configured=configured)
+    normalized = replace(discovered, configured=configuration.state)
     return replace(normalized, transport=_transport_evidence(normalized))
 
 
@@ -505,11 +497,7 @@ async def _discover_openai_catalog(key: ProviderCatalogKey) -> ProviderCatalogDi
     )
     return replace(
         discovered,
-        configured=(
-            HealthState.AVAILABLE
-            if settings.openai_api_key
-            else HealthState.UNAVAILABLE
-        ),
+        configured=probe_provider_configuration(Provider.OPENAI).state,
         transport=(
             HealthState.AVAILABLE
             if discovered.catalog.state.status is CatalogStatus.AVAILABLE
@@ -539,22 +527,10 @@ async def _discover_in_process_catalog(
 async def _discover_unverified_catalog(
     key: ProviderCatalogKey,
 ) -> ProviderCatalogDiscovery:
-    provider = Provider(key.provider_id)
-    configured = HealthState.UNKNOWN
-    if provider is Provider.ZAI:
-        configured = (
-            HealthState.AVAILABLE
-            if settings.zai_auth_token
-            else HealthState.UNAVAILABLE
-        )
-    elif provider is Provider.ZHIPU:
-        configured = (
-            HealthState.AVAILABLE if settings.zhipu_api_key else HealthState.UNAVAILABLE
-        )
     return unavailable_discovery(
         key,
         reason="provider lane has no verified prompt-free model enumeration",
-        configured=configured,
+        configured=probe_provider_configuration(Provider(key.provider_id)).state,
     )
 
 
@@ -756,11 +732,10 @@ def _create_zai_model(
     from .acp_chat_model import AcpChatModel
 
     backend = backend if backend is not None else settings.acp_backend
-    auth_token = settings.zai_auth_token
     logger.debug(
-        "[%s] Instantiating ACP Wrapper. Auth token present: %s, backend=%s",
+        "[%s] Instantiating ACP Wrapper. Auth token configuration: %s, backend=%s",
         Provider.ZAI,
-        bool(auth_token and auth_token.strip()),
+        probe_provider_configuration(Provider.ZAI).state,
         backend,
     )
     try:
@@ -775,7 +750,7 @@ def _create_zai_model(
     )
     env_vars = _build_zai_env(
         zai_base_url=settings.zai_base_url,
-        zai_auth_token=auth_token,
+        zai_auth_token=settings.zai_auth_token,
     )
     if backend == "binary":
         env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"

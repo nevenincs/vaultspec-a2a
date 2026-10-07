@@ -17,12 +17,13 @@ from ..database import (
     get_control_action_by_dispatch_id,
     has_live_queued_continuation_lease,
     mark_control_action_applied,
+    read_latest_checkpoint,
     read_next_queued_continuation,
     thread_write_expectation,
 )
 from ..thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
-    read_checkpoint_evidence,
+    classify_checkpoint_evidence,
 )
 from ..thread.enums import (
     NON_ACTIVE_STATUSES,
@@ -388,8 +389,13 @@ async def reconcile_run_checkpoint(
     # The checkpoint store is a different transaction owner. Release this read
     # snapshot before awaiting it; the later election compares the saved witness.
     await db.commit()
-    evidence = await read_checkpoint_evidence(
-        checkpointer, receipt, timeout_seconds=request.checkpoint_timeout_seconds
+    evidence = classify_checkpoint_evidence(
+        await read_latest_checkpoint(
+            checkpointer,
+            receipt.thread_id,
+            timeout=request.checkpoint_timeout_seconds,
+        ),
+        receipt,
     )
     decision = _CheckpointDecision(
         thread_id,

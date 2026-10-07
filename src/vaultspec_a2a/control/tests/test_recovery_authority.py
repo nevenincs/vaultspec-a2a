@@ -12,7 +12,12 @@ from langgraph.graph import END, START
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...conftest import SqlitePosture
-from ...database import create_control_action, create_thread, get_thread
+from ...database import (
+    create_control_action,
+    create_thread,
+    get_thread,
+    read_latest_checkpoint,
+)
 from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
     record_graph_completion,
@@ -29,7 +34,7 @@ from ...thread import RunWriteAuthority
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
-    read_checkpoint_evidence,
+    classify_checkpoint_evidence,
 )
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
@@ -198,7 +203,9 @@ async def test_empty_pending_writes_do_not_prove_completion(durable_run: Durable
     checkpoint = await saver.aget_tuple(config)
     assert checkpoint is not None
     assert not checkpoint.pending_writes
-    evidence = await read_checkpoint_evidence(saver, receipt, timeout_seconds=5)
+    evidence = classify_checkpoint_evidence(
+        await read_latest_checkpoint(saver, "run", timeout=5), receipt
+    )
     assert evidence.kind is CheckpointEvidenceKind.PENDING
     async with sessions() as db:
         observed = await reconcile_run_checkpoint(

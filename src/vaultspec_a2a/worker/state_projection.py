@@ -27,7 +27,7 @@ from ..thread import live_interrupts, named_request_id
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
-    read_checkpoint_evidence,
+    classify_checkpoint_evidence,
 )
 from ..thread.enums import TERMINAL_STATUSES, DegradedReason, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence
@@ -418,8 +418,11 @@ class StateProjector:
           blind could deliver its input a second time.
         """
         thread_id = receipt.thread_id
-        evidence = await read_checkpoint_evidence(
-            self._checkpointer, receipt, timeout_seconds=timeout_seconds
+        evidence = classify_checkpoint_evidence(
+            await read_latest_checkpoint(
+                self._checkpointer, thread_id, timeout=timeout_seconds
+            ),
+            receipt,
         )
         kind = evidence.kind
         settled = _SETTLED_PREFLIGHTS.get(kind)
@@ -580,8 +583,11 @@ class StateProjector:
         Refusing every resume whose live state momentarily could not be read
         would strand runs that are genuinely waiting.
         """
-        evidence = await read_checkpoint_evidence(
-            self._checkpointer, receipt, timeout_seconds=timeout_seconds
+        evidence = classify_checkpoint_evidence(
+            await read_latest_checkpoint(
+                self._checkpointer, receipt.thread_id, timeout=timeout_seconds
+            ),
+            receipt,
         )
         if evidence.kind is CheckpointEvidenceKind.INTERRUPTED:
             return ResumeAdmission()

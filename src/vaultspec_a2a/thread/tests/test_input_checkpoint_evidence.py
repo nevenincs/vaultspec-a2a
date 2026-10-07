@@ -20,9 +20,10 @@ from uuid import uuid4
 
 import pytest
 
+from ...database import read_latest_checkpoint
 from ...tests._checkpoint_seeding import real_input_checkpoint
 from ..action_receipts import GraphActionReceipt, control_action_payload_fingerprint
-from ..checkpoint_evidence import CheckpointEvidenceKind, read_checkpoint_evidence
+from ..checkpoint_evidence import CheckpointEvidenceKind, classify_checkpoint_evidence
 from ..enums import ControlActionType
 
 if TYPE_CHECKING:
@@ -86,8 +87,11 @@ async def test_the_staged_input_names_the_action_that_sent_it(
     # have taken the input's receipt never ran.
     assert "active_graph_action_receipt" not in stored.checkpoint["channel_values"]
 
-    evidence = await read_checkpoint_evidence(
-        checkpointer, receipt, timeout_seconds=_READ_TIMEOUT_SECONDS
+    evidence = classify_checkpoint_evidence(
+        await read_latest_checkpoint(
+            checkpointer, _THREAD, timeout=_READ_TIMEOUT_SECONDS
+        ),
+        receipt,
     )
 
     assert evidence.kind is CheckpointEvidenceKind.PENDING
@@ -106,8 +110,11 @@ async def test_an_action_the_staged_input_does_not_name_is_still_a_new_turn(
     await _seed_crashed_input(checkpointer, staged)
     later = _receipt("follow-up", generation=2, thread_id=_THREAD)
 
-    evidence = await read_checkpoint_evidence(
-        checkpointer, later, timeout_seconds=_READ_TIMEOUT_SECONDS
+    evidence = classify_checkpoint_evidence(
+        await read_latest_checkpoint(
+            checkpointer, _THREAD, timeout=_READ_TIMEOUT_SECONDS
+        ),
+        later,
     )
 
     assert evidence.kind is CheckpointEvidenceKind.PRIOR_ACTION
@@ -124,8 +131,11 @@ async def test_the_staged_input_reads_the_same_on_postgres(
     receipt = _receipt("ingest", generation=1, thread_id=thread_id)
     checkpoint_id = await _seed_crashed_input(pooled_postgres_saver, receipt)
 
-    evidence = await read_checkpoint_evidence(
-        pooled_postgres_saver, receipt, timeout_seconds=_READ_TIMEOUT_SECONDS
+    evidence = classify_checkpoint_evidence(
+        await read_latest_checkpoint(
+            pooled_postgres_saver, thread_id, timeout=_READ_TIMEOUT_SECONDS
+        ),
+        receipt,
     )
 
     assert evidence.kind is CheckpointEvidenceKind.PENDING

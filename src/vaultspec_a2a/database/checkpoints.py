@@ -67,18 +67,44 @@ class CheckpointRead:
         return self.status in {CheckpointReadStatus.TIMEOUT, CheckpointReadStatus.ERROR}
 
     @property
-    def channel_values(self) -> dict[str, object]:
-        """The checkpoint's channel values, or an empty mapping without any.
+    def strict_channel_values(self) -> dict[str, object] | None:
+        """The checkpoint's channel values, or ``None`` when its shape is foreign.
 
-        Durable storage is untrusted despite the saver's declared types, so a
-        checkpoint or channel map that is not a plain dict reads as empty.
+        Durable storage is untrusted despite the saver's declared types. A
+        checkpoint, or a channel map, that is not a plain dict is refused here
+        rather than read as empty, for a caller whose answer depends on telling
+        a malformed checkpoint from one that holds nothing. A checkpoint with
+        no channel map at all holds no channels.
         """
         checkpoint = coerce_object_mapping(
             getattr(self.checkpoint_tuple, "checkpoint", None)
         )
         if checkpoint is None:
+            return None
+        if "channel_values" not in checkpoint:
             return {}
-        return coerce_object_mapping(checkpoint.get("channel_values")) or {}
+        return coerce_object_mapping(checkpoint["channel_values"])
+
+    @property
+    def channel_values(self) -> dict[str, object]:
+        """The checkpoint's channel values, or an empty mapping without any.
+
+        A checkpoint or channel map that is not a plain dict reads as empty.
+        """
+        return self.strict_channel_values or {}
+
+    @property
+    def checkpoint_id(self) -> str | None:
+        """The id the stored checkpoint answers to, or ``None`` without one.
+
+        The id the checkpoint records, falling back to the one its config names.
+        """
+        stored = self.checkpoint_tuple
+        checkpoint = coerce_object_mapping(getattr(stored, "checkpoint", None)) or {}
+        config = coerce_object_mapping(getattr(stored, "config", None)) or {}
+        configurable = coerce_object_mapping(config.get("configurable")) or {}
+        raw = checkpoint.get("id") or configurable.get("checkpoint_id")
+        return None if raw is None else str(raw)
 
     def tuple_or_raise(self) -> CheckpointTuple | None:
         """Return the tuple, ``None`` when absent, or raise the read's failure."""

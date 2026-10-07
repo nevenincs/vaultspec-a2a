@@ -22,11 +22,7 @@ from ..database import (
 )
 from ..domain_config import domain_config
 from ..thread.enums import DegradedReason, RepairStatus, ThreadStatus
-from ..thread.snapshots import (
-    ThreadStateData,
-    project_checkpoint_tuple,
-    record_repair_posture,
-)
+from ..thread.snapshots import ThreadStateData, record_repair_posture
 from .projection import (
     clear_permissions_without_checkpoint_truth,
     durable_approval,
@@ -179,25 +175,20 @@ async def _judge_run_posture(
         )
 
     checkpoint_present = probe.checkpoint_tuple is not None
-    checkpoint_id: str | None = None
     if probe.unreadable:
         mark_degraded(
             snapshot,
             DegradedReason.CHECKPOINT_UNAVAILABLE,
             repair=RepairStatus.CHECKPOINT_UNAVAILABLE,
         )
-    if probe.checkpoint_tuple is None:
+    if not checkpoint_present:
         clear_permissions_without_checkpoint_truth(snapshot)
-    else:
-        checkpoint_id = project_checkpoint_tuple(
-            probe.checkpoint_tuple, thread_id=thread.id
-        ).checkpoint_id
     snapshot = await enrich_snapshot_from_execution_state(
         db,
         thread=thread,
         snapshot=snapshot,
         checkpoint_present=checkpoint_present,
-        checkpoint_id=checkpoint_id,
+        checkpoint_id=probe.checkpoint_id,
     )
     finalize_snapshot_replay_status(
         snapshot,

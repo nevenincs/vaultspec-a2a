@@ -23,19 +23,6 @@ if TYPE_CHECKING:
     from .worker_management import LazyWorkerSpawner
 
 
-_PERMISSION_RESPONSE_KEY_PREFIX = "permission-response:"
-_PERMISSION_REJECTION_KEY_PREFIX = "permission-rejection:"
-
-
-def permission_response_action_key(request_id: str) -> str:
-    """Return the single journal identity shared by every client retry."""
-    return f"{_PERMISSION_RESPONSE_KEY_PREFIX}{request_id}"
-
-
-def permission_rejection_action_key(idempotency_key: str) -> str:
-    return f"{_PERMISSION_REJECTION_KEY_PREFIX}{idempotency_key}"
-
-
 def response_payload(option_id: str, notes: str | None) -> dict[str, object]:
     return {"option_id": option_id, "notes": notes}
 

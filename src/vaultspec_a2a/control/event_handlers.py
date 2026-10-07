@@ -28,6 +28,7 @@ from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
 from ..thread.enums import ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
+from ..thread.idempotency import permission_request_action_key
 from ..thread.permission_fsm import (
     compute_permission_request_effects,
 )
@@ -933,7 +934,7 @@ async def _persist_permission_request(
         thread_id=thread_id,
         action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
         request_id=request_id,
-        idempotency_key=f"permission-request:{request_id}",
+        idempotency_key=permission_request_action_key(request_id),
         payload={"description": description},
     )
     if not reservation.payload_matches:

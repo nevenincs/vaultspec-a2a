@@ -29,6 +29,7 @@ from ...thread.checkpoint_evidence import (
 )
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
+from ...thread.idempotency import thread_create_action_key
 from ...thread.state import TeamState
 from ..accepted_input import freeze_accepted_input
 from ..dispatch_receipts import prepare_graph_action_receipt
@@ -73,7 +74,7 @@ async def durable_run(
             db,
             thread_id="run",
             action_type=ControlActionType.INGEST,
-            idempotency_key="thread-create:run",
+            idempotency_key=thread_create_action_key("run"),
             dispatch_id="accepted",
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             payload=freeze_accepted_input(

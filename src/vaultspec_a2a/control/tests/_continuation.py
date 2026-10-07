@@ -38,6 +38,7 @@ from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
+from ...thread.idempotency import thread_create_action_key
 from ...thread.state import TeamState
 from ..accepted_input import freeze_accepted_input
 from ..dispatch_receipts import prepare_graph_action_receipt
@@ -129,7 +130,7 @@ async def seed_busy_run(
         db,
         thread_id=RUN,
         action_type=ControlActionType.INGEST,
-        idempotency_key=f"thread-create:{RUN}",
+        idempotency_key=thread_create_action_key(RUN),
         dispatch_id=FIRST_RECEIPT,
         recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=30),
         payload=envelope("first turn", workspace),

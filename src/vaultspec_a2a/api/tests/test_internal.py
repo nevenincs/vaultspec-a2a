@@ -42,6 +42,7 @@ from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import GraphCompletionReceipt
 from ...thread.executable_graph import freeze_graph_definition
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
+from ...thread.idempotency import thread_create_action_key
 from ...worker.ipc import WorkerBridge
 from ..internal import internal_router
 
@@ -93,7 +94,7 @@ async def _seed_accepted_thread(
         session,
         thread_id=thread.id,
         action_type=authority.action_type,
-        idempotency_key=f"thread-create:{thread.id}",
+        idempotency_key=thread_create_action_key(thread.id),
         dispatch_id=authority.action_receipt_id,
         recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         payload=freeze_accepted_input(dispatch, intent={"content": "relay fixture"}),

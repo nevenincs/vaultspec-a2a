@@ -47,6 +47,10 @@ from ..thread.enums import (
     ControlActionType,
     ThreadStatus,
 )
+from ..thread.idempotency import (
+    CLARIFICATION_RESPONSE_KEY_PREFIX,
+    clarification_response_action_key,
+)
 from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import AcceptedActionInput, freeze_accepted_input
 from .action_lease import (
@@ -81,8 +85,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
-_IDEMPOTENCY_PREFIX = "clarification-response:"
 
 #: The writers a clarification pause is recorded under: the dispatches that run
 #: the graph. A permission pause and the answer to one hold writers of their
@@ -269,23 +271,6 @@ class _ResultError:
     detail: str
     status_code: int
     failure_type: FailureType | None = None
-
-
-def _idempotency_key(request_id: str) -> str:
-    """Build this action's key as a READABLE prefix, never a digest.
-
-    Its siblings in ``thread.idempotency`` hash their inputs, and converging
-    this one onto them would look like an obvious cleanup. It would break
-    restart recovery silently. The recovery sweep below finds every unapplied
-    clarification action with ``idempotency_key.like(f"{_IDEMPOTENCY_PREFIX}%")``
-    - a prefix match that a sha256 digest cannot satisfy, because a digest has
-    no queryable prefix. The query would simply match nothing, parked leases
-    would never be redriven, and nothing would raise.
-
-    So the difference from its siblings is a REQUIREMENT, not drift. Any change
-    here has to move the recovery query with it.
-    """
-    return f"{_IDEMPOTENCY_PREFIX}{request_id}"
 
 
 def _checkpoint_receipt(checkpoint_tuple: object | None, request_id: str) -> str | None:
@@ -513,7 +498,7 @@ async def _respond_under_write_lock(
         return _run_not_found(attempt.request_id, attempt.thread_id)
 
     fingerprint = clarification_resolution_fingerprint(attempt.resolution)
-    idempotency_key = _idempotency_key(attempt.request_id)
+    idempotency_key = clarification_response_action_key(attempt.request_id)
     existing = await get_control_action_by_idempotency_key(
         db,
         thread_id=attempt.thread_id,
@@ -831,7 +816,7 @@ async def redrive_clarification_actions(
                 await db.execute(
                     select(ControlActionModel).where(
                         ControlActionModel.idempotency_key.like(
-                            f"{_IDEMPOTENCY_PREFIX}%"
+                            f"{CLARIFICATION_RESPONSE_KEY_PREFIX}%"
                         ),
                         ControlActionModel.applied_at.is_(None),
                     )

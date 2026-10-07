@@ -59,6 +59,10 @@ from ..thread.enums import (
     ControlActionType,
     ThreadStatus,
 )
+from ..thread.idempotency import (
+    AUTHORING_VERDICT_KEY_PREFIX,
+    authoring_verdict_action_key,
+)
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
 from ._thread_metadata import dispatchable_workspace_root
 from .accepted_input import freeze_accepted_input
@@ -121,11 +125,6 @@ class _VerdictSetup:
     graph_definition: FrozenGraphDefinition
 
 
-def _verdict_resume_idempotency_key(proposal_id: str) -> str:
-    """Return the request-level journal key for one document-gate verdict."""
-    return f"authoring-verdict:{proposal_id}"
-
-
 def _verdict_resume_payload(
     verdict: str, notes: str | None, *, request_id: str
 ) -> dict[str, object]:
@@ -153,7 +152,7 @@ async def settle_verdict_dispatch_receipt(
     """
     if (
         action.action_type != ControlActionType.RESUME.value
-        or not action.idempotency_key.startswith("authoring-verdict:")
+        or not action.idempotency_key.startswith(AUTHORING_VERDICT_KEY_PREFIX)
         or action.applied_at is not None
     ):
         return False
@@ -688,7 +687,7 @@ class VerdictSubscriber:
                     write_expectation=setup.write_expectation,
                     thread_id=thread_id,
                     action_type=ControlActionType.RESUME,
-                    idempotency_key=_verdict_resume_idempotency_key(setup.current_gate),
+                    idempotency_key=authoring_verdict_action_key(setup.current_gate),
                     request_id=setup.current_gate,
                     payload=freeze_accepted_input(dispatch, intent=setup.resume_value),
                     dispatch_id=dispatch.dispatch_id,

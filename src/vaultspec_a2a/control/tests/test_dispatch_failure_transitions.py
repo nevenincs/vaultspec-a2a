@@ -54,6 +54,7 @@ from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import RepairStatus, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
+from ...thread.idempotency import thread_create_action_key
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
@@ -163,7 +164,7 @@ async def _seed_accepted_initial_action(
         session,
         thread_id=thread_id,
         action_type=thread.writer_action_type,
-        idempotency_key=f"thread-create:{thread_id}",
+        idempotency_key=thread_create_action_key(thread_id),
         dispatch_id=thread.writer_action_receipt_id,
         recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
         payload=freeze_accepted_input(dispatch, intent={"content": "initial fixture"}),

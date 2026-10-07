@@ -62,6 +62,7 @@ from ..thread.enums import (
 )
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
 from ..thread.executable_graph import freeze_graph_definition
+from ..thread.idempotency import thread_create_action_key
 from ..thread.lifecycle_guards import can_archive, can_delete
 from .cleanup import build_cleanup_manifest, execute_cleanup_manifest
 from .repositories import (
@@ -395,7 +396,7 @@ async def create_and_dispatch_thread(
         ControlActionClaimRequest(
             thread_id=thread.id,
             action_type=ControlActionType.INGEST,
-            idempotency_key=f"thread-create:{thread.id}",
+            idempotency_key=thread_create_action_key(thread.id),
             payload=accepted_input,
             dispatch_id=action_receipt_id,
             worker_generation=thread.writer_generation,

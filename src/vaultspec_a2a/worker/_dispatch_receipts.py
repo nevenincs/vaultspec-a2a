@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..ipc.schemas import DispatchApplicationReceiptPayload
+from ..thread.action_receipts import GRAPH_ACTION_VERB
 from ..thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
     read_checkpoint_evidence,
@@ -51,7 +52,7 @@ class DispatchReceiptReporter:
         dispatch_log_extra: Callable[..., dict[str, Any]],
     ) -> None:
         """Report incorporation after reading its committed checkpoint proof."""
-        if req.action != "ingest" and req.action != "resume":
+        if not req.requires_graph_receipt:
             return
         if self._reported.get(req.thread_id) == req.dispatch_id:
             return
@@ -96,7 +97,7 @@ class DispatchReceiptReporter:
                 req.thread_id,
                 DispatchApplicationReceiptPayload(
                     dispatch_id=req.dispatch_id,
-                    action=req.action,
+                    action=GRAPH_ACTION_VERB[receipt.action_type],
                     graph_action_receipt=receipt,
                     checkpoint_id=evidence.checkpoint_id,
                 ).model_dump(mode="json"),

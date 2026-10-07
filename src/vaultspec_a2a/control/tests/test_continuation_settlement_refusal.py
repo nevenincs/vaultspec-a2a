@@ -46,6 +46,7 @@ from ...thread.failure_evidence import (
     GraphFailureEvidence,
     failure_detail_fingerprint,
 )
+from ...thread.idempotency import thread_create_action_key
 from ..accepted_input import freeze_accepted_input
 from ..circuit_breaker import WorkerCircuitBreaker
 from ..dispatch import redispatch_reconciling_threads
@@ -292,7 +293,7 @@ async def _seed_reconciling_run(
             db,
             thread_id=RUN,
             action_type=ControlActionType.INGEST,
-            idempotency_key=f"thread-create:{RUN}",
+            idempotency_key=thread_create_action_key(RUN),
             dispatch_id=FIRST_RECEIPT,
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=30),
             payload=envelope("first turn", workspace),

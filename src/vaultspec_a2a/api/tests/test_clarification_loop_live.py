@@ -76,6 +76,10 @@ from ...thread.clarification import (
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
+from ...thread.idempotency import (
+    clarification_response_action_key,
+    thread_create_action_key,
+)
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from .clarification_harness import (
@@ -495,7 +499,7 @@ async def _seed_clarification_run(
             db,
             thread_id=thread.id,
             action_type=authority.action_type,
-            idempotency_key=f"thread-create:{thread.id}",
+            idempotency_key=thread_create_action_key(thread.id),
             dispatch_id=authority.action_receipt_id,
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             payload=freeze_accepted_input(
@@ -523,7 +527,7 @@ async def _prepare_expired_claim(
         request_id=request_id,
         answers={"provider": "codex"},
     )
-    idempotency_key = f"clarification-response:{request_id}"
+    idempotency_key = clarification_response_action_key(request_id)
     async with session_factory() as db:
         definition = await read_accepted_graph_definition(db, run.thread_id)
         resume = DispatchRequest(

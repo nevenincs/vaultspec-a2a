@@ -88,6 +88,7 @@ from ...tests._write_authority import make_test_write_authority
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
+from ...thread.idempotency import thread_create_action_key
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
@@ -326,7 +327,7 @@ async def _ingest_live_verdict_run(
             db,
             thread_id=context.identity.thread_id,
             action_type=authority.action_type,
-            idempotency_key=f"thread-create:{context.identity.thread_id}",
+            idempotency_key=thread_create_action_key(context.identity.thread_id),
             dispatch_id=authority.action_receipt_id,
             payload=freeze_accepted_input(
                 ingest, intent={"content": "drive to the gate"}

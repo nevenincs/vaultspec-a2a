@@ -32,7 +32,6 @@ from ...control import cancel_service
 from ...control._permission_response_contract import (
     PermissionInput,
     PermissionRuntime,
-    permission_response_action_key,
 )
 from ...control.accepted_input import freeze_accepted_input
 from ...control.action_lease import prepare_control_action_claim
@@ -61,7 +60,11 @@ from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
-from ...thread.idempotency import default_cancel_key
+from ...thread.idempotency import (
+    default_cancel_key,
+    permission_response_action_key,
+    thread_create_action_key,
+)
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
@@ -254,7 +257,7 @@ async def _create_current_thread(
         db,
         thread_id=thread_id,
         action_type=authority.action_type,
-        idempotency_key=f"thread-create:{thread_id}",
+        idempotency_key=thread_create_action_key(thread_id),
         dispatch_id=authority.action_receipt_id,
         payload=freeze_accepted_input(
             dispatch, intent={"content": "seed accepted graph authority"}

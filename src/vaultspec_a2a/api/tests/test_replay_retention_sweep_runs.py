@@ -32,6 +32,7 @@ from ...tests.gateway_boot import (
     spawn_until_ready,
 )
 from ...thread.enums import ThreadStatus
+from ...thread.idempotency import thread_create_action_key
 
 if TYPE_CHECKING:
     import subprocess
@@ -68,7 +69,7 @@ async def _seed_expired_window(database_path: Path) -> None:
                 session,
                 thread_id=_RUN,
                 action_type=authority.action_type,
-                idempotency_key=f"thread-create:{_RUN}",
+                idempotency_key=thread_create_action_key(_RUN),
                 dispatch_id=authority.action_receipt_id,
                 recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=30),
             )

@@ -26,9 +26,11 @@ from ..database import (
     successor_thread_write_authority,
     thread_write_expectation,
 )
+from ..thread.action_receipts import GRAPH_ACTION_VERB
 from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
 from ..thread.enums import (
     NON_ACTIVE_STATUSES,
+    RECOVERY_ACTION_TYPES,
     ControlActionResultStatus,
     ControlActionType,
     RecoveryCondition,
@@ -74,15 +76,6 @@ __all__ = ["DirectControlRecoverySummary", "redrive_direct_control_actions"]
 
 logger = logging.getLogger(__name__)
 _JSON_OBJECT = TypeAdapter(dict[str, object])
-_RECOVERABLE_TYPES = frozenset(
-    {
-        ControlActionType.INGEST.value,
-        ControlActionType.RESUME.value,
-        ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value,
-        ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value,
-        ControlActionType.CANCEL.value,
-    }
-)
 _RECOVERY_PAGE_SIZE = 64
 _RECOVERY_CLAIM_TTL = timedelta(seconds=45)
 
@@ -124,7 +117,9 @@ async def _expire_overdue_actions(
             select(ControlActionModel, ThreadModel)
             .join(ThreadModel, ThreadModel.id == ControlActionModel.thread_id)
             .where(
-                ControlActionModel.action_type.in_(_RECOVERABLE_TYPES),
+                ControlActionModel.action_type.in_(
+                    action.value for action in RECOVERY_ACTION_TYPES
+                ),
                 ControlActionModel.applied_at.is_(None),
                 ControlActionModel.recovery_deadline_at.is_not(None),
                 ControlActionModel.recovery_deadline_at <= observed_at,
@@ -253,13 +248,12 @@ async def _reconstruct_dispatch(
         )
     except ValueError as exc:
         return _Refusal(FailureType.INCOMPATIBLE_STATE, str(exc))
-    expected_action = {
-        ControlActionType.INGEST.value: "ingest",
-        ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value: "ingest",
-        ControlActionType.RESUME.value: "resume",
-        ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value: "resume",
-        ControlActionType.CANCEL.value: "cancel",
-    }.get(action.action_type)
+    action_type = ControlActionType(action.action_type)
+    expected_action = (
+        "cancel"
+        if action_type is ControlActionType.CANCEL
+        else GRAPH_ACTION_VERB.get(action_type)
+    )
     if dispatch.thread_id != action.thread_id or dispatch.action != expected_action:
         return _Refusal(
             FailureType.INCOMPATIBLE_STATE, "accepted input identity mismatch"

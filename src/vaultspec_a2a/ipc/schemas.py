@@ -20,7 +20,7 @@ from pydantic import (
     model_validator,
 )
 
-from ..thread.action_receipts import GraphActionReceipt
+from ..thread.action_receipts import GRAPH_ACTION_VERB, GraphActionReceipt
 from ..thread.actor_tokens import ActorTokenBundle
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import ControlActionType
@@ -208,37 +208,24 @@ class DispatchRequest(BaseModel):
     # end — they are never checkpointed.
     actor_tokens: ActorTokenBundle | None = None
 
+    @property
+    def requires_graph_receipt(self) -> bool:
+        """Whether this dispatch delivers graph input, which needs its receipt.
+
+        A cancel stops a run without entering its graph, so it is the one
+        dispatch that crosses the wire with no receipt.
+        """
+        return self.action in GRAPH_ACTION_VERB.values()
+
     def require_graph_action_receipt(self) -> GraphActionReceipt:
         """Require a matching current receipt before graph execution admission."""
         self.require_graph_definition()
         receipt = self.graph_action_receipt
-        allowed_ingest = (
-            self.action == "ingest"
-            and receipt is not None
-            and (
-                receipt.action_type
-                in {
-                    ControlActionType.INGEST,
-                    ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-                }
-            )
-        )
-        allowed_resume = (
-            self.action == "resume"
-            and receipt is not None
-            and (
-                receipt.action_type
-                in {
-                    ControlActionType.RESUME,
-                    ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-                }
-            )
-        )
         if (
             receipt is None
             or receipt.thread_id != self.thread_id
             or receipt.dispatch_id != self.dispatch_id
-            or not (allowed_ingest or allowed_resume)
+            or GRAPH_ACTION_VERB.get(receipt.action_type) != self.action
         ):
             raise ValueError("incompatible graph dispatch authority")
         return receipt

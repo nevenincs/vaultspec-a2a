@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from ...control._permission_response_contract import (
     PermissionInput,
     PermissionRuntime,
-    permission_response_action_key,
 )
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.permission_service import respond_to_permission
@@ -26,6 +25,7 @@ from ...database.models import Base
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
+from ...thread.idempotency import permission_response_action_key
 from ._catalog_authority import current_execution_metadata
 from .test_dispatch_failure_transitions import _seed_accepted_initial_action
 

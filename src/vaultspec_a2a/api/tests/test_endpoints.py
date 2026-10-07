@@ -27,7 +27,6 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...control._permission_response_contract import permission_response_action_key
 from ...control.config import settings
 from ...database import (
     append_permission_log,
@@ -53,6 +52,10 @@ from ...thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
     ThreadStatus,
+)
+from ...thread.idempotency import (
+    permission_response_action_key,
+    thread_create_action_key,
 )
 from .conftest import catalog_run_fields, make_app
 
@@ -2810,7 +2813,7 @@ class TestDeleteThread:
                     session,
                     thread_id="thread-delete-terminal",
                     action_type=authority.action_type,
-                    idempotency_key="thread-create:thread-delete-terminal",
+                    idempotency_key=thread_create_action_key("thread-delete-terminal"),
                     dispatch_id=authority.action_receipt_id,
                     recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 )
@@ -2879,7 +2882,7 @@ class TestDeleteThread:
                     session,
                     thread_id="thread-delete-artifacts",
                     action_type=authority.action_type,
-                    idempotency_key="thread-create:thread-delete-artifacts",
+                    idempotency_key=thread_create_action_key("thread-delete-artifacts"),
                     dispatch_id=authority.action_receipt_id,
                     recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 )

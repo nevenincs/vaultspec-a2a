@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from ..ipc.schemas import DispatchApplicationReceiptPayload
+from ..thread.action_receipts import GRAPH_ACTION_VERB
 from ..thread.enums import ThreadStatus
 from ..thread.permission_fsm import compute_permission_resolution_effects
 
@@ -42,7 +43,10 @@ async def apply_permission_resolution(
         set_thread_repair_state,
     )
     from ..thread.enums import ControlActionResultStatus
-    from ._permission_response_contract import permission_response_action_key
+    from ..thread.idempotency import (
+        permission_response_action_key,
+        permission_response_applied_action_key,
+    )
 
     request_value = payload.get("request_id")
     request_id = request_value if isinstance(request_value, str) else ""
@@ -69,7 +73,7 @@ async def apply_permission_resolution(
         thread_id=thread_id,
         action_type=fx_res.last_applied_action,
         request_id=request_id,
-        idempotency_key=f"permission-response-applied:{request_id}",
+        idempotency_key=permission_response_applied_action_key(request_id),
         payload={"request_id": request_id},
         result_status=ControlActionResultStatus.APPLIED,
     )
@@ -96,8 +100,6 @@ def validated_application_receipt(
 ) -> DispatchApplicationReceiptPayload | None:
     if payload.get("type") != "dispatch_applied":
         return None
-    from ..thread.enums import ControlActionType
-
     try:
         application = DispatchApplicationReceiptPayload.model_validate(payload)
     except ValidationError:
@@ -117,14 +119,10 @@ def validated_application_receipt(
             },
         )
         return None
-    receipt_action = application.graph_action_receipt.action_type
-    expected_transport_action = (
-        "ingest"
-        if receipt_action
-        in {ControlActionType.INGEST, ControlActionType.MESSAGE_FOLLOWUP_REQUESTED}
-        else "resume"
-    )
-    if application.action != expected_transport_action:
+    if (
+        application.action
+        != GRAPH_ACTION_VERB[application.graph_action_receipt.action_type]
+    ):
         logger.warning(
             "Refusing mismatched dispatch application verb for thread %s",
             thread_id,

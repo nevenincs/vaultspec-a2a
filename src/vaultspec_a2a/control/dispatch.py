@@ -181,7 +181,7 @@ async def dispatch_to_worker(
         WorkerDispatchRejectedError: Worker returned non-2xx (e.g. 500/503).
         WorkerUnreachableError: httpx transport error (caller decides policy).
     """
-    if dispatch.action != "cancel":
+    if dispatch.requires_graph_receipt:
         try:
             dispatch.require_graph_action_receipt()
         except ValueError as exc:

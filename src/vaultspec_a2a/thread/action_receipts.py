@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Annotated, Literal
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError
 
 from .enums import ControlActionType
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 __all__ = [
+    "GRAPH_ACTION_VERB",
     "GraphActionReceipt",
     "GraphCompletionReceipt",
     "control_action_payload_fingerprint",
@@ -19,8 +24,30 @@ __all__ = [
     "merge_graph_completion_receipts",
 ]
 
+GRAPH_ACTION_VERB: Mapping[ControlActionType, Literal["ingest", "resume"]] = (
+    MappingProxyType(
+        {
+            ControlActionType.INGEST: "ingest",
+            ControlActionType.MESSAGE_FOLLOWUP_REQUESTED: "ingest",
+            ControlActionType.RESUME: "resume",
+            ControlActionType.PERMISSION_RESPONSE_SUBMITTED: "resume",
+        }
+    )
+)
+"""The journaled actions that enter the graph, each with its transport verb.
+
+Its keys are exactly the actions a receipt can identify; every other action,
+cancel included, carries no graph input and needs no receipt.
+"""
+
 _Identity = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^\S+$")]
 _Fingerprint = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+
+
+def _graph_action_type(action_type: ControlActionType) -> ControlActionType:
+    if action_type not in GRAPH_ACTION_VERB:
+        raise ValueError(f"{action_type.value!r} is not a graph action")
+    return action_type
 
 
 class GraphActionReceipt(BaseModel):
@@ -35,12 +62,7 @@ class GraphActionReceipt(BaseModel):
     schema_version: Literal["graph-action-v1"]
     thread_id: Annotated[str, Field(min_length=1, max_length=128, pattern=r"^\S+$")]
     action_id: _Identity
-    action_type: Literal[
-        ControlActionType.INGEST,
-        ControlActionType.RESUME,
-        ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-        ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-    ]
+    action_type: Annotated[ControlActionType, AfterValidator(_graph_action_type)]
     payload_fingerprint: _Fingerprint
     dispatch_id: _Identity
     run_revision: Annotated[int, Field(strict=True, ge=0)]

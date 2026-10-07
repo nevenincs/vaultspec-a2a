@@ -11,6 +11,7 @@ from ..thread.action_receipts import (
 )
 from ..thread.enums import ControlActionType
 from ..thread.executable_graph import FrozenGraphDefinition
+from ..thread.idempotency import thread_create_action_key
 from .accepted_input import AcceptedActionInput
 
 if TYPE_CHECKING:
@@ -41,7 +42,7 @@ async def read_accepted_graph_definition(
     action = await get_control_action_by_idempotency_key(
         db,
         thread_id=thread_id,
-        idempotency_key=f"thread-create:{thread_id}",
+        idempotency_key=thread_create_action_key(thread_id),
     )
     if (
         action is None

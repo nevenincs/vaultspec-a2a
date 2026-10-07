@@ -940,31 +940,29 @@ async def _handle_progress_event(
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     checkpointer: Checkpointer | None = None,
-) -> str | None:
+) -> None:
     """Settle one exact control action from a private worker receipt."""
     application = _validated_application_receipt(thread_id, payload)
     if application is None:
-        return None
+        return
     factory = _session_factory(session_factory)
     if factory is None:
         _skip_without_database("the control-action settlement", thread_id)
-        return None
+        return
     if checkpointer is None:
         logger.warning(
             "Skipping application receipt for %s: no checkpointer is available",
             thread_id,
             extra={"thread_id": thread_id, "action": "checkpoint_proof_unavailable"},
         )
-        return None
+        return
     async with factory() as db:
         stored_receipt = await _proven_application_receipt(
             db, thread_id, application, checkpointer
         )
         if stored_receipt is None:
-            return None
-        return await _commit_proven_application(
-            db, thread_id, application, stored_receipt
-        )
+            return
+        await _commit_proven_application(db, thread_id, application, stored_receipt)
 
 
 async def _handle_execution_state_event(
@@ -1079,14 +1077,12 @@ async def relay_event(
         payload,
         session_factory=session_factory,
     )
-    applied_permission_id = await _handle_progress_event(
+    await _handle_progress_event(
         thread_id,
         payload,
         session_factory=session_factory,
         checkpointer=checkpointer,
     )
-    if applied_permission_id is not None and aggregator is not None:
-        aggregator.resolve_permission(applied_permission_id)
     await _handle_clarification_pause_event(
         thread_id,
         payload,

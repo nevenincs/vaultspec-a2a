@@ -531,7 +531,8 @@ async def _seed_parked_gate(
 
     Mirrors what the phase submit node commits before the gate parks:
     ``gate_pending_proposal_id`` is the ONE proposal the run awaits a verdict for,
-    and a durable ``document_approval_request`` permission row records the pause.
+    and a durable ``document_approval_request`` permission row, keyed by that
+    proposal id as the gate keys it, records the pause.
 
     ``status`` defaults to ``INPUT_REQUIRED`` (the healthy parked posture); pass
     ``RUNNING`` to model the clobber, where a prior gate's verdict resume
@@ -610,7 +611,7 @@ async def _seed_parked_gate(
         await update_thread_status(session, thread_id, seed.status)
         await record_permission_request(
             session,
-            request_id=f"{thread_id}:adr-gate",
+            request_id=proposal_id,
             thread_id=thread_id,
             pause_reason_type="document_approval_request",
             description="Approve the ADR document",
@@ -815,7 +816,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
                     thread_id=thread_id,
                     idempotency_key=authoring_verdict_action_key(info["proposal_id"]),
                 )
-                gate_row = await get_permission_request(db, f"{thread_id}:adr-gate")
+                gate_row = await get_permission_request(db, info["proposal_id"])
                 thread = await get_thread(db, thread_id)
             assert action is not None
             assert action.dispatch_id in worker_app.state.dispatch_ids
@@ -837,7 +838,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
             )
 
             async with session_factory() as db:
-                gate_row = await get_permission_request(db, f"{thread_id}:adr-gate")
+                gate_row = await get_permission_request(db, info["proposal_id"])
                 thread = await get_thread(db, thread_id)
             assert gate_row is not None
             assert gate_row.request_status == PermissionRequestStatus.APPLIED.value

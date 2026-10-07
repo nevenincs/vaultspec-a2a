@@ -11,6 +11,7 @@ from ..ipc.schemas import DispatchApplicationReceiptPayload
 from ..thread.action_receipts import GRAPH_ACTION_VERB
 from ..thread.enums import ThreadStatus
 from ..thread.permission_fsm import compute_permission_resolution_effects
+from ..thread.repair_policy import RepairPhase, repair_state_for_action
 from .permission_options import response_is_rejection
 
 if TYPE_CHECKING:
@@ -48,13 +49,13 @@ async def apply_permission_resolution(
         mark_control_action_applied,
         mark_permission_request_applied,
         set_thread_approval_state,
-        set_thread_repair_state,
     )
     from ..thread.enums import ControlActionResultStatus
     from ..thread.idempotency import (
         permission_response_action_key,
         permission_response_applied_action_key,
     )
+    from .repair_transitions import apply_repair_transition
 
     request_value = payload.get("request_id")
     request_id = request_value if isinstance(request_value, str) else ""
@@ -86,13 +87,10 @@ async def apply_permission_resolution(
         payload={"request_id": request_id},
         result_status=ControlActionResultStatus.APPLIED,
     )
-    await set_thread_repair_state(
+    await apply_repair_transition(
         db,
         thread_id,
-        repair_status=fx_res.repair_status,
-        repair_reason=fx_res.repair_reason,
-        execution_readiness=fx_res.repair_status.value,
-        last_applied_action=fx_res.last_applied_action,
+        repair_state_for_action(fx_res.last_applied_action, RepairPhase.APPLIED),
     )
     if fx_res.is_plan_approval:
         await set_thread_approval_state(
@@ -214,7 +212,7 @@ async def commit_proven_application(
     )
     from ..thread.enums import TERMINAL_STATUS_VALUES, ControlActionType
     from .dispatch_receipts import validate_current_graph_receipt
-    from .repair_transitions import mark_ingest_applied, mark_message_followup_applied
+    from .repair_transitions import apply_repair_transition
 
     # ``proven_application_receipt`` ends its read transaction before the
     # checkpoint proof, so this settlement owns the whole re-read and write.
@@ -243,12 +241,22 @@ async def commit_proven_application(
         return
     if action.action_type == ControlActionType.INGEST.value:
         await mark_control_action_applied(db, action.id)
-        await mark_ingest_applied(db, thread_id)
+        await apply_repair_transition(
+            db,
+            thread_id,
+            repair_state_for_action(ControlActionType.INGEST, RepairPhase.APPLIED),
+        )
         await db.commit()
         return
     if action.action_type == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value:
         await mark_control_action_applied(db, action.id)
-        await mark_message_followup_applied(db, thread_id)
+        await apply_repair_transition(
+            db,
+            thread_id,
+            repair_state_for_action(
+                ControlActionType.MESSAGE_FOLLOWUP_APPLIED, RepairPhase.APPLIED
+            ),
+        )
         await db.commit()
         return
     if (

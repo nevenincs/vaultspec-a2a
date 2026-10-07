@@ -22,14 +22,14 @@ from ..database import (
     expire_pending_permission_requests,
     mark_control_action_applied,
     set_thread_approval_state,
-    set_thread_repair_state,
 )
 from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
-    RepairStatus,
     ThreadStatus,
 )
+from ..thread.repair_policy import terminal_repair_transition
+from .repair_transitions import apply_repair_transition
 from .repositories.continuation_queue import (
     lock_run_for_continuation_decision,
     refuse_queued_continuations,
@@ -140,15 +140,5 @@ async def settle_terminal(
         applied_at=settled_at,
         result_status=evidence.result_status,
     )
-    await set_thread_repair_state(
-        db,
-        thread.id,
-        repair_status=RepairStatus.HEALTHY,
-        execution_readiness=RepairStatus.HEALTHY.value,
-        # A cancellation is the one terminal recorded as the run's last applied
-        # action; a completed or failed turn leaves that record as it stood.
-        last_applied_action=(
-            ControlActionType.CANCEL if status is ThreadStatus.CANCELLED else None
-        ),
-    )
+    await apply_repair_transition(db, thread.id, terminal_repair_transition(status))
     return election.outcome

@@ -90,7 +90,6 @@ async def _seed_completed_thread(
             team_preset=seed.team_preset,
             status=seed.status,
             repair_status="healthy",
-            execution_readiness="healthy",
         )
         await session.commit()
 

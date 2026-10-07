@@ -74,6 +74,7 @@ __all__ = [
     "normalize_plan_entries",
     "normalize_wire_event_type",
     "project_checkpoint_tuple",
+    "record_repair_posture",
     "stamp_message_created_at",
     "tasks_past_their_interrupt",
     "unanswered_interrupt_values",
@@ -533,6 +534,17 @@ class ThreadStateData:  # pylint: disable=too-many-instance-attributes
 # ---------------------------------------------------------------------------
 # Pure projection helpers
 # ---------------------------------------------------------------------------
+
+
+def record_repair_posture(snapshot: ThreadStateData, posture: str | None) -> None:
+    """Set *snapshot*'s repair posture together with the readiness it implies.
+
+    Readiness is never judged on its own: a run is as fit to resume as its
+    repair posture says, so every write of the posture writes the served
+    readiness with it and the two cannot disagree.
+    """
+    snapshot.repair_status = posture
+    snapshot.execution_readiness = posture
 
 
 def coerce_provider(value: object) -> Provider | None:
@@ -1071,8 +1083,6 @@ def finalize_snapshot_replay_status(
         # rebuild from is provably absent: a replay gap, not the unknown that an
         # unavailable checkpoint reports.
         with contextlib.suppress(AttributeError):
-            snapshot.repair_status = RepairStatus.REPLAY_GAP.value
-        with contextlib.suppress(AttributeError):
-            snapshot.execution_readiness = RepairStatus.REPLAY_GAP.value
+            record_repair_posture(snapshot, RepairStatus.REPLAY_GAP.value)
         snapshot.replay_status = ReplayStatus.GAP_DETECTED.value
     return snapshot

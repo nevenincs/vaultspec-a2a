@@ -1,4 +1,4 @@
-"""Dispatch-failure state transitions stay aligned with readiness semantics."""
+"""Repair transitions, dispatch failure among them, stay aligned with readiness."""
 
 from __future__ import annotations
 
@@ -25,7 +25,10 @@ from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
-from ...control.repair_transitions import apply_dispatch_failure
+from ...control.repair_transitions import (
+    apply_dispatch_failure,
+    apply_repair_transition,
+)
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_control_action,
@@ -43,9 +46,14 @@ from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import RepairStatus, ThreadStatus
+from ...thread.enums import ControlActionType, RepairStatus, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ...thread.idempotency import thread_create_action_key
+from ...thread.repair_policy import (
+    DISPATCH_FAILED_TRANSITION,
+    RepairPhase,
+    repair_state_for_action,
+)
 from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
@@ -151,6 +159,68 @@ async def _seed_accepted_initial_action(
     )
 
 
+#: Every step of a control action the repair policy maps.
+_ACTION_STEPS: list[tuple[ControlActionType, RepairPhase]] = [
+    (ControlActionType.INGEST, RepairPhase.REQUESTED),
+    (ControlActionType.INGEST, RepairPhase.APPLIED),
+    (ControlActionType.PERMISSION_REQUEST_CREATED, RepairPhase.APPLIED),
+    (ControlActionType.PERMISSION_RESPONSE_SUBMITTED, RepairPhase.REQUESTED),
+    (ControlActionType.PERMISSION_RESPONSE_APPLIED, RepairPhase.APPLIED),
+    (ControlActionType.MESSAGE_FOLLOWUP_REQUESTED, RepairPhase.REQUESTED),
+    (ControlActionType.MESSAGE_FOLLOWUP_APPLIED, RepairPhase.APPLIED),
+    (ControlActionType.CANCEL, RepairPhase.REQUESTED),
+    (ControlActionType.CANCEL, RepairPhase.APPLIED),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("action", "phase"), _ACTION_STEPS)
+async def test_every_action_step_persists_through_the_one_applier(
+    session_factory: async_sessionmaker[AsyncSession],
+    action: ControlActionType,
+    phase: RepairPhase,
+) -> None:
+    """Each mapped step lands whole: posture, readiness, account and action.
+
+    The run starts quarantined with a stale account, so a step that left any of
+    them behind would show here. Readiness is never written on its own, so it
+    must read back as the posture the step installed.
+    """
+    transition = repair_state_for_action(action, phase)
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            title="Repair step",
+            repair_status=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+            repair_reason="a stale account",
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        await apply_repair_transition(session, thread.id, transition)
+        await session.commit()
+
+    async with session_factory() as session:
+        updated = await get_thread(session, thread.id)
+    assert updated is not None
+    assert updated.repair_status == transition.repair_status.value
+    assert updated.execution_readiness == updated.repair_status
+    assert updated.repair_reason == transition.reason
+    recorded = (
+        updated.last_requested_action
+        if phase is RepairPhase.REQUESTED
+        else updated.last_applied_action
+    )
+    untouched = (
+        updated.last_applied_action
+        if phase is RepairPhase.REQUESTED
+        else updated.last_requested_action
+    )
+    assert recorded == action.value
+    assert untouched is None
+
+
 @pytest.mark.asyncio
 async def test_a_failed_dispatch_records_its_reason_and_condition(
     session_factory: async_sessionmaker[AsyncSession],
@@ -162,7 +232,6 @@ async def test_a_failed_dispatch_records_its_reason_and_condition(
             write_authority=make_test_write_authority(),
             title="Failed dispatch",
             repair_status="healthy",
-            execution_readiness="healthy",
         )
         await session.commit()
 
@@ -183,6 +252,9 @@ async def test_a_failed_dispatch_records_its_reason_and_condition(
         # The floor, not a provider member: nothing here reached a provider.
         assert updated.provider_condition == ProviderCondition.UNKNOWN.value
         assert updated.repair_reason == "the gateway worker is not reachable"
+        # The status change and the repair transition land together.
+        assert updated.repair_status == DISPATCH_FAILED_TRANSITION.repair_status
+        assert updated.execution_readiness == updated.repair_status
 
 
 @pytest.mark.asyncio
@@ -203,7 +275,6 @@ async def test_an_undelivered_resume_does_not_stamp_a_failure_on_a_live_run(
             write_authority=make_test_write_authority(),
             title="Undelivered resume",
             repair_status="healthy",
-            execution_readiness="healthy",
         )
         await session.commit()
 
@@ -254,7 +325,6 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
                 status=ThreadStatus.INPUT_REQUIRED,
                 title="Undelivered clarification resume",
                 repair_status="paused_resumable",
-                execution_readiness="paused_resumable",
                 metadata=current_execution_metadata(tmp_path),
             )
             await _seed_accepted_initial_action(session, thread_id, workspace=tmp_path)
@@ -331,7 +401,6 @@ async def test_a_reasonless_failure_still_carries_a_condition(
             write_authority=make_test_write_authority(),
             title="Reasonless failure",
             repair_status="healthy",
-            execution_readiness="healthy",
         )
         await session.commit()
 
@@ -349,6 +418,8 @@ async def test_a_reasonless_failure_still_carries_a_condition(
         assert updated.status == ThreadStatus.FAILED.value
         assert updated.failure_reason is None
         assert updated.provider_condition == ProviderCondition.UNKNOWN.value
+        # With no account of its own, the repair reason is the transition's.
+        assert updated.repair_reason == DISPATCH_FAILED_TRANSITION.reason
 
 
 def _permission_spawner(worker_url: str = "http://worker") -> LazyWorkerSpawner:
@@ -375,7 +446,6 @@ async def _parked_permission_run(
             status=ThreadStatus.INPUT_REQUIRED,
             title="Parked on a tool permission",
             repair_status=RepairStatus.PAUSED_RESUMABLE.value,
-            execution_readiness=RepairStatus.PAUSED_RESUMABLE.value,
             metadata=current_execution_metadata(workspace),
         )
         await record_permission_request(

@@ -55,7 +55,6 @@ async def _seed(
                 title=f"thread-{index}",
                 thread_id=f"t{index:02d}",
                 repair_status=RepairStatus.HEALTHY,
-                execution_readiness="healthy",
             )
             ids.append(thread.id)
             await session.commit()

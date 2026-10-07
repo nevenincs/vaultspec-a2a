@@ -47,6 +47,7 @@ from ..thread.snapshots import (
     PermissionOptionData,
     ThreadStateData,
     clarification_data_from_interrupt,
+    record_repair_posture,
 )
 
 __all__ = [
@@ -92,27 +93,17 @@ def _decode_json_list(raw: str | None, *, field_name: str) -> list[object]:
         raise ValueError(msg) from exc
 
 
-def _escalated(current: str | None, demanded: RepairStatus) -> str:
+def escalate_repair_posture(current: str | None, demanded: RepairStatus) -> str:
+    """Apply a demanded repair posture to *current*, fail-closed.
+
+    The posture moves to *demanded* unless it already demands at least as much,
+    so a cause found late in a read can never talk a run back down from the
+    posture an earlier cause put it in.
+    """
     demanded_severity = _REPAIR_SEVERITY.get(demanded, 0)
     if current is None or _REPAIR_SEVERITY.get(current, 0) < demanded_severity:
         return demanded.value
     return current
-
-
-def escalate_repair_posture(
-    repair_status: str | None,
-    execution_readiness: str | None,
-    demanded: RepairStatus,
-) -> tuple[str, str]:
-    """Apply a demanded repair posture to both repair columns, fail-closed.
-
-    Each column moves to *demanded* unless it already holds a posture that
-    demands at least as much, so a cause found late in a read can never talk a
-    run back down from the posture an earlier cause put it in.
-    """
-    return _escalated(repair_status, demanded), _escalated(
-        execution_readiness, demanded
-    )
 
 
 def mark_degraded(
@@ -125,14 +116,14 @@ def mark_degraded(
 
     *repair* is the repair posture the cause demands of the run, applied through
     :func:`escalate_repair_posture`. A cause that says nothing about checkpoint
-    lineage passes none and leaves both repair columns as they are.
+    lineage passes none and leaves the posture as it is.
     """
     snapshot.snapshot_complete = False
     if reason not in snapshot.degraded_reasons:
         snapshot.degraded_reasons.append(reason)
     if repair is not None:
-        snapshot.repair_status, snapshot.execution_readiness = escalate_repair_posture(
-            snapshot.repair_status, snapshot.execution_readiness, repair
+        record_repair_posture(
+            snapshot, escalate_repair_posture(snapshot.repair_status, repair)
         )
 
 
@@ -442,8 +433,7 @@ async def enrich_snapshot_from_durable_state(
     snapshot: ThreadStateData,
 ) -> ThreadStateData:
     """Merge durable gateway-owned state into a reconnect snapshot."""
-    snapshot.repair_status = thread.repair_status
-    snapshot.execution_readiness = thread.execution_readiness
+    record_repair_posture(snapshot, thread.repair_status)
     snapshot.approval_status = thread.approval_status
     snapshot.approval_request_id = thread.approval_request_id
     # Read before the terminal branch below returns, so a settled run reports

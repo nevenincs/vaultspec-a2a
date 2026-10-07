@@ -453,7 +453,6 @@ async def test_the_two_readings_answer_with_different_records(tmp_path: Path) ->
                 thread_id="two-readings",
                 status=ThreadStatus.INPUT_REQUIRED,
                 repair_status="checkpoint_unavailable",
-                execution_readiness="checkpoint_unavailable",
                 team_preset="mock-success-single",
             )
             await session.commit()

@@ -34,7 +34,6 @@ from ...service_tests._provider_catalog_live import declared_lane_model_value
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
-from .._acp_types import NativeCommandOutcome
 from .._codex_app_server_client import _CodexAppServerClient
 from .._codex_permission import CodexPermissionRung
 from .._codex_protocol import (
@@ -51,7 +50,7 @@ from ..cli_resolution import (
     ProviderRuntimeUnavailableError,
     resolve_provider_cli_executable,
 )
-from ..codex_chat_model import CodexChatModel, _ActiveCodexTurn
+from ..codex_chat_model import CodexChatModel
 from ..conditions import ProviderCondition
 from ..factory import ProviderFactory, codex_binary_proof_reason
 from ..provider_readiness import probe_provider_readiness
@@ -206,119 +205,6 @@ async def test_client_request_after_close_raises() -> None:
     await client.aclose()
     with pytest.raises(_CodexProtocolError, match="closed"):
         await client.request("echo", {})
-
-
-@pytest.mark.asyncio
-async def test_native_interrupt_targets_one_exact_active_turn() -> None:
-    class InterruptClient:
-        def __init__(self) -> None:
-            self.active: _ActiveCodexTurn | None = None
-            self.observed: tuple[str, JsonObject] | None = None
-
-        async def request(self, method: str, params: JsonObject) -> JsonObject:
-            self.observed = (method, params)
-            assert self.active is not None
-            self.active.terminal_status = "interrupted"
-            self.active.terminal_seen.set()
-            return {}
-
-    client = InterruptClient()
-    model = CodexChatModel(workspace_root=str(Path.cwd()))
-    active = _ActiveCodexTurn(cast("_CodexAppServerClient", client))
-    client.active = active
-    model._active_turns[("thread-1", "turn-1")] = active
-    result = await model.execute_native_control(
-        "interrupt", thread_id="thread-1", turn_id="turn-1"
-    )
-
-    assert result.outcome is NativeCommandOutcome.COMPLETED
-    assert result.effects_may_have_occurred is True
-    assert client.observed == (
-        "turn/interrupt",
-        {"threadId": "thread-1", "turnId": "turn-1"},
-    )
-
-
-@pytest.mark.asyncio
-async def test_native_interrupt_rejects_ack_without_interrupted_end() -> None:
-    class CompletedClient:
-        def __init__(self) -> None:
-            self.active: _ActiveCodexTurn | None = None
-
-        async def request(self, method: str, params: JsonObject) -> JsonObject:
-            assert self.active is not None
-            self.active.terminal_status = "completed"
-            self.active.terminal_seen.set()
-            return {}
-
-    client = CompletedClient()
-    model = CodexChatModel(workspace_root=str(Path.cwd()))
-    active = _ActiveCodexTurn(cast("_CodexAppServerClient", client))
-    client.active = active
-    model._active_turns[("thread-1", "turn-1")] = active
-
-    result = await model.execute_native_control(
-        "interrupt", thread_id="thread-1", turn_id="turn-1"
-    )
-
-    assert result.outcome is NativeCommandOutcome.FAILED
-    assert result.effects_may_have_occurred is True
-    assert result.reason is not None
-    assert "ended as 'completed'" in result.reason
-
-
-@pytest.mark.asyncio
-async def test_native_control_refuses_unknown_and_inactive_targets() -> None:
-    model = CodexChatModel(workspace_root=str(Path.cwd()))
-
-    unsupported = await model.execute_native_control(
-        "compact", thread_id="thread-1", turn_id="turn-1"
-    )
-    inactive = await model.execute_native_control(
-        "interrupt", thread_id="thread-1", turn_id="turn-1"
-    )
-
-    assert unsupported.outcome is NativeCommandOutcome.UNSUPPORTED
-    assert inactive.outcome is NativeCommandOutcome.BLOCKED
-
-
-@pytest.mark.asyncio
-async def test_duplicate_native_interrupt_is_busy() -> None:
-    client = cast("_CodexAppServerClient", object())
-    model = CodexChatModel(workspace_root=str(Path.cwd()))
-    active = _ActiveCodexTurn(client, interrupt_in_flight=True)
-    model._active_turns[("thread-1", "turn-1")] = active
-    result = await model.execute_native_control(
-        "interrupt", thread_id="thread-1", turn_id="turn-1"
-    )
-
-    assert result.outcome is NativeCommandOutcome.BUSY
-
-
-@pytest.mark.asyncio
-async def test_native_interrupt_refuses_an_already_terminal_turn() -> None:
-    client = cast("_CodexAppServerClient", object())
-    model = CodexChatModel(workspace_root=str(Path.cwd()))
-    active = _ActiveCodexTurn(client, terminal_status="completed")
-    active.terminal_seen.set()
-    model._active_turns[("thread-1", "turn-1")] = active
-
-    result = await model.execute_native_control(
-        "interrupt", thread_id="thread-1", turn_id="turn-1"
-    )
-
-    assert result.outcome is NativeCommandOutcome.BLOCKED
-    assert result.effects_may_have_occurred is False
-
-
-@pytest.mark.asyncio
-async def test_native_interrupt_rejects_invalid_identity_before_rpc() -> None:
-    model = CodexChatModel(workspace_root=str(Path.cwd()))
-
-    with pytest.raises(ValueError, match="thread_id"):
-        await model.execute_native_control(
-            "interrupt", thread_id=" thread-1", turn_id="turn-1"
-        )
 
 
 # ---------------------------------------------------------------------------

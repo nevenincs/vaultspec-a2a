@@ -42,16 +42,10 @@ from ._acp_mcp import harness_spawn_env
 from ._acp_model_state import (
     AcpModelState,
     AcpSessionBusyError,
-    NativeCommandRequest,
     model_state_or_none,
     model_state_path,
     read_model_state,
     write_model_state,
-)
-from ._acp_native_commands import (
-    native_command_error_result,
-    native_command_prompt_blocks,
-    validate_native_command,
 )
 from ._acp_prompt_outcomes import (
     raise_for_prompt_stop_reason as _raise_for_prompt_stop_reason,
@@ -82,8 +76,6 @@ from ._acp_types import (
     AcpModelConfig,
     AcpResponseFuture,
     AcpSessionContext,
-    NativeCommandOutcome,
-    NativeCommandResult,
     PermissionCallback,
     RpcHandlerMap,
     require_workspace_root,
@@ -323,7 +315,6 @@ class AcpChatModel(ProcessChatModel):
                 messages,
                 stop=stop,
                 run_manager=run_manager,
-                native_command=None,
                 **kwargs,
             )
         ) as request:
@@ -336,7 +327,6 @@ class AcpChatModel(ProcessChatModel):
         *,
         stop: list[str] | None,
         run_manager: AsyncCallbackManagerForLLMRun | None,
-        native_command: NativeCommandRequest | None,
         **kwargs: Any,
     ) -> AsyncGenerator[ChatGenerationChunk]:
         """Own one provider session and refuse concurrent use explicitly."""
@@ -346,11 +336,7 @@ class AcpChatModel(ProcessChatModel):
         self._state.session.session_busy = True
         try:
             async with aclosing(
-                self._astream_session(
-                    messages,
-                    run_manager=run_manager,
-                    native_command=native_command,
-                )
+                self._astream_session(messages, run_manager=run_manager)
             ) as session:
                 async for chunk in session:
                     yield chunk
@@ -523,7 +509,6 @@ class AcpChatModel(ProcessChatModel):
         messages: list[BaseMessage],
         *,
         run_manager: AsyncCallbackManagerForLLMRun | None,
-        native_command: NativeCommandRequest | None,
     ) -> AsyncGenerator[ChatGenerationChunk]:
         """Prepare one role before any independent probe or provider acquisition."""
         workspace = require_workspace_root(
@@ -538,9 +523,7 @@ class AcpChatModel(ProcessChatModel):
             self._native_authority = authority
             try:
                 async with aclosing(
-                    self._astream_prepared_session(
-                        messages, run_manager=run_manager, native_command=native_command
-                    )
+                    self._astream_prepared_session(messages, run_manager=run_manager)
                 ) as prepared:
                     async for chunk in prepared:
                         yield chunk
@@ -552,9 +535,8 @@ class AcpChatModel(ProcessChatModel):
         messages: list[BaseMessage],
         *,
         run_manager: AsyncCallbackManagerForLLMRun | None,
-        native_command: NativeCommandRequest | None,
     ) -> AsyncGenerator[ChatGenerationChunk]:
-        """Run one ordinary prompt or one negotiated native command."""
+        """Run one ordinary prompt."""
         # Rendered through the seam the Codex lane shares: a conversation says
         # who spoke and what a tool answered, and it has to say the same thing on
         # whichever transport carries it. Rendering here instead dropped every
@@ -666,9 +648,6 @@ class AcpChatModel(ProcessChatModel):
             self._state.transport.stdin = ctx.stdin
             self._state.transport.stdin_lock = ctx.stdin_lock
             self._state.session.response_futures = ctx.response_futures
-            prompt_blocks = await native_command_prompt_blocks(
-                ctx, native_command, prompt_blocks, result.session_id
-            )
             prompt_future = await setup_prompt(
                 ctx,
                 self._state.config,
@@ -703,32 +682,6 @@ class AcpChatModel(ProcessChatModel):
                     )
                 )
             await run_independent_cleanups(*cleanup_steps)
-
-    async def execute_native_command(
-        self, name: str, arguments: str | None = None
-    ) -> NativeCommandResult:
-        """Execute one exactly advertised command through ACP prompt syntax."""
-        validate_native_command(name, arguments)
-
-        output: list[str] = []
-        try:
-            async for chunk in self._stream_request(
-                [],
-                stop=None,
-                run_manager=None,
-                native_command=NativeCommandRequest(name, arguments),
-            ):
-                content = chunk.message.content
-                if isinstance(content, str):
-                    output.append(content)
-        except Exception as exc:
-            return native_command_error_result(name, exc)
-        return NativeCommandResult(
-            name=name,
-            outcome=NativeCommandOutcome.COMPLETED,
-            output="".join(output),
-            effects_may_have_occurred=True,
-        )
 
     def _enforce_turn_deadline(self, ctx: AcpSessionContext) -> None:
         """Fail the turn once the subprocess has gone silent for too long."""

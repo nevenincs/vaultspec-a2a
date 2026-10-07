@@ -49,6 +49,7 @@ import pytest
 
 from ..testing.acceptance import (
     CODER_ROLE,
+    GATEWAY_AUTH_HEADERS,
     MODE_AUTONOMOUS,
     OBSERVE_DEADLINE_SECONDS,
     SOLO_CODER_PRESET,
@@ -123,10 +124,7 @@ async def _run_solo_coder_proof(
         # Per-agent_id token minted here and supplied at the gateway seam (pw7
         # pattern): keyed by the coder's agent_id so the run_start coverage gate
         # passes without the engine's role-key minting.
-        run_tokens = {
-            role: await harness.mint(ec, f"agent:{harness.run_id}:{role}", "agent")
-            for role in case.roles
-        }
+        run_tokens = await harness.mint_role_tokens(ec, harness.run_id, case.roles)
         # Operation-mode = autonomous BEFORE run-start, so the engine's authoring
         # eligibility layer AUTO-APPROVES the mutating propose_changeset INTO the
         # review lane instead of gating it as ``awaiting_permission``. This is the
@@ -141,7 +139,7 @@ async def _run_solo_coder_proof(
         # gated op.
         mode_setter = await harness.mint(ec, f"mode-setter:{harness.run_id}", "human")
         await harness.set_mode(ec, MODE_AUTONOMOUS, setter_token=mode_setter)
-        async with httpx.AsyncClient() as hc:
+        async with httpx.AsyncClient(headers=GATEWAY_AUTH_HEADERS) as hc:
             await harness.run_start(
                 hc,
                 run_id=harness.run_id,

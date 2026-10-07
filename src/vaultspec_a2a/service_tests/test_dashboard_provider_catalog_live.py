@@ -17,46 +17,32 @@ projection.
 
 from __future__ import annotations
 
-import os
-import subprocess
 import uuid
-from contextlib import contextmanager
 from dataclasses import dataclass
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-from pydantic import TypeAdapter, ValidationError
 
-from ..lifecycle.discovery import write_service_json
 from ..service_tests._live_desktop_gateway import armed_gateway
 from ..testing import (
-    DEFAULT_ATTACH_CREDENTIAL,
     LIVE_PROVIDER_PREREQUISITES,
     selection_from_served_catalog,
     wait_for_run_status,
 )
+from ..testing.payloads import json_object, json_object_list
 from ..testing.ports import free_port
-from ..utils.process import ProcessContainment
-from .test_engine_broker_lost_ack_live import (
-    _engine_command,
-    _force_engine_tree_exit,
-    _provision_workspace,
-    _shutdown_engine,
-    _wait_for_engine,
-)
+from ._dashboard_engine import dashboard_engine, provision_workspace
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
     from pathlib import Path
 
     from ..api.schemas.gateway import ProviderCatalogSelection
+    from ..providers._json_contract import JsonObject
 _RUN_ID_PREFIX = "live-provider-catalog"
 _TERMINAL_DEADLINE_SECONDS = 900.0
 _POLL_SECONDS = 2.0
-_JSON_OBJECT = TypeAdapter(dict[str, object])
-_JSON_ARRAY = TypeAdapter(list[object])
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,50 +57,32 @@ class _DashboardScenario:
     nonce: str
 
 
-def _object(value: object, *, source: str) -> dict[str, object]:
-    """Require one bounded object projection from a real HTTP response."""
-    try:
-        return _JSON_OBJECT.validate_python(value, strict=True)
-    except ValidationError as exc:
-        raise AssertionError(f"{source} must be a JSON object: {exc}") from exc
-
-
-def _array(value: object, *, source: str) -> list[object]:
-    """Require one ordered JSON array without accepting arbitrary iterables."""
-    try:
-        return _JSON_ARRAY.validate_python(value, strict=True)
-    except ValidationError as exc:
-        raise AssertionError(f"{source} must be a JSON array: {exc}") from exc
-
-
-def _engine_envelope(response: httpx.Response, *, source: str) -> dict[str, object]:
+def _engine_envelope(response: httpx.Response, *, source: str) -> JsonObject:
     """Extract the verbatim sibling envelope from Dashboard's public response."""
     assert response.status_code == HTTPStatus.OK, f"{source}: {response.text}"
-    body = _object(response.json(), source=f"{source} body")
-    data = _object(body.get("data"), source=f"{source} data")
-    return _object(data.get("envelope"), source=f"{source} envelope")
+    body = json_object(response.json(), at=f"{source} body")
+    data = json_object(body.get("data"), at=f"{source} data")
+    return json_object(data.get("envelope"), at=f"{source} envelope")
 
 
 def _frozen_assignment(
-    envelope: dict[str, object], selection: ProviderCatalogSelection
-) -> dict[str, object]:
+    envelope: JsonObject, selection: ProviderCatalogSelection
+) -> JsonObject:
     """Assert A2A froze the current opaque selection for every preset role."""
-    frozen = _object(envelope.get("frozen_assignment"), source="frozen assignment")
+    frozen = json_object(envelope.get("frozen_assignment"), at="frozen assignment")
     assert frozen.get("schema_version") == 1, frozen
     assert isinstance(frozen.get("digest"), str) and frozen["digest"], frozen
-    assignments = _array(frozen.get("assignments"), source="frozen assignments")
+    assignments = json_object_list(frozen.get("assignments"), at="frozen assignments")
     assert assignments, frozen
-    for assignment in assignments:
-        role = _object(assignment, source="frozen role assignment")
+    for role in assignments:
         assert role.get("provider_id") == selection.provider_id, role
         assert role.get("execution_mode") == selection.execution_mode, role
         assert role.get("catalog_revision") == selection.catalog_revision, role
         assert role.get("entry_id") == selection.entry_id, role
         assert isinstance(role.get("model_name"), str) and role["model_name"], role
-        controls = _array(role.get("controls"), source="frozen role controls")
-        control_records = [
-            _object(control, source="frozen native control") for control in controls
-        ]
+        control_records = json_object_list(
+            role.get("controls"), at="frozen role controls"
+        )
         selected_controls = [
             control
             for control in control_records
@@ -140,7 +108,7 @@ def _assert_completed_provider_output(
     gateway_base: str,
     auth: str,
     run_id: str,
-    frozen: dict[str, object],
+    frozen: JsonObject,
     expected_nonce: str,
 ) -> None:
     """Prove an agent governed by the frozen record returned the unique prompt nonce."""
@@ -150,15 +118,13 @@ def _assert_completed_provider_output(
         timeout=30,
     )
     assert history.status_code == HTTPStatus.OK, history.text
-    history_body = _object(history.json(), source="completed run history")
-    state = _object(history_body.get("state"), source="completed run state")
-    messages = [
-        _object(message, source="completed run message")
-        for message in _array(state.get("messages"), source="completed run messages")
-    ]
+    history_body = json_object(history.json(), at="completed run history")
+    state = json_object(history_body.get("state"), at="completed run state")
+    messages = json_object_list(state.get("messages"), at="completed run messages")
     frozen_agents: set[str] = set()
-    for record in _array(frozen.get("assignments"), source="frozen assignments"):
-        assignment = _object(record, source="frozen role assignment")
+    for assignment in json_object_list(
+        frozen.get("assignments"), at="frozen assignments"
+    ):
         agent_id = assignment.get("agent_id")
         if isinstance(agent_id, str) and agent_id:
             frozen_agents.add(agent_id)
@@ -185,10 +151,10 @@ def _wait_for_completed_run(
     token: str,
     selection: ProviderCatalogSelection,
     run_id: str,
-) -> dict[str, object]:
+) -> JsonObject:
     """Poll the production recovery surface until the one opt-in turn completes."""
 
-    def _read_status() -> dict[str, object]:
+    def _read_status() -> JsonObject:
         response = httpx.post(
             f"{engine_base}/ops/a2a/run-status",
             headers={"Authorization": f"Bearer {token}"},
@@ -214,7 +180,7 @@ def _wait_for_completed_run(
 
 def _dashboard_scenario(tmp_path: Path) -> _DashboardScenario:
     workspace = tmp_path / "dashboard-workspace"
-    _provision_workspace(workspace)
+    provision_workspace(workspace)
     engine_port = free_port()
     return _DashboardScenario(
         workspace=workspace,
@@ -224,54 +190,6 @@ def _dashboard_scenario(tmp_path: Path) -> _DashboardScenario:
         run_id=f"{_RUN_ID_PREFIX}-{uuid.uuid4().hex}",
         nonce=f"provider-output-{uuid.uuid4().hex}",
     )
-
-
-@contextmanager
-def _dashboard_engine(
-    tmp_path: Path,
-    scenario: _DashboardScenario,
-    gateway_base: str,
-) -> Generator[str]:
-    discovery_home = tmp_path / "a2a-discovery"
-    write_service_json(
-        discovery_home / "service.json",
-        port=int(gateway_base.rsplit(":", 1)[1]),
-        pid=os.getpid(),
-        service_token=DEFAULT_ATTACH_CREDENTIAL,
-    )
-    environment = {
-        **{
-            key: value
-            for key, value in os.environ.items()
-            if key not in {"VAULTSPEC_APP_HOME", "VAULTSPEC_A2A_DESKTOP_APP_HOME"}
-        },
-        "VAULTSPEC_A2A_HOME": str(discovery_home),
-        "VAULTSPEC_APP_HOME": str(tmp_path / "dashboard-product-home"),
-    }
-    with scenario.engine_log.open("wb") as output:
-        containment = ProcessContainment.create()
-        new_session = bool(containment.spawn_kwargs().get("start_new_session"))
-        process: subprocess.Popen[bytes] | None = None
-        token: str | None = None
-        try:
-            process = subprocess.Popen(
-                _engine_command(scenario.engine_port, scenario.workspace),
-                cwd=scenario.workspace,
-                env=environment,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                start_new_session=new_session,
-            )
-            containment.assign(process.pid)
-            token = _wait_for_engine(scenario.workspace, scenario.engine_base, process)
-            yield token
-        finally:
-            if process is None:
-                containment.close()
-            elif token is not None:
-                _shutdown_engine(process, containment, scenario.engine_base, token)
-            else:
-                _force_engine_tree_exit(process, containment)
 
 
 def _run_dashboard_turn(
@@ -286,8 +204,8 @@ def _run_dashboard_turn(
         timeout=10,
     )
     session.raise_for_status()
-    session_data = _object(session.json(), source="engine session")
-    scope = _object(session_data.get("data"), source="engine session data").get(
+    session_data = json_object(session.json(), at="engine session")
+    scope = json_object(session_data.get("data"), at="engine session data").get(
         "active_scope"
     )
     assert isinstance(scope, str) and scope, session_data
@@ -366,6 +284,12 @@ def test_dashboard_catalog_selection_completes_and_replays_with_frozen_assignmen
                 scenario.workspace / ".vault" / "data" / "engine-data" / "service.json"
             ),
         ) as (gateway_base, auth),
-        _dashboard_engine(tmp_path, scenario, gateway_base) as token,
+        dashboard_engine(
+            tmp_path,
+            workspace=scenario.workspace,
+            engine_port=scenario.engine_port,
+            engine_log=scenario.engine_log,
+            a2a_port=int(gateway_base.rsplit(":", 1)[1]),
+        ) as token,
     ):
         _run_dashboard_turn(scenario, gateway_base, auth, token)

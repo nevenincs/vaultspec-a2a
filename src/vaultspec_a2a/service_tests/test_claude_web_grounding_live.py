@@ -73,11 +73,10 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import httpx
 import pytest
-from pydantic import TypeAdapter, ValidationError
 
 from ..control.run_start_policy import required_role_ids
+from ..graph.enums import Provider
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND
-from ..providers._json_contract import JsonObject
 from ..providers.conditions import ProviderCondition, condition_from_acp_error
 from ..team.team_config import load_team_config
 from ..testing.acceptance import (
@@ -88,15 +87,18 @@ from ..testing.acceptance import (
     AcceptanceHarness,
     ResilientAuthoringClient,
     reachable_stack,
+    resolve_selection,
     snapshot_vault,
     vault_write_delta,
 )
 from ..testing.payloads import json_object, json_object_list
+from ..utils.coercion import coerce_object_list, coerce_object_mapping
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from ..conftest import ExternalPrerequisiteRule
+    from ..providers._json_contract import JsonObject
 
 logger = logging.getLogger(__name__)
 
@@ -155,9 +157,6 @@ _POLL_SECONDS = 15.0
 #: asserting the one it would prefer to report.
 _RATE_REFUSAL_CONDITION = ProviderCondition.THROTTLED
 
-_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
-_OBJECT_LIST = TypeAdapter(list[object])
-
 
 @runtime_checkable
 class _WriterMessage(Protocol):
@@ -174,10 +173,10 @@ def _object_list(value: object, *, at: str) -> list[object]:
     """Read an optional heterogeneous checkpoint list without widening its values."""
     if value is None:
         return []
-    try:
-        return _OBJECT_LIST.validate_python(value)
-    except ValidationError as exc:
-        raise AssertionError(f"expected list at {at}: {exc}") from exc
+    items = coerce_object_list(value)
+    if items is None:
+        raise AssertionError(f"expected list at {at}: {value!r}")
+    return items
 
 
 def _fetch_live_commit_shas() -> set[str]:
@@ -239,6 +238,7 @@ def _web_grounding_case(feature: str) -> AcceptanceCase:
         ),
         roles=tuple(required_role_ids(load_team_config(PRESET_LIVE))),
         expected_doc_kinds=(),
+        lane_provider=Provider.CLAUDE.value,
         autonomous=True,
     )
 
@@ -256,11 +256,8 @@ def _web_locator_urls(findings: Sequence[Mapping[str, object]]) -> list[str]:
         if locators is None:
             continue
         for locator in _object_list(locators, at="finding locators"):
-            try:
-                fields = _JSON_OBJECT.validate_python(locator)
-            except ValidationError:
-                continue
-            if fields.get("kind") != WEB_LOCATOR_KIND:
+            fields = coerce_object_mapping(locator)
+            if fields is None or fields.get("kind") != WEB_LOCATOR_KIND:
                 continue
             url = fields.get("url")
             if isinstance(url, str) and url and url not in urls:
@@ -401,10 +398,7 @@ async def _observe_web_grounding_run(
     async with ResilientAuthoringClient(
         harness.engine_base_url, harness.engine_bearer
     ) as ec:
-        run_tokens = {
-            role: await harness.mint(ec, f"agent:{harness.run_id}:{role}", "agent")
-            for role in case.roles
-        }
+        run_tokens = await harness.mint_role_tokens(ec, harness.run_id, case.roles)
         reviewer_human = await harness.mint(ec, f"rev-human:{harness.run_id}", "human")
         # Manual mode is the zero-writes guarantee at its source: a queued proposal
         # waits for a human verdict this test never gives, so nothing can apply even
@@ -590,12 +584,17 @@ async def test_claude_lane_completes_a_real_web_retrieval(
 
     feature = f"tool-cores-web-{int(time.time())}"
     case = _web_grounding_case(feature)
+    selection, overrides = await resolve_selection(
+        case, gateway_url, str(vault_root.parent), external_prerequisite
+    )
     harness = AcceptanceHarness(
         case=case,
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
         gateway_url=gateway_url,
+        selection=selection,
+        overrides=overrides,
     )
 
     before = snapshot_vault(vault_root)

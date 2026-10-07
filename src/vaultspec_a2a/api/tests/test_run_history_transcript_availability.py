@@ -22,6 +22,7 @@ import pytest
 
 from ...database import update_thread_status
 from ...testing import async_catalog_run_fields, serve_on_loopback
+from ...testing.gateway_verbs import DEFAULT_TEAM_PRESET
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus, TranscriptAvailability
 from .conftest import make_app
@@ -34,15 +35,13 @@ if TYPE_CHECKING:
 
     type SessionFactory = async_sessionmaker[AsyncSession]
 
-_PRESET = "mock-success-single"
-
 
 async def _start_run(client: httpx.AsyncClient, run_id: str) -> str:
     """Start one real run through the real run-start verb."""
     started = await client.post(
         "/v1/runs",
         json={
-            "team_preset": _PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "remember this",
             "autonomous": True,
             "run_id": run_id,

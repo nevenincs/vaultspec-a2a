@@ -19,8 +19,8 @@ from ...streaming.aggregator import EventAggregator
 from ...testing import SseReader, serve_on_loopback, settings_override
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
+from ._relay_events import progress_event, relay_events
 from .conftest import make_app, seed_run_with_status
-from .test_stream_resume_replay import _progress_event, _relay
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -49,7 +49,7 @@ async def test_a_run_with_retained_frames_reports_a_resumable_stream(
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         before = await client.get(f"/v1/runs/{_RUN}")
-        await _relay(client, [_progress_event(_RUN, 1)])
+        await relay_events(client, [progress_event(_RUN, 1)])
         after = await client.get(f"/v1/runs/{_RUN}")
         async with client.stream(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": "-"}
@@ -80,7 +80,7 @@ async def test_a_switched_off_service_reports_no_resumable_stream(
             serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         ):
-            await _relay(client, [_progress_event(_RUN, 1)])
+            await relay_events(client, [progress_event(_RUN, 1)])
             status = await client.get(f"/v1/runs/{_RUN}")
 
     assert status.status_code == 200
@@ -124,7 +124,7 @@ async def test_run_status_answers_the_field_on_one_pooled_connection(
             serve_on_loopback(producer) as producer_base,
             httpx.AsyncClient(base_url=producer_base, timeout=10.0) as relay_client,
         ):
-            await _relay(relay_client, [_progress_event(_RUN, 1)])
+            await relay_events(relay_client, [progress_event(_RUN, 1)])
         assert replay_writer_seat(viewer) is None, (
             "the viewer gateway must reach the store, not another app's ring"
         )

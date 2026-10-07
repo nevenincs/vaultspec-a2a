@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING, Final
 from pydantic import TypeAdapter, ValidationError
 
 from ..providers._json_contract import JsonObject
+from ..utils.coercion import coerce_string_list
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -67,7 +68,6 @@ __all__ = [
 
 _JSON_OBJECT: Final[TypeAdapter[JsonObject]] = TypeAdapter(JsonObject)
 _JSON_OBJECT_LIST: Final[TypeAdapter[list[JsonObject]]] = TypeAdapter(list[JsonObject])
-_TEXT_LIST: Final[TypeAdapter[list[str]]] = TypeAdapter(list[str])
 
 
 def json_object(value: object, *, at: str) -> JsonObject:
@@ -92,10 +92,10 @@ def text_list(value: object, *, at: str) -> list[str]:
     Strict, so a number or a boolean is refused rather than coerced to its text:
     a payload that carried one has already broken its contract.
     """
-    try:
-        return _TEXT_LIST.validate_python(value, strict=True)
-    except ValidationError as exc:
-        raise AssertionError(f"expected a text list at {at}: {exc}") from exc
+    texts = coerce_string_list(value)
+    if texts is None:
+        raise AssertionError(f"expected a text list at {at}: {value!r}")
+    return texts
 
 
 def required_text(body: Mapping[str, object], field: str, *, at: str) -> str:

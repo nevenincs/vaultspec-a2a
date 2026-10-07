@@ -112,7 +112,7 @@ def _declaring_modules(pattern: str) -> list[str]:
             "process-tree kill escalation",
             r'"taskkill",',
             1,
-            "utils/process.py",
+            "utils/_process_tree.py",
             "The Windows escalation was implemented twice, once sync and once "
             "async, with both copies independently choosing the same two "
             "timeout budgets. A kill escalation is the last thing that should "
@@ -123,7 +123,7 @@ def _declaring_modules(pattern: str) -> list[str]:
             "POSIX descendant snapshot",
             r"def posix_descendant_pids\(",
             1,
-            "utils/process.py",
+            "utils/_process_tree.py",
             "The row above pins the escalation by its WINDOWS argv, so a second "
             "copy written for POSIX alone would carry no taskkill literal and "
             "pass it. This pins the other half. The snapshot is the load-bearing "

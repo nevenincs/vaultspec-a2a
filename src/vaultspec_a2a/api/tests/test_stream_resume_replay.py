@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
@@ -25,6 +25,7 @@ from ...streaming.subscribers import SequenceAllocation
 from ...testing import SseFrame, SseReader, serve_on_loopback
 from ...thread.enums import ThreadStatus
 from .._stream_replay import retained_after
+from ._relay_events import progress_event, relay_events, terminal_event
 from .conftest import make_app, seed_run_with_status
 from .test_internal import _record_completed_checkpoint, _seed_accepted_thread
 
@@ -39,41 +40,6 @@ if TYPE_CHECKING:
 _PARKED_CADENCE = 3600.0
 
 _RUN = "replay-run"
-
-
-def _progress_event(run_id: str, index: int) -> dict[str, Any]:
-    return {
-        "thread_id": run_id,
-        "ts": float(index),
-        "payload": {
-            "type": "agent_status",
-            "event_type": "agent_status",
-            "thread_id": run_id,
-            "agent_id": "coder",
-            "state": "working",
-            "detail": f"step {index}",
-            "sequence": index,
-        },
-    }
-
-
-def _terminal_event(run_id: str, index: int) -> dict[str, Any]:
-    return {
-        "thread_id": run_id,
-        "ts": float(index),
-        "payload": {
-            "type": "thread_terminal",
-            "event_type": "thread_terminal",
-            "thread_id": run_id,
-            "status": ThreadStatus.COMPLETED.value,
-            "sequence": index,
-        },
-    }
-
-
-async def _relay(client: httpx.AsyncClient, events: list[dict[str, Any]]) -> None:
-    response = await client.post("/internal/events/batch", json={"events": events})
-    assert response.status_code == 200, response.text
 
 
 def _sequences(frames: list[SseFrame]) -> list[int]:
@@ -106,14 +72,16 @@ async def test_a_reconnect_covers_every_sequence_to_the_terminal_exactly_once(
             assert first.status_code == 200
             reader = SseReader(first.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
-            await _relay(client, [_progress_event(_RUN, index) for index in (1, 2, 3)])
+            await relay_events(
+                client, [progress_event(_RUN, index) for index in (1, 2, 3)]
+            )
             seen_first = [await reader.next_frame() for _ in range(3)]
         # The viewer is gone. Everything below is produced with nobody
         # attached, which is exactly the history a resume has to recover.
-        await _relay(
+        await relay_events(
             client,
-            [_progress_event(_RUN, index) for index in (4, 5, 6)]
-            + [_terminal_event(_RUN, 7)],
+            [progress_event(_RUN, index) for index in (4, 5, 6)]
+            + [terminal_event(_RUN, 7)],
         )
 
         cursor = seen_first[-1].event_id
@@ -162,7 +130,7 @@ async def test_the_window_sentinel_replays_everything_still_retained_once(
         serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        await _relay(client, [_progress_event(_RUN, index) for index in (1, 2, 3)])
+        await relay_events(client, [progress_event(_RUN, index) for index in (1, 2, 3)])
         async with client.stream(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": "-"}
         ) as response:
@@ -170,7 +138,7 @@ async def test_the_window_sentinel_replays_everything_still_retained_once(
             reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
             replayed = [await reader.next_frame() for _ in range(3)]
-            await _relay(client, [_progress_event(_RUN, 4)])
+            await relay_events(client, [progress_event(_RUN, 4)])
             after = await reader.next_frame()
 
     assert _sequences(replayed) == [1, 2, 3]
@@ -189,14 +157,14 @@ async def test_a_resume_at_the_head_of_the_window_replays_nothing(
         serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        await _relay(client, [_progress_event(_RUN, index) for index in (1, 2)])
+        await relay_events(client, [progress_event(_RUN, index) for index in (1, 2)])
         async with client.stream(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": f"{_RUN}:2"}
         ) as response:
             assert response.status_code == 200
             reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
-            await _relay(client, [_progress_event(_RUN, 3)])
+            await relay_events(client, [progress_event(_RUN, 3)])
             live = await reader.next_frame()
 
     assert live.sequence == 3

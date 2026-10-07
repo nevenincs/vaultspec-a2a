@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 import pytest
+from langgraph.types import interrupt
 
 from ...control._permission_response_contract import PermissionInput
 from ...control.circuit_breaker import WorkerCircuitBreaker
@@ -35,15 +36,23 @@ from ...database import (
     supersede_permission_requests,
 )
 from ...testing import (
+    add_test_node,
     adopted_spawner,
+    ainvoke_test_graph,
+    compile_test_graph,
     current_execution_metadata,
+    new_state_graph,
     park_document_approval,
     park_permission,
     seed_create_action,
 )
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import ControlActionResultStatus, ThreadStatus
+from ...thread.enums import (
+    ControlActionResultStatus,
+    InterruptType,
+    ThreadStatus,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -125,6 +134,46 @@ async def _journal_request(
             allowed_options=_OPTIONS if allowed_options is None else allowed_options,
         )
         await session.commit()
+
+
+async def _park_raw_permission_interrupt(
+    checkpointer: AsyncSqliteSaver,
+    *,
+    thread_id: str,
+    request_id: str,
+) -> None:
+    """Park a real graph on a permission interrupt that offers no option.
+
+    The worker's own callback refuses such a request instead of parking, so this
+    stands in for the untrusted input the respond route still has to survive: a
+    stored checkpoint, written by some other generation or corrupted in place,
+    that holds a permission interrupt with nothing to answer it with.
+    """
+    builder = new_state_graph()
+    add_test_node(
+        builder,
+        "gate",
+        lambda _state: {
+            "active_agent": str(
+                interrupt(
+                    {
+                        "type": InterruptType.PERMISSION_REQUEST.value,
+                        "request_id": request_id,
+                        "tool_name": "bash",
+                        "tool_input": {"command": "ls"},
+                        "options": [],
+                    }
+                )
+            )
+        },
+    )
+    builder.add_edge("__start__", "gate")
+    builder.add_edge("gate", "__end__")
+    graph = compile_test_graph(builder, checkpointer=checkpointer)
+    parked = await ainvoke_test_graph(
+        graph, {}, {"configurable": {"thread_id": thread_id}}
+    )
+    assert "__interrupt__" in parked
 
 
 async def _assert_journalled(
@@ -342,9 +391,21 @@ async def test_optionless_request_is_journalled_and_committed(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """A request offering no usable options fails closed, and says so durably."""
+    """A request offering no usable options fails closed, and says so durably.
+
+    The worker refuses such a call rather than parking on it, so no run this
+    release starts can reach this guard through its own permission callback.
+    The guard stays because a checkpoint is untrusted input: one written by a
+    foreign generation, or corrupted in the store, can still hold a permission
+    interrupt that offers nothing, and answering that would approve a tool call
+    against an offer nobody made. The park below is therefore a raw interrupt,
+    not the worker's callback.
+    """
     thread_id = await _seed_thread(session_factory)
-    request_id = await park_permission(checkpointer, thread_id=thread_id, options=[])
+    request_id = f"{thread_id}:perm-optionless"
+    await _park_raw_permission_interrupt(
+        checkpointer, thread_id=thread_id, request_id=request_id
+    )
     await _journal_request(
         session_factory,
         thread_id=thread_id,

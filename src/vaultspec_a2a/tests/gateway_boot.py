@@ -412,7 +412,9 @@ def armed_gateway_env(
     env["VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS"] = f"{WORKER_READY_TIMEOUT:g}"
     if extra:
         env.update(extra)
-    _DESKTOP_WORKSPACES[gateway_port] = app_home / "workspaces" / "project"
+    _DESKTOP_WORKSPACES[gateway_port] = (
+        derive_state_paths(app_home).workspaces_root / "project"
+    )
     return env
 
 
@@ -435,7 +437,7 @@ def broker_gateway_env(
     state = derive_state_paths(app_home)
     env.update(
         {
-            "VAULTSPEC_A2A_HOME": str(state.app_home),
+            "VAULTSPEC_A2A_HOME": str(state.home),
             "VAULTSPEC_A2A_WORKSPACE_ROOT": str(state.workspaces_root),
             "VAULTSPEC_A2A_DATABASE_BACKEND": "sqlite",
             "VAULTSPEC_A2A_DATABASE_URL": (

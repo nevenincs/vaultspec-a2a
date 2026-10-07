@@ -38,7 +38,7 @@ def test_armed_profile_seats_every_mutable_path_under_app_home(tmp_path: Path) -
         armed = Settings()
 
     assert armed.desktop_app_home == app_home
-    assert armed.a2a_home == state.app_home
+    assert armed.a2a_home == state.home
     assert armed.workspace_root == state.workspaces_root
     assert armed.database_url == f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
     assert armed.checkpoint_database_url == (

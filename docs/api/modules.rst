@@ -196,7 +196,7 @@ Desktop product profile
 
 .. py:class:: DesktopProfile
 
-.. py:class:: DesktopStatePaths
+.. py:function:: provisioned_directories(state)
 
 .. py:function:: derive_state_paths(app_home)
 

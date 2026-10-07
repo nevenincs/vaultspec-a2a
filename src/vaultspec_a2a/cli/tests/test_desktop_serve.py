@@ -70,7 +70,7 @@ def test_prepare_desktop_serve_arms_a_real_settings(tmp_path: Path) -> None:
     with armed_environment(**plan.env):
         armed = Settings()
     assert armed.desktop_app_home == app_home
-    assert armed.a2a_home == state.app_home
+    assert armed.a2a_home == state.home
     assert armed.capsule_assets_root == capsule
     assert armed.database_url == f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
 

@@ -177,7 +177,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
         # seats: each carries the variable an operator would have set it with,
         # so a displaced value is reported in the operator's own vocabulary.
         seated: dict[str, tuple[str, object]] = {
-            "a2a_home": ("VAULTSPEC_A2A_HOME", state.app_home),
+            "a2a_home": ("VAULTSPEC_A2A_HOME", state.home),
             "workspace_root": (
                 "VAULTSPEC_A2A_WORKSPACE_ROOT",
                 state.workspaces_root,

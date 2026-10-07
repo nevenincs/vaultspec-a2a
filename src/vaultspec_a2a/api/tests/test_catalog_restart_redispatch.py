@@ -215,7 +215,8 @@ class _RestartCase:
 
 def _prepare_restart_case(tmp_path: Path) -> _RestartCase:
     app_home = tmp_path / "app-home"
-    workspace = app_home / "workspaces" / "project"
+    state = derive_state_paths(app_home)
+    workspace = state.workspaces_root / "project"
     app_home.mkdir()
     workspace.mkdir(parents=True)
     attach = "attach-restart-proof-0123456789abcdef"
@@ -225,7 +226,7 @@ def _prepare_restart_case(tmp_path: Path) -> _RestartCase:
         ownership="ownership-restart-proof-fedcba9876543210",
     )
     seat_valid_database(app_home)
-    database_path = derive_state_paths(app_home).database_path
+    database_path = state.database_path
     frozen_revision = "frozen-revision-no-longer-served"
     metadata, frozen_selection = _current_metadata(
         workspace, catalog_revision=frozen_revision

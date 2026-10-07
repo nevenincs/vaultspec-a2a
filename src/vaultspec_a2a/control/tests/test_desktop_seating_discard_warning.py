@@ -142,7 +142,7 @@ def test_an_untouched_default_displaced_by_seating_stays_silent(
     # Silence is not inaction: the seating still replaced every default.
     assert armed.database_url == f"sqlite+aiosqlite:///{state.database_path.as_posix()}"
     assert armed.workspace_root == state.workspaces_root
-    assert armed.a2a_home == state.app_home
+    assert armed.a2a_home == state.home
 
 
 def test_every_displaced_setting_is_named_individually(

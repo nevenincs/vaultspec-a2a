@@ -468,6 +468,7 @@ def _scan_worker_log(
 
 
 def _await_exactly_one_worker_dispatch(app_home: Path) -> None:
+    logs_dir = derive_state_paths(app_home).logs_dir
     first_dispatch_deadline = time.monotonic() + 10
     hard_deadline = time.monotonic() + 20
     quiet_deadline: float | None = None
@@ -478,7 +479,7 @@ def _await_exactly_one_worker_dispatch(app_home: Path) -> None:
     while time.monotonic() < min(
         hard_deadline, quiet_deadline or first_dispatch_deadline
     ):
-        worker_logs = list((app_home / "runtime").glob("worker-autospawn-*.stderr.log"))
+        worker_logs = list(logs_dir.glob("worker-autospawn-*.stderr.log"))
         if len(worker_logs) == 1:
             with worker_logs[0].open("r", encoding="utf-8", errors="replace") as log:
                 offset, pending, observed_tail, dispatch_count, saw_data = (

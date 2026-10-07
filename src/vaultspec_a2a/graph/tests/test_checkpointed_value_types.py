@@ -30,13 +30,13 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
+from ...testing import deterministic_model_assignment
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
 )
 from ...thread.enums import ControlActionType
 from ..compiler import compile_team_graph
-from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence

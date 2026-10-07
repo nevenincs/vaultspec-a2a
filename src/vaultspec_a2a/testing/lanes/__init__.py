@@ -20,6 +20,11 @@ turn stays in flight while the gate file exists and completes once it is gone.
 The test closes and opens the gate with :func:`held_turns`, so a run is held
 mid-turn by a signal the test controls rather than by a timer.
 
+A test that compiles a graph itself freezes its team onto the lane with
+:func:`deterministic_model_assignment`, and takes a scripted scenario's agent,
+carrying the script it drives, from :func:`scripted_supervisor` or
+:func:`branch_researcher`.
+
 This module stays light on purpose: a gateway imports it at startup, and the
 model it registers, with its chat-model stack, loads only when a lane builds
 one. The model names below resolve lazily for the same reason.
@@ -42,11 +47,14 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
     from ...providers import LaneRegistration, LaneRegistry
-    from ...team.team_config import AgentConfig
+    from ...providers.team_selection import FrozenLaneAssignment
+    from ...team.team_config import AgentConfig, TeamConfig
     from .deterministic import UNATTENDED_REPLY as UNATTENDED_REPLY
     from .deterministic import (
         DeterministicResearchAdrChatModel as DeterministicResearchAdrChatModel,
     )
+    from .deterministic import branch_researcher as branch_researcher
+    from .deterministic import scripted_supervisor as scripted_supervisor
 
 __all__ = [
     "DETERMINISTIC_LANE",
@@ -54,14 +62,19 @@ __all__ = [
     "UNATTENDED_REPLY",
     "DeterministicResearchAdrChatModel",
     "armed_lane_environment",
+    "branch_researcher",
+    "deterministic_model_assignment",
     "held_turns",
     "register_lanes",
+    "scripted_supervisor",
     "seated_lanes",
 ]
 
 _LAZY_IMPORTS = {
     "DeterministicResearchAdrChatModel": ".deterministic",
     "UNATTENDED_REPLY": ".deterministic",
+    "branch_researcher": ".deterministic",
+    "scripted_supervisor": ".deterministic",
 }
 
 
@@ -113,6 +126,29 @@ def register_lanes(registry: LaneRegistry) -> None:
     """Register this package's lanes; the lane-plugin entry point."""
     for lane in LANES:
         registry.register(lane)
+
+
+def deterministic_model_assignment(
+    team_config: TeamConfig,
+) -> dict[str, FrozenLaneAssignment]:
+    """Compile *team_config*'s per-role assignment on the deterministic lane.
+
+    Frozen by production's team-selection freezer over the lane's served record,
+    for the roles a run of this team must cover, so the assignment a test
+    compiles against is the one a real run would hand the worker.
+    """
+    from ...control.run_start_policy import required_role_ids
+    from ...providers.team_selection import freeze_team_selection
+    from ..catalog import in_process_lane_selection
+
+    record, selection = in_process_lane_selection(DETERMINISTIC_LANE.provider)
+    return freeze_team_selection(
+        selection=selection,
+        overrides={},
+        fallbacks=(),
+        required_roles=tuple(required_role_ids(team_config)),
+        records=(record,),
+    ).compiler_map()
 
 
 def armed_lane_environment(*, hold_gate: Path | None = None) -> dict[str, str]:

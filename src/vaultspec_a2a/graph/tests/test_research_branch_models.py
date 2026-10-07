@@ -22,16 +22,15 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...authoring.submitter import DocumentProposalSubmitter
 from ...team.team_config import ResearchThreadSpec, load_agent_config, load_team_config
-from ...testing import simulator_command
+from ...testing import deterministic_model_assignment, simulator_command
 from ...worker.token_store import RunTokenStore
 from ..compiler import compile_team_graph
 from ..nodes.diverge import researcher_node_name
-from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PRESET = "vaultspec-adr-research-mock"
+_PRESET = "vaultspec-adr-research-deterministic"
 _DISPATCH = "research_dispatch"
 _THREADS = [
     ResearchThreadSpec(thread_id="codebase"),

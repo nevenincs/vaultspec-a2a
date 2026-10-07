@@ -1,0 +1,12 @@
+[agent]
+id           = "deterministic-scripted-supervisor"
+display_name = "Deterministic Scripted Supervisor"
+role         = "supervisor"
+description  = """
+In-process ProviderFactory scenario that routes by script: each non-blank line of
+its persona is one routing reply, given in order, and the last one repeats once
+the others are spent.
+"""
+
+[agent.persona]
+system_prompt = "FINISH"

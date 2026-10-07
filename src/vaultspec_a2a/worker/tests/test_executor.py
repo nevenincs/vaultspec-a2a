@@ -22,7 +22,6 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -35,14 +34,18 @@ from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...domain_config import domain_config
 from ...graph.compiler import compile_team_graph
-from ...graph.tests.conftest import deterministic_model_assignment
 from ...ipc.schemas import DispatchRequest
-from ...providers import ProviderCondition
+from ...providers import ProviderCondition, ProviderFactory
 from ...providers.acp_exceptions import AcpPromptError
 from ...providers.conditions import condition_from_acp_error
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...team.team_config import load_agent_config, load_team_config
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    deterministic_model_assignment,
+    new_state_graph,
+)
 from ...testing.catalog_authority import current_execution_metadata
 from ...thread.action_receipts import (
     GraphActionReceipt,
@@ -2426,25 +2429,9 @@ class TestTheFailureStashCannotOutliveItsRun:
                 await executor.shutdown()
 
 
-class _LoopReviewFactory:
-    """The loop node never passes; every other worker just reports back."""
-
-    def create(
-        self,
-        provider: Any,
-        *,
-        model: Any | None = None,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
-        **kwargs: Any,
-    ) -> FakeListChatModel:
-        del provider, model, workspace_root, kwargs
-        agent_id = getattr(agent_config, "id", "")
-        if agent_id == "mock-reviewer":
-            return FakeListChatModel(
-                responses=["REVISION REQUIRED\n1. Still not right."]
-            )
-        return FakeListChatModel(responses=[f"{agent_id} did its part"])
+# A review loop whose loop node never passes, so every turn runs to its ceiling.
+_REVISING_LOOP = "deterministic-revising-loop"
+_REVISING_REVIEWER = "deterministic-revising-reviewer"
 
 
 def _loop_turn_input(
@@ -2481,13 +2468,13 @@ async def test_a_follow_up_turn_gets_the_whole_loop_ceiling() -> None:
     once. Driven through the real per-turn input builder over a real
     compiled loop graph, two turns on one thread.
     """
-    team = load_team_config("mock-autonomous")
+    team = load_team_config(_REVISING_LOOP)
     max_loops = team.topology.max_loops
     graph: Any = compile_team_graph(
         team_config=team,
         agent_configs={w.agent_id: load_agent_config(w.agent_id) for w in team.workers},
         checkpointer=InMemorySaver(),
-        provider_factory=_LoopReviewFactory(),
+        provider_factory=ProviderFactory(),
         model_assignment=deterministic_model_assignment(team),
     )
     config: Any = {"configurable": {"thread_id": "loop-turns"}}
@@ -2499,7 +2486,7 @@ async def test_a_follow_up_turn_gets_the_whole_loop_ceiling() -> None:
             thread_id="loop-turns",
             dispatch_id=dispatch,
             content="Carry it forward.",
-            team_preset="mock-autonomous",
+            team_preset=_REVISING_LOOP,
             recursion_limit=25,
         )
         visited: list[str] = []
@@ -2512,7 +2499,7 @@ async def test_a_follow_up_turn_gets_the_whole_loop_ceiling() -> None:
         return visited
 
     first_turn = await _turn("loop-turns-d1", first=True)
-    assert first_turn.count("mock-reviewer") == max_loops
+    assert first_turn.count(_REVISING_REVIEWER) == max_loops
 
     second_turn = await _turn("loop-turns-d2", first=False)
-    assert second_turn.count("mock-reviewer") == max_loops
+    assert second_turn.count(_REVISING_REVIEWER) == max_loops

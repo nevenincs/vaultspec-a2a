@@ -21,12 +21,12 @@ from langgraph.errors import GraphRecursionError
 
 from ...graph.compiler import CompiledTeamGraph, compile_team_graph
 from ...providers.factory import ProviderFactory
-from ...providers.team_selection import FrozenLaneAssignment
 from ...team.team_config import (
     discover_team_preset_ids,
     load_agent_config,
     load_team_config,
 )
+from ...testing import deterministic_model_assignment
 from ...testing.lanes import DeterministicResearchAdrChatModel, seated_lanes
 
 if TYPE_CHECKING:
@@ -59,19 +59,6 @@ def _compiled_graph() -> CompiledTeamGraph:
     agent_configs = {
         ref.agent_id: load_agent_config(ref.agent_id) for ref in team_config.workers
     }
-    lane = FrozenLaneAssignment.model_validate(
-        {
-            "schema_version": 1,
-            "provider_id": "deterministic",
-            "execution_mode": "in-process-deterministic",
-            "catalog_revision": "test-revision",
-            "entry_id": "test-entry",
-            "model_name": "deterministic",
-            "controls": [],
-            "defaulted_control_ids": [],
-            "provenance": {"selection_source": "team_selection"},
-        }
-    )
     step_timeout_seconds = team_config.graph.step_timeout_seconds
     assert step_timeout_seconds is not None
     with seated_lanes():
@@ -81,7 +68,7 @@ def _compiled_graph() -> CompiledTeamGraph:
             step_timeout=float(step_timeout_seconds),
             provider_factory=ProviderFactory(),
             workspace_root=Path.cwd(),
-            model_assignment={ref.agent_id: lane for ref in team_config.workers},
+            model_assignment=deterministic_model_assignment(team_config),
         )
 
 

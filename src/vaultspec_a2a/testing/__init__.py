@@ -125,7 +125,11 @@ if TYPE_CHECKING:
         serve_on_loopback_in_thread,
         uvicorn_started,
     )
-    from .lanes import armed_lane_environment, seated_lanes
+    from .lanes import (
+        armed_lane_environment,
+        deterministic_model_assignment,
+        seated_lanes,
+    )
     from .leases import (
         LEASE_TTL_MS,
         Lease,
@@ -369,6 +373,10 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.lanes",
         "armed_lane_environment",
     ),
+    "deterministic_model_assignment": (
+        "vaultspec_a2a.testing.lanes",
+        "deterministic_model_assignment",
+    ),
     "seated_lanes": ("vaultspec_a2a.testing.lanes", "seated_lanes"),
     "add_test_node": ("vaultspec_a2a.testing.graph", "add_test_node"),
     "ainvoke_test_graph": ("vaultspec_a2a.testing.graph", "ainvoke_test_graph"),
@@ -540,6 +548,7 @@ __all__ = [
     "declared_lane_model_value",
     "decode_frame",
     "desktop_workspace",
+    "deterministic_model_assignment",
     "effective_worker_count",
     "exchange_acp_request",
     "exclusive_keys",

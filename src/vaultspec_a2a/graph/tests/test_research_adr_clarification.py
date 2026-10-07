@@ -26,9 +26,9 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
+from ...testing import deterministic_model_assignment
 from .._compiler_research import _clarification_request_id
 from ..compiler import compile_team_graph
-from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 # The preset that declares a questionnaire, and a sibling that declares none.
 _ASKING_PRESET = "vaultspec-adr-research-clarify"
-_SILENT_PRESET = "vaultspec-adr-research-mock"
+_SILENT_PRESET = "vaultspec-adr-research-deterministic"
 
 
 class _FakeSubmitter:

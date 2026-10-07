@@ -1,0 +1,12 @@
+[agent]
+id           = "deterministic-branch-researcher"
+display_name = "Deterministic Branch Researcher"
+role         = "researcher"
+description  = """
+In-process ProviderFactory scenario for one research branch: it asks permission to
+run each tool its persona lists, one per non-blank line, and then returns a
+finding that names its branch and the options it was granted.
+"""
+
+[agent.persona]
+system_prompt = "read_source"

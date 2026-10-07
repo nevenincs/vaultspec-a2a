@@ -15,14 +15,24 @@ factory injects:
   and the reviewer emits the ``PASS`` sentinel that advances the inner review
   loop. The feature tag and topic are configurable so a parameterized harness can
   assert the materialized document stems.
-- scripted scenarios: supervisor routing, a supervised permission pause, a
-  provider failure, a cancellation window, a relay burst, an endless
-  generation loop, and a turn held until its test releases it, each selected
-  by the bundled agent that names it.
+- scripted scenarios: supervisor routing, a scripted supervisor, a reviewer
+  that always requests revision, a research branch that asks before it
+  reports, a supervised permission pause, a provider failure, a cancellation
+  window, a relay burst, an endless generation loop, and a turn held until its
+  test releases it, each selected by the bundled agent that names it.
+
+A scenario that follows a script reads it from its agent's persona, one entry
+per non-blank line. The scripted supervisor's entries are its routing replies,
+given in order, the last repeating once the others are spent. The branch
+researcher's entries are the tools it asks permission to run on its branch, in
+order. Each bundled preset declares a default script; :func:`scripted_supervisor`
+and :func:`branch_researcher` return that preset carrying a test's own, so the
+script a test drives is stated beside the assertions that depend on it.
 """
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator, Callable
 from enum import StrEnum
 from pathlib import Path
@@ -43,19 +53,28 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from pydantic import Field, PrivateAttr
 
 from ...authoring.contract import RESEARCH_ADR_ROLES
+from ...graph.nodes.phase_gate import REVIEW_REVISION_SENTINEL
 from ...providers._acp_types import PermissionCallback
-from ...team.team_config import AgentConfig
+from ...team import AgentConfig, AgentPersonaConfig, load_agent_config
 from ...thread.constants import DEFAULT_SUPERVISOR_ID
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["UNATTENDED_REPLY", "DeterministicResearchAdrChatModel"]
+__all__ = [
+    "UNATTENDED_REPLY",
+    "DeterministicResearchAdrChatModel",
+    "branch_researcher",
+    "scripted_supervisor",
+]
 
 
 class _DeterministicScript(StrEnum):
     """Named in-process scenarios selected by their bundled agent identity."""
 
     SUPERVISOR_ROUTING = "supervisor_routing"
+    SCRIPTED_SUPERVISOR = "scripted_supervisor"
+    REVISING_REVIEW = "revising_review"
+    BRANCH_RESEARCH = "branch_research"
     PERMISSION_PAUSE = "permission_pause"
     FAILURE = "failure"
     CANCEL_WINDOW = "cancel_window"
@@ -69,14 +88,25 @@ class _DeterministicScript(StrEnum):
 # approval gate and then the worker's own permission pause.
 _ROUTED_WORKER_ID = "deterministic-permission-pause"
 
+_SCRIPTED_SUPERVISOR_ID = "deterministic-scripted-supervisor"
+_BRANCH_RESEARCHER_ID = "deterministic-branch-researcher"
+
 # These agents deliberately select a scenario through the same ``AgentConfig``
 # injection that the production ``ProviderFactory`` uses for the role-keyed
 # research_adr content. Each remains entirely in-process and exists only to
-# exercise a real BaseChatModel/worker seam. A star supervisor is always built
-# from the default supervisor agent, so the routing scenario is keyed on that id
-# rather than on an agent of its own.
+# exercise a real BaseChatModel/worker seam. A star supervisor a worker compiles
+# is always built from the default supervisor agent, so the routing scenario is
+# keyed on that id; the scripted supervisor has an agent of its own because a
+# test hands it to the compiler directly. The revising verdict is served under
+# two roles: the document topology seats its reviewer by the ``doc-reviewer``
+# role, and a review loop outside it takes a plain ``reviewer``, since a document
+# role in a coding topology would misstate what its preset authors.
 _SCRIPT_BY_AGENT_ID: dict[str, _DeterministicScript] = {
     DEFAULT_SUPERVISOR_ID: _DeterministicScript.SUPERVISOR_ROUTING,
+    _SCRIPTED_SUPERVISOR_ID: _DeterministicScript.SCRIPTED_SUPERVISOR,
+    "deterministic-revising-doc-reviewer": _DeterministicScript.REVISING_REVIEW,
+    "deterministic-revising-reviewer": _DeterministicScript.REVISING_REVIEW,
+    _BRANCH_RESEARCHER_ID: _DeterministicScript.BRANCH_RESEARCH,
     _ROUTED_WORKER_ID: _DeterministicScript.PERMISSION_PAUSE,
     "deterministic-failure": _DeterministicScript.FAILURE,
     "deterministic-cancel-window": _DeterministicScript.CANCEL_WINDOW,
@@ -96,7 +126,12 @@ _SCRIPTED_PERMISSION_OPTIONS: tuple[tuple[str, str], ...] = (
 )
 
 UNATTENDED_REPLY = "Deterministic task completed unattended; no permission was asked."
-"""The permission-pause worker's reply on a turn that has no one to ask."""
+"""A permission scenario's reply on a turn that has no one to ask."""
+
+# The research producer states each branch's thread in a system message of its
+# own; the branch researcher reads it back so its requests and its finding name
+# the branch that made them.
+_RESEARCH_BRANCH_LINE = re.compile(r"Research thread '([^']*)'")
 
 _RELAY_BURST_CHUNKS = 1100
 _RELAY_BURST_CHUNK_BYTES = 4096
@@ -106,9 +141,15 @@ _LOOP_INTERVAL_SECONDS = 0.05
 _HOLD_POLL_SECONDS = 0.05
 _HELD_TURN_REPLY = "Deterministic held turn completed after its release."
 
-# The reviewer sentinel the research_adr inner-review router advances on (the
-# REVISION path is driven by the gate verdict, not this provider).
+# The verdict every role-keyed reviewer returns, which advances the inner review
+# loop; only the revising reviewer scenario sends work back.
 _REVIEW_PASS = "PASS"
+
+# The revising reviewer's verdict: the sentinel the review routers send work back
+# on, with one finding for the writer to address.
+_REVIEW_REVISION = (
+    f"{REVIEW_REVISION_SENTINEL}\n1. The claims need re-fetchable locators."
+)
 
 # This provider emits no clarification sentinel. A marker once lived here that
 # made the researcher's turn ask a question instead of researching, for a ground
@@ -236,6 +277,61 @@ def _script_of(agent_id: str | None) -> _DeterministicScript | None:
     return _SCRIPT_BY_AGENT_ID.get(agent_id) if agent_id else None
 
 
+def _script_lines(persona: str) -> tuple[str, ...]:
+    """Read a persona as a script: one entry per non-blank line."""
+    return tuple(line.strip() for line in persona.splitlines() if line.strip())
+
+
+def _scripted_preset(agent_id: str, script: tuple[str, ...]) -> AgentConfig:
+    """Load *agent_id*'s bundled preset with *script* as its persona.
+
+    Each entry must read back as itself - one non-blank line apiece - or the
+    model would follow a script other than the one its test stated.
+    """
+    persona = "\n".join(script)
+    if not script or _script_lines(persona) != script:
+        raise ValueError(
+            f"a script is one or more non-blank, single-line entries: {script!r}"
+        )
+    agent = load_agent_config(agent_id)
+    return agent.model_copy(
+        update={"persona": AgentPersonaConfig(system_prompt=persona)}
+    )
+
+
+def scripted_supervisor(*replies: str) -> AgentConfig:
+    """Return the scripted supervisor's preset, routing by *replies* in order.
+
+    The last reply repeats once the others are spent, so a single reply is a
+    supervisor that answers the same way however often it is asked.
+    """
+    return _scripted_preset(_SCRIPTED_SUPERVISOR_ID, replies)
+
+
+def branch_researcher(*tools: str) -> AgentConfig:
+    """Return the branch researcher's preset, asking to run *tools* on each branch."""
+    return _scripted_preset(_BRANCH_RESEARCHER_ID, tools)
+
+
+def _research_branch(messages: list[BaseMessage]) -> str:
+    """Return the research branch the producer stated for this turn."""
+    for message in messages:
+        found = _RESEARCH_BRANCH_LINE.search(str(message.content))
+        if found is not None:
+            return found.group(1)
+    raise RuntimeError(
+        "deterministic branch researcher was served outside a research branch"
+    )
+
+
+def _offered_permission_options() -> list[dict[str, str]]:
+    """The options every scripted permission request offers, in wire shape."""
+    return [
+        {"optionId": choice_id, "name": name}
+        for choice_id, name in _SCRIPTED_PERMISSION_OPTIONS
+    ]
+
+
 def _supervisor_route(messages: list[BaseMessage]) -> str:
     """Route to the scripted worker until it has answered the latest human turn.
 
@@ -257,9 +353,10 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
     Selected through the real provider path by its registered lane; the
     factory injects the run's ``AgentConfig`` so the model resolves its role or
     its scenario. The output is deterministic and derives only from the agent
-    id, feature tag, topic, the turn's messages and the permission answer, never
-    from a network call. A held turn's content is fixed as well; its test decides
-    only when it completes, through the hold gate.
+    id and persona, feature tag, topic, the turn's messages, the permission
+    answers and how many scripted replies it has given, never from a network
+    call. A held turn's content is fixed as well; its test decides only when it
+    completes, through the hold gate.
     """
 
     feature_tag: str = "acceptance-harness"
@@ -269,6 +366,7 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
     hold_gate: Path | None = Field(default=None, exclude=True)
 
     _cancel_window_entered: asyncio.Event = PrivateAttr(default_factory=asyncio.Event)
+    _replies_given: int = PrivateAttr(default=0)
 
     @property
     @override
@@ -296,6 +394,27 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         """Wait until the cancellation scenario has entered its blocking turn."""
         await self._cancel_window_entered.wait()
 
+    def _script(self) -> tuple[str, ...]:
+        """Return this model's script, read from its agent's persona."""
+        if self.agent_config is None:
+            return ()
+        return _script_lines(self.agent_config.persona.system_prompt)
+
+    def _scripted_reply(self) -> str:
+        """Give the scripted supervisor's next reply; the last one repeats.
+
+        Counted on this instance, which a compiled graph keeps for its
+        supervisor across every routing turn of its runs.
+        """
+        replies = self._script()
+        if not replies:
+            raise RuntimeError(
+                "deterministic scripted supervisor was served with no replies"
+            )
+        reply = replies[min(self._replies_given, len(replies) - 1)]
+        self._replies_given += 1
+        return reply
+
     async def _permission_pause_content(self) -> str:
         """Ask the worker's permission callback once and report the decision.
 
@@ -309,14 +428,36 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         option_id = await callback(
             _PERMISSION_TOOL_NAME,
             {"purpose": "exercise the generic supervised permission seam"},
-            [
-                {"optionId": choice_id, "name": name}
-                for choice_id, name in _SCRIPTED_PERMISSION_OPTIONS
-            ],
+            _offered_permission_options(),
         )
         if option_id == _ALLOW_OPTION_ID:
             return f"Deterministic permission approved with {option_id}."
         return f"Deterministic permission denied with {option_id}."
+
+    async def _branch_research_content(self, messages: list[BaseMessage]) -> str:
+        """Ask to run each scripted tool on this branch, then report the answers.
+
+        Every request names the branch and the call's place in the script, so
+        each is its own request even when a script names one tool twice. As on
+        the permission-pause worker, a turn without a callback has no one to ask
+        and reports, for its branch, that it proceeded unattended.
+        """
+        branch = _research_branch(messages)
+        callback = self.permission_callback
+        if callback is None:
+            return f"{branch}: {UNATTENDED_REPLY}"
+        tools = self._script()
+        if not tools:
+            raise RuntimeError(
+                "deterministic branch researcher was served with no tools to ask for"
+            )
+        granted = [
+            await callback(
+                tool, {"thread": branch, "call": index}, _offered_permission_options()
+            )
+            for index, tool in enumerate(tools)
+        ]
+        return f"{branch}: granted {' '.join(granted)}"
 
     async def _held_turn_content(self) -> str:
         """Hold the turn while its gate file exists, then complete it.
@@ -360,6 +501,15 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
 
         if script is _DeterministicScript.SUPERVISOR_ROUTING:
             return _supervisor_route(messages)
+
+        if script is _DeterministicScript.SCRIPTED_SUPERVISOR:
+            return self._scripted_reply()
+
+        if script is _DeterministicScript.REVISING_REVIEW:
+            return _REVIEW_REVISION
+
+        if script is _DeterministicScript.BRANCH_RESEARCH:
+            return await self._branch_research_content(messages)
 
         if script is _DeterministicScript.PERMISSION_PAUSE:
             return await self._permission_pause_content()

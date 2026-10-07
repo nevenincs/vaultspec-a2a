@@ -34,7 +34,12 @@ from ...ipc.schemas import DispatchRequest, canonical_project_root
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    deterministic_model_assignment,
+    new_state_graph,
+)
 from ...thread.errors import ConfigError
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ...thread.state import TeamState
@@ -64,20 +69,15 @@ def _uncanonical_spelling(workspace: Path) -> str:
 
 
 def _assignment(model_name: str) -> dict[str, FrozenLaneAssignment]:
+    """The preset's deterministic assignment, frozen under *model_name*.
+
+    The model name is the one field varied, so two assignments built under
+    different names differ in identity and in nothing else.
+    """
+    team = load_team_config("mock-success-single")
     return {
-        "coder": FrozenLaneAssignment.model_validate(
-            {
-                "provider_id": "deterministic",
-                "execution_mode": "in-process-deterministic",
-                "catalog_revision": "revision",
-                "entry_id": "entry",
-                "model_name": model_name,
-                "controls": [],
-                "defaulted_control_ids": [],
-                "provenance": {"selection_source": "team_selection"},
-                "schema_version": 1,
-            }
-        )
+        role: lane.model_copy(update={"model_name": model_name})
+        for role, lane in deterministic_model_assignment(team).items()
     }
 
 
@@ -621,9 +621,7 @@ class TestOneWorkspaceOneGraphEntry:
         """Real compilation: a second run never receives the first run's graph."""
         manager = self._manager()
 
-        selection = _assignment("current")["coder"]
-        team = load_team_config("mock-success-single", workspace_root=workspace)
-        assignment = {ref.agent_id: dict(selection) for ref in team.workers}
+        assignment = _assignment("current")
 
         def dispatch(thread_id: str) -> DispatchRequest:
             return DispatchRequest(

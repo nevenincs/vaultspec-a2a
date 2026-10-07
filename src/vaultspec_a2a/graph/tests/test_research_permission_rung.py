@@ -3,131 +3,38 @@
 The document topology fans research out into one branch per thread spec, and a
 branch is a fan-out task: LangGraph replays it with the payload its dispatch
 sent, so the run's answer channel never reaches it however far the run has
-moved on. These tests drive the real ``vaultspec-adr-research`` graph over a
-real ``AsyncSqliteSaver`` to prove the rung works anyway - two branches park on
+moved on. These tests drive a real ``research_adr`` graph over a real
+``AsyncSqliteSaver`` to prove the rung works anyway - two branches park on
 their own requests, each is answered by the interrupt it belongs to, both
 finish - and that an autonomous run still asks nobody.
 
-The researcher lane is a scripted in-process model that asks for each branch it
-serves; every other role runs on the deterministic lane through the real
-provider factory. The permission seam the researcher drives is the production
-callback, not a stand-in for one.
+Every role runs on the deterministic lane through the real provider factory.
+The researcher is the lane's branch researcher, which asks to run each tool its
+script lists before it reports, so the permission seam it drives is the
+production callback, not a stand-in for one.
 """
 
 from __future__ import annotations
 
-import re
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.messages import HumanMessage
 from langgraph.types import Command, Interrupt
 
 from ...providers import ProviderFactory
-from ...team.team_config import ResearchThreadSpec, load_agent_config, load_team_config
+from ...team.team_config import load_agent_config, load_team_config
+from ...testing import deterministic_model_assignment
+from ...testing.lanes import UNATTENDED_REPLY, branch_researcher
 from ..compiler import compile_team_graph
-from ..protocols import ProviderFactoryProtocol
-from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-_OPTIONS: list[dict[str, Any]] = [
-    {"optionId": "allow_once", "name": "Allow once"},
-    {"optionId": "reject_once", "name": "Reject once"},
-]
-
-_THREADS = [
-    ResearchThreadSpec(thread_id="codebase"),
-    ResearchThreadSpec(thread_id="prior-art"),
-]
-
-# The producer states each branch's thread in a system message; the scripted
-# lane reads it back so a finding names the branch that produced it.
-_THREAD_LINE = re.compile(r"Research thread '([^']*)'")
-
-_NO_RUNG = "no permission rung"
-
-
-def _branch_thread(messages: list[BaseMessage]) -> str:
-    for message in messages:
-        found = _THREAD_LINE.search(str(message.content))
-        if found is not None:
-            return found.group(1)
-    raise AssertionError("the researcher producer stated no research thread")
-
-
-class _PermissionAskingResearcher(BaseChatModel):
-    """A researcher lane that asks before it reports, and says what it got."""
-
-    calls_per_turn: int = 1
-    permission_callback: Any | None = None
-
-    @property
-    @override
-    def _llm_type(self) -> str:
-        return "permission-asking-researcher"
-
-    @override
-    def _generate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: Any | None = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        raise NotImplementedError("this lane is async only")
-
-    @override
-    async def _agenerate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: Any | None = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        thread = _branch_thread(messages)
-        callback = self.permission_callback
-        if callback is None:
-            content = f"{thread}: {_NO_RUNG}"
-        else:
-            granted = [
-                await callback(
-                    "read_source", {"thread": thread, "call": index}, _OPTIONS
-                )
-                for index in range(self.calls_per_turn)
-            ]
-            content = f"{thread}: granted {' '.join(granted)}"
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(content))])
-
-
-class _ResearcherPermissionFactory:
-    """Serve the asking lane to the researcher and the real factory's to the rest."""
-
-    def __init__(self, *, calls_per_turn: int = 1) -> None:
-        self._calls_per_turn = calls_per_turn
-        self._factory = ProviderFactory()
-
-    def create(
-        self,
-        provider: Any,
-        *,
-        model: Any,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
-        **kwargs: Any,
-    ) -> BaseChatModel:
-        if getattr(agent_config, "role", None) == "researcher":
-            return _PermissionAskingResearcher(calls_per_turn=self._calls_per_turn)
-        return self._factory.create(
-            provider,
-            model=model,
-            agent_config=agent_config,
-            workspace_root=workspace_root,
-            **kwargs,
-        )
+# Two research branches, ``codebase`` and ``prior-art``, each on the branch
+# researcher.
+_PRESET = "deterministic-research-branches"
+_TOOL = "read_source"
 
 
 class _FakeSubmitter:
@@ -141,18 +48,18 @@ def _graph(
     checkpointer: AsyncSqliteSaver,
     *,
     autonomous: bool = False,
-    calls_per_turn: int = 1,
+    asks_per_branch: int = 1,
 ) -> Any:
-    team = load_team_config("vaultspec-adr-research")
-    topology = team.topology.model_copy(update={"research_threads": _THREADS})
-    team = team.model_copy(update={"topology": topology})
-    factory = _ResearcherPermissionFactory(calls_per_turn=calls_per_turn)
-    assert isinstance(factory, ProviderFactoryProtocol)
+    team = load_team_config(_PRESET)
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    tools = (_TOOL,) * asks_per_branch
+    researcher = branch_researcher(*tools)
+    agent_configs[researcher.id] = researcher
     return compile_team_graph(
         team_config=team,
-        agent_configs={w.agent_id: load_agent_config(w.agent_id) for w in team.workers},
+        agent_configs=agent_configs,
         checkpointer=checkpointer,
-        provider_factory=cast("ProviderFactoryProtocol", factory),
+        provider_factory=ProviderFactory(),
         step_timeout=42.0,
         autonomous=autonomous,
         proposal_submitter=_FakeSubmitter(),
@@ -228,11 +135,11 @@ async def test_two_supervised_branches_each_park_and_each_resume(
         for p in _permission_interrupts(result)
     ] == ["prior-art"]
 
-    result = await graph.ainvoke(_answer(by_thread["prior-art"], "reject_once"), config)
+    result = await graph.ainvoke(_answer(by_thread["prior-art"], "deny_once"), config)
     assert _permission_interrupts(result) == []
     assert _claims(result) == [
         "codebase: granted allow_once",
-        "prior-art: granted reject_once",
+        "prior-art: granted deny_once",
     ]
     # Both branches joined, so the machine ran on to its first human document
     # gate rather than stalling at the fan-out.
@@ -253,8 +160,8 @@ async def test_an_autonomous_research_run_asks_nobody(
 
     assert _permission_interrupts(result) == []
     assert _claims(result) == [
-        f"codebase: {_NO_RUNG}",
-        f"prior-art: {_NO_RUNG}",
+        f"codebase: {UNATTENDED_REPLY}",
+        f"prior-art: {UNATTENDED_REPLY}",
     ]
     assert [p.value["type"] for p in result["__interrupt__"]] == [
         "document_approval_request"
@@ -272,7 +179,7 @@ async def test_a_branch_needing_two_approvals_finishes(
     question per delivery must still converge; the bound below fails the test
     rather than hanging if it does not.
     """
-    graph = _graph(checkpointer, calls_per_turn=2)
+    graph = _graph(checkpointer, asks_per_branch=2)
     config = {"configurable": {"thread_id": "rung-two-approvals"}}
 
     result = await graph.ainvoke(_seed("rung-two-approvals"), config=config)
@@ -329,9 +236,9 @@ async def test_an_answer_for_another_branch_settles_nothing(
     result = await graph.ainvoke(
         _answer(still_asking["codebase"], "allow_once"), config
     )
-    result = await graph.ainvoke(_answer(prior_art, "reject_once"), config)
+    result = await graph.ainvoke(_answer(prior_art, "deny_once"), config)
     assert _permission_interrupts(result) == []
     assert _claims(result) == [
         "codebase: granted allow_once",
-        "prior-art: granted reject_once",
+        "prior-art: granted deny_once",
     ]

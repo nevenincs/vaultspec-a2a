@@ -9,7 +9,10 @@ while it sat on disk.
 Driven against a real workspace: the writer worker writes a real file into a
 real ``.vault/`` tree and the compiled star graph is run over a real
 checkpointer, so the refresh is exercised as a filesystem read rather than
-described.
+described. The supervisor is the deterministic lane's scripted supervisor and
+every other role runs on the lane through the real provider factory, but for
+the writer: no lane scenario puts a document on disk, so that one turn is the
+test's own.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 
+from ...providers import ProviderFactory
 from ...team.team_config import (
     TeamConfig,
     TeamGraphConfig,
@@ -30,13 +34,14 @@ from ...team.team_config import (
     WorkerRef,
     load_agent_config,
 )
+from ...testing import deterministic_model_assignment
+from ...testing.lanes import scripted_supervisor
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
 )
 from ...thread.enums import ControlActionType
 from ..compiler import compile_team_graph
-from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,55 +77,31 @@ class _PlanWritingChat(BaseChatModel):
         )
 
 
-class _RoutingChat(BaseChatModel):
-    """Names each route in turn; the last reply repeats once exhausted."""
+class _PlanWritingFactory:
+    """The real factory for every role but the plan author, whose turn writes."""
 
-    replies: Any = None
-
-    @property
-    @override
-    def _llm_type(self) -> str:
-        return "routing"
-
-    @override
-    def _generate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: Any | None = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        del messages, stop, run_manager, kwargs
-        queued = cast("list[str]", self.replies)
-        reply = queued.pop(0) if len(queued) > 1 else queued[0]
-        return ChatResult(
-            generations=[ChatGeneration(message=AIMessage(content=reply))]
-        )
-
-
-class _Factory:
-    """Supervisor routes; the plan author writes; everyone else reports back."""
-
-    def __init__(self, plan_path: Path, replies: list[str]) -> None:
+    def __init__(self, plan_path: Path) -> None:
         self._plan_path = plan_path
-        self._replies = replies
+        self._factory = ProviderFactory()
 
     def create(
         self,
         provider: Any,
         *,
-        model: Any | None = None,
+        model: Any,
         agent_config: Any | None = None,
         workspace_root: Any | None = None,
         **kwargs: Any,
     ) -> BaseChatModel:
-        del provider, model, workspace_root, kwargs
-        agent_id = getattr(agent_config, "id", None)
-        if agent_id is None:
-            return _RoutingChat(replies=self._replies)
-        if agent_id == _PLAN_AUTHOR:
+        if getattr(agent_config, "id", None) == _PLAN_AUTHOR:
             return _PlanWritingChat(plan_path=self._plan_path)
-        return _RoutingChat(replies=[f"{agent_id} did its part"])
+        return self._factory.create(
+            provider,
+            model=model,
+            agent_config=agent_config,
+            workspace_root=workspace_root,
+            **kwargs,
+        )
 
 
 def _run_input(thread_id: str, prompt: str) -> dict[str, Any]:
@@ -182,7 +163,8 @@ async def test_the_supervisor_gates_on_a_plan_its_own_worker_just_wrote(
     graph: Any = compile_team_graph(
         team_config=team,
         agent_configs={a: load_agent_config(a) for a in (_PLAN_AUTHOR, _CODER)},
-        provider_factory=_Factory(plan_path, [_PLAN_AUTHOR, _CODER, "FINISH"]),
+        supervisor_agent_config=scripted_supervisor(_PLAN_AUTHOR, _CODER, "FINISH"),
+        provider_factory=_PlanWritingFactory(plan_path),
         model_assignment=deterministic_model_assignment(team),
         checkpointer=InMemorySaver(),
         workspace_root=tmp_path,
@@ -233,9 +215,8 @@ async def test_the_first_supervisor_pass_sees_a_vault_it_was_not_seeded_with(
     graph: Any = compile_team_graph(
         team_config=team,
         agent_configs={a: load_agent_config(a) for a in (_PLAN_AUTHOR, _CODER)},
-        provider_factory=_Factory(
-            vault / "plan" / "unused.md", [_PLAN_AUTHOR, "FINISH"]
-        ),
+        supervisor_agent_config=scripted_supervisor(_PLAN_AUTHOR, "FINISH"),
+        provider_factory=ProviderFactory(),
         model_assignment=deterministic_model_assignment(team),
         checkpointer=InMemorySaver(),
         workspace_root=tmp_path,

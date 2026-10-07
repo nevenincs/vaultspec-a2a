@@ -1,0 +1,8 @@
+[agent]
+id           = "deterministic-revising-reviewer"
+display_name = "Deterministic Revising Reviewer"
+role         = "reviewer"
+description  = "In-process ProviderFactory scenario whose every review requests revision."
+
+[agent.persona]
+system_prompt = "Request revision of every pass under review."

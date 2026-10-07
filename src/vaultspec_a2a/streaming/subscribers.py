@@ -416,12 +416,6 @@ class SubscriberManager:
         self._dropped.pop(client_id, None)
         return queue
 
-    def get_subscriber_queue(
-        self, client_id: str
-    ) -> asyncio.Queue[SequencedEvent] | None:
-        """Return the event queue for a subscriber, or None if not registered."""
-        return self._subscribers.get(client_id)
-
     def remove_subscriber(self, client_id: str) -> None:
         """Unregister a subscriber."""
         self._subscribers.pop(client_id, None)
@@ -479,11 +473,6 @@ class SubscriberManager:
             )
         self._subscriptions[client_id] = prospective
 
-    def unsubscribe(self, client_id: str, thread_ids: list[str]) -> None:
-        """Unsubscribe a client from one or more thread event streams."""
-        if client_id in self._subscriptions:
-            self._subscriptions[client_id].difference_update(thread_ids)
-
     def remove_thread(self, thread_id: str) -> None:
         """Remove ``thread_id`` from every active subscriber subscription set."""
         for client_id in list(self._subscriptions):
@@ -509,14 +498,6 @@ class SubscriberManager:
         is the resource the gateway's global stream-connection limit bounds.
         """
         return len(self._subscribers)
-
-    def subscription_count(self) -> int:
-        """Return the number of clients with active subscriptions."""
-        return len(self._subscriptions)
-
-    def get_subscriptions(self, client_id: str) -> frozenset[str]:
-        """Return a frozen snapshot of the thread subscriptions for *client_id*."""
-        return frozenset(self._subscriptions.get(client_id, set()))
 
     def get_active_thread_ids(self) -> list[str]:
         """Return all thread IDs that have at least one subscriber.

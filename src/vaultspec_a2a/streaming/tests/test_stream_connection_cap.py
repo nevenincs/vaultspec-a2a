@@ -85,7 +85,7 @@ def test_a_refused_subscriber_leaves_the_registry_unchanged(
         aggregator.add_subscriber("one-client-too-many")
 
     assert aggregator.subscriber_count() == limit
-    assert aggregator.get_subscriber_queue("one-client-too-many") is None
+    assert "one-client-too-many" not in aggregator._subscribers_mgr._subscribers
 
 
 def test_the_cap_is_global_rather_than_per_client(

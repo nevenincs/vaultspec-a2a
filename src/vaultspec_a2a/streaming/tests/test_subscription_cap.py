@@ -39,7 +39,7 @@ def test_a_client_may_hold_subscriptions_up_to_the_cap(
 
     aggregator.subscribe("client-1", _threads(0, limit))
 
-    assert len(aggregator.get_subscriptions("client-1")) == limit
+    assert len(aggregator.get_active_thread_ids()) == limit
 
 
 def test_the_request_that_would_cross_the_cap_is_refused(
@@ -65,12 +65,12 @@ def test_a_refused_request_leaves_the_existing_subscriptions_intact(
     limit = domain_config.max_subscriptions_per_client
     aggregator.add_subscriber("client-1")
     aggregator.subscribe("client-1", _threads(0, limit))
-    before = aggregator.get_subscriptions("client-1")
+    before = aggregator.get_active_thread_ids()
 
     with pytest.raises(EventAggregatorError):
         aggregator.subscribe("client-1", _threads(limit, 50))
 
-    after = aggregator.get_subscriptions("client-1")
+    after = aggregator.get_active_thread_ids()
     assert after == before
     assert not any(t in after for t in _threads(limit, 50))
 
@@ -90,7 +90,7 @@ def test_one_oversized_request_is_refused_outright(
     with pytest.raises(EventAggregatorError):
         aggregator.subscribe("client-1", _threads(0, limit * 4))
 
-    assert aggregator.get_subscriptions("client-1") == frozenset()
+    assert aggregator.get_active_thread_ids() == []
 
 
 def test_resubscribing_to_held_threads_at_the_cap_is_not_refused(
@@ -108,7 +108,7 @@ def test_resubscribing_to_held_threads_at_the_cap_is_not_refused(
 
     aggregator.subscribe("client-1", held)
 
-    assert len(aggregator.get_subscriptions("client-1")) == limit
+    assert len(aggregator.get_active_thread_ids()) == limit
 
 
 def test_the_cap_is_per_client_not_global(aggregator: EventAggregator) -> None:
@@ -122,9 +122,11 @@ def test_the_cap_is_per_client_not_global(aggregator: EventAggregator) -> None:
     aggregator.add_subscriber("client-2")
     aggregator.subscribe("client-1", _threads(0, limit))
 
-    aggregator.subscribe("client-2", _threads(0, limit))
+    aggregator.subscribe("client-2", _threads(limit, limit))
 
-    assert len(aggregator.get_subscriptions("client-2")) == limit
+    # Disjoint thread sets, so the union only reaches twice the cap if the
+    # second client was granted every thread it asked for.
+    assert len(aggregator.get_active_thread_ids()) == 2 * limit
 
 
 def test_a_refusal_emits_the_operational_counter() -> None:
@@ -157,13 +159,18 @@ def test_an_accepted_subscription_emits_no_refusal_counter() -> None:
     assert counter_total(reader, "aggregator.subscriptions_refused") == 0
 
 
-def test_unsubscribing_frees_capacity_again(aggregator: EventAggregator) -> None:
-    """The cap bounds concurrent held subscriptions, not lifetime total."""
+def test_a_purged_thread_frees_capacity_again(aggregator: EventAggregator) -> None:
+    """The cap bounds concurrent held subscriptions, not lifetime total.
+
+    A settled run's thread is purged from every subscription set, which is the
+    path that hands a long-lived client its capacity back.
+    """
     limit = domain_config.max_subscriptions_per_client
     aggregator.add_subscriber("client-1")
     aggregator.subscribe("client-1", _threads(0, limit))
-    aggregator.unsubscribe("client-1", _threads(0, 10))
+    for thread_id in _threads(0, 10):
+        aggregator.clear_thread_state(thread_id)
 
     aggregator.subscribe("client-1", _threads(limit, 10))
 
-    assert len(aggregator.get_subscriptions("client-1")) == limit
+    assert len(aggregator.get_active_thread_ids()) == limit

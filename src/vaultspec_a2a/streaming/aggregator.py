@@ -19,11 +19,9 @@ from typing import Any, TypedDict, Unpack, cast
 
 from langgraph.types import Command
 
-from ..graph.enums import AgentLifecycleState, ToolCallStatus, ToolKind
-from ..graph.events import DomainEvent, PermissionRequest
+from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ..providers import ProviderCondition
-from ._run_callbacks import RunLifecycleCallbacks
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .ingest import GraphInvocation, IngestManager, IngestRequest
@@ -32,35 +30,6 @@ from .transformer import project_run_progress
 from .types import SequencedEvent, StreamableGraph
 
 __all__ = ["EventAggregator"]
-
-
-class _ToolCallStartOptions(TypedDict, total=False):
-    kind: ToolKind
-    input_args: dict[str, Any] | None
-
-
-class _ToolCallUpdateOptions(TypedDict, total=False):
-    status: ToolCallStatus | None
-    title: str | None
-    content: list[dict[str, str | None]] | None
-
-
-class _PermissionRequestOptional(TypedDict, total=False):
-    tool_call: str | None
-    tool_kind: ToolKind | None
-
-
-class _PermissionRequestOptions(_PermissionRequestOptional):
-    thread_id: str
-    agent_id: str
-    request_id: str
-    description: str
-    options: list[dict[str, str]]
-
-
-class _ArtifactUpdateOptions(TypedDict, total=False):
-    append: bool
-    last_chunk: bool
 
 
 class _IngestOptions(TypedDict, total=False):
@@ -101,9 +70,9 @@ def _validate_ingest_arguments(
 class EventAggregator:  # pylint: disable=too-many-public-methods
     """Central event bus — composition root delegating to sub-components.
 
-    Preserves the exact same public API as the pre-decomposition monolith.
-    All callers continue to work unchanged. The public method count reflects
-    that stable facade; implementation state lives in composed managers.
+    Exposes only the operations the worker and the gateway actually call; the
+    public method count is the union of those two surfaces. Everything else is
+    reached on the composed manager that owns it.
     """
 
     def __init__(self, telemetry: TelemetryHook | None = None) -> None:
@@ -124,21 +93,10 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         self._emitters.bind_buffering(self._buffering)
         self._ingest = IngestManager(self._emitters, self._buffering, self._telemetry)
 
-    @property
-    def emitters(self) -> EventEmitters:
-        """Expose the underlying emitters for callers wiring interrupt detection."""
-        return self._emitters
-
     # -- Sequence management (delegates to emitters) --------------------
 
     def get_sequence(self, thread_id: str) -> int:
         return self._emitters.get_sequence(thread_id)
-
-    def advance_sequence(self, thread_id: str) -> int:
-        return self._emitters.advance_sequence(thread_id)
-
-    def sequence_count(self) -> int:
-        return self._emitters.sequence_count()
 
     def prune_sequences(self, active_thread_ids: set[str]) -> int:
         return self._emitters.prune_sequences(active_thread_ids)
@@ -147,11 +105,6 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
 
     def add_subscriber(self, client_id: str) -> asyncio.Queue[SequencedEvent]:
         return self._subscribers_mgr.add_subscriber(client_id)
-
-    def get_subscriber_queue(
-        self, client_id: str
-    ) -> asyncio.Queue[SequencedEvent] | None:
-        return self._subscribers_mgr.get_subscriber_queue(client_id)
 
     def remove_subscriber(self, client_id: str) -> None:
         self._subscribers_mgr.remove_subscriber(client_id)
@@ -162,9 +115,6 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
     def subscribe(self, client_id: str, thread_ids: list[str]) -> None:
         self._subscribers_mgr.subscribe(client_id, thread_ids)
 
-    def unsubscribe(self, client_id: str, thread_ids: list[str]) -> None:
-        self._subscribers_mgr.unsubscribe(client_id, thread_ids)
-
     def add_broadcast_hook(
         self, hook: Callable[[SequencedEvent], Awaitable[None]]
     ) -> None:
@@ -172,12 +122,6 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
 
     def subscriber_count(self) -> int:
         return self._subscribers_mgr.subscriber_count()
-
-    def subscription_count(self) -> int:
-        return self._subscribers_mgr.subscription_count()
-
-    def get_subscriptions(self, client_id: str) -> frozenset[str]:
-        return self._subscribers_mgr.get_subscriptions(client_id)
 
     def get_active_thread_ids(self) -> list[str]:
         return self._subscribers_mgr.get_active_thread_ids()
@@ -239,26 +183,7 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
     def remove_node_metadata(self, thread_id: str) -> None:
         self._subscribers_mgr.remove_node_metadata(thread_id)
 
-    # -- Buffering (delegates to buffering) -----------------------------
-
-    async def buffer_message_chunk(
-        self,
-        thread_id: str,
-        agent_id: str,
-        content: str,
-        message_id: str,
-    ) -> None:
-        await self._buffering.buffer_message_chunk(
-            thread_id, agent_id, content, message_id
-        )
-
-    async def flush_chunk_buffer(self, thread_id: str) -> None:
-        await self._buffering.flush_chunk_buffer(thread_id)
-
     # -- Event emission (delegates to emitters) -------------------------
-
-    async def emit(self, event: DomainEvent) -> None:
-        await self._emitters.emit(event)
 
     async def emit_agent_status(
         self,
@@ -272,92 +197,11 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
             thread_id, agent_id, node_name, state, detail
         )
 
-    async def emit_message_chunk(
-        self,
-        thread_id: str,
-        agent_id: str,
-        content: str,
-        message_id: str,
-        finish_reason: str | None = None,
-    ) -> None:
-        await self._emitters.emit_message_chunk(
-            thread_id, agent_id, content, message_id, finish_reason
-        )
-
-    async def emit_thought_chunk(
-        self,
-        thread_id: str,
-        agent_id: str,
-        content: str,
-        message_id: str,
-    ) -> None:
-        await self._emitters.emit_thought_chunk(
-            thread_id, agent_id, content, message_id
-        )
-
-    async def emit_tool_call_start(
-        self,
-        thread_id: str,
-        agent_id: str,
-        tool_call_id: str,
-        title: str,
-        **options: Unpack[_ToolCallStartOptions],
-    ) -> None:
-        kind = options.get("kind", ToolKind.OTHER)
-        input_args = options.get("input_args")
-        await self._emitters.emit_tool_call_start(
-            thread_id=thread_id,
-            agent_id=agent_id,
-            tool_call_id=tool_call_id,
-            title=title,
-            kind=kind,
-            input_args=input_args,
-        )
-
-    async def emit_tool_call_update(
-        self,
-        thread_id: str,
-        agent_id: str,
-        tool_call_id: str,
-        **options: Unpack[_ToolCallUpdateOptions],
-    ) -> None:
-        await self._emitters.emit_tool_call_update(
-            thread_id=thread_id,
-            agent_id=agent_id,
-            tool_call_id=tool_call_id,
-            status=options.get("status"),
-            title=options.get("title"),
-            content=options.get("content"),
-        )
-
-    async def emit_permission_request(
-        self,
-        **options: Unpack[_PermissionRequestOptions],
-    ) -> None:
-        await self._emitters.emit_permission_request(
-            thread_id=options["thread_id"],
-            agent_id=options["agent_id"],
-            request_id=options["request_id"],
-            description=options["description"],
-            options=options["options"],
-            tool_call=options.get("tool_call"),
-            tool_kind=options.get("tool_kind"),
-        )
-
     def resolve_permission(self, request_id: str) -> None:
         self._emitters.resolve_permission(request_id)
 
-    def expire_thread_permissions(self, thread_id: str) -> int:
-        return self._emitters.expire_thread_permissions(thread_id)
-
     def prune_stale_permissions(self, max_age_seconds: float = 300.0) -> int:
         return self._emitters.prune_stale_permissions(max_age_seconds)
-
-    def get_pending_permissions(
-        self,
-        thread_id: str | None = None,
-    ) -> list[PermissionRequest]:
-        return self._emitters.get_pending_permissions(thread_id)
 
     def get_agent_states(self, thread_id: str) -> dict[str, AgentLifecycleState]:
         return self._emitters.get_agent_states(thread_id)
@@ -372,30 +216,6 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
     ) -> None:
         self._emitters.sync_worker_event(thread_id, payload)
 
-    async def emit_artifact_update(
-        self,
-        thread_id: str,
-        artifact_id: str,
-        filename: str,
-        content: str,
-        **options: Unpack[_ArtifactUpdateOptions],
-    ) -> None:
-        await self._emitters.emit_artifact_update(
-            thread_id=thread_id,
-            artifact_id=artifact_id,
-            filename=filename,
-            content=content,
-            append=options.get("append", False),
-            last_chunk=options.get("last_chunk", True),
-        )
-
-    async def emit_plan_update(
-        self,
-        thread_id: str,
-        entries: list[dict[str, str]],
-    ) -> None:
-        await self._emitters.emit_plan_update(thread_id, entries)
-
     async def emit_error(
         self,
         thread_id: str,
@@ -405,39 +225,6 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         agent_id: str | None = None,
     ) -> None:
         await self._emitters.emit_error(thread_id, code, message, recoverable, agent_id)
-
-    async def emit_team_status(
-        self,
-        thread_id: str,
-        agents: list[dict[str, Any]],
-        active_thread_ids: list[str] | None = None,
-    ) -> None:
-        await self._emitters.emit_team_status(thread_id, agents, active_thread_ids)
-
-    # -- LangGraph stream processing (delegates to transformer/ingest) ---
-
-    async def process_stream_frame(
-        self,
-        namespace: tuple[str, ...],
-        mode: str,
-        payload: object,
-        thread_id: str,
-        agent_id: str,
-    ) -> None:
-        """Project one ``(namespace, mode, payload)`` graph stream frame."""
-        from .transformer import StreamFrame
-
-        await self._ingest.project_frame(
-            StreamFrame(namespace=namespace, mode=mode, payload=payload),
-            thread_id=thread_id,
-            agent_id=agent_id,
-        )
-
-    def run_lifecycle_callbacks(
-        self, thread_id: str, agent_id: str
-    ) -> RunLifecycleCallbacks:
-        """The tool and model-completion handler a run seats in its config."""
-        return self._ingest.run_lifecycle_callbacks(thread_id, agent_id)
 
     # -- Ingest (delegates to ingest manager) ---------------------------
 

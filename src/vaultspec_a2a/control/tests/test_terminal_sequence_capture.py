@@ -186,7 +186,7 @@ async def test_the_sequence_is_captured_before_the_prune_discards_it(
 
     aggregator = EventAggregator()
     for _ in range(7):
-        aggregator.advance_sequence(thread_id)
+        aggregator._emitters.next_sequence(thread_id)
     assert aggregator.get_sequence(thread_id) == 7
 
     await _handle_terminal_event(
@@ -226,7 +226,7 @@ async def test_a_reconnecting_client_reads_the_true_cursor_after_settle(
 
     aggregator = EventAggregator()
     for _ in range(3):
-        aggregator.advance_sequence(thread_id)
+        aggregator._emitters.next_sequence(thread_id)
 
     await _handle_terminal_event(
         thread_id,
@@ -275,7 +275,7 @@ async def test_a_live_run_still_reads_the_aggregators_own_counter(
 
     aggregator = EventAggregator()
     for _ in range(4):
-        aggregator.advance_sequence(thread_id)
+        aggregator._emitters.next_sequence(thread_id)
 
     async with session_factory() as db:
         capture = await capture_thread_state(

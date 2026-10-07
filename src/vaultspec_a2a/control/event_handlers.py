@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import asdict
 from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, TypedDict, Unpack
@@ -931,7 +932,7 @@ async def _handle_execution_state_event(
             interrupt_count=projection.interrupt_count,
             next_nodes=list(projection.next_nodes),
             interrupt_types=list(projection.interrupt_types),
-            tasks=[task.model_dump(mode="json") for task in projection.tasks],
+            tasks=[asdict(task) for task in projection.tasks],
             degraded_reasons=list(projection.degraded_reasons),
         )
         await db.commit()

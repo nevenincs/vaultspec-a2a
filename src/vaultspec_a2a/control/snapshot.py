@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, ToolCall, ToolMessage
+from pydantic import TypeAdapter
 
 from ..graph.enums import (
     AgentLifecycleState,
@@ -23,7 +24,9 @@ from ..thread.snapshots import (
     ArtifactData,
     MessageData,
     ThreadStateData,
+    ToolCallContent,
     ToolCallData,
+    ToolCallLocation,
     build_agent_descriptor,
     classify_message_role,
     derive_message_id,
@@ -123,6 +126,11 @@ def _checkpoint_agents(
     ]
 
 
+#: Checkpoint action detail arrives as plain mappings; snapshots carry typed blocks.
+_TOOL_CALL_CONTENT = TypeAdapter(list[ToolCallContent])
+_TOOL_CALL_LOCATIONS = TypeAdapter(list[ToolCallLocation])
+
+
 def _checkpoint_tool_call(
     call: ToolCall, answered_tool_ids: set[str]
 ) -> ToolCallData | None:
@@ -136,16 +144,16 @@ def _checkpoint_tool_call(
         return ToolCallData(
             tool_call_id=call_id,
             title=name,
-            kind=str(classify_tool_kind(name)),
-            status=str(map_action_item_status(detail.get("status"))),
-            content=content,
-            locations=locations,
+            kind=classify_tool_kind(name),
+            status=map_action_item_status(detail.get("status")),
+            content=_TOOL_CALL_CONTENT.validate_python(content),
+            locations=_TOOL_CALL_LOCATIONS.validate_python(locations),
         )
     return ToolCallData(
         tool_call_id=call_id,
         title=name,
-        kind=str(classify_tool_kind(name)),
-        status=str(
+        kind=classify_tool_kind(name),
+        status=(
             ToolCallStatus.COMPLETED
             if call_id in answered_tool_ids
             else ToolCallStatus.PENDING
@@ -183,15 +191,13 @@ def _live_tool_calls(
         if call_id in checkpoint_ids:
             continue
         try:
-            kind = str(ToolKind(state.get("kind", ToolKind.OTHER.value)))
+            kind = ToolKind(state.get("kind", ToolKind.OTHER.value))
         except ValueError:
-            kind = str(ToolKind.OTHER)
+            kind = ToolKind.OTHER
         try:
-            status = str(
-                ToolCallStatus(state.get("status", ToolCallStatus.PENDING.value))
-            )
+            status = ToolCallStatus(state.get("status", ToolCallStatus.PENDING.value))
         except ValueError:
-            status = str(ToolCallStatus.PENDING)
+            status = ToolCallStatus.PENDING
         tool_calls.append(
             ToolCallData(
                 tool_call_id=call_id,

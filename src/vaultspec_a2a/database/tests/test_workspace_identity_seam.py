@@ -14,20 +14,12 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
 from ...control import run_discovery_service
 from ...control.run_discovery_service import discover_active_runs
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
-from ..models import Base
 from ..thread_repository import (
     _workspace_key,
     create_thread,
@@ -35,24 +27,9 @@ from ..thread_repository import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
     from pathlib import Path
 
-
-@pytest_asyncio.fixture
-async def engine() -> AsyncGenerator[AsyncEngine]:
-    database = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with database.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    yield database
-    await database.dispose()
-
-
-@pytest_asyncio.fixture
-async def session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as database_session:
-        yield database_session
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def test_both_seams_share_one_normalizer_object() -> None:

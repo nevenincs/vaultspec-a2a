@@ -18,15 +18,14 @@ from typing import TYPE_CHECKING, Any, cast
 import anyio
 import httpx
 import pytest
-import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...conftest import SqlitePosture
 from ...control import cancel_service
 from ...control._permission_response_contract import (
     PermissionInput,
@@ -43,11 +42,9 @@ from ...control.message_service import send_followup_message
 from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
-    Base,
     RecoveryAttemptModel,
     ThreadModel,
     begin_write_transaction,
-    configure_sqlite_engine,
     create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
@@ -78,7 +75,9 @@ from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncGenerator
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...worker.graph_lifecycle import RegisteredCompiledGraph
 
@@ -90,20 +89,6 @@ _TEST_INTERNAL_TOKEN = "direct-control-lease-test-token"
 def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give both sides of real worker dispatch the current IPC credential."""
     monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    tmp_path: Path,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'direct-control-leases.db'}",
-        connect_args={"timeout": 5},
-    )
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    await engine.dispose()
 
 
 @asynccontextmanager
@@ -749,31 +734,14 @@ async def test_terminal_state_before_cancel_prevents_dispatch_reservation(
     assert action is None
 
 
-@pytest_asyncio.fixture
-async def posture_session_factory(
-    tmp_path: Path,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    """Sessions on the production SQLite posture, on a real file.
-
-    The default fixture above leaves journal mode and lock waiting at driver
-    defaults, which is enough for the election proofs. Contention between a
-    service's read and its write is only faithful under the posture the product
-    actually serves on: write-ahead logging, the configured busy timeout, and
-    SQLAlchemy owning every ``BEGIN``.
-    """
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'posture.db'}")
-    configure_sqlite_engine(engine)
-    try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-        yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    finally:
-        await engine.dispose()
-
-
+# The election proofs above keep journal mode and lock waiting at driver
+# defaults. Contention between a service's read and its write is only faithful
+# under the posture the product actually serves on: write-ahead logging, the
+# configured busy timeout, and SQLAlchemy owning every ``BEGIN``.
 @pytest.mark.asyncio
+@pytest.mark.sqlite_engine(SqlitePosture.APPLICATION)
 async def test_cancel_waits_for_a_concurrent_writer_rather_than_failing(
-    posture_session_factory: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A commit landing between the cancel preflight and its claim must not refuse.
 
@@ -783,14 +751,14 @@ async def test_cancel_waits_for_a_concurrent_writer_rather_than_failing(
     operator sees a 500 for an entirely ordinary race.
     """
     thread_id = "cancel-under-contention"
-    await _running_thread(posture_session_factory, thread_id)
+    await _running_thread(session_factory, thread_id)
     app = FastAPI()
 
     @app.post("/dispatch")
     async def accept_dispatch() -> JSONResponse:
         return JSONResponse({"status": "accepted"})
 
-    async with posture_session_factory() as sibling:
+    async with session_factory() as sibling:
         sibling_thread = await sibling.get(ThreadModel, thread_id)
         assert sibling_thread is not None
         await sibling.rollback()
@@ -808,7 +776,7 @@ async def test_cancel_waits_for_a_concurrent_writer_rather_than_failing(
                 httpx.AsyncClient(
                     transport=httpx.ASGITransport(app=app), base_url="http://worker"
                 ) as worker_client,
-                posture_session_factory() as db,
+                session_factory() as db,
             ):
                 return await cancel_thread(
                     db,
@@ -830,7 +798,7 @@ async def test_cancel_waits_for_a_concurrent_writer_rather_than_failing(
     assert result.failure_type is None
     assert result.thread_status == ThreadStatus.CANCELLING.value
 
-    async with posture_session_factory() as db:
+    async with session_factory() as db:
         thread = await get_thread(db, thread_id)
         action = await get_control_action_by_idempotency_key(
             db,

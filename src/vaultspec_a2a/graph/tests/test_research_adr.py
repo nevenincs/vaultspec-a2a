@@ -12,24 +12,20 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
-import pytest_asyncio
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-    from pathlib import Path
-
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..protocols import ProviderFactoryProtocol
 
 from langchain_core.messages import AIMessage
 
-from ...database.tests._backends import migrated_session_factory
 from ...streaming.node_metadata import node_metadata_from_graph
 from ...team.team_config import (
     ResearchThreadSpec,
@@ -116,13 +112,6 @@ class _StateCapturingSubmitter:
         return f"prop-{phase}"
 
 
-@pytest_asyncio.fixture
-async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        yield saver
-
-
 def _research_adr_team(research_threads: list[ResearchThreadSpec] | None = None) -> Any:
     team = load_team_config("vaultspec-adr-research")
     if research_threads is not None:
@@ -156,7 +145,7 @@ def _answer(parked: Any, verdict: str, notes: str | None = None) -> Command[str]
 async def test_research_adr_compiles_expected_node_set(
     checkpointer: AsyncSqliteSaver,
     pf: ProviderFactoryProtocol,
-    tmp_path: Path,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     team = _research_adr_team(
         [
@@ -164,17 +153,16 @@ async def test_research_adr_compiles_expected_node_set(
             ResearchThreadSpec(thread_id="prior-art"),
         ]
     )
-    async with migrated_session_factory("sqlite", tmp_path) as (_target, factory):
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=_agent_configs(team),
-            checkpointer=checkpointer,
-            provider_factory=pf,
-            step_timeout=42.0,
-            proposal_submitter=_FakeSubmitter(),
-            model_assignment=deterministic_model_assignment(team),
-            runtime_identity_port=SqlRuntimeIdentityPort(factory),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        step_timeout=42.0,
+        proposal_submitter=_FakeSubmitter(),
+        model_assignment=deterministic_model_assignment(team),
+        runtime_identity_port=SqlRuntimeIdentityPort(migrated_session_factory),
+    )
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
     assert {

@@ -21,24 +21,21 @@ from typing import TYPE_CHECKING, Any
 import anyio
 import httpx
 import pytest
-import pytest_asyncio
 from fastapi import FastAPI, Response
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
-from ...conftest import materialize_schema
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from langchain_core.runnables import RunnableConfig
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+    )
 
 from ...authoring import AuthoringClient, LifecycleEvent, StreamError
 from ...control._verdict_subscriber_config import VerdictSubscriberConfig
@@ -85,18 +82,6 @@ _TEST_INTERNAL_TOKEN = "verdict-subscriber-test-token"
 def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give both sides of the real ASGI dispatch the current IPC credential."""
     monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    tmp_path: Path,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    """A real file-backed aiosqlite session factory with the schema created."""
-    db_file = tmp_path / "subscriber.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    await engine.dispose()
 
 
 def _make_subscriber(

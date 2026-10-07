@@ -10,43 +10,21 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import pytest
-import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import insert, text
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
 from ...control.run_discovery_service import discover_active_runs
-from ..models import Base, ThreadModel
+from ..models import ThreadModel
 from ..thread_repository import _active_thread_page_statement, _workspace_key
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
     from pathlib import Path
+
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
     from ...control.run_discovery_service import ActiveRunDiscoveryResult
 
 _HISTORY_ROWS = 100_000
-
-
-@pytest_asyncio.fixture
-async def engine() -> AsyncGenerator[AsyncEngine]:
-    database = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with database.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    yield database
-    await database.dispose()
-
-
-@pytest_asyncio.fixture
-async def session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as database_session:
-        yield database_session
 
 
 async def _seed_history(

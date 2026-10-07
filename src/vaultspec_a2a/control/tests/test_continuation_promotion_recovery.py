@@ -14,11 +14,8 @@ exactly once however many passes run.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import httpx
 import pytest
-import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
@@ -38,21 +35,10 @@ from ..worker_management import LazyWorkerSpawner
 from ._continuation import (
     RUN,
     BusyRun,
-    busy_run_state,
     finish_turn,
     journal_action,
     queue_continuation,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
-
-
-@pytest_asyncio.fixture
-async def busy_run(tmp_path: Path) -> AsyncIterator[BusyRun]:
-    async with busy_run_state(tmp_path) as state:
-        yield state
 
 
 async def _promote(run: BusyRun) -> None:

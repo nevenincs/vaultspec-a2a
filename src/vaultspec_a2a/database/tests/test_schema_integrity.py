@@ -34,19 +34,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
-from alembic import command
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 from sqlalchemy import Connection, String, create_engine, inspect, select, text
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
 from ...api.schemas.gateway import (
     ActiveRunRecord,
@@ -63,12 +55,13 @@ from ...tests._write_authority import (
 )
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS, MAX_TOOL_CALL_CHARS
 from ...thread.enums import ControlActionResultStatus, RepairStatus, ThreadStatus
-from ..migrate import build_migration_config
 from ..models import Base, ControlActionModel, ThreadModel
 from ..thread_repository import create_thread, list_active_thread_page
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Iterator, Mapping
+    from collections.abc import Iterator, Mapping
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 # The four partial indexes revision 0009 created descending, and the ordering it
 # gave each one. Newest-first listing is the access pattern they exist for, so
@@ -89,36 +82,12 @@ _FK_CONVENTION = {"fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_na
 
 
 @pytest.fixture(scope="module")
-def migrated_database(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A real file-backed SQLite database migrated through the real chain.
-
-    File-backed rather than ``:memory:`` because only a file forces the Alembic
-    chain, which is what production replays and what these tests are about.
-    """
-    database = tmp_path_factory.mktemp("schema-integrity") / "migrated.db"
-    command.upgrade(build_migration_config(f"sqlite+aiosqlite:///{database}"), "head")
-    return database
-
-
-@pytest.fixture(scope="module")
-def migrated_connection(migrated_database: Path) -> Iterator[Connection]:
-    """An open sync connection to the migrated database."""
-    engine = create_engine(f"sqlite:///{migrated_database}")
+def migrated_connection(migrated_template: Path) -> Iterator[Connection]:
+    """An open sync connection to the session's migrated database, read only."""
+    engine = create_engine(f"sqlite:///{migrated_template}")
     with engine.connect() as connection:
         yield connection
     engine.dispose()
-
-
-@pytest_asyncio.fixture
-async def session() -> AsyncGenerator[AsyncSession]:
-    """A real session over the live declarative schema."""
-    engine: AsyncEngine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as sess:
-        yield sess
-    await engine.dispose()
 
 
 def _index_ddl(connection: Connection, index_name: str) -> str:
@@ -197,18 +166,16 @@ class TestUnnamedForeignKeysAreTargetable:
         )
 
     def test_batch_naming_convention_drops_an_unnamed_foreign_key(
-        self, migrated_database: Path, tmp_path: Path
+        self, migrated_database_file: Path
     ) -> None:
         """Alembic's batch ``naming_convention`` targets an unnamed FK for real.
 
         This is the whole remedy ``Base`` points at, exercised end to end: a
         real migrated database, a real ``Operations`` context, a real batch
         rebuild, and a reflection afterwards proving the constraint is gone.
-        Run against a copy so the module-scoped database stays pristine.
+        Run against the test's own copy so the shared template stays pristine.
         """
-        working = tmp_path / "fk-drop.db"
-        working.write_bytes(migrated_database.read_bytes())
-        engine = create_engine(f"sqlite:///{working}")
+        engine = create_engine(f"sqlite:///{migrated_database_file}")
         try:
             with engine.connect() as connection:
                 before = inspect(connection).get_foreign_keys("artifacts")

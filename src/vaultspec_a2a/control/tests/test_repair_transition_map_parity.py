@@ -11,14 +11,10 @@ already right; it was the functions that duplicated it.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...conftest import materialize_schema
 from ...control.repair_transitions import (
     apply_dispatch_failure,
     mark_cancel_requested,
@@ -38,22 +34,13 @@ from ...thread.repair_policy import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import Awaitable, Callable
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...database.models import ThreadModel
 
     _TransitionFn = Callable[[AsyncSession, str], Awaitable[ThreadModel | None]]
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    case_dir = tmp_path_factory.mktemp("repair-parity-db")
-    materialize_schema(Path(case_dir / "test.db"))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{case_dir / 'test.db'}")
-    yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    await engine.dispose()
 
 
 _CASES: list[tuple[_TransitionFn, ControlActionType, str]] = [

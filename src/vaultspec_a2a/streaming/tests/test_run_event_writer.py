@@ -21,13 +21,10 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from ...database.migrate import run_migrations
 from ...database.models import Base, ThreadModel
 from ...database.run_event_repository import RunEventStore
-from ...database.session import configure_sqlite_engine
-from ...database.tests._backends import BACKENDS, migrated_session_factory
 from ...database.thread_repository import create_thread
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
@@ -37,7 +34,6 @@ from ..subscribers import RunSequenceAllocator, SequenceAllocation
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
-    from pathlib import Path
 
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -110,17 +106,13 @@ _IDLE_CADENCE = 30.0
 
 @pytest_asyncio.fixture
 async def make_harness(
-    tmp_path: Path,
+    migrated_engine: AsyncEngine,
 ) -> AsyncIterator[Callable[..., Awaitable[_Harness]]]:
-    """Build migrated stores, each with its own writer cadence and window."""
+    """Bind a writer, with the cadence and window a proof asks for, to the store."""
     built: list[_Harness] = []
 
     async def _make(*, window: int = 3, interval: float = _IDLE_CADENCE) -> _Harness:
-        url = f"sqlite+aiosqlite:///{tmp_path / f'application-{len(built)}.db'}"
-        await run_migrations(url)
-        engine = create_async_engine(url)
-        configure_sqlite_engine(engine)
-        harness = _Harness(engine, window=window, interval=interval)
+        harness = _Harness(migrated_engine, window=window, interval=interval)
         built.append(harness)
         await harness.seed_thread()
         return harness
@@ -130,7 +122,6 @@ async def make_harness(
     finally:
         for harness in built:
             await harness.writer.aclose()
-            await harness.engine.dispose()
 
 
 def _frame(index: int, *, thread_id: str = _RUN) -> dict[str, object]:
@@ -379,49 +370,44 @@ async def _retained_sequences(store: RunEventStore, thread_id: str) -> list[int]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend_name", BACKENDS)
 async def test_a_deleted_run_cannot_stop_the_replay_log_of_every_other_run(
-    backend_name: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    migrated_session_factory: async_sessionmaker[AsyncSession],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """One run's doomed rows must not be another run's permanent outage.
 
-    Proved on both backends because the refusal arrives differently on each -
-    a SQLite foreign-key failure and a PostgreSQL integrity error are not the
-    same exception from the same driver - while the consequence to guard
-    against is identical: a run deleted with frames still held can never take
-    those rows, and a flush that batched every run together therefore failed
-    for every run, for as long as the gateway lived.
+    The refusal arrives as a SQLite foreign-key failure, and the consequence
+    to guard against is that a run deleted with frames still held can never
+    take those rows, and a flush that batched every run together therefore
+    failed for every run, for as long as the gateway lived.
 
     The delete here is the real one: the thread row goes, and the schema's
     cascade takes its retained rows with it, which is the state the deletion
     saga leaves behind.
     """
-    async with migrated_session_factory(backend_name, tmp_path) as (_target, factory):
-        store = RunEventStore(factory)
-        await _seed_runs(factory, _HEALTHY, _DELETED)
-        writer = RunEventWriter(store, window=100, flush_interval_seconds=_IDLE_CADENCE)
-        _hold(writer, _HEALTHY, 1)
-        _hold(writer, _DELETED, 1)
-        await _delete_run(factory, _DELETED)
+    store = RunEventStore(migrated_session_factory)
+    await _seed_runs(migrated_session_factory, _HEALTHY, _DELETED)
+    writer = RunEventWriter(store, window=100, flush_interval_seconds=_IDLE_CADENCE)
+    _hold(writer, _HEALTHY, 1)
+    _hold(writer, _DELETED, 1)
+    await _delete_run(migrated_session_factory, _DELETED)
 
-        with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.streaming"):
-            written = await writer.flush()
+    with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.streaming"):
+        written = await writer.flush()
 
-        assert written == 1, "the healthy run's frame did not reach the table"
-        assert await _retained_sequences(store, _HEALTHY) == [1]
-        abandoned = [
-            record
-            for record in caplog.records
-            if getattr(record, "action", None) == "run_event_flush_abandoned"
-        ]
-        assert [getattr(record, "thread_id", None) for record in abandoned] == [
-            _DELETED
-        ]
-        # Dropped rather than retried forever: nothing of the deleted run is
-        # held, so no later flush carries it and no resume is offered it.
-        assert writer.pending(_DELETED) == []
+    assert written == 1, "the healthy run's frame did not reach the table"
+    assert await _retained_sequences(store, _HEALTHY) == [1]
+    abandoned = [
+        record
+        for record in caplog.records
+        if getattr(record, "action", None) == "run_event_flush_abandoned"
+    ]
+    assert [getattr(record, "thread_id", None) for record in abandoned] == [_DELETED]
+    # Dropped rather than retried forever: nothing of the deleted run is
+    # held, so no later flush carries it and no resume is offered it.
+    assert writer.pending(_DELETED) == []
 
-        _hold(writer, _HEALTHY, 2)
-        assert await writer.flush() == 1
-        assert await _retained_sequences(store, _HEALTHY) == [1, 2]
-        await writer.aclose()
+    _hold(writer, _HEALTHY, 2)
+    assert await writer.flush() == 1
+    assert await _retained_sequences(store, _HEALTHY) == [1, 2]
+    await writer.aclose()

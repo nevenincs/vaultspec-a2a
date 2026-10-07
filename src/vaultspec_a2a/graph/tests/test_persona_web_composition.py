@@ -35,9 +35,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
-import pytest_asyncio
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...authoring.contract import DOCUMENT_AUTHORING_ROLES
 from ...providers.lane_admission import is_web_lane_proven
@@ -57,8 +55,9 @@ from ..compiler import compile_team_graph
 from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
     from pathlib import Path
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 
 #: The lanes the compiled runs below declare, one per stance. Named rather than
@@ -177,13 +176,6 @@ class _RecordingSubmitter:
     async def __call__(self, state: Any, phase: str) -> str:
         self.phases.append(phase)
         return f"prop-{phase}"
-
-
-@pytest_asyncio.fixture
-async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        yield saver
 
 
 def _prompt_text(prompt_file: Path) -> str:

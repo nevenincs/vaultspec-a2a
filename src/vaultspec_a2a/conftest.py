@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -28,6 +29,9 @@ from .testing import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
     from .authoring.discovery import EngineEndpoint
 
@@ -683,6 +687,11 @@ def pytest_configure(config: pytest.Config) -> None:
         "requires_prerequisites(*ids): deselects a billable live proof unless "
         "the caller explicitly declares every listed external prerequisite.",
     )
+    config.addinivalue_line(
+        "markers",
+        f"{SQLITE_ENGINE_MARK}(posture, *, timeout=None): the SqlitePosture and "
+        "driver lock wait in seconds the root `engine` fixture opens with.",
+    )
     _declared = frozenset(config.getoption("required_prerequisites") or [])
     unknown = sorted(_declared - _BY_ID.keys())
     if unknown:
@@ -900,10 +909,187 @@ def schema_template() -> Path:
     return _schema_template
 
 
-def materialize_schema(db_path: Path) -> Path:
-    """Give *db_path* the full schema by copying the session template."""
-    import shutil
+_migrated_template: Path | None = None
 
+
+def migrated_schema_template() -> Path:
+    """Return a SQLite file brought to head by the packaged chain, built once.
+
+    The same economy as :func:`schema_template`, for the suites whose claim is
+    about what the Alembic chain produces rather than what the model metadata
+    declares. The chain runs once per session through the production migration
+    entrypoint, and every caller copies the result, so each test still owns a
+    real migrated file of its own.
+
+    Alembic's env opens an event loop of its own, which it cannot do on a thread
+    already running one, so the chain runs on a thread of its own whichever
+    context asks first - a synchronous fixture or a coroutine mid-test.
+    """
+    global _migrated_template
+    if _migrated_template is None:
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        from .database.migrate import run_migrations
+        from .testing.session_root import session_scratch_dir
+
+        target = session_scratch_dir("vaultspec-migrated-") / "migrated.db"
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(
+                asyncio.run, run_migrations(f"sqlite+aiosqlite:///{target}")
+            ).result()
+        _migrated_template = target
+    return _migrated_template
+
+
+def materialize_schema(db_path: Path, *, migrated: bool = False) -> Path:
+    """Give *db_path* the full schema by copying a session template.
+
+    *migrated* selects the Alembic-head template over the model-metadata one.
+    """
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(schema_template(), db_path)
+    template = migrated_schema_template() if migrated else schema_template()
+    shutil.copyfile(template, db_path)
     return db_path
+
+
+# ---------------------------------------------------------------------------
+# Database, session and checkpointer fixtures - one family for every suite
+# ---------------------------------------------------------------------------
+#
+# Every suite reaches a store through these rather than building its own:
+# ``engine`` is a real per-test SQLite file carrying the model schema,
+# ``migrated_engine`` a real per-test file at the head of the Alembic chain, and
+# ``checkpointer`` a real per-test ``AsyncSqliteSaver``. A suite whose claim
+# depends on the connection posture says so with the ``sqlite_engine`` mark,
+# which is data the one ``engine`` fixture reads, never a second engine builder.
+
+SQLITE_ENGINE_MARK = "sqlite_engine"
+
+
+class SqlitePosture(Enum):
+    """How much of the application's SQLite connection posture an engine has."""
+
+    #: Journal mode, lock waiting and ``BEGIN`` exactly as the driver leaves them.
+    DRIVER = "driver"
+    #: SQLAlchemy owns every ``BEGIN``; the driver's implicit one is disabled.
+    TRANSACTIONS = "transactions"
+    #: The served posture: WAL, the configured busy timeout, enforced foreign
+    #: keys, and SQLAlchemy-owned ``BEGIN``.
+    APPLICATION = "application"
+
+
+def _sqlite_engine(
+    db_file: Path, posture: SqlitePosture, *, timeout: float | None = None
+) -> AsyncEngine:
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from .database.session import (
+        configure_sqlite_engine,
+        configure_sqlite_transactions,
+    )
+
+    connect_args: dict[str, Any] = {} if timeout is None else {"timeout": timeout}
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{db_file}", connect_args=connect_args
+    )
+    if posture is SqlitePosture.APPLICATION:
+        configure_sqlite_engine(engine)
+    elif posture is SqlitePosture.TRANSACTIONS:
+        configure_sqlite_transactions(engine)
+    return engine
+
+
+@pytest.fixture
+def database_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A per-test SQLite file carrying the full model schema."""
+    return materialize_schema(tmp_path_factory.mktemp("database") / "test.db")
+
+
+@pytest_asyncio.fixture
+async def engine(
+    request: pytest.FixtureRequest, database_file: Path
+) -> AsyncIterator[AsyncEngine]:
+    """A real engine over :func:`database_file`, in the posture the test marks.
+
+    Unmarked, the engine keeps the driver's defaults. ``sqlite_engine(posture,
+    timeout=...)`` on the test, its class or its module chooses a
+    :class:`SqlitePosture` and the driver's lock wait in seconds.
+    """
+    marker = request.node.get_closest_marker(SQLITE_ENGINE_MARK)
+    posture = (
+        marker.args[0] if marker is not None and marker.args else SqlitePosture.DRIVER
+    )
+    timeout = marker.kwargs.get("timeout") if marker is not None else None
+    eng = _sqlite_engine(database_file, posture, timeout=timeout)
+    yield eng
+    await eng.dispose()
+
+
+@pytest.fixture
+def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    """Sessions over :func:`engine`, keeping attribute state across commits."""
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture
+async def session(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncSession]:
+    """One open session from :func:`session_factory` for direct assertions."""
+    async with session_factory() as db:
+        yield db
+
+
+@pytest.fixture
+def migrated_database_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A per-test SQLite file at the head of the packaged Alembic chain."""
+    return materialize_schema(
+        tmp_path_factory.mktemp("migrated") / "application.db", migrated=True
+    )
+
+
+@pytest_asyncio.fixture
+async def migrated_engine(migrated_database_file: Path) -> AsyncIterator[AsyncEngine]:
+    """A real engine over :func:`migrated_database_file`, as the service opens it.
+
+    Always the application posture: a cascade or a lock wait this schema
+    declares is enforced here exactly as production enforces it.
+    """
+    eng = _sqlite_engine(migrated_database_file, SqlitePosture.APPLICATION)
+    yield eng
+    await eng.dispose()
+
+
+@pytest.fixture
+def migrated_session_factory(
+    migrated_engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    """Sessions over :func:`migrated_engine`."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    return async_sessionmaker(migrated_engine, expire_on_commit=False)
+
+
+@pytest.fixture(scope="session")
+def migrated_template() -> Path:
+    """The session's read-only Alembic-head file, for suites that only reflect it."""
+    return migrated_schema_template()
+
+
+@pytest.fixture
+def checkpoint_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Where :func:`checkpointer` keeps its per-test SQLite store."""
+    return tmp_path_factory.mktemp("checkpoints") / "checkpoints.db"
+
+
+@pytest_asyncio.fixture
+async def checkpointer(checkpoint_file: Path) -> AsyncIterator[AsyncSqliteSaver]:
+    """A real ``AsyncSqliteSaver`` over :func:`checkpoint_file`, set up."""
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_file)) as saver:
+        await saver.setup()
+        yield saver

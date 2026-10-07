@@ -21,9 +21,7 @@ from typing import TYPE_CHECKING
 import anyio
 import httpx
 import pytest
-import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...control._permission_response_contract import PermissionInput, PermissionRuntime
 from ...control.circuit_breaker import WorkerCircuitBreaker
@@ -44,11 +42,12 @@ from .. import (
     get_permission_logs_by_thread,
     record_permission_request,
 )
-from ..models import Base
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncGenerator
     from pathlib import Path
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..models import PermissionLogModel
 
@@ -72,20 +71,6 @@ class _PauseSpec:
 
 _TOOL_PAUSE = _PauseSpec("bash", "bash", _TOOL_OPTIONS)
 _APPROVAL_PAUSE = _PauseSpec("plan_approval_request", None, _APPROVAL_OPTIONS)
-
-
-@pytest_asyncio.fixture
-async def sessions(
-    tmp_path: Path,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'permission-audit.db'}",
-        connect_args={"timeout": 5},
-    )
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    await engine.dispose()
 
 
 @asynccontextmanager
@@ -118,7 +103,7 @@ def _spawner() -> LazyWorkerSpawner:
 
 
 async def _pause_run(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
     thread_id: str,
     *,
     workspace: Path,
@@ -126,7 +111,7 @@ async def _pause_run(
 ) -> str:
     """Park a real run on a real durable permission request."""
     request_id = f"{thread_id}:permission"
-    async with sessions() as db:
+    async with session_factory() as db:
         await create_thread(
             db,
             write_authority=make_test_write_authority(),
@@ -149,14 +134,14 @@ async def _pause_run(
 
 
 async def _decide(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
     worker_client: httpx.AsyncClient,
     *,
     request_id: str,
     option_id: str,
     idempotency_key: str,
 ):
-    async with sessions() as db:
+    async with session_factory() as db:
         return await respond_to_permission(
             db,
             response=PermissionInput(request_id, option_id, idempotency_key),
@@ -171,30 +156,30 @@ async def _decide(
 
 
 async def _audit_rows(
-    sessions: async_sessionmaker[AsyncSession], thread_id: str
+    session_factory: async_sessionmaker[AsyncSession], thread_id: str
 ) -> list[PermissionLogModel]:
-    async with sessions() as db:
+    async with session_factory() as db:
         return list(await get_permission_logs_by_thread(db, thread_id))
 
 
 @pytest.mark.asyncio
 async def test_approving_a_tool_call_records_a_durable_audit_row(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A real approval leaves a real row naming the tool and the option."""
     thread_id = "audit-approve-thread"
     request_id = await _pause_run(
-        sessions,
+        session_factory,
         thread_id,
         workspace=tmp_path,
         pause=_TOOL_PAUSE,
     )
-    assert await _audit_rows(sessions, thread_id) == []
+    assert await _audit_rows(session_factory, thread_id) == []
 
     async with _worker(tmp_path / "audit-approve-checkpoints.db") as worker_client:
         result = await _decide(
-            sessions,
+            session_factory,
             worker_client,
             request_id=request_id,
             option_id="allow_once",
@@ -202,7 +187,7 @@ async def test_approving_a_tool_call_records_a_durable_audit_row(
         )
     assert result.accepted is True
 
-    rows = await _audit_rows(sessions, thread_id)
+    rows = await _audit_rows(session_factory, thread_id)
     assert len(rows) == 1
     entry = rows[0]
     assert entry.thread_id == thread_id
@@ -218,12 +203,12 @@ async def test_approving_a_tool_call_records_a_durable_audit_row(
 @pytest.mark.asyncio
 async def test_rejecting_a_tool_call_records_the_denial_not_an_approval(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The audited verdict follows the option's kind, so a denial reads as one."""
     thread_id = "audit-reject-thread"
     request_id = await _pause_run(
-        sessions,
+        session_factory,
         thread_id,
         workspace=tmp_path,
         pause=_TOOL_PAUSE,
@@ -231,7 +216,7 @@ async def test_rejecting_a_tool_call_records_the_denial_not_an_approval(
 
     async with _worker(tmp_path / "audit-reject-checkpoints.db") as worker_client:
         result = await _decide(
-            sessions,
+            session_factory,
             worker_client,
             request_id=request_id,
             option_id="reject_once",
@@ -239,7 +224,7 @@ async def test_rejecting_a_tool_call_records_the_denial_not_an_approval(
         )
     assert result.accepted is True
 
-    rows = await _audit_rows(sessions, thread_id)
+    rows = await _audit_rows(session_factory, thread_id)
     assert len(rows) == 1
     assert rows[0].action == ApprovalStatus.REJECTED.value
     assert rows[0].option_id == "reject_once"
@@ -248,12 +233,12 @@ async def test_rejecting_a_tool_call_records_the_denial_not_an_approval(
 @pytest.mark.asyncio
 async def test_an_approval_pause_is_audited_under_the_plan_approval_sentinel(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A pause that gated no tool still names what was decided."""
     thread_id = "audit-plan-thread"
     request_id = await _pause_run(
-        sessions,
+        session_factory,
         thread_id,
         workspace=tmp_path,
         pause=_APPROVAL_PAUSE,
@@ -261,7 +246,7 @@ async def test_an_approval_pause_is_audited_under_the_plan_approval_sentinel(
 
     async with _worker(tmp_path / "audit-plan-checkpoints.db") as worker_client:
         result = await _decide(
-            sessions,
+            session_factory,
             worker_client,
             request_id=request_id,
             option_id="approve",
@@ -269,7 +254,7 @@ async def test_an_approval_pause_is_audited_under_the_plan_approval_sentinel(
         )
     assert result.accepted is True
 
-    rows = await _audit_rows(sessions, thread_id)
+    rows = await _audit_rows(session_factory, thread_id)
     assert len(rows) == 1
     assert rows[0].tool_name == PermissionType.PLAN_APPROVAL.value
     assert rows[0].action == ApprovalStatus.APPROVED.value
@@ -281,12 +266,12 @@ async def test_an_approval_pause_is_audited_under_the_plan_approval_sentinel(
 @pytest.mark.asyncio
 async def test_a_guard_rejected_response_is_not_recorded_as_a_decision(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The log holds decisions, not attempts the state machine refused."""
     thread_id = "audit-refused-thread"
     request_id = await _pause_run(
-        sessions,
+        session_factory,
         thread_id,
         workspace=tmp_path,
         pause=_TOOL_PAUSE,
@@ -294,7 +279,7 @@ async def test_a_guard_rejected_response_is_not_recorded_as_a_decision(
 
     async with _worker(tmp_path / "audit-refused-checkpoints.db") as worker_client:
         result = await _decide(
-            sessions,
+            session_factory,
             worker_client,
             request_id=request_id,
             option_id="option_the_request_never_offered",
@@ -303,13 +288,13 @@ async def test_a_guard_rejected_response_is_not_recorded_as_a_decision(
     assert result.accepted is False
     assert result.error_status_code == 409
 
-    assert await _audit_rows(sessions, thread_id) == []
+    assert await _audit_rows(session_factory, thread_id) == []
 
 
 @pytest.mark.asyncio
 async def test_a_client_retry_records_one_decision_not_two(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """One decision yields one row however many times the client retries.
 
@@ -318,7 +303,7 @@ async def test_a_client_retry_records_one_decision_not_two(
     """
     thread_id = "audit-retry-thread"
     request_id = await _pause_run(
-        sessions,
+        session_factory,
         thread_id,
         workspace=tmp_path,
         pause=_TOOL_PAUSE,
@@ -326,14 +311,14 @@ async def test_a_client_retry_records_one_decision_not_two(
 
     async with _worker(tmp_path / "audit-retry-checkpoints.db") as worker_client:
         first = await _decide(
-            sessions,
+            session_factory,
             worker_client,
             request_id=request_id,
             option_id="allow_once",
             idempotency_key="operator-retry-1",
         )
         second = await _decide(
-            sessions,
+            session_factory,
             worker_client,
             request_id=request_id,
             option_id="allow_once",
@@ -342,6 +327,6 @@ async def test_a_client_retry_records_one_decision_not_two(
     assert first.accepted is True
     assert second.accepted is True
 
-    rows = await _audit_rows(sessions, thread_id)
+    rows = await _audit_rows(session_factory, thread_id)
     assert len(rows) == 1
     assert rows[0].option_id == "allow_once"

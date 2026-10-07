@@ -19,12 +19,10 @@ import re
 from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
-import pytest_asyncio
 from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command, Interrupt
 
 from ...team.team_config import ResearchThreadSpec, load_agent_config, load_team_config
@@ -33,7 +31,7 @@ from ..protocols import ProviderFactoryProtocol
 from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 _OPTIONS: list[dict[str, Any]] = [
     {"optionId": "allow_once", "name": "Allow once"},
@@ -129,13 +127,6 @@ class _FakeSubmitter:
 
     async def __call__(self, state: Any, phase: str) -> str:
         return f"prop-{phase}"
-
-
-@pytest_asyncio.fixture
-async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        yield saver
 
 
 def _graph(

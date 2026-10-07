@@ -32,15 +32,18 @@ from ..repositories import count_queued_continuations, run_lifetime_deadline
 from ._continuation import (
     RUN,
     BusyRun,
-    busy_run_state,
     definition,
     finish_turn,
     journal_action,
     queue_continuation,
+    start_busy_run,
 )
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 def _age(seconds: int) -> datetime:
@@ -64,6 +67,8 @@ async def _reconcile(run: BusyRun) -> RecoveryObservation:
 @pytest.mark.asyncio
 async def test_a_run_past_its_lifetime_settles_rather_than_promoting(
     tmp_path: Path,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The run ends where it is, and the waiting turn is refused, not lost.
 
@@ -72,73 +77,85 @@ async def test_a_run_past_its_lifetime_settles_rather_than_promoting(
     the only moment that can know whether another turn still fits.
     """
     spent = _age(domain_config.max_run_lifetime_seconds + 60)
-    async with busy_run_state(tmp_path, created_at=spent) as run:
-        continuation = await queue_continuation(run.sessions, run.workspace)
-        await finish_turn(run.saver, run.receipt)
+    run = await start_busy_run(
+        migrated_session_factory, checkpointer, tmp_path, created_at=spent
+    )
+    continuation = await queue_continuation(run.sessions, run.workspace)
+    await finish_turn(run.saver, run.receipt)
 
-        observed = await _reconcile(run)
+    observed = await _reconcile(run)
 
-        assert observed.status is ThreadStatus.COMPLETED
-        assert observed.condition != CONTINUATION_PROMOTED
-        assert observed.changed
+    assert observed.status is ThreadStatus.COMPLETED
+    assert observed.condition != CONTINUATION_PROMOTED
+    assert observed.changed
 
-        async with run.sessions() as reader:
-            thread = await get_thread(reader, RUN)
-            assert thread is not None
-            assert thread.status == ThreadStatus.COMPLETED.value
+    async with run.sessions() as reader:
+        thread = await get_thread(reader, RUN)
+        assert thread is not None
+        assert thread.status == ThreadStatus.COMPLETED.value
 
-            refused = await journal_action(reader, continuation)
-            assert refused.result_status == (
-                ControlActionResultStatus.REJECTED_INVALID_STATE.value
-            )
-            assert refused.applied_at is not None
-            assert refused.claim_token is None
-            # The record still says what was refused and where it sat.
-            assert refused.queue_position == 1
-            # Nothing is left waiting on a run that can never promote it.
-            assert await count_queued_continuations(reader, thread_id=RUN) == 0
+        refused = await journal_action(reader, continuation)
+        assert refused.result_status == (
+            ControlActionResultStatus.REJECTED_INVALID_STATE.value
+        )
+        assert refused.applied_at is not None
+        assert refused.claim_token is None
+        # The record still says what was refused and where it sat.
+        assert refused.queue_position == 1
+        # Nothing is left waiting on a run that can never promote it.
+        assert await count_queued_continuations(reader, thread_id=RUN) == 0
 
 
 @pytest.mark.asyncio
-async def test_the_last_turn_gets_the_time_that_is_left(tmp_path: Path) -> None:
+async def test_the_last_turn_gets_the_time_that_is_left(
+    tmp_path: Path,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """A promotion near the bound is capped by it, not given a fresh budget."""
     remaining = 120
     started = _age(domain_config.max_run_lifetime_seconds - remaining)
-    async with busy_run_state(tmp_path, created_at=started) as run:
-        continuation = await queue_continuation(run.sessions, run.workspace)
-        await finish_turn(run.saver, run.receipt)
-        lifetime_deadline = run_lifetime_deadline(started)
-        budget = definition(run.workspace).run_timeout_seconds
-        assert budget > remaining, "the turn's own budget must exceed what is left"
+    run = await start_busy_run(
+        migrated_session_factory, checkpointer, tmp_path, created_at=started
+    )
+    continuation = await queue_continuation(run.sessions, run.workspace)
+    await finish_turn(run.saver, run.receipt)
+    lifetime_deadline = run_lifetime_deadline(started)
+    budget = definition(run.workspace).run_timeout_seconds
+    assert budget > remaining, "the turn's own budget must exceed what is left"
 
-        observed = await _reconcile(run)
+    observed = await _reconcile(run)
 
-        assert observed.condition == CONTINUATION_PROMOTED
-        async with run.sessions() as reader:
-            promoted = await journal_action(reader, continuation)
-            assert promoted.recovery_deadline_at is not None
-            assert promoted.recovery_deadline_at == lifetime_deadline
-            assert promoted.recovery_deadline_at < datetime.now(UTC) + timedelta(
-                seconds=budget
-            )
+    assert observed.condition == CONTINUATION_PROMOTED
+    async with run.sessions() as reader:
+        promoted = await journal_action(reader, continuation)
+        assert promoted.recovery_deadline_at is not None
+        assert promoted.recovery_deadline_at == lifetime_deadline
+        assert promoted.recovery_deadline_at < datetime.now(UTC) + timedelta(
+            seconds=budget
+        )
 
 
 @pytest.mark.asyncio
-async def test_a_young_run_keeps_its_turn_s_own_budget(tmp_path: Path) -> None:
+async def test_a_young_run_keeps_its_turn_s_own_budget(
+    tmp_path: Path,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """The cap only binds near the end; an ordinary promotion is unaffected."""
-    async with busy_run_state(tmp_path, created_at=_age(60)) as run:
-        continuation = await queue_continuation(run.sessions, run.workspace)
-        await finish_turn(run.saver, run.receipt)
-        budget = definition(run.workspace).run_timeout_seconds
-        before = datetime.now(UTC)
+    run = await start_busy_run(
+        migrated_session_factory, checkpointer, tmp_path, created_at=_age(60)
+    )
+    continuation = await queue_continuation(run.sessions, run.workspace)
+    await finish_turn(run.saver, run.receipt)
+    budget = definition(run.workspace).run_timeout_seconds
+    before = datetime.now(UTC)
 
-        observed = await _reconcile(run)
+    observed = await _reconcile(run)
 
-        assert observed.condition == CONTINUATION_PROMOTED
-        async with run.sessions() as reader:
-            promoted = await journal_action(reader, continuation)
-            assert promoted.recovery_deadline_at is not None
-            assert promoted.recovery_deadline_at >= before + timedelta(
-                seconds=budget - 5
-            )
-            assert promoted.recovery_deadline_at < run_lifetime_deadline(_age(60))
+    assert observed.condition == CONTINUATION_PROMOTED
+    async with run.sessions() as reader:
+        promoted = await journal_action(reader, continuation)
+        assert promoted.recovery_deadline_at is not None
+        assert promoted.recovery_deadline_at >= before + timedelta(seconds=budget - 5)
+        assert promoted.recovery_deadline_at < run_lifetime_deadline(_age(60))

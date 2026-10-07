@@ -20,7 +20,7 @@ import pytest
 
 from ...testing import JsonReplyHandler, serve_handler
 from ...tests.native_build import linux_isolation_helper
-from ...utils.process import ProcessContainmentError
+from ...utils import ProcessContainmentError
 from ..native_isolation import (
     NativeLaunchAuthority,
     decode_launch_environment,

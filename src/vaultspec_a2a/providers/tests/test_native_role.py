@@ -14,7 +14,7 @@ from langchain_core.messages import HumanMessage
 from ...desktop.native_isolation import NativeWorkspaceAuthority
 from ...desktop.tests.test_native_isolation import _authority, _install_runtime
 from ...testing import settings_override
-from ...utils.process import ProcessContainmentError
+from ...utils import ProcessContainmentError
 from .._native_role import (
     bind_model_native_workspace,
     prepare_acp_role,

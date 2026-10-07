@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from ...utils import ProcessContainment
 from ...utils._process_tree import pid_is_live, wait_pid_gone_async
-from ...utils.process import ProcessContainment
 from .._acp_request import jsonrpc_error, jsonrpc_result
 from .._acp_rpc_handlers import (
     on_terminal_kill,

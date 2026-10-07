@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...control.config import settings
-from ...utils.process import ProcessContainmentError
+from ...utils import ProcessContainmentError
 from .._provider_execution import provider_execution_command
 
 if TYPE_CHECKING:

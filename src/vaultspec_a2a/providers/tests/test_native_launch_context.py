@@ -12,7 +12,7 @@ import pytest
 
 from ...desktop.tests.test_native_isolation import _authority, _install_runtime
 from ...testing import settings_override
-from ...utils.process import ProcessContainmentError
+from ...utils import ProcessContainmentError
 from .._acp_mcp import resolve_harness_mcp_servers
 from .._acp_rpc_terminal_handlers import (
     on_terminal_create,

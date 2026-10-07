@@ -26,8 +26,8 @@ from ...providers._subprocess import (
     kill_process_tree,
     spawn_acp_process,
 )
+from ...utils import ProcessContainment, ProcessContainmentError
 from ...utils._process_tree import pid_is_live, wait_pid_gone
-from ...utils.process import ProcessContainment, ProcessContainmentError
 
 # A "provider" that spawns a long-lived grandchild, prints its pid, then sleeps.
 _PROVIDER_WITH_GRANDCHILD = (

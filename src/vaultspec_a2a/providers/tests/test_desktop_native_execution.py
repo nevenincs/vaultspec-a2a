@@ -13,7 +13,7 @@ from ...control.provider_execution import native_execution_refusal_reason
 from ...control.state_layout import state_layout
 from ...graph.enums import Provider
 from ...testing import armed_desktop_app_home, settings_override
-from ...utils.process import ProcessContainmentError
+from ...utils import ProcessContainmentError
 from .._acp_rpc_terminal_handlers import on_terminal_create
 from .._acp_types import AcpSessionContext
 from .._provider_execution import provider_execution_command

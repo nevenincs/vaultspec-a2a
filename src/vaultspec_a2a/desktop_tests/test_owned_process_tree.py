@@ -45,9 +45,8 @@ from ..testing import (
     unvalidated_selection,
     worker_lifecycle_gateway_script,
 )
-from ..utils import kill_pid_tree_async
+from ..utils import ProcessContainment, kill_pid_tree_async
 from ..utils._process_tree import pid_is_live, port_has_listener, wait_pid_gone
-from ..utils.process import ProcessContainment
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

@@ -33,6 +33,7 @@ from ...control._worker_health import WorkerLiveness, WorkerState
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
+from ...testing import adopted_spawner
 from ...testing.ports import free_port
 from ...utils.process import ProcessContainment
 
@@ -150,11 +151,7 @@ def _unsupervised_watchdog(
     as a status transition without any process being spawned.
     """
     port = free_port()
-    spawner = LazyWorkerSpawner(
-        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
-    )
-    # The real production method that marks an adopted worker: spawned, no handle.
-    spawner.adopt_worker()
+    spawner = adopted_spawner(f"http://127.0.0.1:{port}", port)
     worker_state = WorkerState()
     breaker = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30)
     app_state = SimpleNamespace(

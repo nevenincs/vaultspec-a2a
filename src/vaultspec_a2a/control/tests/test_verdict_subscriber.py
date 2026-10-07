@@ -52,7 +52,6 @@ from ...control.verdict_subscriber import (
     _recovery_high_water,
     _StreamInterruptedError,
 )
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_control_action,
     create_thread,
@@ -66,7 +65,12 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    adopted_spawner,
+    compile_test_graph,
+    new_state_graph,
+)
 from ...testing.catalog_authority import current_execution_metadata
 from ...thread.enums import ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
@@ -98,9 +102,7 @@ def _make_subscriber(
             circuit_breaker=WorkerCircuitBreaker(
                 failure_threshold=3, recovery_timeout=30.0
             ),
-            worker_spawner=LazyWorkerSpawner(
-                worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
-            ),
+            worker_spawner=adopted_spawner(),
             endpoint_provider=lambda: None,
         )
     )

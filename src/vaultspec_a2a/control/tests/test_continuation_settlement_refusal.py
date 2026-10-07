@@ -34,6 +34,7 @@ from ...database import (
 )
 from ...database.session import close_db, get_session_factory, init_db
 from ...ipc.schemas import DispatchRequest
+from ...testing import adopted_spawner
 from ...testing.catalog_authority import current_execution_metadata
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
@@ -48,7 +49,6 @@ from ..dispatch import redispatch_reconciling_threads
 from ..dispatch_receipts import prepare_graph_action_receipt
 from ..event_handlers import _handle_terminal_event
 from ..repositories import count_queued_continuations
-from ..worker_management import LazyWorkerSpawner
 from ._continuation import (
     FIRST_RECEIPT,
     PRESET,
@@ -310,10 +310,7 @@ async def test_the_recovery_sweep_refuses_the_queue_of_a_run_it_fails(
         await _seed_reconciling_run(sessions, tmp_path, stored_metadata(tmp_path))
         continuation = await queue_continuation(sessions, tmp_path)
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.adopt_worker()
+        spawner = adopted_spawner()
         async with httpx.AsyncClient(
             base_url="http://127.0.0.1:9", timeout=0.2
         ) as client:

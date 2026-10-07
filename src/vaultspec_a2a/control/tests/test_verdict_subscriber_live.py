@@ -74,7 +74,6 @@ from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import relay_event
 from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import VerdictSubscriber
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_control_action,
     create_thread,
@@ -87,7 +86,12 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    adopted_spawner,
+    compile_test_graph,
+    new_state_graph,
+)
 from ...testing.catalog_authority import current_execution_metadata
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
@@ -508,9 +512,7 @@ async def test_live_verdict_round_trip_parks_and_resumes(
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=3, recovery_timeout=30.0
                 ),
-                worker_spawner=LazyWorkerSpawner(
-                    worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
-                ),
+                worker_spawner=adopted_spawner(),
                 endpoint_provider=lambda: None,
             )
         )
@@ -798,9 +800,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
                     circuit_breaker=WorkerCircuitBreaker(
                         failure_threshold=3, recovery_timeout=30.0
                     ),
-                    worker_spawner=LazyWorkerSpawner(
-                        worker_url="http://worker", worker_port=1, auto_spawn=False
-                    ),
+                    worker_spawner=adopted_spawner(),
                     endpoint_provider=lambda: live_engine,
                 )
             )
@@ -937,9 +937,7 @@ async def _run_clobbered_reconcile(
                     circuit_breaker=WorkerCircuitBreaker(
                         failure_threshold=3, recovery_timeout=30.0
                     ),
-                    worker_spawner=LazyWorkerSpawner(
-                        worker_url="http://worker", worker_port=1, auto_spawn=False
-                    ),
+                    worker_spawner=adopted_spawner(),
                     endpoint_provider=lambda: live_engine,
                 )
             )

@@ -26,7 +26,6 @@ from ...control.execution_authority import resolve_execution_authority
 from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
 from ...control.repair_transitions import apply_dispatch_failure
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_control_action,
     create_thread,
@@ -38,7 +37,7 @@ from ...domain_config import domain_config
 from ...ipc.schemas import DispatchRequest
 from ...providers.conditions import ProviderCondition
 from ...team.team_config import load_team_config
-from ...testing import session_scratch_dir
+from ...testing import adopted_spawner, session_scratch_dir
 from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import ClarificationAnswers
@@ -260,12 +259,7 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
             await _seed_accepted_initial_action(session, thread_id, workspace=tmp_path)
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9",
-            worker_port=9,
-            auto_spawn=False,
-        )
-        spawner.adopt_worker()
+        spawner = adopted_spawner()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1,
             recovery_timeout=30.0,
@@ -351,14 +345,6 @@ async def test_a_reasonless_failure_still_carries_a_condition(
         assert updated.provider_condition == ProviderCondition.UNKNOWN.value
 
 
-def _permission_spawner(worker_url: str = "http://worker") -> LazyWorkerSpawner:
-    spawner = LazyWorkerSpawner(
-        worker_url=worker_url, worker_port=8001, auto_spawn=False
-    )
-    spawner.adopt_worker()
-    return spawner
-
-
 async def _parked_permission_run(
     session_factory: async_sessionmaker[AsyncSession],
     *,
@@ -425,7 +411,7 @@ async def test_a_saturated_worker_leaves_the_parked_run_answerable(
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=3, recovery_timeout=30.0
                 ),
-                worker_spawner=_permission_spawner(),
+                worker_spawner=adopted_spawner(),
             ),
         )
 
@@ -484,7 +470,7 @@ async def test_an_unreachable_worker_leaves_the_parked_run_answerable(
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=3, recovery_timeout=30.0
                 ),
-                worker_spawner=_permission_spawner("http://127.0.0.1:9"),
+                worker_spawner=adopted_spawner("http://127.0.0.1:9"),
             ),
         )
 

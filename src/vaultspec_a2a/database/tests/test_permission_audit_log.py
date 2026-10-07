@@ -30,8 +30,8 @@ from ...control.permission_service import respond_to_permission
 from ...control.tests.test_dispatch_failure_transitions import (
     _seed_accepted_initial_action,
 )
-from ...control.worker_management import LazyWorkerSpawner
 from ...graph.enums import PermissionType
+from ...testing import adopted_spawner
 from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ApprovalStatus, ThreadStatus
@@ -96,14 +96,6 @@ async def _worker(checkpoint_path: Path) -> AsyncGenerator[httpx.AsyncClient]:
         await bridge.close()
 
 
-def _spawner() -> LazyWorkerSpawner:
-    spawner = LazyWorkerSpawner(
-        worker_url="http://worker", worker_port=8001, auto_spawn=False
-    )
-    spawner.adopt_worker()
-    return spawner
-
-
 async def _pause_run(
     session_factory: async_sessionmaker[AsyncSession],
     thread_id: str,
@@ -155,7 +147,7 @@ async def _decide(
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=3, recovery_timeout=30.0
                 ),
-                worker_spawner=_spawner(),
+                worker_spawner=adopted_spawner(),
             ),
         )
 

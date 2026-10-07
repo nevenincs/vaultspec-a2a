@@ -33,8 +33,9 @@ from ...api.internal import internal_router
 from ...control._worker_health import WorkerLiveness, WorkerState, worker_liveness
 from ...control.config import settings
 from ...control.health import assemble_health_status
-from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
+from ...control.worker_management import WorkerWatchdog
 from ...graph.enums import ServerEventType, StreamFrameKind
+from ...testing import adopted_spawner
 from ...testing.ports import free_port
 from ...worker.ipc import WorkerBridge
 from ..circuit_breaker import WorkerCircuitBreaker
@@ -55,9 +56,7 @@ def _gateway_app() -> FastAPI:
 def _watchdog_over(app_state: object) -> WorkerWatchdog:
     """A watchdog reading *app_state*, wired through its real constructor."""
     port = free_port()
-    spawner = LazyWorkerSpawner(
-        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
-    )
+    spawner = adopted_spawner(f"http://127.0.0.1:{port}", port)
     breaker = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30)
     return WorkerWatchdog(spawner, breaker, WorkerState(), app_state)
 

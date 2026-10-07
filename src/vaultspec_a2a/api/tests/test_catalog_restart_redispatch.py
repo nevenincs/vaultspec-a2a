@@ -17,7 +17,6 @@ from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.dispatch import redispatch_reconciling_threads
 from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     close_db,
     create_control_action,
@@ -55,6 +54,7 @@ from ...team.team_config import load_team_config
 from ...testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     RunVerbs,
+    adopted_spawner,
     booted_gateway,
     broker_gateway_env,
     fetch_in_process_selection,
@@ -553,10 +553,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
             await session.commit()
 
         contacts: list[float] = []
-        spawner = LazyWorkerSpawner(
-            worker_url="http://test-worker:8001", worker_port=8001, auto_spawn=False
-        )
-        spawner.adopt_worker()
+        spawner = adopted_spawner("http://test-worker:8001")
         await redispatch_reconciling_threads(
             worker.client,
             WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=30.0),

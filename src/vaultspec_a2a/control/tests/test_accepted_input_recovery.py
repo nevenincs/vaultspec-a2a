@@ -16,6 +16,7 @@ from ...database.models import Base
 from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import adopted_spawner
 from ...testing.catalog_authority import current_execution_metadata
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
@@ -25,7 +26,6 @@ from ..circuit_breaker import WorkerCircuitBreaker
 from ..direct_control_recovery import redrive_direct_control_actions
 from ..dispatch_receipts import prepare_graph_action_receipt
 from ..execution_authority import resolve_execution_authority
-from ..worker_management import LazyWorkerSpawner
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -106,9 +106,7 @@ async def test_redrive_uses_complete_accepted_input_and_refuses_retired_shape(
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=3, recovery_timeout=30
                 ),
-                worker_spawner=LazyWorkerSpawner(
-                    worker_url="http://worker", worker_port=8001, auto_spawn=False
-                ),
+                worker_spawner=adopted_spawner(),
                 trace_headers=None,
             )
         if complete:

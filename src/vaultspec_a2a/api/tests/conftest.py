@@ -26,11 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.event_handlers import CheckpointPruneRegistry
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import create_thread
 from ...providers.factory import ProviderCatalogRegistration, ProviderFactory
 from ...providers.in_process_catalog import served_in_process_lanes
 from ...streaming.aggregator import EventAggregator
+from ...testing import adopted_spawner
 from ...tests._write_authority import make_test_write_authority
 from ..app import create_app
 from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
@@ -361,12 +361,7 @@ def make_app(
     app.state.circuit_breaker = cb
 
     # PHASE-1a: lazy worker spawner — pre-marked as spawned for tests
-    spawner = LazyWorkerSpawner(
-        worker_url="http://test-worker:8001",
-        worker_port=8001,
-        auto_spawn=False,
-    )
-    spawner.adopt_worker()
+    spawner = adopted_spawner("http://test-worker:8001")
     app.state.worker_spawner = spawner
     app.state.db_session_factory = session_factory
 

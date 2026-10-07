@@ -23,12 +23,11 @@ Only the third is a measurement. The first two raise
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from typing import TYPE_CHECKING, Final
 
 from dev.paths import REPO_ROOT, UTF_8
-from dev.runner import TOOLING_PROFILE, child_environment
+from dev.runner import TOOLING_PROFILE, child_environment, resolve_executable
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -38,6 +37,7 @@ __all__ = [
     "DEFAULT_TIMEOUT_SECONDS",
     "ToolMissingError",
     "ToolUnavailableError",
+    "combined_output",
     "run_captured",
     "run_tool",
 ]
@@ -88,19 +88,14 @@ def run_captured(
         subprocess.CalledProcessError: When ``check`` is set and the tool
             exited non-zero.
     """
-    # Resolve through `shutil.which` rather than handing the bare name to
-    # `subprocess`. On Windows the interesting tools ship as `.cmd` shims -
-    # `npx` is a POSIX shell script CreateProcess cannot execute, while
-    # `npx.cmd` beside it is the real entry point - and only PATHEXT
-    # resolution finds the right one.
-    resolved = shutil.which(argv[0])
+    resolved = resolve_executable(argv[0])
     if resolved is None:
         msg = f"{argv[0]} is not on PATH"
         raise ToolMissingError(msg)
 
     try:
-        # `resolved` is an absolute path from `shutil.which` and the rest of the
-        # vector is constructed by the caller; nothing here is shell-parsed.
+        # `resolved` is an absolute path from `resolve_executable` and the rest
+        # of the vector is constructed by the caller; nothing here is shell-parsed.
         return subprocess.run(
             [resolved, *argv[1:]],
             capture_output=True,
@@ -118,6 +113,22 @@ def run_captured(
     except OSError as exc:
         msg = f"{argv[0]} could not be launched ({exc})"
         raise ToolUnavailableError(msg) from exc
+
+
+def combined_output(completed: subprocess.CompletedProcess[str]) -> str:
+    """Return everything a captured child wrote, standard output first.
+
+    A version banner, a refusal, or a failing step's diagnosis lands on
+    whichever stream the tool chose, and tools disagree about which; a caller
+    reading what the child SAID reads both.
+
+    Args:
+        completed: A process returned by :func:`run_captured`.
+
+    Returns:
+        Both streams joined, with surrounding whitespace stripped.
+    """
+    return (completed.stdout + completed.stderr).strip()
 
 
 def run_tool(

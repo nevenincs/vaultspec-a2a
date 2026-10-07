@@ -35,23 +35,26 @@ success while handing back an unusable binary is worse than none, because it
 reads as assurance. So the digest is per platform, and an unlisted platform is
 refused rather than guessed at.
 
-Stdlib only, so it behaves identically on every platform and needs nothing
-installed to install something.
+Stdlib only - it reaches nothing but the stdlib-only harness modules - so it
+behaves identically on every platform and needs nothing installed to install
+something.
 """
 
 from __future__ import annotations
 
-import hashlib
 import os
 import platform
-import shutil
-import subprocess
 import sys
 import tarfile
 import tempfile
-import urllib.request
 import zipfile
 from pathlib import Path
+
+from dev.download import UnverifiedDownloadError, download_verified
+from dev.exit_codes import OK, TOOL_MISSING
+from dev.runner import resolve_executable, run
+
+__all__ = ["ARCHIVES", "RELEASE_PATH", "VERSION", "ensure", "find", "main"]
 
 VERSION = "1.7.12"
 
@@ -92,14 +95,9 @@ ARCHIVES: dict[tuple[str, str], tuple[str, str]] = {
     ),
 }
 
-#: The release artefact path under the download host, which `_download` joins
-#: to a literal `https://` origin.
+#: The release artefact path under the download host, which
+#: :func:`dev.download.download_verified` joins to its literal origin.
 RELEASE_PATH = "rhysd/actionlint/releases/download"
-
-#: Exit codes, from `dev/EXIT-CODES.md`: 0 OK, 1 FAILED, 127 TOOL_MISSING.
-OK = 0
-FAILED = 1
-TOOL_MISSING = 127
 
 
 def _platform_key() -> tuple[str, str]:
@@ -123,30 +121,6 @@ def _cache_root() -> Path:
     if runner_tool_cache:
         return Path(runner_tool_cache) / "actionlint" / VERSION
     return Path.cwd() / ".venv" / "tools" / "actionlint" / VERSION
-
-
-def _download(path: str, into: Path) -> None:
-    """Fetch one release artefact to `into`, failing loudly rather than partially.
-
-    The caller passes a PATH, never a URL, and the scheme and host are written
-    here as literal text. That is the whole scheme control: a variable URL can
-    carry `file:` or any other scheme urlopen happens to handle, and this way
-    the only reachable origin is the one this line spells out.
-    """
-    with urllib.request.urlopen(f"https://github.com/{path}", timeout=120) as response:
-        into.write_bytes(response.read())
-
-
-def _verify(archive: Path, expected: str) -> None:
-    """Refuse an archive whose bytes are not the ones this file pins."""
-    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    if digest != expected:
-        raise SystemExit(
-            f"actionlint {VERSION} archive digest mismatch\n"
-            f"  expected {expected}\n"
-            f"  got      {digest}\n"
-            "Refusing to run an unverified executable."
-        )
 
 
 def _extract_member(archive: Path, suffix: str, destination: Path) -> None:
@@ -193,7 +167,7 @@ def find() -> Path | None:
     behind their back, and the version skew that creates is visible in the
     report actionlint prints.
     """
-    on_path = shutil.which("actionlint")
+    on_path = resolve_executable("actionlint")
     if on_path:
         return Path(on_path)
     key = _platform_key()
@@ -235,8 +209,7 @@ def ensure() -> Path:
     # temporary directory.
     with tempfile.TemporaryDirectory(dir=root) as scratch:
         archive = Path(scratch) / suffix
-        _download(artefact, archive)
-        _verify(archive, expected)
+        archive.write_bytes(download_verified(artefact, expected, timeout=120))
         # ONE member, written to a path this function chose. Not
         # `extractall`: an archive names its own paths, and honouring them is
         # how an entry called `../../.ssh/authorized_keys` gets written
@@ -261,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
     if "--install" in args:
         try:
             binary = ensure()
-        except SystemExit as failure:
+        except (SystemExit, UnverifiedDownloadError) as failure:
             print(str(failure), file=sys.stderr)
             return TOOL_MISSING
         except OSError as failure:
@@ -296,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         'label ".+" is unknown',
         *args,
     ]
-    return subprocess.call(command)
+    return run(command)
 
 
 if __name__ == "__main__":

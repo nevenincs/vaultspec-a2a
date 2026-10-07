@@ -13,7 +13,10 @@ from __future__ import annotations
 import sys
 
 from dev.doctor._probe import fail, report, warn
-from dev.process import ToolUnavailableError, run_captured
+from dev.exit_codes import OK
+from dev.process import ToolUnavailableError, combined_output, run_captured
+
+__all__ = ["docker_optional", "docker_required"]
 
 DOCKER_INSTALL_WINDOWS = (
     "https://docs.docker.com/desktop/setup/install/windows-install/"
@@ -41,7 +44,7 @@ def _diagnose() -> str | None:
         docker = run_captured(["docker", "--version"], timeout=None)
     except ToolUnavailableError:
         return f"Docker is not installed. Install it from {hint}"
-    banner = (docker.stdout + docker.stderr).strip()
+    banner = combined_output(docker)
     if docker.returncode != 0:
         return (
             f"Docker is unavailable. Install or repair Docker from {hint}\n  {banner}"
@@ -53,7 +56,7 @@ def _diagnose() -> str | None:
     except ToolUnavailableError as exc:
         compose_banner = str(exc)
     else:
-        compose_banner = (compose.stdout + compose.stderr).strip()
+        compose_banner = combined_output(compose)
         if compose.returncode == 0:
             report(compose_banner)
             return None
@@ -67,12 +70,13 @@ def docker_optional() -> int:
     """Report Docker support without failing non-container workflows.
 
     Returns:
-        Always 0. A missing container runtime is information here, not a
-        verdict - it matters only to the build and stack recipes.
+        Always :data:`OK`. A missing container runtime is information
+        here, not a verdict - it matters only to the build and stack
+        recipes.
     """
     problem = _diagnose()
     if problem is None:
-        return 0
+        return OK
     return warn(
         f"{problem}\n  It is required only for container build and stack recipes.",
     )
@@ -82,9 +86,10 @@ def docker_required() -> int:
     """Require Docker and Compose for container-specific recipes.
 
     Returns:
-        0 when both are present and working, otherwise 1.
+        :data:`OK` when both are present and working, otherwise
+        :data:`~dev.exit_codes.FAILED`.
     """
     problem = _diagnose()
     if problem is None:
-        return 0
+        return OK
     return fail(f"{problem}\n  This recipe cannot run without Docker and Compose.")

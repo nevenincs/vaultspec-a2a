@@ -12,6 +12,10 @@ sandbox, and cannot reason about afterwards. Reporting
 :data:`dev.exit_codes.INIT_HOST_TOOL_MISSING` with the tool's own installation
 URL is a better outcome than a half-provisioned host.
 
+This is the one host-tool probe in ``dev/``: :mod:`dev.doctor` asks it the same
+questions about the tools a developer runs recipes with, so "present",
+"working" and "new enough" mean one thing whichever command asked.
+
 Stdlib-only, by the constraint stated in :mod:`dev.init`; a tool is asked its
 version through :func:`dev.process.run_captured`, which is stdlib-only as well.
 """
@@ -19,20 +23,28 @@ version through :func:`dev.process.run_captured`, which is stdlib-only as well.
 from __future__ import annotations
 
 import re
-import shutil
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
-from dev.process import ToolUnavailableError, run_captured
+from dev.process import (
+    ToolMissingError,
+    ToolUnavailableError,
+    combined_output,
+    run_captured,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-__all__ = ["Finding", "Requirement", "check", "check_all"]
+__all__ = ["VERSION_TIMEOUT_SECONDS", "Finding", "Requirement", "check", "check_all"]
 
 #: Matches the first dotted version in a `--version` banner. Every tool this
 #: fleet requires prints one, in among a varying amount of other text.
 _VERSION = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
+
+#: Ceiling on one version probe. A tool that cannot say its version inside a
+#: minute has hung, and a hung tool is not one the workstation provides.
+VERSION_TIMEOUT_SECONDS: Final[float] = 60.0
 
 
 @dataclass(frozen=True)
@@ -67,7 +79,8 @@ class Finding:
     Attributes:
         command: The executable that was probed.
         ok: Whether the requirement is satisfied.
-        found: The version that was found, or ``None`` when the tool is absent.
+        found: The version that was found, or ``None`` when the tool is absent,
+            could not report one, or printed nothing recognizable.
         message: One line stating the outcome and, when it is not satisfied,
             the remedy.
         advisory: Carried through from the requirement.
@@ -87,15 +100,25 @@ def _version_of(requirement: Requirement) -> str | None:
         requirement: The tool to interrogate.
 
     Returns:
-        The first dotted version in its banner, or ``None`` when it does not
-        run or prints nothing recognizable.
+        The first dotted version in its banner, or ``None`` when it answered
+        and printed nothing recognizable.
+
+    Raises:
+        ToolMissingError: When the executable is not on ``PATH``.
+        ToolUnavailableError: When it could not be launched, did not answer
+            inside :data:`VERSION_TIMEOUT_SECONDS`, or its version command
+            exited non-zero. A tool that cannot answer ``--version`` is not one
+            the workstation provides, whatever its banner happened to say.
     """
     declared = requirement.version_argv or (requirement.command, "--version")
-    try:
-        completed = run_captured([requirement.command, *declared[1:]], timeout=60)
-    except ToolUnavailableError:
-        return None
-    match = _VERSION.search(completed.stdout + completed.stderr)
+    argv = [requirement.command, *declared[1:]]
+    completed = run_captured(argv, timeout=VERSION_TIMEOUT_SECONDS)
+    banner = combined_output(completed)
+    if completed.returncode != 0:
+        detail = banner.splitlines()[-1] if banner else "no output"
+        msg = f"`{' '.join(argv)}` exited {completed.returncode}: {detail}"
+        raise ToolUnavailableError(msg)
+    match = _VERSION.search(banner)
     return match.group(0) if match else None
 
 
@@ -125,6 +148,19 @@ def _absent(requirement: Requirement) -> str:
     return f"{requirement.command} is not on PATH. {requirement.purpose} {where}"
 
 
+def _finding(
+    requirement: Requirement, *, ok: bool, found: str | None, message: str
+) -> Finding:
+    """Return one requirement's finding, carrying its advisory flag through."""
+    return Finding(
+        command=requirement.command,
+        ok=ok,
+        found=found,
+        message=message,
+        advisory=requirement.advisory,
+    )
+
+
 def check(requirement: Requirement) -> Finding:
     """Probe one requirement.
 
@@ -134,26 +170,30 @@ def check(requirement: Requirement) -> Finding:
     Returns:
         The finding, whose ``message`` is the whole of what a person needs.
     """
-    if shutil.which(requirement.command) is None:
-        return Finding(
-            command=requirement.command,
+    try:
+        found = _version_of(requirement)
+    except ToolMissingError:
+        return _finding(requirement, ok=False, found=None, message=_absent(requirement))
+    except ToolUnavailableError as exc:
+        return _finding(
+            requirement,
             ok=False,
             found=None,
-            message=_absent(requirement),
-            advisory=requirement.advisory,
+            message=(
+                f"{requirement.command} is installed but could not report its "
+                f"version ({exc}). See {requirement.install_url}"
+            ),
         )
-    found = _version_of(requirement)
     if requirement.minimum is None:
-        return Finding(
-            command=requirement.command,
+        return _finding(
+            requirement,
             ok=True,
             found=found,
             message=f"{requirement.command} {found or '(version unknown)'}",
-            advisory=requirement.advisory,
         )
     if found is None:
-        return Finding(
-            command=requirement.command,
+        return _finding(
+            requirement,
             ok=False,
             found=None,
             message=(
@@ -161,25 +201,22 @@ def check(requirement: Requirement) -> Finding:
                 f"this repository requires >= {requirement.minimum}. "
                 f"See {requirement.install_url}"
             ),
-            advisory=requirement.advisory,
         )
     if _tuple(found) < _tuple(requirement.minimum):
-        return Finding(
-            command=requirement.command,
+        return _finding(
+            requirement,
             ok=False,
             found=found,
             message=(
                 f"{requirement.command} {found} is too old; this repository "
                 f"requires >= {requirement.minimum}. See {requirement.install_url}"
             ),
-            advisory=requirement.advisory,
         )
-    return Finding(
-        command=requirement.command,
+    return _finding(
+        requirement,
         ok=True,
         found=found,
         message=f"{requirement.command} {found} (requires >= {requirement.minimum})",
-        advisory=requirement.advisory,
     )
 
 

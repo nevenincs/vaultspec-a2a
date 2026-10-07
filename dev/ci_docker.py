@@ -2,27 +2,25 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import urllib.request
 from pathlib import Path
 
+from dev.download import download_verified
 from dev.exit_codes import OK
 from dev.process import run_captured
 from dev.runner import run
 
 __all__ = ["main"]
 
+#: Each plugin's release path under ``github.com`` and its pinned SHA-256.
 _PLUGINS = {
     "docker-compose": (
-        "https://github.com/docker/compose/releases/download/"
-        "v5.6.0/docker-compose-linux-x86_64",
+        "docker/compose/releases/download/v5.6.0/docker-compose-linux-x86_64",
         "40343e21ca777173e69cff5dbafeb37c6f81f3b0d57d9e597f036e95eb63e76a",
     ),
     "docker-buildx": (
-        "https://github.com/docker/buildx/releases/download/"
-        "v0.37.2/buildx-v0.37.2.linux-amd64",
+        "docker/buildx/releases/download/v0.37.2/buildx-v0.37.2.linux-amd64",
         "982ca20490b45ed1ec8d99795974d3d874a358f75938c9c237305010e6b7e548",
     ),
 }
@@ -44,13 +42,9 @@ def main() -> None:
         )
     plugins = config / "cli-plugins"
     plugins.mkdir(parents=True, exist_ok=True)
-    for name, (url, digest) in _PLUGINS.items():
-        with urllib.request.urlopen(url, timeout=60) as response:
-            payload = response.read(128 * 1024 * 1024 + 1)
-        if hashlib.sha256(payload).hexdigest() != digest:
-            raise RuntimeError(f"{name} download did not match its pinned SHA256")
+    for name, (path, digest) in _PLUGINS.items():
         target = plugins / name
-        target.write_bytes(payload)
+        target.write_bytes(download_verified(path, digest, timeout=60))
         target.chmod(0o755)
     for plugin in ("compose", "buildx"):
         if run(["docker", plugin, "version"], env, timeout=30) != OK:

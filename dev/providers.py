@@ -31,10 +31,13 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from dev.exit_codes import FAILED, OK
 from vaultspec_a2a.testing import LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON
 
 if TYPE_CHECKING:
     from vaultspec_a2a.providers.provider_catalog import ProviderCatalog
+
+__all__ = ["main"]
 
 #: The five identifiers one live proof lane is declared with. Imported from the
 #: test-support package that reads them rather than restated, so a rename cannot
@@ -131,7 +134,7 @@ def _render_exports(
     provider_id, _, model_value = selection.partition("=")
     if not provider_id or not model_value:
         print("--exports expects PROVIDER=MODEL, e.g. claude=haiku", file=sys.stderr)
-        return 2
+        return FAILED
 
     lane = next(
         (
@@ -143,7 +146,7 @@ def _render_exports(
     )
     if lane is None:
         print(f"no lane discovered for provider {provider_id!r}", file=sys.stderr)
-        return 1
+        return FAILED
 
     model = next(
         (m for m in lane["models"] if m["provider_value"] == model_value), None
@@ -154,12 +157,12 @@ def _render_exports(
             f"{provider_id} does not serve model {model_value!r}; it serves: {served}",
             file=sys.stderr,
         )
-        return 1
+        return FAILED
 
     control_id, option_id = _resolve_option(lane, option)
     if control_id is None:
         print(f"{provider_id} serves no control matching {option!r}", file=sys.stderr)
-        return 1
+        return FAILED
 
     values = (
         provider_id,
@@ -177,7 +180,7 @@ def _render_exports(
             print(f'export {name}="{value}"')
         else:
             print(f'$env:{name} = "{value}"')
-    return 0
+    return OK
 
 
 def _resolve_option(
@@ -240,9 +243,9 @@ def main(argv: list[str] | None = None) -> int:
         return _render_exports(lanes, args.exports, args.option, args.shell)
     if args.json:
         print(json.dumps(lanes, indent=2))
-        return 0
+        return OK
     _print_report(lanes)
-    return 0
+    return OK
 
 
 if __name__ == "__main__":

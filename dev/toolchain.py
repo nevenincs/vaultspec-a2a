@@ -36,7 +36,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dev.exit_codes import FINDINGS_CODES
 from dev.paths import PACKAGE_PATH, PYTHON_PATHS, SKIPPED_DIRS, TEST_TIERS
 from dev.runner import (
     Cmd,
@@ -48,6 +47,23 @@ from dev.runner import (
     uv_run,
     uv_run_env,
 )
+
+__all__ = [
+    "AUDIT",
+    "BUILD",
+    "CI",
+    "DEFAULTS",
+    "DEPS",
+    "FIX",
+    "HEALTH",
+    "LINT",
+    "TEST",
+    "VERBS",
+    "Target",
+    "Verb",
+    "find_verb",
+    "public_targets",
+]
 
 #: Shell scripts invoked from outside any Python entry point: by a workflow
 #: step, or as a cloud environment's setup script. actionlint shellchecks a
@@ -110,12 +126,9 @@ class Target:
         name: The target token typed on the command line.
         summary: One-line description shown by ``help``.
         steps: The steps to run, in order.
-        advisory: When true the target reports findings but always exits 0.
-        findings_codes: The statuses this target's tool uses to mean "I found
-            something". Only these are suppressed when `advisory` is set;
-            every other non-zero status is the tool failing to RUN, and
-            propagates. Defaults to `FINDINGS_CODES` ({1}), which is right for
-            every scanner here.
+        advisory: When true the target's findings do not gate. Only the
+            statuses in `FINDINGS_CODES` ({1}) are suppressed; every other
+            non-zero status is the tool failing to RUN, and propagates.
         keep_going: When true a failing step does not stop the remaining steps.
             Aggregate dashboards set this so one red dimension does not hide
             every dimension after it.
@@ -125,7 +138,6 @@ class Target:
     summary: str
     steps: tuple[Step, ...]
     advisory: bool = False
-    findings_codes: frozenset[int] = FINDINGS_CODES
     keep_going: bool = False
 
 

@@ -16,13 +16,11 @@ Like its sibling gates this has no baseline and no exclusion list.
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from dev.audit.unreachable_code import UnreachableCodeOutcome, run_unreachable_code_scan
-from dev.exit_codes import FAILED, OK, TOOL_BROKEN
 from dev.paths import REPO_ROOT
+from dev.quality.gate import gate_main, measured_reachability
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,6 +30,8 @@ if TYPE_CHECKING:
         TestFinding,
         UnreachableCodeResult,
     )
+
+__all__ = ["UnusedSymbolVerdict", "evaluate", "main", "run_gate"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,28 +96,17 @@ def run_gate(repo_root: Path = REPO_ROOT) -> UnusedSymbolVerdict:
     Raises:
         RuntimeError: When the scan could not run.
     """
-    result = run_unreachable_code_scan(repo_root)
-    if result.outcome is UnreachableCodeOutcome.ERROR:
-        msg = f"reachability scan unavailable, coverage unproven: {result.reason}"
-        raise RuntimeError(msg)
-    return evaluate(result)
+    return evaluate(measured_reachability(repo_root))
 
 
 def main() -> int:
     """Print the live set and fail until it is empty.
 
     Returns:
-        :data:`OK` when clean, :data:`FAILED` on findings, and
-        :data:`TOOL_BROKEN` when the measurement could not be taken.
+        The exit code :func:`~dev.quality.gate.gate_main` maps the verdict
+        onto.
     """
-    try:
-        verdict = run_gate()
-    except RuntimeError as exc:
-        print(str(exc), file=sys.stderr)
-        return TOOL_BROKEN
-    stream = sys.stdout if verdict.is_clean else sys.stderr
-    stream.write(verdict.report() + "\n")
-    return OK if verdict.is_clean else FAILED
+    return gate_main(run_gate)
 
 
 if __name__ == "__main__":

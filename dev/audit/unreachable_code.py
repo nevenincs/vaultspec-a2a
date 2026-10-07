@@ -70,9 +70,7 @@ from dev.quality.source_import_analysis import (
     imported_modules,
     imported_symbols,
     load_modules,
-    parse_module,
     repo_source_roots,
-    type_checking_guarded_nodes,
 )
 
 if TYPE_CHECKING:
@@ -440,30 +438,6 @@ def pytest_plugin_modules(spec: ShippedTreeSpec) -> frozenset[str]:
     return frozenset()
 
 
-def configured_script_imports(
-    spec: ShippedTreeSpec, shipped: dict[str, SourceModule]
-) -> frozenset[str]:
-    """Reach package imports made by Python scripts launched from procs.toml."""
-    config = spec.repo_root / "procs.toml"
-    if not config.is_file():
-        return frozenset()
-    scripts = re.findall(
-        r"scripts/[A-Za-z0-9_/-]+\.py", config.read_text(encoding=UTF_8)
-    )
-    reached: set[str] = set()
-    for relative in scripts:
-        path = spec.repo_root / relative
-        if not path.is_file():
-            continue
-        for node in ast.walk(parse_module(path)):
-            if isinstance(node, ast.Import):
-                reached.update(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                reached.add(node.module)
-                reached.update(f"{node.module}.{alias.name}" for alias in node.names)
-    return frozenset(reached & set(shipped))
-
-
 def entry_points(
     spec: ShippedTreeSpec, shipped: dict[str, SourceModule]
 ) -> tuple[str, ...]:
@@ -475,7 +449,7 @@ def entry_points(
 
     Returns:
         The console scripts, the ``python -m`` surfaces, the Alembic revision
-        modules, and modules named or imported by configured scripts, deduped.
+        modules, and modules the repository's configuration names, deduped.
 
     Raises:
         UnreadableSourceError: As :func:`console_script_modules`.
@@ -485,7 +459,6 @@ def entry_points(
         | set(module_execution_surfaces(shipped))
         | set(migration_surfaces(spec, shipped))
         | set(configured_surfaces(spec, shipped))
-        | set(configured_script_imports(spec, shipped))
     )
     return tuple(sorted(root for root in roots if root in shipped))
 
@@ -1270,9 +1243,6 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-# `parse_module` and `type_checking_guarded_nodes` are re-exported for the
-# coverage gates that build on this audit without reaching past it into the
-# shared analysis module.
 __all__ = [
     "ModuleFinding",
     "ModuleReach",
@@ -1282,8 +1252,7 @@ __all__ = [
     "TestFinding",
     "UnreachableCodeOutcome",
     "UnreachableCodeResult",
-    "parse_module",
+    "declared_exports",
     "run_unreachable_code_scan",
     "scan_unreachable_code",
-    "type_checking_guarded_nodes",
 ]

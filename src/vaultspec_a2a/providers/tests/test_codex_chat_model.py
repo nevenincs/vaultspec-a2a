@@ -310,15 +310,21 @@ async def _answered_frame(client: _CodexAppServerClient) -> JsonObject:
 
 
 @pytest.mark.asyncio
-async def test_a_declared_tool_call_is_approved() -> None:
+async def test_a_declared_tool_call_is_approved(tmp_path: Path) -> None:
     """The composed surface is auto-approved, so the bridged write actually runs.
 
     The regression that mattered: before the rung existed this arm answered
     ``-32601``, which codex resolves as a refusal, and every authoring call was
     lost while the run still reported success.
+
+    The rung carries the run's bound project, as production always gives it one:
+    a rung with nothing to measure a call against refuses every call it is
+    handed, so a scope-less arm would assert approval against a path no real run
+    takes.
     """
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         await client.request("drive", {})
@@ -444,11 +450,12 @@ async def test_a_non_tool_call_elicitation_is_declined() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_supervised_rung_decides_the_tool_call() -> None:
+async def test_a_supervised_rung_decides_the_tool_call(tmp_path: Path) -> None:
     """A supervised run routes the decision to its human rung and honours it.
 
     The callback is handed the ACP option shape, so the id it returns IS the
-    action codex expects — which is what keeps the two lanes converged.
+    action codex expects — which is what keeps the two lanes converged. The rung
+    carries the run's bound project for the same reason the autonomous arm does.
     """
     seen: list[tuple[str, list[str]]] = []
 
@@ -458,7 +465,9 @@ async def test_a_supervised_rung_decides_the_tool_call() -> None:
         seen.append((tool_name, [str(option.get("optionId")) for option in options]))
         return "accept"
 
-    client = await _approval_client(permission_callback=approve)
+    client = await _approval_client(
+        permission_callback=approve, project_scope=RunProjectScope(str(tmp_path))
+    )
     try:
         await client.request("drive", {})
         answered = await _answered_frame(client)

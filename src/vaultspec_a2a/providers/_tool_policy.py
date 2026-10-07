@@ -22,13 +22,11 @@ from dataclasses import dataclass
 from langgraph.errors import GraphBubbleUp
 
 from ..graph.acp_options import (
-    APPROVE_OPTION_ID,
     REJECT_OPTION_ID,
     is_approval,
     is_remembering,
     narrowest_option_id,
     offered_option,
-    option_id_of,
     option_id_of_kind,
     valid_option_ids,
 )
@@ -65,15 +63,24 @@ def _refused_ahead_of_both_rungs(
     The guards run in one order on every lane, the scope check first, so the
     same call is refused for the same reason whichever lane raised it.
     """
+    # A rung built with no project cannot measure a call against one, and a
+    # check that cannot be made is not a check that passed: the project scan is
+    # the first authority consulted, so a run with nothing to measure against
+    # has no authority to permit anything. Production always supplies the run's
+    # bound project; absence is a construction defect, and the deny-by-default
+    # direction is to refuse rather than to let the call through unmeasured.
+    if scope is None:
+        logger.warning(
+            "Refused a tool call with no project to measure it against: tool=%s",
+            request.tool,
+        )
+        return True
     # A run is bound to one project, and a call naming another is outside what
     # the run was admitted to do, so neither an allowlist nor a human at the
     # prompt is the authority that could permit it. The refused ARGUMENT is not
     # logged, only the fact and the run's own bound project: a caller-chosen
     # path is agent-supplied payload.
-    if (
-        scope is not None
-        and foreign_project_argument(request.arguments, scope) is not None
-    ):
+    if foreign_project_argument(request.arguments, scope) is not None:
         logger.warning(
             "Refused a cross-project tool call: tool=%s named a project outside "
             "the run's bound project (bound=%s)",
@@ -91,8 +98,8 @@ def _refused_ahead_of_both_rungs(
     return False
 
 
-def _narrowed_to_one_use(option_id: str, options: list[JsonObject]) -> str:
-    """Return the once-only spelling of a chosen answer.
+def _narrowed_to_one_use(option_id: str, options: list[JsonObject]) -> str | None:
+    """Return the once-only spelling of a chosen answer, or None to refuse.
 
     A remembered answer is not this project's to give. The CLI persists it as a
     permission rule in the operator's own settings, outside anything a run can
@@ -104,22 +111,35 @@ def _narrowed_to_one_use(option_id: str, options: list[JsonObject]) -> str:
 
     The answer keeps its polarity: a remembered approval becomes the once-only
     approval and a remembered refusal the once-only refusal, read through the
-    same option kinds the autonomous answer is chosen from. If a session offers
-    no once-only answer of that polarity, the choice is left as made rather
-    than converted into one the human did not give - and that case is logged,
-    because it is the one where an answer outlives its call. Whether that case
-    should be refused instead is decided here and nowhere else.
+    same option kinds the autonomous answer is chosen from.
+
+    Where the session offers no once-only answer of that polarity the two
+    polarities part, and deliberately. A remembered REFUSAL is answered by
+    refusing the call: refusing is what the human asked for, so the call is
+    carried out exactly as given and the only thing dropped is the durable rule
+    nobody asked to write. A remembered APPROVAL cannot be treated the same way,
+    because refusing it would answer the opposite of what the human said; it is
+    forwarded as chosen, and the rule it causes is logged as the cost.
     """
     chosen = offered_option(options, option_id)
     if chosen is None or not is_remembering(chosen):
         return option_id
+    approving = is_approval(chosen)
     once = (
         PermissionOptionKind.ALLOW_ONCE
-        if is_approval(chosen)
+        if approving
         else PermissionOptionKind.REJECT_ONCE
     )
     narrowed = option_id_of_kind(options, once)
     if narrowed is None:
+        if not approving:
+            logger.info(
+                "Refusing the tool call rather than forwarding a remembered "
+                "refusal the session offers no single-use spelling for: tool "
+                "option=%r",
+                option_id,
+            )
+            return None
         logger.warning(
             "Permission option %r remembers the answer and the session offers "
             "no single-use alternative; the CLI will persist a rule this run "
@@ -138,13 +158,15 @@ def _narrowed_to_one_use(option_id: str, options: list[JsonObject]) -> str:
 async def _human_answer(
     request: ToolPermissionRequest, ask: Callable[[], Awaitable[str]]
 ) -> str | None:
-    """Return the human rung's answer applied to this call, or None if it failed.
+    """Return the human rung's answer applied to this call, or None to refuse.
 
     ``GraphBubbleUp`` propagates rather than being caught: it is how a
     supervised rung suspends the run to ask a person, so swallowing it here
     would turn a pending question into a silent refusal. The rung that asked
     records it and refuses the still-open request. Any other failure refuses
-    the call: a human rung that raised has approved nothing.
+    the call: a human rung that raised has approved nothing. A refusal the
+    session can only spell as a durable rule refuses too, for the reason
+    :func:`_narrowed_to_one_use` gives.
     """
     try:
         chosen = await ask()
@@ -159,22 +181,7 @@ async def _human_answer(
     return _narrowed_to_one_use(chosen, request.options)
 
 
-def _option_id_at(options: list[JsonObject], index: int, *, default: str) -> str:
-    """Return the id of the option at ``index``, or ``default`` if it has none.
-
-    Positional, never scanning: the caller picks an option by CONVENTION (first
-    is the least restrictive), so silently sliding to a neighbour when the
-    conventional entry is malformed would substitute an option with the opposite
-    meaning. Reading the id through the canonical extractor instead of
-    subscripting is what keeps a malformed entry from raising ``KeyError`` on a
-    path that exists to handle malformed input.
-    """
-    if not options:
-        return default
-    return option_id_of(options[index]) or default
-
-
-def _autonomous_answer(request: ToolPermissionRequest, *, covered: bool) -> str:
+def _autonomous_answer(request: ToolPermissionRequest, *, covered: bool) -> str | None:
     """Decide with no human rung: approve exactly what the composed surface covers.
 
     An unattended run has no human rung, so this IS the permission decision,
@@ -187,23 +194,31 @@ def _autonomous_answer(request: ToolPermissionRequest, *, covered: bool) -> str:
     call would make the declared surface advisory and every unadvertised verb
     reachable.
 
-    An approval is the NARROWEST offered one: taking the first approval-kind
-    option could grant a whole server for a session on the strength of one
-    allowlisted tool. A refusal is the narrowest offered refusal, and otherwise
-    :data:`REJECT_OPTION_ID`. That id is a deliberate answer rather than a
-    gap: an id the agent does not recognise makes it decline the tool call,
-    which is the direction a refusal must fail in, while any scan that could
-    land on an approval turns one malformed or unusual option list into a grant.
+    An approval is the NARROWEST offered one, and ONLY an offered one: taking
+    the first approval-kind option could grant a whole server for a session on
+    the strength of one allowlisted tool, and answering a covered call whose
+    request offers no approval at all - by position, or with the conventional
+    approve literal - would turn a malformed or unusual option list into a
+    grant the provider never put on the table. Coverage decides that an approval
+    is PERMITTED; it does not invent one, so such a call is refused.
+
+    A refusal is the narrowest offered refusal, and otherwise
+    :data:`REJECT_OPTION_ID`. That id is a deliberate answer rather than a gap:
+    an id the agent does not recognise makes it decline the tool call, which is
+    the direction a refusal must fail in, while any scan that could land on an
+    approval turns one malformed option list into a grant.
     """
     options = request.options
     if covered:
-        # A covered call whose request offers no approval-kind option is
-        # answered with the first offered id, and with APPROVE_OPTION_ID
-        # when no option carries one. Whether such a call should be refused
-        # instead is decided here and nowhere else.
-        return narrowest_option_id(options, approving=True) or _option_id_at(
-            options, 0, default=APPROVE_OPTION_ID
+        approval = narrowest_option_id(options, approving=True)
+        if approval is not None:
+            return approval
+        logger.warning(
+            "Refused a covered tool call at the autonomous rung: tool=%s was "
+            "offered no approval to select, so there is nothing to approve with",
+            request.tool,
         )
+        return None
     logger.warning(
         "Refused a tool call at the autonomous rung: tool=%s is not covered by "
         "the run's composed surface",
@@ -225,8 +240,9 @@ async def decide(
     human rung (*ask*, bound to this call) then answers, and an unattended run
     is answered by the composed-surface rule. *covered* is consulted only on the
     unattended path, so a lane's coverage check runs - and logs - only for the
-    calls it decides. *scope* is the project the run is bound to; ``None``, a
-    rung built with no project to measure against, skips the scope scan.
+    calls it decides. *scope* is the project the run is bound to; a rung built
+    with ``None`` has no project to measure a call against and every call it
+    puts here is refused.
 
     ``None`` leaves the refusal to the rung, which spells it in its own lane's
     terms. ``GraphBubbleUp`` raised by *ask* propagates to the rung.
@@ -235,17 +251,17 @@ async def decide(
         return None
     if ask is not None:
         chosen = await _human_answer(request, ask)
-        if chosen is None:
-            return None
     else:
         chosen = _autonomous_answer(request, covered=covered())
+    if chosen is None:
+        return None
     # An answer naming an option that was never offered is not a decision a
     # rung can carry out, so the call is REFUSED rather than mapped onto a
     # neighbour: the pinned ACP adapter sorts its options with the approvals
     # first, so substituting the first offered option resolved a refusal whose
     # id did not match to a grant. A request offering no usable id leaves
-    # nothing to check against, and the answer is forwarded as given - which
-    # is the case the autonomous fallback ids above are answering.
+    # nothing to check against, and the answer is forwarded as given - which for
+    # a refusal is the conventional literal the rung declines on.
     valid_ids = valid_option_ids(request.options)
     if valid_ids and chosen not in valid_ids:
         logger.warning(

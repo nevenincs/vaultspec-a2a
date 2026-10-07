@@ -43,6 +43,7 @@ import pytest
 
 from ...control.config import settings
 from ...graph.enums import Provider
+from ...testing import read_acp_frame
 from ...workspace.environment import resolve_env_vars
 from .._acp_session import claude_session_options
 from .._acp_types import AcpModelConfig
@@ -51,7 +52,6 @@ from .._factory_commands import _classify_acp_command, claude_acp_entry
 from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
-from ._acp_frames import read_acp_frame
 
 if TYPE_CHECKING:
     from asyncio.subprocess import Process

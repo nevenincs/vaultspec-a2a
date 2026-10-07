@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import sys
 from collections.abc import AsyncIterator, Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,7 +35,12 @@ from ...graph.events import (
     ToolCallUpdate,
 )
 from ...providers import AcpPromptError, ProviderCondition
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    new_state_graph,
+    simulator_command,
+)
 from ...thread.enums import ThreadStatus
 from ...thread.errors import EventAggregatorError
 from .. import EventAggregator as CoreAggregator
@@ -2216,18 +2220,12 @@ class TestIngestExceptionCauseChain:
         assert len(summary) <= len("Graph event stream failed unexpectedly: ") + 500
 
 
-# The ACP protocol simulator: a real subprocess speaking real JSON-RPC over
-# stdio, already used by the worker node's own integration tests. Driving the
-# failure through it rather than through an in-process stand-in is the point of
-# the test below - the loss this Phase repaired happened across the worker node,
-# the exception wrapper and the ingest summarizer, and only a real provider
-# exception travelling that whole path can show it is repaired.
-_ACP_SIMULATOR = (
-    Path(__file__).resolve().parent.parent.parent
-    / "graph"
-    / "tests"
-    / "acp_simulator.py"
-)
+# The failure below is driven through the ACP protocol simulator: a real
+# subprocess speaking real JSON-RPC over stdio. Driving it through that rather
+# than through an in-process stand-in is the point of the test - the loss this
+# Phase repaired happened across the worker node, the exception wrapper and the
+# ingest summarizer, and only a real provider exception travelling that whole
+# path can show it is repaired.
 
 # The vendor prose the simulated provider refuses with. It is the test's INPUT,
 # and every assertion below asks whether it - and the protocol facts around it -
@@ -2259,12 +2257,7 @@ def _failing_provider_graph(
     from ...graph.nodes.worker import create_worker_node
     from ...providers.acp_chat_model import AcpChatModel
 
-    command = [
-        sys.executable,
-        str(_ACP_SIMULATOR),
-        "--error",
-        _PROVIDER_REFUSAL,
-    ]
+    command = simulator_command("--error", _PROVIDER_REFUSAL)
     if error_kind is not None:
         command += ["--error-kind", error_kind, "--error-code", "-32603"]
     model = AcpChatModel(

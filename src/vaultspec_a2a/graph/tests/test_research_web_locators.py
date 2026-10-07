@@ -16,9 +16,7 @@ nothing - it would pass just as well if the malformation were harmless.
 
 from __future__ import annotations
 
-import sys
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -27,7 +25,12 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    new_state_graph,
+    simulator_command,
+)
 from .._compiler_research import _make_research_producer
 from ..compiler import _wire_diverge_stage
 from ..nodes.diverge import (
@@ -39,13 +42,13 @@ from ..nodes.diverge import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from langchain_core.runnables import RunnableConfig
 
     from ...thread.state import TeamState
     from ..nodes.diverge import ResearchFindingProducer
 
-SIMULATOR_PATH = Path(__file__).parent / "acp_simulator.py"
-PYTHON_EXE = sys.executable
 
 _THREAD_ID = "web-grounding"
 
@@ -74,12 +77,10 @@ def _researcher_producer(tmp_path: Path, prose: str) -> ResearchFindingProducer:
     response_file = tmp_path / "researcher-turn.txt"
     response_file.write_text(prose, encoding="utf-8")
     model = AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
+        command=simulator_command(
             "--response-file",
             str(response_file),
-        ],
+        ),
         workspace_root=str(tmp_path),
     )
     return _make_research_producer(model, "You are the researcher.")

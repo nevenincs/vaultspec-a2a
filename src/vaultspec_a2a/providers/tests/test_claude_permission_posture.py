@@ -9,7 +9,6 @@ prove the posture actually leaves the process.
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -17,6 +16,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ...team.team_config import load_agent_config
+from ...testing import read_acp_frame, simulator_command
 from ...utils.enums import AcpRequestId
 from .._acp_session import claude_session_options, setup_session
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
@@ -32,7 +32,6 @@ from .._claude_tool_policy import (
 )
 from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpSessionError
-from ._acp_frames import read_acp_frame
 from ._installed_vocabulary import (
     acp_adapter_permission_mode_ids,
     acp_adapter_session_mode_source,
@@ -45,9 +44,6 @@ if TYPE_CHECKING:
 
 _SESSION_ID = "session-under-test"
 _TIMEOUT = 10.0
-_SIMULATOR = (
-    Path(__file__).parent.parent.parent / "graph" / "tests" / "acp_simulator.py"
-)
 
 # Echoes each stdin line back on stdout, so the frame a production seam wrote is
 # readable from the same context. A real pipe round-trip through a real process.
@@ -511,13 +507,7 @@ async def test_supervised_session_still_runs_against_an_agent_without_modes(
 def _simulator_model(tmp_path: Path, *extra_args: str) -> AcpChatModel:
     """An unattended model over a real ACP subprocess, with no permission rung."""
     return AcpChatModel(
-        command=[
-            sys.executable,
-            str(_SIMULATOR),
-            "--response",
-            "done",
-            *extra_args,
-        ],
+        command=simulator_command("--response", "done", *extra_args),
         env_vars={},
         workspace_root=str(tmp_path),
     )

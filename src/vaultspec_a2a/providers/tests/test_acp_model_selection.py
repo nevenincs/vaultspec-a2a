@@ -14,6 +14,7 @@ import asyncio
 
 import pytest
 
+from ...testing import read_acp_frame
 from ...utils.enums import AcpRequestId
 from .._acp_session import (
     _select_desired_config_options,
@@ -25,7 +26,6 @@ from .._acp_types import AcpModelConfig, AcpSessionContext, InitializeResult
 from .._json_contract import JsonObject, JsonValue
 from ..acp_exceptions import AcpErrorCode, AcpSessionError
 from ..conditions import ProviderCondition
-from ._acp_frames import read_acp_frame
 
 # An opaque model identifier standing for the value frozen into a run's role
 # assignment. Deliberately a literal rather than a lookup: an external lane's

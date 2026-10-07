@@ -32,8 +32,6 @@ reach past the seam.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -49,6 +47,7 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
+from ...testing import simulator_command
 from .._compiler_prompts import (
     WEB_GROUNDING_MARKER,
     compose_persona_prompt,
@@ -59,9 +58,8 @@ from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+    from pathlib import Path
 
-SIMULATOR_PATH = Path(__file__).parent / "acp_simulator.py"
-PYTHON_EXE = sys.executable
 
 #: The lanes the compiled runs below declare, one per stance. Named rather than
 #: derived from the declaration so the run is reproducible, but every expectation
@@ -156,14 +154,12 @@ class _SimulatorProviderFactory:
         prompt_file = self.record_dir / f"{agent_id}.prompt.json"
         self.prompt_files[agent_id] = prompt_file
         return AcpChatModel(
-            command=[
-                PYTHON_EXE,
-                str(SIMULATOR_PATH),
+            command=simulator_command(
                 "--response",
                 "PASS",
                 "--record-session-prompt",
                 str(prompt_file),
-            ],
+            ),
             # An armed run always carries its lane token; without it the spawn's
             # config-home isolation does not engage.
             env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},

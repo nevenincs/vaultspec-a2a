@@ -23,7 +23,7 @@ from typing import Any, cast
 
 import pytest
 
-from ...testing import request_permission_request
+from ...testing import REQUEST_PERMISSION_METHOD, request_permission_request
 from .._acp_protocol import ServerRpcRequest, handle_client_response, handle_server_rpc
 from .._acp_types import AcpModelConfig, AcpSessionContext
 from ..acp_exceptions import AcpPromptError
@@ -55,6 +55,15 @@ async def _dispatch(
     """
     await handle_server_rpc(
         ServerRpcRequest(method, rpc_id, {}), _context(stdin), _config(), handlers
+    )
+
+
+async def _dispatch_permission(
+    rpc_id: int | str, handler: Any, stdin: _CapturingStdin
+) -> None:
+    """Dispatch one permission request whose only registered handler is *handler*."""
+    await _dispatch(
+        REQUEST_PERMISSION_METHOD, rpc_id, {REQUEST_PERMISSION_METHOD: handler}, stdin
     )
 
 
@@ -167,19 +176,12 @@ def test_a_raising_handler_still_answers_with_a_protocol_error() -> None:
     ) -> dict[str, Any]:
         raise RuntimeError("handler exploded")
 
-    asyncio.run(
-        _dispatch(
-            "session/request_permission",
-            7,
-            {"session/request_permission": _boom},
-            stdin,
-        )
-    )
+    asyncio.run(_dispatch_permission(7, _boom, stdin))
 
     reply = _sent(stdin)
     assert reply["id"] == 7
     assert reply["error"]["code"] == -32603
-    assert "session/request_permission" in reply["error"]["message"]
+    assert REQUEST_PERMISSION_METHOD in reply["error"]["message"]
 
 
 def test_the_failure_reply_does_not_leak_the_exception_text() -> None:
@@ -194,14 +196,7 @@ def test_the_failure_reply_does_not_leak_the_exception_text() -> None:
     ) -> dict[str, Any]:
         raise RuntimeError("/secret/path/leaked.txt missing")
 
-    asyncio.run(
-        _dispatch(
-            "session/request_permission",
-            9,
-            {"session/request_permission": _boom},
-            stdin,
-        )
-    )
+    asyncio.run(_dispatch_permission(9, _boom, stdin))
 
     assert "leaked" not in json.dumps(_sent(stdin))
 
@@ -218,11 +213,7 @@ def test_a_successful_handler_reply_is_unchanged() -> None:
     ) -> dict[str, Any]:
         return {"jsonrpc": "2.0", "id": rpc_id, "result": {"content": "hello"}}
 
-    asyncio.run(
-        _dispatch(
-            "session/request_permission", 3, {"session/request_permission": _ok}, stdin
-        )
-    )
+    asyncio.run(_dispatch_permission(3, _ok, stdin))
 
     reply = _sent(stdin)
     assert reply["result"]["content"] == "hello"
@@ -242,14 +233,7 @@ def test_cancellation_is_not_reported_as_a_handler_failure() -> None:
         raise asyncio.CancelledError
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(
-            _dispatch(
-                "session/request_permission",
-                5,
-                {"session/request_permission": _cancelled},
-                stdin,
-            )
-        )
+        asyncio.run(_dispatch_permission(5, _cancelled, stdin))
 
     assert stdin.frames == []
 
@@ -322,7 +306,7 @@ async def test_a_failing_handler_answers_the_agent_over_a_real_session_pipe() ->
         prompt_id_ref=[0],
         interrupt_exc=[],
     )
-    handlers: dict[str, Any] = {"session/request_permission": _boom}
+    handlers: dict[str, Any] = {REQUEST_PERMISSION_METHOD: _boom}
 
     loop_task = asyncio.create_task(process_stdout_loop(ctx, _config(), handlers))
     try:

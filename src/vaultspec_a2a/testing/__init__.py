@@ -8,8 +8,8 @@ polling built on them (``polling``), registry-backed service endpoint
 resolution (``endpoints``), and the pytest plugin
 (``plugin``) that derives scheduling groups, timeout backstops, and lease
 acquisition from the declarations. The ACP test peer (``acp``) is the simulated
-agent side of the protocol over stdio, with the frame reader a client-side test
-uses against it.
+agent side of the protocol over stdio, with the frame builders and the request and
+reply exchange a client-side test uses against it.
 
 The plugin is loaded by the repository-root ``conftest.py``, which is the one
 channel that neither an ``addopts`` override can strip nor a consumer
@@ -23,8 +23,15 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .acp import (
+        ACP_PROTOCOL_VERSION,
         ACP_SIMULATOR_PATH,
+        REQUEST_PERMISSION_METHOD,
+        acp_request,
+        exchange_acp_request,
+        initialize_request,
+        initialize_result,
         read_acp_frame,
+        request_permission_params,
         request_permission_request,
         simulator_command,
     )
@@ -139,8 +146,21 @@ if TYPE_CHECKING:
 #: naming ``vaultspec_a2a.testing.children``, leaving every submodule this
 #: facade lazily loads misreported as reachable only through type checking.
 _LAZY_EXPORTS = {
+    "ACP_PROTOCOL_VERSION": ("vaultspec_a2a.testing.acp", "ACP_PROTOCOL_VERSION"),
     "ACP_SIMULATOR_PATH": ("vaultspec_a2a.testing.acp", "ACP_SIMULATOR_PATH"),
+    "REQUEST_PERMISSION_METHOD": (
+        "vaultspec_a2a.testing.acp",
+        "REQUEST_PERMISSION_METHOD",
+    ),
+    "acp_request": ("vaultspec_a2a.testing.acp", "acp_request"),
+    "exchange_acp_request": ("vaultspec_a2a.testing.acp", "exchange_acp_request"),
+    "initialize_request": ("vaultspec_a2a.testing.acp", "initialize_request"),
+    "initialize_result": ("vaultspec_a2a.testing.acp", "initialize_result"),
     "read_acp_frame": ("vaultspec_a2a.testing.acp", "read_acp_frame"),
+    "request_permission_params": (
+        "vaultspec_a2a.testing.acp",
+        "request_permission_params",
+    ),
     "request_permission_request": (
         "vaultspec_a2a.testing.acp",
         "request_permission_request",
@@ -331,6 +351,7 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "ACP_PROTOCOL_VERSION",
     "ACP_SIMULATOR_PATH",
     "CPU_BUDGET_ENV",
     "DEFAULT_IDLE_WINDOW_S",
@@ -340,6 +361,7 @@ __all__ = [
     "LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON",
     "LIVE_PROVIDER_PREREQUISITES",
     "MARKER_NAME",
+    "REQUEST_PERMISSION_METHOD",
     "RESOURCES",
     "SCRATCH_PREFIX",
     "SCRATCH_ROLE",
@@ -360,6 +382,7 @@ __all__ = [
     "ResourceSpec",
     "SseFrame",
     "SseReader",
+    "acp_request",
     "add_test_node",
     "ainvoke_test_graph",
     "allocate_free_ports",
@@ -377,6 +400,7 @@ __all__ = [
     "declared_lane_model_value",
     "decode_frame",
     "effective_worker_count",
+    "exchange_acp_request",
     "exclusive_keys",
     "fetch_in_process_selection",
     "fetch_in_process_selection_at",
@@ -388,6 +412,8 @@ __all__ = [
     "hold_lease",
     "in_process_lane_selection",
     "in_process_selection",
+    "initialize_request",
+    "initialize_result",
     "is_terminal",
     "lease_home",
     "live_peer_sessions",
@@ -404,6 +430,7 @@ __all__ = [
     "read_frame",
     "register_session",
     "registry_watch",
+    "request_permission_params",
     "request_permission_request",
     "reserve_scratch_ports",
     "resolve_gateway_url",

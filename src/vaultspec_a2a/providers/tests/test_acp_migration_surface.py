@@ -35,7 +35,6 @@ Skips with a pointer when the Claude CLI entry point is unavailable (an infra ga
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -43,7 +42,12 @@ import pytest
 
 from ...control.config import settings
 from ...graph.enums import Provider
-from ...testing import read_acp_frame
+from ...testing import (
+    ACP_PROTOCOL_VERSION,
+    acp_request,
+    exchange_acp_request,
+    initialize_request,
+)
 from ...workspace.environment import resolve_env_vars
 from .._acp_session import claude_session_options
 from .._acp_types import AcpModelConfig
@@ -58,28 +62,23 @@ if TYPE_CHECKING:
 
 
 async def _assert_initialize_surface(proc: Process) -> None:
-    assert proc.stdin is not None and proc.stdout is not None
-    init: JsonObject = {
-        "jsonrpc": "2.0",
-        "id": 0,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": 1,
-            "clientCapabilities": {
-                "fs": {"readTextFile": True, "writeTextFile": False},
-            },
-            "clientInfo": {"name": "p02-s08-surface", "version": "1.0.0"},
-        },
-    }
-    proc.stdin.write(json.dumps(init).encode("utf-8") + b"\n")
-    await proc.stdin.drain()
-    init_frame = await read_acp_frame(proc.stdout, 0, 30.0)
+    init_frame = await exchange_acp_request(
+        proc,
+        initialize_request(
+            0,
+            "p02-s08-surface",
+            {"fs": {"readTextFile": True, "writeTextFile": False}},
+        ),
+        30.0,
+    )
     assert "result" in init_frame, init_frame.get("error")
     init_res = init_frame["result"]
     assert isinstance(init_res, dict)
 
     # protocolVersion our request pins and our fs/terminal RPC names are keyed to.
-    assert init_res.get("protocolVersion") == 1, init_res.get("protocolVersion")
+    assert init_res.get("protocolVersion") == ACP_PROTOCOL_VERSION, init_res.get(
+        "protocolVersion"
+    )
     # The two fields InitializeResult parses.
     agent_caps = init_res.get("agentCapabilities")
     assert isinstance(agent_caps, dict) and agent_caps
@@ -115,29 +114,59 @@ def _served_config(workspace: str) -> AcpModelConfig:
     )
 
 
+async def _set_config_option(
+    proc: Process, rpc_id: int, session_id: str, config_id: str, value: str
+) -> JsonObject:
+    """Send ``session/set_config_option`` and return the option as the adapter holds it.
+
+    The adapter answers with its whole option list, so the one named *config_id*
+    is picked out of the reply rather than assumed to be the only entry.
+    """
+    frame = await exchange_acp_request(
+        proc,
+        acp_request(
+            rpc_id,
+            "session/set_config_option",
+            {"sessionId": session_id, "configId": config_id, "value": value},
+        ),
+        40.0,
+    )
+    assert "result" in frame, frame.get("error")
+    result = frame["result"]
+    assert isinstance(result, dict)
+    options = result.get("configOptions")
+    assert isinstance(options, list)
+    matching = [
+        option
+        for option in options
+        if isinstance(option, dict) and option.get("id") == config_id
+    ]
+    assert len(matching) == 1, options
+    return matching[0]
+
+
 async def _start_acp_session(proc: Process, workspace: str) -> tuple[str, str, str]:
-    assert proc.stdin is not None and proc.stdout is not None
     # session/new with the claudeCode options block PRODUCTION composes, read
     # from the production composer rather than copied: a copy proves the
     # adapter accepts some shape, which is not the question. The question is
     # whether it accepts the shape a served turn sends.
-    new: JsonObject = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "session/new",
-        "params": {
-            "cwd": workspace,
-            "mcpServers": list[JsonValue](),
-            "_meta": {
-                "claudeCode": {
-                    "options": claude_session_options(_served_config(workspace))
-                }
+    new_frame = await exchange_acp_request(
+        proc,
+        acp_request(
+            1,
+            "session/new",
+            {
+                "cwd": workspace,
+                "mcpServers": list[JsonValue](),
+                "_meta": {
+                    "claudeCode": {
+                        "options": claude_session_options(_served_config(workspace))
+                    }
+                },
             },
-        },
-    }
-    proc.stdin.write(json.dumps(new).encode("utf-8") + b"\n")
-    await proc.stdin.drain()
-    new_frame = await read_acp_frame(proc.stdout, 1, 40.0)
+        ),
+        40.0,
+    )
     assert "result" in new_frame, new_frame.get("error")
     new_res = new_frame["result"]
     assert isinstance(new_res, dict)
@@ -219,64 +248,21 @@ async def test_migrated_adapter_preserves_handshake_surface() -> None:
     proc = await spawn_acp_process(
         command, env, workspace, use_exec=False, metadata=meta
     )
-    assert proc.stdin is not None and proc.stdout is not None
     try:
         await _assert_initialize_surface(proc)
         session_id, config_id, desired_model = await _start_acp_session(proc, workspace)
-        select_model: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "session/set_config_option",
-            "params": {
-                "sessionId": session_id,
-                "configId": config_id,
-                "value": desired_model,
-            },
-        }
-        proc.stdin.write(json.dumps(select_model).encode("utf-8") + b"\n")
-        await proc.stdin.drain()
-        selected_frame = await read_acp_frame(proc.stdout, 2, 40.0)
-        assert "result" in selected_frame, selected_frame.get("error")
-        selected_result = selected_frame["result"]
-        assert isinstance(selected_result, dict)
-        selected_options = selected_result.get("configOptions")
-        assert isinstance(selected_options, list)
-        selected_model_options = [
-            option
-            for option in selected_options
-            if isinstance(option, dict) and option.get("id") == config_id
-        ]
-        assert len(selected_model_options) == 1
-        assert selected_model_options[0].get("currentValue") == desired_model
+        selected = await _set_config_option(
+            proc, 2, session_id, config_id, desired_model
+        )
+        assert selected.get("currentValue") == desired_model
 
         # The seam an unattended run pins its permission mode through. It is
         # this exchange rather than session/set_mode precisely because it
         # answers with the option list the adapter now holds, so the mode is
         # set and verified in one call - which is the property asserted here.
-        pin_mode: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "session/set_config_option",
-            "params": {
-                "sessionId": session_id,
-                "configId": MODE_CONFIG_OPTION_ID,
-                "value": AUTONOMOUS_PERMISSION_MODE,
-            },
-        }
-        proc.stdin.write(json.dumps(pin_mode).encode("utf-8") + b"\n")
-        await proc.stdin.drain()
-        pinned_frame = await read_acp_frame(proc.stdout, 3, 40.0)
-        assert "result" in pinned_frame, pinned_frame.get("error")
-        pinned_result = pinned_frame["result"]
-        assert isinstance(pinned_result, dict)
-        pinned_options = pinned_result.get("configOptions")
-        assert isinstance(pinned_options, list)
-        pinned_mode_options = [
-            option
-            for option in pinned_options
-            if isinstance(option, dict) and option.get("id") == MODE_CONFIG_OPTION_ID
-        ]
-        assert len(pinned_mode_options) == 1, pinned_options
-        assert pinned_mode_options[0].get("currentValue") == AUTONOMOUS_PERMISSION_MODE
+        pinned = await _set_config_option(
+            proc, 3, session_id, MODE_CONFIG_OPTION_ID, AUTONOMOUS_PERMISSION_MODE
+        )
+        assert pinned.get("currentValue") == AUTONOMOUS_PERMISSION_MODE
     finally:
         await kill_process_tree(proc, metadata=meta)

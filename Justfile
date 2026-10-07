@@ -202,7 +202,7 @@ deps-claude-cli:
 deps-codex-cli:
     {{dev}} deps codex-cli
 
-# Verify rootless Docker and install pinned integration CLI plugins.
+# Verify rootless Docker and install the pinned Docker Compose plugin.
 [group('setup')]
 deps-docker-ci:
     {{dev}} deps docker-ci

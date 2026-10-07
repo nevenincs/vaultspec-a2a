@@ -267,7 +267,7 @@ DEPS = Verb(
         ),
         Target(
             "docker-ci",
-            "Verify rootless Docker and install pinned integration CLI plugins.",
+            "Verify rootless Docker and install the pinned Docker Compose plugin.",
             (dev_module("ci_docker"),),
         ),
         Target(

@@ -33,6 +33,9 @@ from .authoring_cursor_repository import (
 from .authoring_cursor_repository import (
     set_authoring_cursor as set_authoring_cursor,
 )
+from .checkpoints import CheckpointRead as CheckpointRead
+from .checkpoints import CheckpointReadStatus as CheckpointReadStatus
+from .checkpoints import read_latest_checkpoint as read_latest_checkpoint
 from .compatibility import SchemaCompatibilityError as SchemaCompatibilityError
 from .compatibility import supported_migration_head as supported_migration_head
 from .compatibility import validate_desktop_schema as validate_desktop_schema
@@ -195,6 +198,8 @@ __all__ = [
     "ArtifactModel",
     "AuthoringEventCursorModel",
     "Base",
+    "CheckpointRead",
+    "CheckpointReadStatus",
     "ControlActionModel",
     "ControlActionReservation",
     "CostTrackingModel",
@@ -262,6 +267,7 @@ __all__ = [
     "normalize_workspace_identity",
     "outstanding_permission_pause",
     "path_safe_run_id_clause",
+    "read_latest_checkpoint",
     "record_permission_request",
     "record_permission_response_submission",
     "record_thread_execution_state",

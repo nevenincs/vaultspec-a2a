@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, cast, override
 from sqlalchemy import select
 
 from ..database import (
+    CheckpointRead,
     ControlActionModel,
     ThreadModel,
     ThreadStatusElectionOutcome,
@@ -26,6 +27,7 @@ from ..database import (
     get_pending_permission_requests,
     get_thread,
     mark_control_action_applied,
+    read_latest_checkpoint,
     settle_control_action_lease,
     successor_thread_write_authority,
     thread_write_expectation,
@@ -62,11 +64,9 @@ from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .graph_definition import read_accepted_graph_definition
 from .repair_transitions import record_undelivered_dispatch
-from .thread_state_service import read_run_snapshot
 
 if TYPE_CHECKING:
     import httpx
-    from langgraph.checkpoint.base import CheckpointTuple
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..database.checkpoints import Checkpointer
@@ -288,18 +288,9 @@ def _idempotency_key(request_id: str) -> str:
     return f"{_IDEMPOTENCY_PREFIX}{request_id}"
 
 
-def _checkpoint_receipt(checkpoint_tuple: object | None, request_id: str) -> str | None:
+def _checkpoint_receipt(checkpoint: CheckpointRead, request_id: str) -> str | None:
     """Read one application receipt from checkpoint channel values."""
-    checkpoint_value: object = getattr(checkpoint_tuple, "checkpoint", None)
-    if not isinstance(checkpoint_value, dict):
-        return None
-    checkpoint = cast("dict[str, object]", checkpoint_value)
-    values = checkpoint.get("channel_values")
-    if not isinstance(values, dict):
-        return None
-    receipts = cast("dict[str, object]", values).get(
-        "clarification_resolution_receipts"
-    )
+    receipts = checkpoint.channel_values.get("clarification_resolution_receipts")
     if not isinstance(receipts, dict):
         return None
     fingerprint = cast("dict[str, object]", receipts).get(request_id)
@@ -325,10 +316,10 @@ async def _settle_from_receipt(
     action: ControlActionModel,
     *,
     fingerprint: str,
-    checkpoint_tuple: object | None,
+    checkpoint: CheckpointRead,
 ) -> bool:
     """Settle only when checkpoint truth carries this request and fingerprint."""
-    if _checkpoint_receipt(checkpoint_tuple, action.request_id or "") != fingerprint:
+    if _checkpoint_receipt(checkpoint, action.request_id or "") != fingerprint:
         return False
     if action.applied_at is not None:
         return True
@@ -373,7 +364,7 @@ async def _replay_existing_action(
     db: AsyncSession,
     existing: ControlActionModel,
     fingerprint: str,
-    checkpoint_snapshot: object | None,
+    checkpoint: CheckpointRead,
     parked_matches: bool,
 ) -> ClarificationResult | None:
     stored = _stored_resolution(existing)
@@ -389,7 +380,7 @@ async def _replay_existing_action(
         db,
         existing,
         fingerprint=fingerprint,
-        checkpoint_tuple=checkpoint_snapshot,
+        checkpoint=checkpoint,
     ):
         await db.refresh(existing)
         return _result(existing, applied=True)
@@ -466,14 +457,14 @@ async def respond_to_clarification(
     # The checkpoint read is remote I/O, so it happens before the durable
     # transaction opens: holding the write lock across it would block every
     # other writer for the length of a checkpoint round trip.
-    checkpoint_snapshot = await read_run_snapshot(checkpointer, thread_id)
-    parked = pending_clarification(checkpoint_snapshot, thread_id=thread_id)
+    checkpoint = await read_latest_checkpoint(checkpointer, thread_id)
+    parked = pending_clarification(checkpoint.checkpoint_tuple, thread_id=thread_id)
     attempt = _ClarificationAttempt(
         thread_id=thread_id,
         request_id=request_id,
         resolution=resolution,
         runtime=runtime,
-        checkpoint_snapshot=checkpoint_snapshot,
+        checkpoint=checkpoint,
         parked=parked,
     )
 
@@ -496,7 +487,7 @@ class _ClarificationAttempt:
     request_id: str
     resolution: ClarificationResolution
     runtime: ClarificationRuntime
-    checkpoint_snapshot: CheckpointTuple | None
+    checkpoint: CheckpointRead
     parked: ClarificationRequest | None
 
     @property
@@ -541,7 +532,7 @@ async def _respond_under_write_lock(
             db,
             existing,
             fingerprint,
-            attempt.checkpoint_snapshot,
+            attempt.checkpoint,
             attempt.is_parked,
         )
         if replay is not None:
@@ -747,14 +738,14 @@ async def _dispatch_claimed(
     # A very fast worker may already have checkpointed the receipt before its HTTP
     # acknowledgement reaches us. Settle opportunistically, but never infer
     # application merely from the acknowledgement.
-    latest_checkpoint = await read_run_snapshot(
+    latest_checkpoint = await read_latest_checkpoint(
         context.runtime.checkpointer, context.thread_id
     )
     applied = await _settle_from_receipt(
         db,
         action,
         fingerprint=context.fingerprint,
-        checkpoint_tuple=latest_checkpoint,
+        checkpoint=latest_checkpoint,
     )
     if applied:
         await db.refresh(action)
@@ -787,11 +778,14 @@ async def reconcile_clarification_pause(
     recorded_as_parked = expectation.status is ThreadStatus.INPUT_REQUIRED
     if not recorded_as_parked and expectation.status not in _PARKABLE_STATUSES:
         return
-    snapshot = await read_run_snapshot(checkpointer, thread_id)
-    if snapshot is None:
-        # An unreadable checkpoint proves neither a pause nor its end.
+    checkpoint = await read_latest_checkpoint(checkpointer, thread_id)
+    if checkpoint.checkpoint_tuple is None:
+        # A missing or unreadable checkpoint proves neither a pause nor its end.
         return
-    parked = pending_clarification(snapshot, thread_id=thread_id) is not None
+    parked = (
+        pending_clarification(checkpoint.checkpoint_tuple, thread_id=thread_id)
+        is not None
+    )
     if parked == recorded_as_parked:
         return
     await begin_write_transaction(db)

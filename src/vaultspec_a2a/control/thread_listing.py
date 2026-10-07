@@ -16,6 +16,7 @@ from ..database import (
     get_pending_permission_requests,
     get_thread_execution_state,
     list_threads,
+    read_latest_checkpoint,
 )
 from ..domain_config import domain_config
 from ..thread.enums import (
@@ -164,16 +165,13 @@ async def _bulk_read_checkpoints(
     async def _one(thread_id: str) -> tuple[str, _CheckpointProbe]:
         reader = await readers.get()
         try:
-            try:
-                checkpoint_tuple = await reader.aget_tuple(
-                    {"configurable": {"thread_id": thread_id}}
-                )
-            except Exception:
-                logger.warning(
-                    "Checkpoint probe failed for thread %s", thread_id, exc_info=True
-                )
-                return thread_id, _CheckpointProbe(unverified=True)
-            return thread_id, _CheckpointProbe(tuple=checkpoint_tuple)
+            # No single read may outlast the batch it belongs to.
+            checkpoint = await read_latest_checkpoint(
+                reader, thread_id, timeout=deadline
+            )
+            return thread_id, _CheckpointProbe(
+                tuple=checkpoint.checkpoint_tuple, unverified=checkpoint.unreadable
+            )
         finally:
             readers.put_nowait(reader)
 

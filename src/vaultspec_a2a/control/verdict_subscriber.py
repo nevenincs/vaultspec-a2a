@@ -47,6 +47,7 @@ from ..database import (
     list_threads,
     mark_control_action_applied,
     mark_permission_request_applied,
+    read_latest_checkpoint,
     set_authoring_cursor,
     thread_write_expectation,
     update_thread_status,
@@ -76,7 +77,6 @@ from .graph_definition import read_accepted_graph_definition
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from langchain_core.runnables import RunnableConfig
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..authoring import EngineEndpoint
@@ -227,15 +227,7 @@ def _decided_verdicts(data: object) -> dict[str, str]:
     return verdict_by_id
 
 
-def _checkpoint_authoring_ids(checkpoint: object) -> set[str]:
-    checkpoint_mapping = coerce_object_mapping(checkpoint)
-    values = (
-        coerce_object_mapping(checkpoint_mapping.get("channel_values"))
-        if checkpoint_mapping is not None
-        else None
-    )
-    if values is None:
-        return set()
+def _checkpoint_authoring_ids(values: Mapping[str, object]) -> set[str]:
     out: set[str] = set()
     for field in _STATE_ID_FIELDS:
         items = coerce_object_list(values.get(field))
@@ -405,32 +397,12 @@ class VerdictSubscriber:
         the run is not parked at a document gate, so the parked-run reconcile skips
         it rather than correlating a stale earlier gate's proposal.
         """
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-        try:
-            checkpoint_tuple = await asyncio.wait_for(
-                self._dependencies.checkpointer.aget_tuple(config),
-                timeout=self._timing.checkpoint_timeout_seconds,
-            )
-        except TimeoutError:
-            logger.warning("Checkpoint read timed out for thread %s", thread_id)
-            return None
-        except Exception:
-            logger.warning(
-                "Checkpoint read failed for thread %s", thread_id, exc_info=True
-            )
-            return None
-        if checkpoint_tuple is None:
-            return None
-        checkpoint: object = getattr(checkpoint_tuple, "checkpoint", None)
-        checkpoint_mapping = coerce_object_mapping(checkpoint)
-        values = (
-            coerce_object_mapping(checkpoint_mapping.get("channel_values"))
-            if checkpoint_mapping is not None
-            else None
+        checkpoint = await read_latest_checkpoint(
+            self._dependencies.checkpointer,
+            thread_id,
+            timeout=self._timing.checkpoint_timeout_seconds,
         )
-        if values is None:
-            return None
-        pending = values.get(_GATE_PENDING_PROPOSAL_FIELD)
+        pending = checkpoint.channel_values.get(_GATE_PENDING_PROPOSAL_FIELD)
         return pending if isinstance(pending, str) and pending else None
 
     # ------------------------------------------------------------------
@@ -563,23 +535,12 @@ class VerdictSubscriber:
 
     async def _thread_authoring_ids(self, thread_id: str) -> set[str]:
         """Read a thread's authoring reference ids from its latest checkpoint."""
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-        try:
-            checkpoint_tuple = await asyncio.wait_for(
-                self._dependencies.checkpointer.aget_tuple(config),
-                timeout=self._timing.checkpoint_timeout_seconds,
-            )
-        except TimeoutError:
-            logger.warning("Checkpoint read timed out for thread %s", thread_id)
-            return set()
-        except Exception:
-            logger.warning(
-                "Checkpoint read failed for thread %s", thread_id, exc_info=True
-            )
-            return set()
-        if checkpoint_tuple is None:
-            return set()
-        return _checkpoint_authoring_ids(getattr(checkpoint_tuple, "checkpoint", None))
+        checkpoint = await read_latest_checkpoint(
+            self._dependencies.checkpointer,
+            thread_id,
+            timeout=self._timing.checkpoint_timeout_seconds,
+        )
+        return _checkpoint_authoring_ids(checkpoint.channel_values)
 
     # ------------------------------------------------------------------
     # Resume dispatch

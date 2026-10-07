@@ -39,9 +39,9 @@ from ...control._worker_readiness import (
     _reap_unready_worker,
 )
 from ...control.worker_management import LazyWorkerSpawner
-from ...lifecycle.discovery import is_pid_alive
 from ...lifecycle.shutdown import ShutdownDeadline
 from ...utils import kill_pid_tree_async
+from ...utils._process_tree import pid_is_live
 from ...utils.process import ProcessContainment, ProcessContainmentError
 
 # A stand-in for the half-started worker: spawns real grandchildren, prints their
@@ -133,15 +133,15 @@ def _spawn_tree(
 def _await_gone(pids: list[int], *, timeout: float = 20.0) -> list[int]:
     """Wait for every pid to die, returning any survivors."""
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and any(is_pid_alive(p) for p in pids):
+    while time.monotonic() < deadline and any(pid_is_live(p) for p in pids):
         time.sleep(0.05)
-    return [p for p in pids if is_pid_alive(p)]
+    return [p for p in pids if pid_is_live(p)]
 
 
 async def _force_cleanup(pids: list[int]) -> None:
     """Last-resort teardown so a failing assertion cannot leak real processes."""
     for pid in pids:
-        if is_pid_alive(pid):
+        if pid_is_live(pid):
             with contextlib.suppress(Exception):
                 await kill_pid_tree_async(pid, term_timeout=2.0, kill_timeout=2.0)
 
@@ -236,7 +236,7 @@ async def test_shutdown_reaps_descendants_after_worker_root_crashes() -> None:
     try:
         process.kill()
         process.wait(timeout=5)
-        assert all(is_pid_alive(pid) for pid in child_pids)
+        assert all(pid_is_live(pid) for pid in child_pids)
 
         await _shutdown_worker_process(process, containment)
 
@@ -338,7 +338,7 @@ async def test_spawner_cooperates_then_reaps_the_remaining_owned_tree(
         child_pid = int(marker.read_text(encoding="utf-8"))
         assert elapsed < 4.2, f"owned worker teardown took {elapsed:.4f}s"
         assert process.poll() is not None
-        assert not is_pid_alive(child_pid), "owned descendant survived escalation"
+        assert not pid_is_live(child_pid), "owned descendant survived escalation"
         assert spawner.process is None and spawner.containment is None
     finally:
         child_pids: list[int] = []
@@ -396,7 +396,7 @@ async def test_shutdown_reaps_child_created_after_cooperative_request(
         child_pid = int(marker.read_text(encoding="utf-8"))
         assert elapsed < 4.2, f"late-child teardown took {elapsed:.4f}s"
         assert process.poll() is not None
-        assert not is_pid_alive(child_pid), "late descendant survived root exit"
+        assert not pid_is_live(child_pid), "late descendant survived root exit"
     finally:
         child_pids: list[int] = []
         if marker.exists():
@@ -447,7 +447,7 @@ async def test_spawner_snapshots_uncontained_tree_before_root_exits(
         assert marker.exists(), "the cooperative shutdown route was not reached"
         child_pid = int(marker.read_text(encoding="utf-8"))
         assert process.poll() is not None
-        assert not is_pid_alive(child_pid), "uncontained descendant survived teardown"
+        assert not pid_is_live(child_pid), "uncontained descendant survived teardown"
     finally:
         child_pids: list[int] = []
         if marker.exists():

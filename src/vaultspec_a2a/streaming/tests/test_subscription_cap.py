@@ -15,9 +15,9 @@ from __future__ import annotations
 import pytest
 
 from ...domain_config import domain_config
-from ...telemetry.aggregator_hook import OTelAggregatorHook
 from ...thread.errors import EventAggregatorError
 from ..aggregator import EventAggregator
+from ._metric_reader import counter_total, metered_hook
 
 
 @pytest.fixture
@@ -130,13 +130,12 @@ def test_the_cap_is_per_client_not_global(aggregator: EventAggregator) -> None:
 def test_a_refusal_emits_the_operational_counter() -> None:
     """The refusal is observable to operators, not just to the caller.
 
-    Uses the real OTel hook against a real meter rather than a stand-in: it
-    registers each counter lazily on first use, so the counter's presence in the
-    hook's registry is proof the production path actually recorded it. The
-    control below shows the same registry is empty without a refusal, so this
-    cannot pass on a counter registered by some other code path.
+    Uses the real OTel hook over a real SDK meter rather than a stand-in, and
+    reads the recorded total back from the SDK's in-memory reader. The control
+    below shows the same reader reports nothing without a refusal, so this
+    cannot pass on a counter recorded by some other code path.
     """
-    hook = OTelAggregatorHook()
+    hook, reader = metered_hook()
     aggregator = EventAggregator(telemetry=hook)
     limit = domain_config.max_subscriptions_per_client
     aggregator.add_subscriber("client-1")
@@ -144,18 +143,18 @@ def test_a_refusal_emits_the_operational_counter() -> None:
     with pytest.raises(EventAggregatorError):
         aggregator.subscribe("client-1", _threads(0, limit + 1))
 
-    assert hook.has_registered_counter("aggregator.subscriptions_refused")
+    assert counter_total(reader, "aggregator.subscriptions_refused") == 1
 
 
 def test_an_accepted_subscription_emits_no_refusal_counter() -> None:
     """Control: the counter tracks refusals, not subscribe calls."""
-    hook = OTelAggregatorHook()
+    hook, reader = metered_hook()
     aggregator = EventAggregator(telemetry=hook)
     aggregator.add_subscriber("client-1")
 
     aggregator.subscribe("client-1", _threads(0, 5))
 
-    assert not hook.has_registered_counter("aggregator.subscriptions_refused")
+    assert counter_total(reader, "aggregator.subscriptions_refused") == 0
 
 
 def test_unsubscribing_frees_capacity_again(aggregator: EventAggregator) -> None:

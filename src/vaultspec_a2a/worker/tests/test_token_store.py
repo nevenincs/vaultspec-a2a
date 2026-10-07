@@ -73,7 +73,6 @@ class TestRunTokenStore:
     def test_register_then_per_role_read(self) -> None:
         store = RunTokenStore()
         store.register("run-1", _bundle())
-        assert store.has("run-1")
         assert store.actor_token("run-1", "coder") == "tok-coder"
         assert store.actor_token("run-1", "reviewer") == "tok-reviewer"
         assert store.engine_bearer("run-1") == "bearer-machine"
@@ -92,16 +91,16 @@ class TestRunTokenStore:
         store = RunTokenStore()
         store.register("run-1", None)
         store.register("run-2", ActorTokenBundle())
-        assert not store.has("run-1")
-        assert not store.has("run-2")
-        assert store.active_run_count() == 0
+        assert store.engine_bearer("run-1") is None
+        assert store.engine_bearer("run-2") is None
+        assert repr(store) == "RunTokenStore(active_runs=0)"
 
     def test_drop_removes_the_run_and_is_idempotent(self) -> None:
         store = RunTokenStore()
         store.register("run-1", _bundle())
         store.drop("run-1")
-        assert not store.has("run-1")
         assert store.actor_token("run-1", "coder") is None
+        assert store.engine_bearer("run-1") is None
         # Dropping an already-dropped or never-registered run does not raise.
         store.drop("run-1")
         store.drop("never")

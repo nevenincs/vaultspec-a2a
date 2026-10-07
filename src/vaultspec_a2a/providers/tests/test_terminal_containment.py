@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...lifecycle.discovery import is_pid_alive
+from ...utils._process_tree import pid_is_live
 from ...utils.process import ProcessContainment
 from .._acp_rpc_handlers import (
     on_terminal_kill,
@@ -98,7 +98,7 @@ async def test_terminal_child_contained_and_reaped_whole(
         acp_session_context.terminal_outputs[terminal_id].output.strip()
     )
     try:
-        assert is_pid_alive(grandchild_pid)
+        assert pid_is_live(grandchild_pid)
 
         # terminal/kill reaps the whole terminal subtree via the containment.
         await on_terminal_kill(
@@ -109,11 +109,11 @@ async def test_terminal_child_contained_and_reaped_whole(
         )
 
         deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and is_pid_alive(grandchild_pid):
+        while time.monotonic() < deadline and pid_is_live(grandchild_pid):
             await asyncio.sleep(0.05)
-        assert not is_pid_alive(grandchild_pid)
+        assert not pid_is_live(grandchild_pid)
     finally:
-        if is_pid_alive(grandchild_pid):
+        if pid_is_live(grandchild_pid):
             from ...utils._process_tree import kill_pid_tree_async
 
             await kill_pid_tree_async(grandchild_pid)

@@ -47,24 +47,22 @@ def _snapshot(*names: str) -> CatalogSnapshot:
 class TestRunCatalogStore:
     """The per-run catalog cache mirrors RunTokenStore's lifecycle."""
 
-    def test_register_get_has_drop(self) -> None:
+    def test_register_get_drop(self) -> None:
         store = RunCatalogStore()
         snap = _snapshot("read_context")
         assert store.get("t1") is None
-        assert not store.has("t1")
         store.register("t1", snap)
         assert store.get("t1") is snap
-        assert store.has("t1")
-        assert store.active_run_count() == 1
+        assert repr(store) == "RunCatalogStore(active_runs=1)"
         store.drop("t1")
-        assert not store.has("t1")
+        assert store.get("t1") is None
         store.drop("t1")  # idempotent
 
     def test_register_none_is_noop(self) -> None:
         store = RunCatalogStore()
         store.register("t1", None)
-        assert not store.has("t1")
-        assert store.active_run_count() == 0
+        assert store.get("t1") is None
+        assert repr(store) == "RunCatalogStore(active_runs=0)"
 
     def test_repr_reports_only_count(self) -> None:
         store = RunCatalogStore()
@@ -138,7 +136,6 @@ class TestAuthoringBindingProvider:
                 tokens={"vaultspec-coder": "actor-xyz"}, engine_bearer=None
             ),
         )
-        assert token_store.has("t1")  # not the no-bundle case
         assert token_store.actor_token("t1", "vaultspec-coder") == "actor-xyz"
         assert token_store.engine_bearer("t1") is None
 
@@ -264,13 +261,13 @@ async def test_binding_for_fetches_catalog_once_per_run_live() -> None:
         catalog_store=catalog_store,
     )
 
-    assert not catalog_store.has(run_id)
+    assert catalog_store.get(run_id) is None
     first = await provider.binding_for(run_id, "vaultspec-coder")
     assert first is not None
     assert first.tool_names  # the engine served a non-empty catalog
     # The fetch populated the shared cache...
-    assert catalog_store.has(run_id)
     cached = catalog_store.get(run_id)
+    assert cached is not None
     # ...and a second role's binding reuses the SAME snapshot (one fetch per run).
     second = await provider.binding_for(run_id, "vaultspec-coder")
     assert second is not None
@@ -323,4 +320,4 @@ async def test_binding_for_concurrent_fetches_share_one_snapshot_live() -> None:
     )
     assert first is not None and second is not None
     assert first.snapshot is second.snapshot
-    assert catalog_store.active_run_count() == 1
+    assert repr(catalog_store) == "RunCatalogStore(active_runs=1)"

@@ -23,11 +23,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ..lifecycle.discovery import is_pid_alive
 from ..tests.gateway_boot import (
     GatewayBootError,
     spawn_until_ready,
 )
+from ..utils._process_tree import pid_is_live
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -66,7 +66,7 @@ def test_a_gateway_that_never_becomes_ready_is_reaped(tmp_path: Path) -> None:
         spawned.append(proc)
         # Alive at spawn time, through the real predicate: the assertion below
         # about it being gone is only meaningful because it was here first.
-        assert is_pid_alive(proc.pid), "the sleeper never started"
+        assert pid_is_live(proc.pid), "the sleeper never started"
         return proc
 
     try:
@@ -81,7 +81,7 @@ def test_a_gateway_that_never_becomes_ready_is_reaped(tmp_path: Path) -> None:
         assert len(spawned) == 1, spawned
         proc = spawned[0]
         assert proc.poll() is not None, "the unready gateway was left running"
-        assert not is_pid_alive(proc.pid), "the unready gateway tree survived"
+        assert not pid_is_live(proc.pid), "the unready gateway tree survived"
     finally:
         for proc in spawned:
             if proc.poll() is None:
@@ -118,7 +118,7 @@ def test_an_interrupted_boot_is_reaped(tmp_path: Path) -> None:
             stderr=subprocess.STDOUT,
         )
         spawned.append(proc)
-        assert is_pid_alive(proc.pid), "the sleeper never started"
+        assert pid_is_live(proc.pid), "the sleeper never started"
         interrupter.start()
         return proc
 
@@ -131,7 +131,7 @@ def test_an_interrupted_boot_is_reaped(tmp_path: Path) -> None:
         assert len(spawned) == 1, spawned
         proc = spawned[0]
         assert proc.poll() is not None, "the interrupted gateway was left running"
-        assert not is_pid_alive(proc.pid), "the interrupted gateway tree survived"
+        assert not pid_is_live(proc.pid), "the interrupted gateway tree survived"
     finally:
         interrupter.cancel()
         for proc in spawned:

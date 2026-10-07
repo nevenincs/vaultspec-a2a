@@ -28,7 +28,11 @@ from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
 import httpx
 
-from ..utils._process_tree import detached_spawn_kwargs, kill_pid_tree_async
+from ..utils._process_tree import (
+    detached_spawn_kwargs,
+    kill_pid_tree_async,
+    pid_is_live,
+)
 from .boot import (
     build_cwd_for,
     build_sha,
@@ -39,6 +43,7 @@ from .boot import (
     serve_cwd_for,
     serve_env,
 )
+from .discovery import port_has_listener
 from .errors import LifecycleError
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
@@ -90,6 +95,11 @@ _KILL_ESCALATION_WAIT = 5.0
 
 SPAWN_LOG_CAP_BYTES = 10 * 1024 * 1024
 
+# A connect probe, not a bind probe: on Windows ``SO_REUSEADDR`` lets a second
+# socket bind a port another is already listening on, so only a loopback connect
+# tells a held port from a free one.
+_PORT_PROBE_TIMEOUT_SECONDS = 1.0
+
 
 @dataclass(frozen=True, slots=True)
 class ProcVerdict:
@@ -123,12 +133,6 @@ def endpoint_for(record: ProcRecord) -> str:
     return f"http://127.0.0.1:{record.port}"
 
 
-def _is_pid_alive(pid: int) -> bool:
-    from .discovery import is_pid_alive
-
-    return is_pid_alive(pid)
-
-
 def _confirm_terminated(pid: int, *, timeout: float = 10.0) -> bool:
     """Poll until *pid* is no longer a live process; ``False`` if it survives.
 
@@ -139,10 +143,10 @@ def _confirm_terminated(pid: int, *, timeout: float = 10.0) -> bool:
     """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not _is_pid_alive(pid):
+        if not pid_is_live(pid):
             return True
         time.sleep(0.05)
-    return not _is_pid_alive(pid)
+    return not pid_is_live(pid)
 
 
 def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
@@ -292,11 +296,11 @@ def attach(name: str, *, home: Path | None = None) -> ProcVerdict:
     so an operator never attaches to a stale record.
     """
     record = resolve(name, home=home)
-    if not _is_pid_alive(record.pid):
+    if not pid_is_live(record.pid):
         raise LifecycleError(
             f"{record.role}-{record.name} pid {record.pid} is not alive"
         )
-    if not _port_is_bound(record.port):
+    if not port_has_listener(record.port, timeout=_PORT_PROBE_TIMEOUT_SECONDS):
         raise LifecycleError(
             f"{record.role}-{record.name} pid {record.pid} is alive but port "
             f"{record.port} is not accepting connections"
@@ -385,7 +389,7 @@ def resume(
     started/last-seen stamp, preserving port, workspace, and owner.
     """
     record = resolve(name, home=home)
-    if _is_pid_alive(record.pid):
+    if pid_is_live(record.pid):
         raise LifecycleError(
             f"{record.role}-{record.name} pid {record.pid} is still alive; "
             "nothing to resume (use rerun to cycle it)"
@@ -782,7 +786,7 @@ def _listener_ready(
     """
     from ..utils._process_tree import ListenerOwnership, classify_listener_ownership
 
-    if not _port_is_bound(port):
+    if not port_has_listener(port, timeout=_PORT_PROBE_TIMEOUT_SECONDS):
         return False
     ownership = classify_listener_ownership(port, process.pid)
     if ownership is ListenerOwnership.CONFIRMED:
@@ -906,17 +910,3 @@ def _start_from_record(
     )
     write_record(updated, home=home)
     return updated
-
-
-def _port_is_bound(port: int, *, timeout: float = 1.0) -> bool:
-    """Return ``True`` when something is accepting connections on *port*.
-
-    A connect probe, not a bind probe: on Windows ``SO_REUSEADDR`` lets a second
-    socket bind a port another is already listening on, so a bind cannot tell a
-    held port from a free one. A successful loopback connect proves a live
-    listener - exactly what ``attach`` must verify. Delegates to the shared
-    :func:`~vaultspec_a2a.lifecycle.discovery.port_has_listener` primitive.
-    """
-    from .discovery import port_has_listener
-
-    return port_has_listener(port, timeout=timeout)

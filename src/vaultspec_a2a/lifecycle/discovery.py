@@ -63,6 +63,7 @@ from ..desktop._platform_acl import (
 from ..desktop._platform_acl import (
     restrict_windows_file as _restrict_windows_file,
 )
+from ..utils._process_tree import pid_is_live
 from ..utils.atomic_write import atomic_write_text
 from ..utils.coercion import coerce_int
 from ._desktop_discovery_record_parts import (
@@ -80,12 +81,10 @@ __all__ = [
     "DESKTOP_DISCOVERY_VERSION",
     "DESKTOP_PROTOCOL_MAX",
     "HEARTBEAT_REFRESH_SECONDS",
-    "DesktopDiscoveryState",
     "DiscoveryState",
     "another_resident_is_live",
     "classify_desktop_discovery",
     "classify_discovery",
-    "is_pid_alive",
     "port_has_listener",
     "probe_health",
     "read_resident_service",
@@ -101,7 +100,10 @@ HEARTBEAT_REFRESH_SECONDS = 15
 
 
 class DiscoveryState(StrEnum):
-    """Attach-never-own classification of a discovery file (R8)."""
+    """Attach-never-own, filesystem-only classification of a discovery file.
+
+    Shared by the Compose service record and the versioned desktop record.
+    """
 
     FRESH = "fresh"
     STALE = "stale"
@@ -346,22 +348,6 @@ def read_resident_service(a2a_home: Path) -> tuple[DiscoveryState, ServiceInfo |
     return classify_discovery(service_json_path(a2a_home))
 
 
-def is_pid_alive(pid: int | None) -> bool:
-    """Return ``True`` when *pid* is a live process on this machine.
-
-    The lifecycle spelling of the package's single liveness probe, adding this
-    layer's ``None`` handling (an unrecorded pid is not alive) on top of
-    :func:`vaultspec_a2a.utils.process.pid_is_live`, which owns the platform
-    contract: an ``OpenProcess`` exit-code query on Windows, and on POSIX a
-    signal-0 probe that discounts an unreaped zombie.
-    """
-    from ..utils._process_tree import pid_is_live
-
-    if pid is None:
-        return False
-    return pid_is_live(pid)
-
-
 def port_has_listener(port: int, *, timeout: float) -> bool:
     """Return ``True`` when a loopback ``connect`` to *port* is accepted.
 
@@ -496,7 +482,7 @@ def another_resident_is_live(a2a_home: Path, *, health_timeout: float = 2.0) -> 
     state, info = read_resident_service(a2a_home)
     if state is not DiscoveryState.FRESH or info is None:
         return False
-    if not is_pid_alive(info.pid):
+    if info.pid is None or not pid_is_live(info.pid):
         return False
     base_url = f"http://127.0.0.1:{info.port}"
     return probe_health(base_url, timeout=health_timeout) is not None
@@ -563,15 +549,6 @@ DESKTOP_PROTOCOL_MIN = 1
 DESKTOP_PROTOCOL_MAX = 1
 
 _DESKTOP_PROFILE = "desktop"
-
-
-class DesktopDiscoveryState(StrEnum):
-    """Filesystem-only classification of a versioned desktop discovery record."""
-
-    FRESH = "fresh"
-    STALE = "stale"
-    MALFORMED = "malformed"
-    ABSENT = "absent"
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -820,7 +797,7 @@ def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | N
 
 def classify_desktop_discovery(
     path: Path, *, now_ms: int | None = None
-) -> tuple[DesktopDiscoveryState, DesktopDiscoveryRecord | None]:
+) -> tuple[DiscoveryState, DesktopDiscoveryRecord | None]:
     """Classify a desktop discovery file filesystem-only (no pid or /health probe).
 
     ``ABSENT`` when the file is missing, ``MALFORMED`` when it is unreadable or is
@@ -830,17 +807,17 @@ def classify_desktop_discovery(
     :func:`desktop_record_process_is_live` before it is trusted as a live resident.
     """
     if not path.exists():
-        return DesktopDiscoveryState.ABSENT, None
+        return DiscoveryState.ABSENT, None
     info = read_service_json(path)
     if info is None:
-        return DesktopDiscoveryState.MALFORMED, None
+        return DiscoveryState.MALFORMED, None
     record = _parse_desktop_record(info)
     if record is None:
-        return DesktopDiscoveryState.MALFORMED, None
+        return DiscoveryState.MALFORMED, None
     now = now_ms if now_ms is not None else int(time.time() * 1000)
     if not heartbeat_is_fresh(info, now):
-        return DesktopDiscoveryState.STALE, record
-    return DesktopDiscoveryState.FRESH, record
+        return DiscoveryState.STALE, record
+    return DiscoveryState.FRESH, record
 
 
 def desktop_record_process_is_live(record: DesktopDiscoveryRecord) -> bool:
@@ -852,7 +829,7 @@ def desktop_record_process_is_live(record: DesktopDiscoveryRecord) -> bool:
     """
     from .singleton import process_start_fingerprint
 
-    if not is_pid_alive(record.pid):
+    if not pid_is_live(record.pid):
         return False
     if record.start_fingerprint is None:
         return True

@@ -327,16 +327,6 @@ class _ControlActionArgs(_ControlActionOptional):
     idempotency_key: str
 
 
-class _GetOrCreateActionOptional(_ControlActionOptional, total=False):
-    absence_already_resolved: bool
-
-
-class _GetOrCreateActionArgs(_GetOrCreateActionOptional):
-    thread_id: str
-    action_type: ControlActionType | str
-    idempotency_key: str
-
-
 class _ReserveActionOptional(TypedDict, total=False):
     request_id: str | None
     payload: dict[str, object] | None
@@ -385,7 +375,7 @@ async def create_control_action(
 
 
 async def get_or_create_control_action(
-    session: AsyncSession, **kwargs: Unpack[_GetOrCreateActionArgs]
+    session: AsyncSession, **kwargs: Unpack[_ControlActionArgs]
 ) -> tuple[ControlActionModel, bool]:
     """Return the journal record for ``(thread_id, idempotency_key)``, inserting it
     only when absent.
@@ -396,23 +386,16 @@ async def get_or_create_control_action(
     same key across boots for a thread that has not advanced its epoch (e.g. rows
     written before the epoch-increment fix), and the app must not die on the second
     boot. Returns ``(action, created)`` where ``created`` is ``False`` for a replay.
-
-    ``absence_already_resolved`` skips only the existence pre-read, for a caller
-    that resolved the same absence for a whole batch in one query. It weakens no
-    guarantee: the pre-read never was the authority - the SAVEPOINT-wrapped insert
-    and its ``IntegrityError`` re-read are, precisely because a concurrent writer
-    can land between any pre-read and the insert.
     """
     thread_id = kwargs["thread_id"]
     idempotency_key = kwargs["idempotency_key"]
-    if not kwargs.get("absence_already_resolved", False):
-        existing = await get_control_action_by_idempotency_key(
-            session,
-            thread_id=thread_id,
-            idempotency_key=idempotency_key,
-        )
-        if existing is not None:
-            return existing, False
+    existing = await get_control_action_by_idempotency_key(
+        session,
+        thread_id=thread_id,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        return existing, False
     # Atomic insert: wrap the INSERT in a SAVEPOINT so a concurrent boot that wins
     # the race raises IntegrityError on the UNIQUE key, rolls back only the nested
     # savepoint (leaving the outer transaction usable), and is then resolved by

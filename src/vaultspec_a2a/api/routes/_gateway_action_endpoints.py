@@ -63,6 +63,7 @@ from ...thread.constants import (
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionResultStatus
 from ...thread.idempotency import IDEMPOTENCY_KEY_MAX_LENGTH
+from ...utils import package_version
 from ...utils.coercion import coerce_object_mapping
 from .._utils import trace_headers
 from ..dependencies import (
@@ -820,7 +821,7 @@ async def service_state_endpoint(
     degraded_reasons = _service_degraded_reasons(checks)
 
     return ServiceStateResponse(
-        service_version=_service_version(),
+        service_version=package_version(),
         status=status,
         alive=True,
         ready=can_accept_run,
@@ -853,13 +854,3 @@ async def service_state_endpoint(
         routes=route_signature(request.app),
         readiness=readiness,
     )
-
-
-def _service_version() -> str:
-    """Return the installed a2a distribution version, or 'unknown'."""
-    from importlib.metadata import PackageNotFoundError, version
-
-    try:
-        return version("vaultspec-a2a")
-    except PackageNotFoundError:
-        return "unknown"

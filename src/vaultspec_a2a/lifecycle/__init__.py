@@ -17,7 +17,6 @@ The process commands in :mod:`vaultspec_a2a.cli` use this package. See
 """
 
 from .boot import render_command, render_env
-from .discovery import is_pid_alive
 from .errors import LifecycleError
 from .manager import (
     ProcVerdict,
@@ -83,7 +82,6 @@ __all__ = [
     "default_procs_owner",
     "deregister_serve",
     "endpoint_for",
-    "is_pid_alive",
     "kill",
     "list_records",
     "list_verdicts",

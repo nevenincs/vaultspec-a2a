@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    from opentelemetry.metrics import Meter
+
 from .instrumentation import get_meter, get_tracer
 
 __all__ = ["OTelAggregatorHook"]
@@ -27,9 +29,11 @@ class OTelAggregatorHook:
     def __init__(
         self,
         module_name: str = "vaultspec_a2a.streaming.aggregator",
+        *,
+        meter: Meter | None = None,
     ) -> None:
         self._tracer = get_tracer(module_name)
-        self._meter = get_meter(module_name)
+        self._meter = meter if meter is not None else get_meter(module_name)
         self._counters: dict[str, Any] = {}
         self._histograms: dict[str, Any] = {}
 
@@ -47,7 +51,3 @@ class OTelAggregatorHook:
         if name not in self._histograms:
             self._histograms[name] = self._meter.create_histogram(name, unit="s")
         self._histograms[name].record(value, attrs)
-
-    def has_registered_counter(self, name: str) -> bool:
-        """Report whether ``name`` has been lazily registered as a counter."""
-        return name in self._counters

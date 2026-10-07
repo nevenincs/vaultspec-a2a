@@ -20,7 +20,7 @@ from ...authoring.discovery import HEARTBEAT_STALE_MS
 from ...desktop._platform_acl import windows_file_is_restricted
 from ...lifecycle.discovery import (
     DESKTOP_DISCOVERY_VERSION,
-    DesktopDiscoveryState,
+    DiscoveryState,
     classify_desktop_discovery,
     desktop_record_process_is_live,
     write_desktop_discovery,
@@ -74,7 +74,7 @@ def test_round_trip_preserves_every_field(tmp_path: Path) -> None:
         protocol_max=1,
     )
     state, read = classify_desktop_discovery(path)
-    assert state is DesktopDiscoveryState.FRESH
+    assert state is DiscoveryState.FRESH
     assert read is not None
     assert read == written
     assert read.version == DESKTOP_DISCOVERY_VERSION
@@ -133,19 +133,19 @@ def test_published_bytes_contain_no_credential_value(tmp_path: Path) -> None:
 def test_classification_fresh_stale_absent_malformed(tmp_path: Path) -> None:
     """The desktop classifier reports each filesystem state distinctly."""
     path = tmp_path / "service.json"
-    assert classify_desktop_discovery(path)[0] is DesktopDiscoveryState.ABSENT
+    assert classify_desktop_discovery(path)[0] is DiscoveryState.ABSENT
 
     write_desktop_discovery(path, generation="g", port=8125, owner="alice")
     state, record = classify_desktop_discovery(path)
-    assert state is DesktopDiscoveryState.FRESH
+    assert state is DiscoveryState.FRESH
     assert record is not None and record.port == 8125
 
     old = int(time.time() * 1000) - HEARTBEAT_STALE_MS - 5_000
     write_desktop_discovery(path, generation="g", port=8125, owner="alice", now_ms=old)
-    assert classify_desktop_discovery(path)[0] is DesktopDiscoveryState.STALE
+    assert classify_desktop_discovery(path)[0] is DiscoveryState.STALE
 
     path.write_text("{ not valid json", encoding="utf-8")
-    assert classify_desktop_discovery(path)[0] is DesktopDiscoveryState.MALFORMED
+    assert classify_desktop_discovery(path)[0] is DiscoveryState.MALFORMED
 
 
 def test_legacy_record_is_malformed_to_the_desktop_classifier(tmp_path: Path) -> None:
@@ -155,7 +155,7 @@ def test_legacy_record_is_malformed_to_the_desktop_classifier(tmp_path: Path) ->
         json.dumps({"port": 8000, "pid": 4321, "last_heartbeat": 1}),
         encoding="utf-8",
     )
-    assert classify_desktop_discovery(path)[0] is DesktopDiscoveryState.MALFORMED
+    assert classify_desktop_discovery(path)[0] is DiscoveryState.MALFORMED
     assert classify_desktop_discovery(path)[1] is None
 
 

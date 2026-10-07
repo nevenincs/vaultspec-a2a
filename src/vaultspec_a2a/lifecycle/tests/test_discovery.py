@@ -30,7 +30,6 @@ from ..discovery import (
     DiscoveryState,
     another_resident_is_live,
     classify_discovery,
-    is_pid_alive,
     port_has_listener,
     read_resident_service,
     remove_service_json_if_owned,
@@ -236,11 +235,7 @@ def test_writer_replaces_preexisting_broad_directory_authority(tmp_path: Path) -
         assert windows_file_is_restricted(home / "service.token")
 
 
-def test_pid_liveness_and_ownership(tmp_path: Path) -> None:
-    assert is_pid_alive(os.getpid()) is True
-    assert is_pid_alive(2**31 - 1) is False
-    assert is_pid_alive(None) is False
-
+def test_service_json_is_removed_only_by_its_owner(tmp_path: Path) -> None:
     path = service_json_path(tmp_path)
     write_service_json(path, port=8000, pid=os.getpid(), allow_tokenless=True)
     # A file owned by another pid is never reclaimed by us.

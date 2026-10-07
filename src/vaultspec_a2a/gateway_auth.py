@@ -55,14 +55,14 @@ def _validated_desktop_attach_credential(parsed: SplitResult) -> str | None:
         return None
     from .lifecycle.discovery import (
         DESKTOP_PROTOCOL_MAX,
-        DesktopDiscoveryState,
+        DiscoveryState,
         classify_desktop_discovery,
         desktop_record_process_is_live,
         service_json_path,
     )
 
     state, record = classify_desktop_discovery(service_json_path(settings.a2a_home))
-    if state is not DesktopDiscoveryState.FRESH or record is None:
+    if state is not DiscoveryState.FRESH or record is None:
         return None
     if not record.supports_protocol(
         DESKTOP_PROTOCOL_MAX

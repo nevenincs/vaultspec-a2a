@@ -49,14 +49,6 @@ class RunCatalogStore:
         """Return the cached snapshot for *thread_id*, or ``None`` if unheld."""
         return self._snapshots.get(thread_id)
 
-    def has(self, thread_id: str) -> bool:
-        """Return ``True`` while a snapshot is held for *thread_id*."""
-        return thread_id in self._snapshots
-
-    def active_run_count(self) -> int:
-        """Number of runs currently holding a snapshot (for diagnostics/tests)."""
-        return len(self._snapshots)
-
     def drop(self, thread_id: str) -> None:
         """Drop *thread_id*'s snapshot at run end. Idempotent."""
         self._snapshots.pop(thread_id, None)

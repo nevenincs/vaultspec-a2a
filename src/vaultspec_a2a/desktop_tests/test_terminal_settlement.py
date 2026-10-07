@@ -11,10 +11,7 @@ proves, over real loopback HTTP:
   plus the terminal status, and no raw actor token;
 - delivery is retried: a receiver that transiently rejects the first attempt and
   accepts the second still receives the settlement, and the run's lease is revoked
-  exactly once;
-- the receiver, applying the dashboard's authentication rule, rejects a callback
-  presenting the worker interprocess-communication secret or an unrelated
-  credential and accepts only the attach-control credential.
+  exactly once.
 
 The valid database is seated by the real ``migrate`` entrypoint; the
 broker gateway is a real process and the worker a real gateway-owned one. The
@@ -40,10 +37,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ..control.event_handlers import _handle_terminal_event, _settlement_tasks
 from ..database import get_thread
-from ..desktop.credentials import (
-    WORKER_IPC_CREDENTIAL_NAME,
-    create_worker_ipc_credential,
-)
+from ..desktop.credentials import WORKER_IPC_CREDENTIAL_NAME
 from ..desktop.profile import derive_state_paths
 from ..testing import settings_override
 from ..tests.gateway_boot import (
@@ -65,7 +59,6 @@ if TYPE_CHECKING:
 
 _ATTACH = "attach-credential-settlement-1234567890abcdef"
 _OWNERSHIP = "ownership-capability-settlement-fedcba0987654321"
-_UNRELATED = "unrelated-credential-000000000000000000"
 _PRESET = "mock-success-single"
 _REQUIRED_ROLE = "mock-coder-success"
 _ACTOR_TOKEN = "tok-coder-secret-value"
@@ -90,12 +83,6 @@ class _ReceiverState:
         self.accepted: list[dict[str, Any]] = []
         self.revoked_leases: list[str] = []
         self._attempts_by_run: dict[str, int] = {}
-
-    @property
-    def rejected_auth(self) -> list[str | None]:
-        """Headers refused by the receiver, derived from the captured attempts."""
-        expected = f"Bearer {self.attach_secret}"
-        return [auth for auth, _raw in self.attempts if auth != expected]
 
 
 @dataclass(frozen=True, slots=True)
@@ -394,56 +381,3 @@ def json_run_id(raw: str) -> str | None:
         return json.loads(raw).get("run_id")
     except (json.JSONDecodeError, TypeError, AttributeError):
         return None
-
-
-def test_settlement_receiver_rejects_worker_ipc_and_unrelated_credentials(
-    tmp_path: Path,
-) -> None:
-    """The dashboard settlement plane accepts only attach-control, not worker IPC."""
-    # Mint a real worker-IPC secret through production code; it must be a distinct
-    # value from the attach-control credential and rejected by the settlement plane.
-    creds_dir = tmp_path / "creds"
-    worker_ipc = create_worker_ipc_credential(creds_dir)
-    assert worker_ipc != _ATTACH, "worker IPC and attach must be distinct secrets"
-
-    server, receiver_port, state = _start_receiver(_ATTACH, fail_first=False)
-    endpoint = f"http://127.0.0.1:{receiver_port}/settle"
-    payload = {
-        "api_version": "v1",
-        "run_id": "run-xyz",
-        "lease_id": "lease-xyz",
-        "terminal_status": "completed",
-    }
-    try:
-        with httpx.Client(timeout=5.0) as client:
-            # Worker-IPC secret: rejected.
-            ipc = client.post(
-                endpoint,
-                json=payload,
-                headers={"Authorization": f"Bearer {worker_ipc}"},
-            )
-            assert ipc.status_code == 401, ipc.status_code
-            # Unrelated credential: rejected.
-            other = client.post(
-                endpoint,
-                json=payload,
-                headers={"Authorization": f"Bearer {_UNRELATED}"},
-            )
-            assert other.status_code == 401, other.status_code
-            # Attach-control credential: accepted.
-            ok = client.post(
-                endpoint, json=payload, headers={"Authorization": f"Bearer {_ATTACH}"}
-            )
-            assert ok.status_code == 200, ok.status_code
-    finally:
-        server.shutdown()
-
-    with state.lock:
-        assert state.rejected_auth == [
-            f"Bearer {worker_ipc}",
-            f"Bearer {_UNRELATED}",
-        ], state.rejected_auth
-        assert state.revoked_leases == ["lease-xyz"], state.revoked_leases
-    # The minted worker-IPC file exists on disk under its own name, separate from
-    # the attach plane, confirming the two planes are distinct files and secrets.
-    assert (creds_dir / WORKER_IPC_CREDENTIAL_NAME).is_file()

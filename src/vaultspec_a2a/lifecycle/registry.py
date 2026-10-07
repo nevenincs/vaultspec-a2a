@@ -25,8 +25,9 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
+from ..utils._process_tree import pid_is_live
 from ..utils.atomic_write import atomic_write_text
-from .discovery import is_pid_alive, port_has_listener
+from .discovery import port_has_listener
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -264,7 +265,7 @@ def write_record(record: ProcRecord, *, home: Path | None = None) -> Path:
     if (
         existing is not None
         and existing.owner != record.owner
-        and is_pid_alive(existing.pid)
+        and pid_is_live(existing.pid)
     ):
         raise RegistryOwnershipError(
             f"record {record.role}-{record.name} is held by a live process "
@@ -307,7 +308,7 @@ def remove_record_if_owned(
     existing = read_record(path)
     if existing is None:
         return False
-    if existing.owner != owner and is_pid_alive(existing.pid):
+    if existing.owner != owner and pid_is_live(existing.pid):
         return False
     path.unlink(missing_ok=True)
     return True
@@ -323,7 +324,7 @@ def classify_record(
     window; a non-heartbeating role (or an unknown role) rests on pid-liveness
     alone and reads ``LIVE`` while its pid is alive.
     """
-    if not is_pid_alive(record.pid):
+    if not pid_is_live(record.pid):
         return StalenessState.DEAD
     if role_config is not None and role_config.heartbeat:
         current = now if now is not None else now_ms()
@@ -380,7 +381,7 @@ def allocate_port(
     record once the process is spawned. Raises :class:`RuntimeError` when the band
     is exhausted. For a race-free claim, prefer :func:`reserve_port`.
     """
-    claimed = {rec.port for rec in list_records(home) if is_pid_alive(rec.pid)}
+    claimed = {rec.port for rec in list_records(home) if pid_is_live(rec.pid)}
     reserved = _live_reservation_ports(home)
     resident_ports: set[int] = (
         set(config.resident.values()) if config is not None else set()
@@ -434,7 +435,7 @@ def _reservation_is_live(path: Path, *, now: int) -> bool:
     pid = _read_reservation_pid(path)
     if pid is None:
         return True
-    return is_pid_alive(pid)
+    return pid_is_live(pid)
 
 
 def _live_reservation_ports(home: Path | None) -> set[int]:
@@ -497,7 +498,7 @@ def reserve_port(
     stale and reclaimable. Raises :class:`RuntimeError` when the band is exhausted.
     """
     _prepare_registry_dir(procs_home(home))
-    claimed = {rec.port for rec in list_records(home) if is_pid_alive(rec.pid)}
+    claimed = {rec.port for rec in list_records(home) if pid_is_live(rec.pid)}
     resident_ports: set[int] = (
         set(config.resident.values()) if config is not None else set()
     )

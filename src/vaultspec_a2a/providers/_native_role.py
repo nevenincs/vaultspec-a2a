@@ -18,8 +18,8 @@ from ..desktop._filesystem_authority import (
 from ..desktop._platform_acl import harden_credential_path
 from ..desktop.native_isolation import NativeLaunchAuthority, NativeWorkspaceAuthority
 from ..desktop.profile import derive_state_paths
+from ..utils import ProcessContainmentError
 from ..utils.async_cleanup import complete_cleanup
-from ..utils.process import ProcessContainmentError
 from ._acp_types import require_workspace_root
 
 if TYPE_CHECKING:

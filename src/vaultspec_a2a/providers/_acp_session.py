@@ -8,8 +8,7 @@ import logging
 from typing import TypedDict, Unpack, cast
 
 from ..control.config import settings
-from ..utils.enums import AcpRequestId
-from ..utils.process import ProcessContainmentError
+from ..utils import AcpRequestId, ProcessContainmentError
 from ._acp_auth import (
     auth_hint,
     authenticate_rpc,

@@ -31,18 +31,18 @@ import os
 import subprocess
 import sys
 import tempfile
-import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 import psutil
 
-from ..utils import ProcessContainment, kill_pid_tree_async, spawn_contained
+from ..utils import ProcessContainment, spawn_contained
 from .progress import ProgressDeadline, ProgressStalledError
 from .session_root import session_scratch_dir
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine, Generator, Mapping
+    from collections.abc import Callable, Generator, Mapping
     from pathlib import Path
 
 __all__ = [
@@ -51,7 +51,7 @@ __all__ = [
     "child_tree_progress",
     "file_size_fingerprint",
     "measured_child_startup_s",
-    "reap_tree",
+    "reap_contained",
     "run_child",
 ]
 
@@ -111,11 +111,22 @@ def measured_child_startup_s() -> float:
     """
     global _measured_startup_s
     if _measured_startup_s is None:
+        command = [sys.executable, "-c", _STARTUP_PROBE]
+        containment = ProcessContainment.create()
         started = time.monotonic()
-        subprocess.run(
-            [sys.executable, "-c", _STARTUP_PROBE], check=True, capture_output=True
+        probe = spawn_contained(
+            command, containment, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-        _measured_startup_s = max(time.monotonic() - started, 0.01)
+        try:
+            stdout, stderr = probe.communicate()
+            elapsed = time.monotonic() - started
+        finally:
+            reap_contained(probe, containment)
+        if probe.returncode != 0:
+            raise subprocess.CalledProcessError(
+                probe.returncode, command, stdout, stderr
+            )
+        _measured_startup_s = max(elapsed, 0.01)
     return _measured_startup_s
 
 
@@ -181,54 +192,55 @@ def await_child(
                 msg = f"still running after its {ceiling_s:.0f}s ceiling"
                 raise ProgressStalledError(msg)
         except ProgressStalledError as stalled:
-            _run_reap(
-                lambda: containment.terminate(term_timeout=10.0, kill_timeout=5.0)
-            )
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                process.wait(timeout=5.0)
+            reaped = reap_contained(process, containment)
             context = "" if diagnostic is None else f"\n{diagnostic()}"
+            unreaped = "" if reaped else " (its contained tree was not reaped)"
             raise ProgressStalledError(
-                f"{what} (pid {process.pid}) made no progress: {stalled}{context}"
+                f"{what} (pid {process.pid}) made no progress: "
+                f"{stalled}{unreaped}{context}"
             ) from stalled
         time.sleep(_POLL_INTERVAL_S)
 
 
-def _run_reap(reap: Callable[[], Coroutine[Any, Any, object]]) -> None:
-    """Run an asynchronous reap to completion from any calling context.
+def reap_contained(
+    process: subprocess.Popen[Any],
+    containment: ProcessContainment,
+    *,
+    term_timeout: float = 10.0,
+    kill_timeout: float = 5.0,
+) -> bool:
+    """Reap *process*'s whole tree through *containment*, from any calling context.
+
+    *process* was started inside *containment* by
+    :func:`~vaultspec_a2a.utils.spawn_contained`, which held every descendant
+    from the root's first instruction, so a root that already exited is no
+    obstacle: what it left running is still reaped, and no kill is ever aimed at
+    a recycled pid. The root's handle is then waited on. *term_timeout* and
+    *kill_timeout* are the graceful and forced phases. Returns ``True`` once the
+    tree is gone and the root reaped; a repeat call after that is a no-op.
 
     Called from a test that is itself running an event loop, ``asyncio.run``
     would refuse and leave the tree alive, so the reap then runs on a thread
     with a loop of its own.
     """
 
-    def _reap() -> None:
-        asyncio.run(reap())
+    def _terminate() -> bool:
+        return asyncio.run(
+            containment.terminate(term_timeout=term_timeout, kill_timeout=kill_timeout)
+        )
 
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        _reap()
-        return
-    reaper = threading.Thread(target=_reap)
-    reaper.start()
-    reaper.join()
-
-
-def reap_tree(
-    pid: int, *, term_timeout: float = 10.0, kill_timeout: float = 5.0
-) -> None:
-    """Kill *pid*'s tree by pid, from any calling context.
-
-    Only for a process the kit did not start inside a containment, such as a
-    detached service or a process one of its children started; a child the kit
-    starts is reaped through its containment instead. *term_timeout* and
-    *kill_timeout* are the graceful and forced phases.
-    """
-    _run_reap(
-        lambda: kill_pid_tree_async(
-            pid, term_timeout=term_timeout, kill_timeout=kill_timeout
-        )
-    )
+        reaped = _terminate()
+    else:
+        with ThreadPoolExecutor(max_workers=1) as reaper:
+            reaped = reaper.submit(_terminate).result()
+    try:
+        process.wait(timeout=kill_timeout)
+    except subprocess.TimeoutExpired:
+        return False
+    return reaped
 
 
 def file_size_fingerprint(*paths: os.PathLike[str] | str) -> Callable[[], object]:
@@ -275,30 +287,31 @@ def run_child(
     not run, and a file's growing size is the caller-observable progress signal
     the wait reads. The files land in this session's own scratch seat inside the
     worktree, never in the system temporary directory. The child runs inside its
-    own containment, released once it exits.
+    own containment, whose whole tree is reaped once the child exits, so nothing
+    it left running outlives the call.
     """
-    containment = ProcessContainment.create()
-    try:
-        with (
-            _capture_dir() as capture,
-            tempfile.TemporaryFile(dir=capture) as out,
-            tempfile.TemporaryFile(dir=capture) as err,
-        ):
-            process = spawn_contained(
-                command,
-                containment,
-                stdout=out,
-                stderr=err,
-                env=None if env is None else dict(env),
-                cwd=cwd,
+    with (
+        _capture_dir() as capture,
+        tempfile.TemporaryFile(dir=capture) as out,
+        tempfile.TemporaryFile(dir=capture) as err,
+    ):
+        containment = ProcessContainment.create()
+        process = spawn_contained(
+            command,
+            containment,
+            stdout=out,
+            stderr=err,
+            env=None if env is None else dict(env),
+            cwd=cwd,
+        )
+
+        def _written() -> object:
+            return (
+                os.fstat(out.fileno()).st_size,
+                os.fstat(err.fileno()).st_size,
             )
 
-            def _written() -> object:
-                return (
-                    os.fstat(out.fileno()).st_size,
-                    os.fstat(err.fileno()).st_size,
-                )
-
+        try:
             returncode = await_child(
                 process,
                 containment,
@@ -306,13 +319,13 @@ def run_child(
                 idle_window_s=idle_window_s,
                 fingerprint=_written,
             )
-            out.seek(0)
-            err.seek(0)
-            return subprocess.CompletedProcess(
-                command,
-                returncode,
-                out.read().decode("utf-8", errors="replace"),
-                err.read().decode("utf-8", errors="replace"),
-            )
-    finally:
-        containment.close()
+        finally:
+            reap_contained(process, containment)
+        out.seek(0)
+        err.seek(0)
+        return subprocess.CompletedProcess(
+            command,
+            returncode,
+            out.read().decode("utf-8", errors="replace"),
+            err.read().decode("utf-8", errors="replace"),
+        )

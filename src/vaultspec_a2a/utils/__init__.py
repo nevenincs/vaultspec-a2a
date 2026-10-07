@@ -5,8 +5,9 @@ secret redaction, contained process spawn, and process termination. Some
 helpers support public integration points, while others remain internal
 implementation tools.
 
-Prefer the owning utility module over broad facade imports. Primary consumers
-include :mod:`vaultspec_a2a.api`, :mod:`vaultspec_a2a.control`,
+Consumers import the names exported here from this package root, never from the
+owning utility module, so that module layout stays free to change. Primary
+consumers include :mod:`vaultspec_a2a.api`, :mod:`vaultspec_a2a.control`,
 :mod:`vaultspec_a2a.providers`, and :mod:`vaultspec_a2a.worker`.
 """
 

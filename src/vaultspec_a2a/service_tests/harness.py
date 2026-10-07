@@ -158,12 +158,8 @@ class ServiceStack:
     started_at: float = field(default_factory=time.time)
     runtime_dir: Path = field(init=False)
     artifacts: dict[str, Any] = field(default_factory=dict)
-    _gateway_proc: subprocess.Popen[bytes] | None = field(
-        default=None, init=False, repr=False
-    )
-    _worker_proc: subprocess.Popen[bytes] | None = field(
-        default=None, init=False, repr=False
-    )
+    _gateway_proc: WatchedProcess | None = field(default=None, init=False, repr=False)
+    _worker_proc: WatchedProcess | None = field(default=None, init=False, repr=False)
     _gateway_log_name: str = field(default="gateway.log", init=False, repr=False)
     _stopped: bool = field(default=False, init=False, repr=False)
 
@@ -248,24 +244,12 @@ class ServiceStack:
     def _watched(self, *names: str) -> list[WatchedProcess]:
         """Return the named harness-owned processes that are currently spawned.
 
-        Only processes this harness holds a ``Popen`` for are watchable; the
-        compose-managed services are deliberately absent, since Docker owns
-        their lifecycle and there is no local exit status to read.
+        Only processes this harness spawned are watchable; the compose-managed
+        services are deliberately absent, since Docker owns their lifecycle and
+        there is no local exit status to read.
         """
-        owned: dict[str, subprocess.Popen[bytes] | None] = {
-            "gateway": self._gateway_proc,
-            "worker": self._worker_proc,
-        }
-        return [
-            WatchedProcess(
-                name,
-                proc,
-                self.runtime_dir
-                / (self._gateway_log_name if name == "gateway" else f"{name}.log"),
-            )
-            for name in names
-            if (proc := owned[name]) is not None
-        ]
+        owned = {"gateway": self._gateway_proc, "worker": self._worker_proc}
+        return [watched for name in names if (watched := owned[name]) is not None]
 
     def start(self) -> None:
         """Bring the deterministic compose stack online and wait for readiness."""
@@ -367,12 +351,13 @@ class ServiceStack:
         port: int,
         env: dict[str, str],
         log_name: str,
-    ) -> subprocess.Popen[bytes]:
+    ) -> WatchedProcess:
         """Spawn the production ASGI *factory* under uvicorn on *port*.
 
         Detached, so a stray interrupt aimed at the harness's own foreground
         group never reaches it; its output lands in *log_name* under this run's
-        directory, where readiness failures and diagnostics read it back.
+        directory, where readiness failures and diagnostics read it back, and
+        the log's stem names it in a readiness failure.
         """
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         return spawn_logged(
@@ -387,6 +372,7 @@ class ServiceStack:
                 "--port",
                 str(port),
             ],
+            name=Path(log_name).stem,
             env=env,
             log_path=self.runtime_dir / log_name,
             cwd=REPO_ROOT,

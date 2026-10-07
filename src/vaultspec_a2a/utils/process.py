@@ -41,8 +41,6 @@ _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9  # JobObjectExtendedLimitInformation
 _JOBOBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS = 1  # JobObjectBasicAccountingInformation
 _JOBOBJECT_BASIC_PROCESS_ID_LIST_CLASS = 3  # JobObjectBasicProcessIdList
-_PROCESS_TERMINATE = 0x0001
-_PROCESS_SET_QUOTA = 0x0100
 _CREATE_SUSPENDED = 0x00000004
 _TH32CS_SNAPTHREAD = 0x00000004
 _THREAD_SUSPEND_RESUME = 0x0002
@@ -51,11 +49,9 @@ _THREAD_SUSPEND_RESUME = 0x0002
 # handle is killed. A Windows root has run no instruction by then.
 _ADMISSION_REAP_TIMEOUT = 5.0
 
-
-class _SpawnKwargs(TypedDict, total=False):
-    """The only platform-specific ``Popen`` keyword this facade supplies."""
-
-    start_new_session: bool
+# A POSIX root's containment is the session and process group it leads from
+# exec; a Windows root is admitted to its Job instead.
+_CONTAINED_NEW_SESSION = sys.platform != "win32"
 
 
 class _ContainedSpawnOptions(TypedDict, total=False):
@@ -290,7 +286,7 @@ class ProcessContainment:
         """Build a containment; on Windows this creates the KILL_ON_JOB_CLOSE job.
 
         A Windows job-creation failure is fatal to containment and raises; POSIX
-        needs no OS object until a pid is assigned.
+        needs no OS object until :func:`spawn_contained` admits its root.
         """
         self = cls()
         if sys.platform == "win32":
@@ -331,99 +327,44 @@ class ProcessContainment:
             raise
         return job
 
-    def spawn_kwargs(self) -> _SpawnKwargs:
-        """Return spawn kwargs that seat the root in its containment at spawn.
+    def _admit(self, process: subprocess.Popen[bytes]) -> None:
+        """Bind the exact root :func:`spawn_contained` started, then let it run.
 
-        POSIX seats the root in a new session/process group at fork; Windows
-        admits the suspended root after creation (see :func:`spawn_contained`),
-        so it contributes no spawn-time kwargs here.
+        Windows assigns the ``CREATE_SUSPENDED`` root to the Job through the
+        process handle ``Popen`` retains - never a reopened numeric pid, so an
+        exit/reuse race cannot seat an unrelated process - and only then resumes
+        its single initial thread through documented Tool Help and thread APIs,
+        so no instruction or descendant creation occurs outside the Job. A
+        failure leaves the root suspended or Job-owned for the caller to reap
+        through the same retained handle.
+
+        A POSIX root was already seated by ``start_new_session`` at exec and only
+        needs its process group recorded: as the session leader, its group id is
+        its pid.
         """
-        if sys.platform == "win32":
-            return {}
-        return {"start_new_session": True}
-
-    def assign(self, pid: int) -> None:
-        """Bind *pid* to the containment before the root does descendant work.
-
-        POSIX records the new process group (its id equals the session leader's
-        pid). Windows assigns the process to the job. A Windows assignment failure
-        raises :class:`ProcessContainmentError`; an ownership caller must reap the
-        exact retained process and fail the spawn.
-        """
+        pid = process.pid
         if sys.platform != "win32":
             if pid <= 1 or pid == os.getpid():
                 raise ProcessContainmentError("Refusing to contain the cleanup owner")
             try:
                 isolated = os.getpgid(pid) == pid and os.getsid(pid) == pid
             except ProcessLookupError:
-                # A short-lived root can exit before assignment; the spawn still
+                # A short-lived root can exit before admission; the spawn still
                 # established its group, which may retain live descendants.
                 isolated = True
             if not isolated:
                 raise ProcessContainmentError(
                     "Process was not spawned in a new session"
                 )
-            # start_new_session made the child a session/group leader: pgid == pid.
             self._pid = pid
             self._pgid = pid
             self._assigned = True
             return
-        import ctypes
-        from ctypes import wintypes
-
-        if self._job is None:
-            raise ProcessContainmentError("Windows containment has no job object")
-        # This pid-only entry point is for roots already running. An owned root
-        # is started by ``spawn_contained``, which admits it suspended through
-        # the handle Popen retains.
-        kernel32 = win_kernel32()
-        kernel32.OpenProcess.restype = wintypes.HANDLE
-        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-        handle = kernel32.OpenProcess(
-            _PROCESS_TERMINATE | _PROCESS_SET_QUOTA, False, pid
-        )
-        if not handle:
-            raise ProcessContainmentError(
-                f"could not open process {pid} to assign it to the job: "
-                f"{ctypes.WinError(ctypes.get_last_error())}"
-            )
-        try:
-            self._assign_win_handle(pid, handle)
-        finally:
-            kernel32.CloseHandle(handle)
-
-    def assign_process(self, process: subprocess.Popen[bytes]) -> None:
-        """Bind the exact retained ``Popen`` identity to this containment.
-
-        Windows uses the process handle owned by ``Popen`` rather than reopening
-        its numeric pid, so an exit/reuse race cannot seat an unrelated process.
-        POSIX uses the isolated process group established at spawn.
-        """
-        if sys.platform != "win32":
-            self.assign(process.pid)
-            return
         handle = getattr(process, "_handle", None)
         if handle is None:
             raise ProcessContainmentError("Popen has no retained Windows handle")
-        self._assign_win_handle(process.pid, handle)
-
-    def assign_suspended_process(self, process: subprocess.Popen[bytes]) -> None:
-        """Atomically admit a Windows ``CREATE_SUSPENDED`` root, then run it.
-
-        Assignment uses the exact process handle retained by ``Popen``. The only
-        initial thread is resumed through documented Tool Help and thread APIs
-        after Job membership succeeds, so no provider instruction or descendant
-        creation can occur outside the Job. A failure leaves the root suspended or
-        Job-owned for the caller to reap through the same retained handle.
-
-        POSIX roots are already seated by ``start_new_session`` at exec and only
-        need their process group recorded.
-        """
-        if sys.platform != "win32":
-            self.assign_process(process)
-            return
-        self.assign_process(process)
-        self._resume_suspended_win_process(process.pid)
+        self._assign_win_handle(pid, handle)
+        self._resume_suspended_win_process(pid)
 
     @staticmethod
     def _resume_suspended_win_process(pid: int) -> None:
@@ -861,13 +802,13 @@ def spawn_contained(
             creationflags=_contained_creationflags(
                 new_process_group=popen.get("new_process_group", False)
             ),
-            start_new_session=bool(containment.spawn_kwargs().get("start_new_session")),
+            start_new_session=_CONTAINED_NEW_SESSION,
         )
     except BaseException:
         containment.close()
         raise
     try:
-        containment.assign_suspended_process(process)
+        containment._admit(process)
     except BaseException as admission_error:
         try:
             _reap_unadmitted_root(process, containment)
@@ -912,7 +853,6 @@ async def spawn_contained_async(
     creationflags = _contained_creationflags(
         new_process_group=popen.get("new_process_group", False)
     )
-    start_new_session = bool(containment.spawn_kwargs().get("start_new_session"))
     try:
         if popen.get("shell", False):
             process = await asyncio.create_subprocess_shell(
@@ -926,7 +866,7 @@ async def spawn_contained_async(
                 cwd=popen.get("cwd"),
                 env=popen.get("env"),
                 creationflags=creationflags,
-                start_new_session=start_new_session,
+                start_new_session=_CONTAINED_NEW_SESSION,
             )
         else:
             process = await asyncio.create_subprocess_exec(
@@ -939,13 +879,13 @@ async def spawn_contained_async(
                 cwd=popen.get("cwd"),
                 env=popen.get("env"),
                 creationflags=creationflags,
-                start_new_session=start_new_session,
+                start_new_session=_CONTAINED_NEW_SESSION,
             )
     except BaseException:
         containment.close()
         raise
     try:
-        containment.assign_suspended_process(_retained_popen(process))
+        containment._admit(_retained_popen(process))
     except BaseException as admission_error:
         try:
             await _reap_unadmitted_root_async(process, containment)

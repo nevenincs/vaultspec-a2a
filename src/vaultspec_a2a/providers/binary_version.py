@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..control.provider_execution import native_execution_refusal_reason
-from ..utils.process import ProcessContainmentError
+from ..utils import ProcessContainmentError
 from ..workspace.environment import scrub_agent_environment
 from ._provider_execution import provider_execution_launch
 

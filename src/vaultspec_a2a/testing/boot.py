@@ -42,7 +42,10 @@ a live process holding its port, its database handles, and its share of the
 machine, and nothing downstream owns it - the caller's context manager never
 received a handle to reap because the failure happened before the yield. Every
 such failure used to leak one gateway tree, and a handful of them starve the box
-until later boots time out too, turning one real failure into a cascade.
+until later boots time out too, turning one real failure into a cascade. Every
+process this module starts runs in its own containment from its first
+instruction and is reaped through it, so a root that already died does not put
+its descendants out of reach.
 """
 
 from __future__ import annotations
@@ -54,7 +57,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 from fastapi import FastAPI
@@ -66,9 +69,9 @@ from ..desktop.credentials import (
     create_worker_ipc_credential,
 )
 from ..desktop.profile import derive_state_paths
-from ..utils._process_tree import detached_spawn_kwargs
+from ..utils import ProcessContainment, spawn_contained
 from ..utils.runtime_exec import self_command
-from .children import reap_tree
+from .children import reap_contained
 from .cli import run_cli
 from .http import serve_on_loopback
 from .ports import (
@@ -278,10 +281,16 @@ class GatewayBootError(AssertionError):
 
 @dataclass(frozen=True, slots=True)
 class WatchedProcess:
-    """A process a readiness wait owns, and the log that explains its death."""
+    """A process the kit started in its own containment, and the log of its death.
+
+    The containment has held the whole tree since the root's first instruction,
+    so :func:`reap_process` reaps everything the process started, whether or not
+    the root is still alive.
+    """
 
     name: str
-    process: subprocess.Popen[Any]
+    process: subprocess.Popen[bytes]
+    containment: ProcessContainment
     log_path: Path | None = None
 
 
@@ -400,83 +409,73 @@ def await_ready(
 
 def await_gateway_ready(
     base: str,
-    proc: subprocess.Popen[bytes],
+    gateway: WatchedProcess,
     *,
-    log_path: Path | None = None,
     timeout: float = READINESS_TIMEOUT,
 ) -> None:
     """Wait until the gateway at *base* answers ``GET /health`` 200.
 
     :func:`await_ready` over the gateway's unauthenticated liveness, watching
-    *proc*: a gateway that dies first fails at once with its exit code and log.
+    *gateway*: a gateway that dies first fails at once with its exit code and
+    log.
     """
 
     def _healthy() -> bool:
         with httpx.Client(base_url=base, timeout=2.0) as client:
             return client.get("/health").status_code == 200
 
-    await_ready(
-        _healthy,
-        what="gateway",
-        watch=[WatchedProcess("gateway", proc, log_path)],
-        timeout=timeout,
-    )
+    await_ready(_healthy, what="gateway", watch=[gateway], timeout=timeout)
 
 
-def reap_process(process: subprocess.Popen[Any]) -> None:
-    """Terminate a spawned process TREE, tolerating an already-dead child.
+def reap_process(watched: WatchedProcess) -> None:
+    """Reap a spawned process TREE through its containment, from any context.
 
     The tree, not the handle: on Windows the virtual-environment interpreter is
     a launcher stub, so the real gateway - and any worker it auto-spawned - are
-    descendants that outlive a kill aimed at the handle alone. The kill is safe
-    from inside a running event loop.
-
-    The dead-child guard is not a micro-optimisation. Several callers reach here
-    on a path where the child is already known dead, and Windows recycles pids:
-    a tree kill aimed at a reaped pid is aimed at whatever process now holds
-    that number.
+    descendants that outlive a kill aimed at the handle alone. The containment
+    has held all of them since the root's first instruction, so a root that has
+    already exited is no obstacle and no kill is aimed at a recycled pid. A
+    repeat call is a no-op.
     """
-    if process.poll() is not None:
-        return
-    with contextlib.suppress(Exception):
-        reap_tree(process.pid)
-    with contextlib.suppress(subprocess.TimeoutExpired):
-        process.wait(timeout=15)
+    reap_contained(watched.process, watched.containment)
 
 
 def spawn_logged(
     command: Sequence[str],
     *,
+    name: str,
     env: Mapping[str, str],
     log_path: Path,
     cwd: Path | None = None,
     detached: bool = False,
-) -> subprocess.Popen[bytes]:
-    """Spawn *command* with its merged output appended to *log_path*.
+) -> WatchedProcess:
+    """Spawn *command* contained, with its merged output appended to *log_path*.
 
     The log is opened for this spawn only and closed again before returning: the
     child writes through its own inherited handle, so the parent keeps nothing a
     failed boot could leak, or that would block deleting the log on Windows.
     Appending keeps every attempt of a bind-race retry, and every lifetime of a
-    deliberate restart over one home, in one file.
+    deliberate restart over one home, in one file. *name* labels the process in
+    a readiness failure.
 
-    *detached* moves the child into its own process group (Windows) or session
-    (POSIX), so a stray interrupt aimed at the runner's foreground group does not
-    reach it. Teardown goes through :func:`reap_process`, which walks the tree by
-    operating-system relationship rather than by group membership, so detaching
-    on the way in costs nothing on the way out.
+    The child starts inside a fresh containment before its first instruction,
+    and :func:`reap_process` reaps it through that containment. A POSIX child
+    therefore always leads its own session; *detached* also gives a Windows
+    child its own console process group, so a stray interrupt aimed at the
+    runner's console does not reach it.
     """
-    flags = detached_spawn_kwargs() if detached else None
     with log_path.open("ab") as log_handle:
-        return subprocess.Popen(
-            list(command),
-            env=dict(env),
+        containment = ProcessContainment.create()
+        process = spawn_contained(
+            command,
+            containment,
+            env=env,
             cwd=cwd,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
-            creationflags=0 if flags is None else flags.creationflags,
-            start_new_session=False if flags is None else flags.start_new_session,
+            new_process_group=detached,
         )
+    return WatchedProcess(name, process, containment, log_path)
 
 
 def spawn_gateway(
@@ -486,7 +485,7 @@ def spawn_gateway(
     env: Mapping[str, str],
     log_path: Path,
     detached: bool = False,
-) -> subprocess.Popen[bytes]:
+) -> WatchedProcess:
     """Spawn the child gateway interpreter, appending its output to *log_path*.
 
     *script* is a program from :func:`gateway_script` or
@@ -500,21 +499,22 @@ def spawn_gateway(
         if script is None
         else [sys.executable, "-c", script, str(gateway_port)]
     )
-    return spawn_logged(command, env=env, log_path=log_path, detached=detached)
+    return spawn_logged(
+        command, name="gateway", env=env, log_path=log_path, detached=detached
+    )
 
 
 def spawn_until_ready(
-    spawn: Callable[[int, int], subprocess.Popen[bytes]],
+    spawn: Callable[[int, int], WatchedProcess],
     *,
-    log_path: Path | None = None,
     attempts: int = 3,
     timeout: float = READINESS_TIMEOUT,
-) -> tuple[subprocess.Popen[bytes], int, int, str]:
+) -> tuple[WatchedProcess, int, int, str]:
     """Boot a gateway on a fresh port pair, retrying only the bind-race death.
 
     *spawn* receives ``(gateway_port, worker_port)`` and returns the spawned
     process; this drives up to *attempts* boots, each on freshly allocated
-    ports, and returns ``(proc, gateway_port, worker_port, base)`` once the
+    ports, and returns ``(gateway, gateway_port, worker_port, base)`` once the
     gateway answers its health endpoint. A child that dies before readiness is
     retried on new ports; the final attempt's failure propagates.
 
@@ -537,18 +537,15 @@ def spawn_until_ready(
             gateway_port, worker_port = (r.port for r in reservations)
         else:
             gateway_port, worker_port = allocate_free_ports(2)
-        proc = spawn(gateway_port, worker_port)
+        gateway = spawn(gateway_port, worker_port)
         base = f"http://127.0.0.1:{gateway_port}"
         try:
-            await_gateway_ready(base, proc, log_path=log_path, timeout=timeout)
+            await_gateway_ready(base, gateway, timeout=timeout)
         except GatewayBootError as exc:
-            # Called for symmetry and for the narrow window where the child died
-            # between the poll and here; by this error's definition it is already
-            # dead, so the dead-child guard normally makes this a no-op. It does
-            # NOT recover descendants a dead child had already spawned - once the
-            # root pid is gone there is no tree left to walk - which is why the
-            # harness relies on the gateway's own containment for that case.
-            reap_process(proc)
+            # The root is dead by this error's definition, but whatever it had
+            # already spawned is still inside its containment, so the reap
+            # recovers those descendants too.
+            reap_process(gateway)
             if reservations is not None:
                 for reservation in reservations:
                     release_reservation(reservation)
@@ -557,7 +554,7 @@ def spawn_until_ready(
         except BaseException:
             # Unready-at-deadline, interrupt, or anything else: this attempt
             # never becomes the caller's, so it must not outlive the failure.
-            reap_process(proc)
+            reap_process(gateway)
             if reservations is not None:
                 for reservation in reservations:
                     release_reservation(reservation)
@@ -571,7 +568,7 @@ def spawn_until_ready(
             gateway_reservation, worker_reservation = reservations
             release_reservation(gateway_reservation)
             hold_for_process_lifetime(worker_reservation)
-        return proc, gateway_port, worker_port, base
+        return gateway, gateway_port, worker_port, base
     raise AssertionError(
         f"gateway did not boot within {attempts} attempts; last: {last_boot_error}"
     )
@@ -595,7 +592,7 @@ def booted_gateway(
     worker it spawned outlives the test.
     """
 
-    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
+    def _spawn(gateway_port: int, worker_port: int) -> WatchedProcess:
         return spawn_gateway(
             script=script,
             gateway_port=gateway_port,
@@ -604,19 +601,19 @@ def booted_gateway(
             detached=detached,
         )
 
-    process, gateway_port, worker_port, base = spawn_until_ready(
-        _spawn, log_path=log_path, timeout=timeout
+    gateway, gateway_port, worker_port, base = spawn_until_ready(
+        _spawn, timeout=timeout
     )
     try:
         yield BootedGateway(
-            process=process,
+            process=gateway.process,
             base_url=base,
             gateway_port=gateway_port,
             worker_port=worker_port,
             log_path=log_path,
         )
     finally:
-        reap_process(process)
+        reap_process(gateway)
 
 
 def gateway_process_env(
@@ -785,10 +782,12 @@ def foreign_worker(
 
     Every request it receives is appended to *request_log* as ``METHOD path``,
     so a test can prove what the gateway asked of it - a health read, or an
-    eviction attempt. Yields the process once it answers, and reaps it after.
+    eviction attempt. Yields the process once it answers, and reaps its tree
+    through its containment after.
     """
     request_log.write_text("", encoding="utf-8")
-    process = subprocess.Popen(
+    containment = ProcessContainment.create()
+    process = spawn_contained(
         [
             sys.executable,
             "-c",
@@ -797,21 +796,23 @@ def foreign_worker(
             json.dumps(body),
             str(request_log),
         ],
+        containment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    squatter = WatchedProcess("foreign worker", process, containment)
     try:
         await_ready(
             lambda: _answers_health(port),
             what="foreign worker",
-            watch=[WatchedProcess("foreign worker", process)],
+            watch=[squatter],
             timeout=10.0,
             interval=0.05,
         )
         yield process
     finally:
-        reap_process(process)
+        reap_process(squatter)
 
 
 @dataclass(frozen=True, slots=True)
@@ -820,10 +821,12 @@ class SignalledChild:
 
     For a probe that runs production code in an interpreter of its own rather
     than a gateway: the program writes a payload to *ready* once it holds what
-    the test inspects, and exits once *stop* exists.
+    the test inspects, and exits once *stop* exists. It runs in its own
+    *containment*, through which its tree is reaped.
     """
 
     process: subprocess.Popen[bytes]
+    containment: ProcessContainment
     ready: Path
     stop: Path
 
@@ -838,7 +841,7 @@ class SignalledChild:
                 self.ready.is_file() and bool(self.ready.read_text(encoding="utf-8"))
             ),
             what="signalled child",
-            watch=[WatchedProcess(self.ready.stem, self.process)],
+            watch=[WatchedProcess(self.ready.stem, self.process, self.containment)],
             timeout=timeout,
             interval=0.05,
         )
@@ -847,30 +850,33 @@ class SignalledChild:
     def request_stop(self, *, timeout: float = 25.0) -> int:
         """Ask the child to stop and return its exit status.
 
-        A child that ignores the request past *timeout* is reaped as a tree.
+        A child that ignores the request past *timeout* is reaped as a tree, and
+        so is anything a child that honoured it left running in its containment.
         """
         self.stop.touch()
-        try:
-            return self.process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            reap_process(self.process)
-            return self.process.wait(timeout=timeout)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            self.process.wait(timeout=timeout)
+        reap_contained(self.process, self.containment)
+        return self.process.wait(timeout=timeout)
 
 
 def spawn_signalled(
     program: str, *args: str, signal_dir: Path, tag: str
 ) -> SignalledChild:
-    """Run *program* in a child interpreter as a :class:`SignalledChild`.
+    """Run *program* in a contained child interpreter as a :class:`SignalledChild`.
 
     The child is handed *args* followed by its ready and stop file paths, both
     under *signal_dir* and named by *tag*.
     """
     ready = signal_dir / f"{tag}.ready"
     stop = signal_dir / f"{tag}.stop"
-    process = subprocess.Popen(
-        [sys.executable, "-c", program, *args, str(ready), str(stop)]
+    containment = ProcessContainment.create()
+    process = spawn_contained(
+        [sys.executable, "-c", program, *args, str(ready), str(stop)], containment
     )
-    return SignalledChild(process=process, ready=ready, stop=stop)
+    return SignalledChild(
+        process=process, containment=containment, ready=ready, stop=stop
+    )
 
 
 async def _accept_callback() -> dict[str, str]:

@@ -15,11 +15,12 @@ factory injects:
   and the reviewer emits the ``PASS`` sentinel that advances the inner review
   loop. The feature tag and topic are configurable so a parameterized harness can
   assert the materialized document stems.
-- scripted scenarios: supervisor routing, a scripted supervisor, a reviewer
-  that always requests revision, a research branch that asks before it
-  reports, a supervised permission pause, a provider failure, a cancellation
-  window, a relay burst, an endless generation loop, and a turn held until its
-  test releases it, each selected by the bundled agent that names it.
+- scripted scenarios: a turn that completes with fixed content, supervisor
+  routing, a scripted supervisor, a reviewer that always requests revision, a
+  research branch that asks before it reports, a supervised permission pause, a
+  cancellation window, a relay burst, an endless generation loop, and a turn
+  held until its test releases it, each selected by the bundled agent that
+  names it.
 
 A scenario that follows a script reads it from its agent's persona, one entry
 per non-blank line. The scripted supervisor's entries are its routing replies,
@@ -71,12 +72,12 @@ __all__ = [
 class _DeterministicScript(StrEnum):
     """Named in-process scenarios selected by their bundled agent identity."""
 
+    COMPLETION = "completion"
     SUPERVISOR_ROUTING = "supervisor_routing"
     SCRIPTED_SUPERVISOR = "scripted_supervisor"
     REVISING_REVIEW = "revising_review"
     BRANCH_RESEARCH = "branch_research"
     PERMISSION_PAUSE = "permission_pause"
-    FAILURE = "failure"
     CANCEL_WINDOW = "cancel_window"
     RELAY_BURST = "relay_burst"
     LOOPING = "looping"
@@ -100,15 +101,19 @@ _BRANCH_RESEARCHER_ID = "deterministic-branch-researcher"
 # test hands it to the compiler directly. The revising verdict is served under
 # two roles: the document topology seats its reviewer by the ``doc-reviewer``
 # role, and a review loop outside it takes a plain ``reviewer``, since a document
-# role in a coding topology would misstate what its preset authors.
+# role in a coding topology would misstate what its preset authors. The
+# completing turn is served under a coder and a reviewer for the same reason: a
+# coding team's turn, and the review that ends its loop, finish with content that
+# asks for no revision.
 _SCRIPT_BY_AGENT_ID: dict[str, _DeterministicScript] = {
+    "deterministic-coder-success": _DeterministicScript.COMPLETION,
+    "deterministic-passing-reviewer": _DeterministicScript.COMPLETION,
     DEFAULT_SUPERVISOR_ID: _DeterministicScript.SUPERVISOR_ROUTING,
     _SCRIPTED_SUPERVISOR_ID: _DeterministicScript.SCRIPTED_SUPERVISOR,
     "deterministic-revising-doc-reviewer": _DeterministicScript.REVISING_REVIEW,
     "deterministic-revising-reviewer": _DeterministicScript.REVISING_REVIEW,
     _BRANCH_RESEARCHER_ID: _DeterministicScript.BRANCH_RESEARCH,
     _ROUTED_WORKER_ID: _DeterministicScript.PERMISSION_PAUSE,
-    "deterministic-failure": _DeterministicScript.FAILURE,
     "deterministic-cancel-window": _DeterministicScript.CANCEL_WINDOW,
     "deterministic-relay-burst": _DeterministicScript.RELAY_BURST,
     "deterministic-looping": _DeterministicScript.LOOPING,
@@ -140,6 +145,10 @@ _LOOP_INTERVAL_SECONDS = 0.05
 # signal, never on elapsed time, so this bounds only the release latency.
 _HOLD_POLL_SECONDS = 0.05
 _HELD_TURN_REPLY = "Deterministic held turn completed after its release."
+
+# A completing turn's content: it carries no revision sentinel, so a reviewer that
+# answers it ends a review loop on its first pass.
+_COMPLETED_TURN_REPLY = "Deterministic turn completed."
 
 # The verdict every role-keyed reviewer returns, which advances the inner review
 # loop; only the revising reviewer scenario sends work back.
@@ -499,6 +508,9 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         if script is None:
             return self._content_for_role()
 
+        if script is _DeterministicScript.COMPLETION:
+            return _COMPLETED_TURN_REPLY
+
         if script is _DeterministicScript.SUPERVISOR_ROUTING:
             return _supervisor_route(messages)
 
@@ -513,9 +525,6 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
 
         if script is _DeterministicScript.PERMISSION_PAUSE:
             return await self._permission_pause_content()
-
-        if script is _DeterministicScript.FAILURE:
-            raise RuntimeError("deterministic scripted provider failure")
 
         if script is _DeterministicScript.HOLD_THEN_COMPLETE:
             return await self._held_turn_content()

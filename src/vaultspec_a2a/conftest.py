@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Any, NoReturn
 import pytest
 import pytest_asyncio
 
-from .service_tests._net import tape_server_base, tape_server_listening
 from .testing import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON,
@@ -320,10 +319,6 @@ def _docker_compose_present() -> bool:
     return completed.returncode == 0
 
 
-def _tape_server_present() -> bool:
-    return tape_server_listening(tape_server_base())
-
-
 def _claude_acp_adapter_present() -> bool:
     """The Node ACP adapter is installed, or the binary backend replaces it."""
     from .control.config import settings
@@ -429,19 +424,9 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         what="a served provider catalog with a selectable in-process lane",
         supply=(
             "boot this branch's gateway so the catalog it serves for the run's "
-            "workspace lists a selectable `deterministic` or `mock` lane"
+            "workspace lists a selectable `deterministic` lane"
         ),
         probe=None,
-    ),
-    ExternalPrerequisite(
-        "tape-server",
-        what="the scripted model backend",
-        supply=(
-            "run `docker compose -f service/docker-compose.integration.yml up -d "
-            "vidaimock`, or export VAULTSPEC_A2A_MOCK_API_BASE pointing at an "
-            "existing one"
-        ),
-        probe=_tape_server_present,
     ),
     ExternalPrerequisite(
         "outbound-network",

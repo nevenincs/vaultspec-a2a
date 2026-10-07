@@ -14,11 +14,11 @@ question with a different truth condition. Rendering it through a synthetic
 round trip would have made a static fact look like an observation.
 
 **The lanes are registrations, not names.** An in-process lane is a
-:class:`~.lane_registry.LaneRegistration`: the ones this build compiles in, plus
-whatever the configured lane plugins register (:mod:`.lane_registry`). The
-admission declaration, the factory and the catalog service all read the lane set
-from :func:`in_process_lanes`, so they cannot drift into disagreeing about what
-an in-process lane is called, and none of them names a lane it does not hold.
+:class:`~.lane_registry.LaneRegistration` that a configured lane plugin
+registers (:mod:`.lane_registry`); this build compiles none in. The admission
+declaration, the factory and the catalog service all read the lane set from
+:func:`in_process_lanes`, so they cannot drift into disagreeing about what an
+in-process lane is called, and none of them names a lane it does not hold.
 
 **Serving is armed, never ambient.** These lanes are constrained to stay
 hidden, and the reason is a product one: a lane that returns fixed content would
@@ -29,10 +29,8 @@ deployment that wants these lanes must say so.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
-from ..graph.enums import Provider
 from ._catalog_discovery import ProviderCatalogDiscovery, available_catalog
 from ._catalog_fields import local_id, model_list_revision
 from .execution_modes import EXTERNAL_EXECUTION_MODES
@@ -47,12 +45,9 @@ from .provider_catalog import (
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from langchain_core.language_models import BaseChatModel
-
-    from ..team.team_config import AgentConfig
+    from ..graph.enums import Provider
 
 __all__ = [
-    "BUILT_IN_LANES",
     "build_in_process_catalog",
     "discover_in_process_catalog",
     "in_process_catalog_key",
@@ -62,41 +57,13 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
-class _MockLane:
-    """The tape-replay lane this build compiles in."""
-
-    provider: Provider = Provider.MOCK
-    execution_mode: str = "in-process-mock"
-    display_name: str = "Mock (in-process tape replay)"
-    description: str = (
-        "In-process mock provider; replays recorded tapes from the configured "
-        "tape server with no live model spend."
-    )
-    model_values: tuple[str, ...] = ("mock-high", "mock-low", "mock-max", "mock-mid")
-
-    def create_model(self, agent_config: AgentConfig | None) -> BaseChatModel:
-        from .mock_chat_model import MockChatModel
-
-        return MockChatModel(agent_config=agent_config)
-
-
-_MOCK_LANE: Final = _MockLane()
-
-#: The in-process lanes this build holds without any plugin. They are executable
-#: whatever the arming; serving them is still armed by the deployment.
-BUILT_IN_LANES: Final[tuple[LaneRegistration, ...]] = (_MOCK_LANE,)
-
-_BUILT_IN_PROVIDERS: Final = frozenset(lane.provider for lane in BUILT_IN_LANES)
-
-
 def in_process_lanes() -> tuple[LaneRegistration, ...]:
-    """Return every in-process lane this process can execute, plugin lanes first.
+    """Return every in-process lane this process can execute, in registry order.
 
     Raises:
         LanePluginError: If the configured lane plugins cannot be honoured.
     """
-    return (*registered_lanes(reserved=_BUILT_IN_PROVIDERS), *BUILT_IN_LANES)
+    return registered_lanes()
 
 
 def in_process_lane(provider: Provider) -> LaneRegistration | None:
@@ -117,27 +84,15 @@ def in_process_catalog_key(lane: LaneRegistration) -> ProviderCatalogKey:
     return ProviderCatalogKey(lane.provider.value, lane.execution_mode)
 
 
-def served_in_process_lanes(
-    *, armed: bool, mock_api_base: str | None
-) -> tuple[ProviderCatalogKey, ...]:
+def served_in_process_lanes(*, armed: bool) -> tuple[ProviderCatalogKey, ...]:
     """Return the in-process lanes this deployment serves, in registry order.
 
-    Unarmed serves nothing at all. Armed serves every plugin lane, which runs
-    entirely inside this process and therefore cannot be unavailable. The mock
-    lane additionally requires a configured tape server: it proxies one over
-    HTTP, so serving it without a base URL would advertise a transport that does
-    not exist, and a certification run that froze it would fail at its first
-    turn rather than never having been offered the lane.
+    Unarmed serves nothing at all. Armed serves every registered lane, which
+    runs entirely inside this process and therefore cannot be unavailable.
     """
     if not armed:
         return ()
-    lanes = [
-        in_process_catalog_key(lane)
-        for lane in registered_lanes(reserved=_BUILT_IN_PROVIDERS)
-    ]
-    if mock_api_base and mock_api_base.strip():
-        lanes.append(in_process_catalog_key(_MOCK_LANE))
-    return tuple(lanes)
+    return tuple(in_process_catalog_key(lane) for lane in registered_lanes())
 
 
 def _entry_id(key: ProviderCatalogKey, provider_value: str) -> str:

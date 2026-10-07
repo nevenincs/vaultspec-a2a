@@ -169,11 +169,10 @@ SCOPES: Final[dict[str, Scope]] = {
         settings_file=True,
     ),
     "compose": Scope(
-        summary="Runs development-only Jaeger and VidaiMock fixtures.",
+        summary="Runs the development-only Jaeger fixture.",
         optional=(
             "JAEGER_OTLP_PORT",
             "JAEGER_UI_PORT",
-            "VIDAIMOCK_PORT",
         ),
     ),
     "live-tests": Scope(

@@ -535,30 +535,20 @@ class TestProviderAdmission:
     without building a model.
     """
 
-    @pytest.mark.parametrize("provider", (Provider.DETERMINISTIC, Provider.MOCK))
-    def test_in_process_fast_path_rejects_native_controls(
-        self, provider: Provider
-    ) -> None:
+    def test_in_process_fast_path_rejects_native_controls(self) -> None:
         with pytest.raises(ValueError, match="no exact native-control executor"):
             ProviderFactory().create(
-                provider,
+                Provider.DETERMINISTIC,
                 model="exact",
-                execution_mode=(
-                    "in-process-deterministic"
-                    if provider is Provider.DETERMINISTIC
-                    else "in-process-mock"
-                ),
+                execution_mode="in-process-deterministic",
                 native_controls={"unsupported": "value"},
             )
 
-    @pytest.mark.parametrize("provider", (Provider.DETERMINISTIC, Provider.MOCK))
-    def test_an_in_process_lane_has_no_implicit_default(
-        self, provider: Provider
-    ) -> None:
+    def test_an_in_process_lane_has_no_implicit_default(self) -> None:
         from ..factory import _admit_and_resolve_model_name
 
         with pytest.raises(ValueError, match="exact model value frozen"):
-            _admit_and_resolve_model_name(provider, None)
+            _admit_and_resolve_model_name(Provider.DETERMINISTIC, None)
 
     def test_an_external_lane_has_no_implicit_default(self) -> None:
         """Omitting a model may not silently choose the artifact producer.

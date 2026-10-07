@@ -34,7 +34,7 @@ from ...database import (
 )
 from ...database.session import close_db, get_session_factory, init_db
 from ...ipc.schemas import DispatchRequest
-from ...testing import adopted_spawner, current_execution_metadata
+from ...testing import DEFAULT_TEAM_PRESET, adopted_spawner, current_execution_metadata
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from ...thread.failure_evidence import (
@@ -50,7 +50,6 @@ from ..event_handlers import _handle_terminal_event
 from ..repositories import count_queued_continuations
 from ._continuation import (
     FIRST_RECEIPT,
-    PRESET,
     RUN,
     BusyRun,
     envelope,
@@ -266,7 +265,7 @@ async def _seed_reconciling_run(
             db,
             thread_id=RUN,
             status=ThreadStatus.RECONCILING,
-            team_preset=PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
             metadata=metadata,
             write_authority=RunWriteAuthority(
                 0, 1, ControlActionType.INGEST, FIRST_RECEIPT

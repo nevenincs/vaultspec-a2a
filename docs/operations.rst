@@ -298,7 +298,7 @@ lifecycle, caller-owned foreground execution, and Compose-owned stacks.
 Compose-owned development fixtures
 ----------------------------------
 
-Docker Compose owns the Jaeger and VidaiMock development/test fixtures.
+Docker Compose owns the Jaeger development/test fixture.
 Gateway and worker run natively through the process registry or test harness;
 there is no production application Compose stack.
 
@@ -331,9 +331,8 @@ there is no production application Compose stack.
      - ``stack-infrastructure-status``
      - ``stack-infrastructure-down``
 
-Prefix the table's recipe names with ``just``. The integration family starts
-Jaeger and VidaiMock; the infrastructure family starts only Jaeger in a separate
-project. Both use ``service/docker-compose.integration.yml``. Their published
+Prefix the table's recipe names with ``just``. Each family starts Jaeger in its
+own project. Both use ``service/docker-compose.integration.yml``. Their published
 ports bind to loopback. With default ports, run only one fixture project at a
 time. Don't register fixture containers as named host processes.
 

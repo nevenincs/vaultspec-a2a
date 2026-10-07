@@ -15,16 +15,15 @@ from ...team.team_config import (
     load_team_config,
     supported_capabilities,
 )
+from ...testing import DEFAULT_TEAM_PRESET
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-_BUNDLED_KNOWN = "mock-success-single"
-
 
 def test_discover_includes_bundled_presets() -> None:
     ids = discover_team_preset_ids()
-    assert _BUNDLED_KNOWN in ids
+    assert DEFAULT_TEAM_PRESET in ids
 
 
 def test_discover_unions_workspace_local_presets(tmp_path: Path) -> None:
@@ -34,18 +33,18 @@ def test_discover_unions_workspace_local_presets(tmp_path: Path) -> None:
 
     ids = discover_team_preset_ids(tmp_path)
     assert "workspace-only-team" in ids  # workspace-local
-    assert _BUNDLED_KNOWN in ids  # bundled still present
+    assert DEFAULT_TEAM_PRESET in ids  # bundled still present
 
 
 def test_discover_ignores_missing_workspace_teams_dir(tmp_path: Path) -> None:
     # No .vaultspec/teams under tmp_path -> only bundled ids come back.
     ids = discover_team_preset_ids(tmp_path)
-    assert _BUNDLED_KNOWN in ids
+    assert DEFAULT_TEAM_PRESET in ids
     assert "workspace-only-team" not in ids
 
 
 def test_is_mock_preset_marks_mock_ids() -> None:
-    assert is_mock_preset("mock-success-single") is True
+    assert is_mock_preset("mock-example") is True
     assert is_mock_preset("vaultspec-adr-research") is False
 
 

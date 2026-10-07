@@ -9,7 +9,7 @@ no test doubles. The /ws WebSocket tests do NOT cover this SSE surface.
 The terminal-replay path is asserted directly because it is deterministic and
 finite (the endpoint yields one ``thread_terminal`` frame and returns); it is
 exactly the close-after-terminal behaviour the -17 merge extended. The live
-streaming loop is exercised end-to-end by the mock-tape run proofs.
+streaming loop is exercised end-to-end by the deterministic-lane run proofs.
 """
 
 from __future__ import annotations

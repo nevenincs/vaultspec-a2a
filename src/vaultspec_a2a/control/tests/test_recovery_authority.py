@@ -20,7 +20,12 @@ from ...graph.nodes.action_completion import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    add_test_node,
+    compile_test_graph,
+    new_state_graph,
+)
 from ...thread import RunWriteAuthority
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.checkpoint_evidence import (
@@ -86,11 +91,9 @@ async def durable_run(
                     content="work",
                     workspace_root=str(tmp_path),
                     recursion_limit=25,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     graph_definition=freeze_graph_definition(
-                        load_team_config(
-                            "mock-success-single", workspace_root=tmp_path
-                        ),
+                        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
                         workspace_root=tmp_path,
                     ),
                 ),
@@ -112,7 +115,7 @@ async def test_initial_graph_authority_is_bound_to_its_durable_receipt(
     sessions, _, _ = durable_run
     async with sessions() as db:
         definition = await read_accepted_graph_definition(db, "run")
-        assert definition.team_id == "mock-success-single"
+        assert definition.team_id == DEFAULT_TEAM_PRESET
         assert definition.step_timeout_seconds == 60
         with pytest.raises(ValueError, match="no current initial graph authority"):
             await read_accepted_graph_definition(db, "another-run")

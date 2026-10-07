@@ -30,6 +30,7 @@ from ...graph.nodes.clarification import (
 )
 from ...streaming._interrupt_projection import emit_interrupt_events
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     add_test_node,
     async_catalog_run_fields,
     compile_test_graph,
@@ -51,7 +52,6 @@ if TYPE_CHECKING:
     from ...streaming.aggregator import EventAggregator
     from ...thread.state import TeamState
 
-_PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
 _PROMPT = "Which side should the monitor panel dock to?"
 _OPTIONS = ["dock-right", "dock-left"]
@@ -152,7 +152,7 @@ async def test_the_nudge_arrives_on_the_sse_stream_carrying_no_questions(
         start = await client.post(
             "/v1/runs",
             json={
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "plan it",
                 "autonomous": True,
                 "run_id": f"clarify-sse-{next(_RUN_SEQ):02d}",
@@ -204,7 +204,7 @@ async def test_the_questions_live_on_run_status_not_on_the_relay(
         start = await client.post(
             "/v1/runs",
             json={
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "plan it",
                 "autonomous": True,
                 "run_id": f"clarify-sse-{next(_RUN_SEQ):02d}",

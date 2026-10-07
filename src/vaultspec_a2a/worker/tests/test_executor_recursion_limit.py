@@ -17,7 +17,12 @@ from langchain_core.messages import AIMessage
 
 from ...providers.team_selection import model_assignment_digest
 from ...team.team_config import load_team_config
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    add_test_node,
+    compile_test_graph,
+    new_state_graph,
+)
 from ..executor import Executor
 from .test_executor import _current_ingest_dispatch, _make_bridge
 
@@ -26,7 +31,7 @@ if TYPE_CHECKING:
 
     from ..graph_lifecycle import RegisteredCompiledGraph
 
-_PRESET_LIMIT = load_team_config("mock-success-single").graph.recursion_limit
+_PRESET_LIMIT = load_team_config(DEFAULT_TEAM_PRESET).graph.recursion_limit
 
 
 @pytest.mark.asyncio(loop_scope="function")

@@ -2,8 +2,7 @@
 
 These tests construct each model through ``ProviderFactory``, with the lane held
 through its plugin, and then exercise the real worker/graph or async-provider
-boundary. They intentionally do not model ACP or VidaiMock SSE semantics; tape
-scenarios remain supplemental coverage.
+boundary. They intentionally do not model ACP transport semantics.
 """
 
 from __future__ import annotations
@@ -18,6 +17,7 @@ from langgraph.graph import END
 from langgraph.types import Command
 
 from ....graph.enums import Provider
+from ....graph.nodes.phase_gate import REVIEW_REVISION_SENTINEL
 from ....graph.nodes.worker import create_worker_node
 from ....providers.factory import ProviderFactory
 from ....team.team_config import AgentConfig, load_agent_config, load_team_config
@@ -110,14 +110,24 @@ async def test_deterministic_permission_pause_resumes_generic_callback() -> None
     assert resumed["messages"][-1].name == agent.id
 
 
-# The scripted FAILURE path has no scenario preset on this branch, so no test
-# drives it here. `deterministic-failure` is NOT that scenario: it is a GRAPH
-# BUDGET failure whose preset says so in as many words ("It is NOT a provider
-# failure and produces no provider condition"), and it runs two workers rather
-# than the single-worker shape these scripted scenarios assume. The branch this
-# merged from used that same name for a provider-failure scenario; keeping its
-# test would have asserted a contract this repository deliberately replaced.
-# `team/tests/test_failure_scenario_preset.py` covers the budget scenario.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "agent_id", ("deterministic-coder-success", "deterministic-passing-reviewer")
+)
+async def test_deterministic_completion_answers_without_asking_for_revision(
+    agent_id: str,
+) -> None:
+    """A completing turn answers, and its answer never sends a review loop back."""
+    model = ProviderFactory().create(
+        Provider.DETERMINISTIC,
+        model="deterministic",
+        agent_config=load_agent_config(agent_id),
+    )
+
+    reply = await model.ainvoke([HumanMessage(content="finish")])
+
+    assert str(reply.content).strip()
+    assert REVIEW_REVISION_SENTINEL not in str(reply.content)
 
 
 @pytest.mark.asyncio

@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import (
 
 from ...control.drain import DrainGate
 from ...database import get_control_action_by_dispatch_id, get_thread
-from ...testing import async_run_start_body, serve_on_loopback
+from ...testing import DEFAULT_TEAM_PRESET, async_run_start_body, serve_on_loopback
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-_PRESET = "mock-success-single"
 
 # Closed port: the IANA discard service is not listening on the loopback test
 # host, so a dispatch POST to it is refused by the real transport. The repo's
@@ -70,7 +69,7 @@ async def _run_body(
     return await async_run_start_body(
         client,
         run_id or f"drain-{next(_RUN_SEQ):02d}",
-        team_preset=_PRESET,
+        team_preset=DEFAULT_TEAM_PRESET,
         tokens={"coder": "tok-coder"},
     )
 

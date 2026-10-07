@@ -34,6 +34,8 @@ from ...ipc.schemas import DispatchRequest
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...team.team_config import load_team_config
 from ...testing import (
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
     add_test_node,
     compile_test_graph,
     current_execution_metadata,
@@ -67,7 +69,7 @@ _BEARER = "secret-machine-bearer"
 def _current_assignment() -> dict[str, FrozenLaneAssignment]:
     return resolve_execution_authority(
         current_execution_metadata(
-            pathlib.Path.cwd(), required_roles=("mock-coder-success",)
+            pathlib.Path.cwd(), required_roles=(DEFAULT_REQUIRED_ROLE,)
         )
     ).model_assignment
 
@@ -75,7 +77,7 @@ def _current_assignment() -> dict[str, FrozenLaneAssignment]:
 def _accepted_ingest(thread_id: str, bundle: ActorTokenBundle) -> DispatchRequest:
     workspace = pathlib.Path(_WORKSPACE)
     definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
     request = DispatchRequest(
@@ -84,7 +86,7 @@ def _accepted_ingest(thread_id: str, bundle: ActorTokenBundle) -> DispatchReques
         workspace_root=_WORKSPACE,
         thread_id=thread_id,
         content="build it",
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=definition,
         recursion_limit=10,
         actor_tokens=bundle,

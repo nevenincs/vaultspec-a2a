@@ -77,6 +77,7 @@ from ...graph.nodes.phase_gate import create_phase_gate_node
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     add_test_node,
     adopted_spawner,
     compile_test_graph,
@@ -246,7 +247,7 @@ def _install_verdict_loop_graph(
     executor.register_compiled_graph(
         thread_id,
         (
-            "mock-success-single",
+            DEFAULT_TEAM_PRESET,
             _WORKSPACE,
             False,
             model_assignment_digest,
@@ -306,7 +307,7 @@ async def _ingest_live_verdict_run(
         workspace_root=_WORKSPACE,
         thread_id=context.identity.thread_id,
         content="drive to the gate",
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=context.resources.definition,
         recursion_limit=10,
         model_assignment=context.resources.model_assignment,
@@ -320,7 +321,7 @@ async def _ingest_live_verdict_run(
             db,
             write_authority=authority,
             thread_id=context.identity.thread_id,
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             metadata=context.resources.metadata,
         )
         await create_control_action(
@@ -492,7 +493,7 @@ async def _run_live_verdict_a2a(
     metadata = current_execution_metadata(workspace)
     execution_authority = resolve_execution_authority(metadata)
     definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
     graph = _install_verdict_loop_graph(

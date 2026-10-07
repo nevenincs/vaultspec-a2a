@@ -85,11 +85,15 @@ async def _compile_measured_graph(
     from ...ipc.schemas import DispatchRequest
     from ...streaming.aggregator import EventAggregator
     from ...team.team_config import load_team_config
+    from ...testing import (
+        DEFAULT_REQUIRED_ROLE,
+        DEFAULT_TEAM_PRESET,
+        deterministic_model_assignment,
+    )
     from ...thread.executable_graph import freeze_graph_definition
     from ...worker.catalog_store import RunCatalogStore
     from ...worker.graph_lifecycle import GraphLifecycleManager
     from ...worker.token_store import RunTokenStore
-    from ..team_selection import FrozenLaneAssignment
 
     lifecycle = GraphLifecycleManager(
         checkpointer=checkpointer,
@@ -98,36 +102,25 @@ async def _compile_measured_graph(
         token_store=RunTokenStore(),
         catalog_store=RunCatalogStore(),
     )
+    model_assignment = deterministic_model_assignment(
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace)
+    )
     await asyncio.sleep(0.1)
     started = heartbeat.begin_window()
     graph = await lifecycle.get_or_compile_graph(
         DispatchRequest(
             action="ingest",
             thread_id=f"loop-responsiveness-{uuid4().hex[:8]}",
-            agent_id="mock-coder-success",
+            agent_id=DEFAULT_REQUIRED_ROLE,
             content="probe",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=freeze_graph_definition(
-                load_team_config("mock-success-single", workspace_root=workspace),
+                load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
                 workspace_root=workspace,
             ),
             workspace_root=str(workspace),
             recursion_limit=10,
-            model_assignment={
-                "mock-coder-success": FrozenLaneAssignment.model_validate(
-                    {
-                        "schema_version": 1,
-                        "provider_id": "mock",
-                        "execution_mode": "in-process-mock",
-                        "catalog_revision": "test-revision",
-                        "entry_id": "mock-high",
-                        "model_name": "mock-high",
-                        "controls": [],
-                        "defaulted_control_ids": [],
-                        "provenance": {"selection_source": "team_selection"},
-                    }
-                )
-            },
+            model_assignment=model_assignment,
         )
     )
     compile_finished = time.monotonic()

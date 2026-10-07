@@ -53,7 +53,7 @@ if TYPE_CHECKING:
 
 _AUTH = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
 _GATEWAY = worker_lifecycle_gateway_script()
-# This module admits runs against the in-process mock lane (see
+# This module admits runs against the in-process deterministic lane (see
 # ``testing/catalog.py``); the gateway must serve one to select.
 
 

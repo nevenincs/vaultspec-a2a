@@ -42,10 +42,8 @@ would have been billing a provider while still reporting green.
 The wire shape is :class:`~vaultspec_a2a.api.schemas.gateway.ProviderCatalogSelection`,
 read from production rather than restated here so it cannot drift. The
 in-process lane identities are the registrations themselves: the lanes this
-package contributes (:data:`~vaultspec_a2a.testing.lanes.LANES`) and the ones
-production compiles in
-(:data:`~vaultspec_a2a.providers.in_process_catalog.BUILT_IN_LANES`). They are
-read from the registrations, not from this process's own lane set, because the
+package contributes (:data:`~vaultspec_a2a.testing.lanes.LANES`). They are read
+from the registrations, not from this process's own lane set, because the
 gateway that serves a payload is usually another process with its own arming.
 
 HTTP stays with the caller's CLIENT. The tiers legitimately differ - an ASGI
@@ -184,11 +182,10 @@ def is_selectable(record: dict[str, Any]) -> bool:
 
 
 def _known_in_process_lanes() -> tuple[LaneRegistration, ...]:
-    """Every in-process lane a test gateway can hold, plugin lanes first."""
-    from ..providers.in_process_catalog import BUILT_IN_LANES
+    """Every in-process lane a test gateway can hold."""
     from .lanes import LANES
 
-    return (*LANES, *BUILT_IN_LANES)
+    return LANES
 
 
 def _is_in_process(record: dict[str, Any]) -> bool:
@@ -249,8 +246,7 @@ def _choose_in_process(
         )
         raise NoSelectableLaneError(
             "no selectable in-process lane is served, so this run cannot present "
-            f"a selection. Arm them on the gateway with {arming} (the mock lane "
-            "additionally needs VAULTSPEC_A2A_MOCK_API_BASE). Served: "
+            f"a selection. Arm them on the gateway with {arming}. Served: "
             + _served_summary(records)
         )
     record = next(
@@ -308,10 +304,9 @@ def in_process_selection(
     """Select an in-process lane's first advertised entry.
 
     ``prefer_provider_id`` names the in-process lane to use when it is served.
-    Callers pass the lane their preset is pinned to, because the lanes are not
-    interchangeable: the mock lane replays a tape and the deterministic lane
-    answers from fixed role-keyed content, so a preset answered by the wrong one
-    still completes while testing something else entirely. An unserved or unnamed
+    Callers pass the lane their preset is pinned to, because in-process lanes
+    are not interchangeable: a preset answered by the wrong one still completes
+    while testing something else entirely. An unserved or unnamed
     preference falls back to the first in-process lane rather than failing, since
     any of them satisfies a caller that expressed no preference.
 

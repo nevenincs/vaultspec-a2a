@@ -300,7 +300,8 @@ def _lane_of(provider: Provider | str | None) -> Provider | None:
 
     Callers hold the lane as the bounded string an ACP model carries rather than
     as an enum member, and a run whose model never declared its lane is the normal
-    unidentified case (hosted APIs, the in-repo mock). Both land on ``None`` here
+    unidentified case (hosted APIs, in-process fixture lanes). Both land on
+    ``None`` here
     so every gate below denies by default instead of raising at a composition
     seam - an unidentifiable lane is exactly a lane with no recorded proof.
     """

@@ -51,6 +51,7 @@ from ...database import (
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     add_test_node,
     adopted_spawner,
     compile_test_graph,
@@ -152,13 +153,13 @@ def _install_receipt_graph(
     )
     workspace = Path(_ACTIVE_PROJECT)
     definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
     executor.register_compiled_graph(
         thread_id,
         (
-            "mock-success-single",
+            DEFAULT_TEAM_PRESET,
             str(workspace),
             False,
             resolve_execution_authority(
@@ -186,7 +187,7 @@ async def _running_thread(
     sessions: async_sessionmaker[AsyncSession],
     thread_id: str,
     *,
-    team_preset: str = "mock-success-single",
+    team_preset: str = DEFAULT_TEAM_PRESET,
 ) -> None:
     async with sessions() as db:
         await _create_current_thread(
@@ -203,7 +204,7 @@ async def _create_current_thread(
     *,
     thread_id: str,
     status: ThreadStatus,
-    team_preset: str = "mock-success-single",
+    team_preset: str = DEFAULT_TEAM_PRESET,
 ) -> None:
     """Persist a thread with the complete current initial graph authority."""
     authority = make_test_write_authority()

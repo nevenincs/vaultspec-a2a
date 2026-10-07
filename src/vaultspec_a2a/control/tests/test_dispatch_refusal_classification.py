@@ -22,7 +22,12 @@ from fastapi.responses import JSONResponse
 from ...domain_config import domain_config
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import adopted_spawner, current_execution_metadata
+from ...testing import (
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    adopted_spawner,
+    current_execution_metadata,
+)
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -87,19 +92,19 @@ def _ingest(
 ) -> DispatchRequest:
     """Build the dispatch the gateway really sends, with real graph authority."""
     authority = resolve_execution_authority(
-        current_execution_metadata(workspace, required_roles=("mock-coder-success",))
+        current_execution_metadata(workspace, required_roles=(DEFAULT_REQUIRED_ROLE,))
     )
     request = DispatchRequest(
         dispatch_id=dispatch_id,
         action="ingest",
         thread_id=thread_id,
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         content="a turn",
         workspace_root=str(workspace),
         recursion_limit=25,
         model_assignment=authority.model_assignment,
         graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=workspace),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
             workspace_root=workspace,
         ),
     )

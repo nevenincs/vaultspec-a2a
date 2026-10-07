@@ -10,7 +10,11 @@ from pydantic import ValidationError
 from ...control.execution_authority import resolve_execution_authority
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import current_execution_metadata
+from ...testing import (
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    current_execution_metadata,
+)
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ..executor import Executor
 from ..graph_lifecycle import GraphCompilationError
@@ -24,7 +28,7 @@ if TYPE_CHECKING:
 
 def _definition(tmp_path: Path) -> FrozenGraphDefinition:
     return freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=tmp_path),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
         workspace_root=tmp_path,
     )
 
@@ -55,12 +59,14 @@ async def test_worker_compiles_accepted_program_after_files_change(
         graph_definition=definition,
         recursion_limit=17,
         model_assignment=resolve_execution_authority(
-            current_execution_metadata(tmp_path, required_roles=("mock-coder-success",))
+            current_execution_metadata(
+                tmp_path, required_roles=(DEFAULT_REQUIRED_ROLE,)
+            )
         ).model_assignment,
     )
     for kind, name in (
-        ("teams", "mock-success-single"),
-        ("agents", "mock-coder-success"),
+        ("teams", DEFAULT_TEAM_PRESET),
+        ("agents", DEFAULT_REQUIRED_ROLE),
     ):
         path = tmp_path / ".vaultspec" / kind / f"{name}.toml"
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,8 @@
+[agent]
+id           = "deterministic-passing-reviewer"
+display_name = "Deterministic Passing Reviewer"
+role         = "reviewer"
+description  = "In-process ProviderFactory scenario whose every review completes without requesting revision."
+
+[agent.persona]
+system_prompt = "Complete the programmed deterministic review without requesting revision."

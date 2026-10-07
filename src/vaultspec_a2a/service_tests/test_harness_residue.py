@@ -26,7 +26,7 @@ from .harness import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PORTS = {"gateway": 19000, "worker": 19001, "vidaimock": 19002, "jaeger": 19003}
+_PORTS = {"gateway": 19000, "worker": 19001, "jaeger": 19003}
 
 
 def test_constructing_a_stack_creates_no_directory() -> None:

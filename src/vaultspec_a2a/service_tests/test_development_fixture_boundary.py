@@ -1,4 +1,4 @@
-"""Development containers expose local trace and deterministic provider fixtures."""
+"""The development container exposes the local trace fixture."""
 
 from __future__ import annotations
 
@@ -55,13 +55,10 @@ def test_resolved_integration_jaeger_boundary(
     assert all(port["host_ip"] == "127.0.0.1" for port in ports)
     assert all(port["protocol"] == "tcp" for port in ports)
     assert "http://localhost:13133/status" in services["jaeger"]["healthcheck"]["test"]
-    assert set(services) == {"jaeger", "vidaimock"}
-    assert services["vidaimock"]["ports"][0]["host_ip"] == "127.0.0.1"
+    assert set(services) == {"jaeger"}
 
 
-@pytest.mark.parametrize(
-    "variable", ["JAEGER_UI_PORT", "JAEGER_OTLP_PORT", "VIDAIMOCK_PORT"]
-)
+@pytest.mark.parametrize("variable", ["JAEGER_UI_PORT", "JAEGER_OTLP_PORT"])
 @pytest.mark.parametrize("value", ["0.0.0.0:26686", "[::]:26686"])
 def test_fixture_rejects_host_address_override(
     docker: str, variable: str, value: str

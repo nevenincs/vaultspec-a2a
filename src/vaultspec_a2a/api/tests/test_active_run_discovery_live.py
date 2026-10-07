@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from ...database.models import ThreadModel
 from ...database.thread_repository import create_thread
-from ...testing import booted_gateway
+from ...testing import DEFAULT_TEAM_PRESET, booted_gateway
 from ...tests._write_authority import (
     make_test_thread_authority_columns,
     make_test_write_authority,
@@ -453,7 +453,7 @@ async def test_the_two_readings_answer_with_different_records(tmp_path: Path) ->
                 thread_id="two-readings",
                 status=ThreadStatus.INPUT_REQUIRED,
                 repair_status="checkpoint_unavailable",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
             )
             await session.commit()
 
@@ -473,6 +473,6 @@ async def test_the_two_readings_answer_with_different_records(tmp_path: Path) ->
         assert record["status"] == ThreadStatus.INPUT_REQUIRED.value
         assert record["repair_status"] == "checkpoint_unavailable"
         assert record["execution_readiness"] == "checkpoint_unavailable"
-        assert record["team_preset"] == "mock-success-single"
+        assert record["team_preset"] == DEFAULT_TEAM_PRESET
         assert record["created_at"]
         assert record["updated_at"]

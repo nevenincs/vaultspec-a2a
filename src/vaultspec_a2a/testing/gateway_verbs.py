@@ -39,12 +39,12 @@ __all__ = [
 # one role it requires. It ships only in source checkouts: the gateway loads it
 # from the checkout, never a published wheel, which is why the harnesses that run
 # it are source-only.
-DEFAULT_TEAM_PRESET = "mock-success-single"
-DEFAULT_REQUIRED_ROLE = "mock-coder-success"
+DEFAULT_TEAM_PRESET = "deterministic-success-single"
+DEFAULT_REQUIRED_ROLE = "deterministic-coder-success"
 
 # The in-process lane DEFAULT_TEAM_PRESET is pinned to. A run presents ONE
 # selection, so the preference is that preset's lane, which never bills.
-DEFAULT_PRESET_LANE = Provider.MOCK.value
+DEFAULT_PRESET_LANE = Provider.DETERMINISTIC.value
 
 _DEFAULT_AUTHORIZATION = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
 

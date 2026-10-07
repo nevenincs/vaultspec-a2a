@@ -29,7 +29,7 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import adopted_spawner, current_execution_metadata
+from ...testing import DEFAULT_TEAM_PRESET, adopted_spawner, current_execution_metadata
 from ...thread import RunWriteAuthority
 from ...thread.enums import (
     ControlActionResultStatus,
@@ -80,7 +80,7 @@ def _graph_authority(
     workspace: Path,
 ) -> tuple[FrozenGraphDefinition, dict[str, FrozenLaneAssignment]]:
     definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
     assignment = resolve_execution_authority(
@@ -103,7 +103,7 @@ def _accepted_cases(workspace: Path) -> tuple[_AcceptedCase, ...]:
                 agent_id="vaultspec-supervisor",
                 content="continue",
                 workspace_root=str(workspace),
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 graph_definition=definition,
                 recursion_limit=37,
                 model_assignment=assignment,
@@ -120,7 +120,7 @@ def _accepted_cases(workspace: Path) -> tuple[_AcceptedCase, ...]:
                 thread_id="permission-run",
                 option_id={"option_id": "allow_once", "notes": None},
                 workspace_root=str(workspace),
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 graph_definition=definition,
                 recursion_limit=37,
                 model_assignment=assignment,
@@ -268,7 +268,7 @@ async def test_current_message_permission_and_cancel_redrive_stable_ids(
     assert delivered["message-stable"]["content"] == "continue"
     assert delivered["message-stable"]["agent_id"] == "vaultspec-supervisor"
     assert delivered["message-stable"]["recursion_limit"] == 37
-    assert delivered["message-stable"]["team_preset"] == "mock-success-single"
+    assert delivered["message-stable"]["team_preset"] == DEFAULT_TEAM_PRESET
     assert delivered["message-stable"]["graph_action_receipt"] is not None
     assert delivered["permission-stable"]["action"] == "resume"
     assert delivered["permission-stable"]["option_id"] == {

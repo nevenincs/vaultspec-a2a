@@ -133,9 +133,7 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
         if reason is not None:
             return ProviderReadiness(provider=provider, ready=False, reason=reason)
     if in_process_lane(provider) is not None:
-        # A held in-process lane needs no credential or launch command. This
-        # readiness probe says construction can proceed, not that a lane's own
-        # dependency - the mock lane's tape server - is reachable.
+        # A held in-process lane needs no credential or launch command.
         return ProviderReadiness(provider=provider, ready=True)
 
     # A missing configuration is refused before any command is resolved.

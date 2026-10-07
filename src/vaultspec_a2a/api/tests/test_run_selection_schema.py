@@ -16,6 +16,7 @@ from ...api.schemas.gateway import RunStartRequest
 from ...context.metadata import ThreadMetadata
 from ...control.admission import AdmissionBroker, _Reservation
 from ...providers.provider_catalog import SELECTION_SCHEMA_VERSION
+from ...testing import DEFAULT_TEAM_PRESET
 
 
 def _selection() -> dict[str, object]:
@@ -31,7 +32,7 @@ def _selection() -> dict[str, object]:
 
 def _request(**changes: object) -> RunStartRequest:
     payload: dict[str, object] = {
-        "team_preset": "mock-coder",
+        "team_preset": DEFAULT_TEAM_PRESET,
         "run_id": "run-selection-schema",
         "message": "go",
         "metadata": ThreadMetadata(workspace_root=str(Path.cwd())),

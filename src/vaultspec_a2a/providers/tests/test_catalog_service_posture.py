@@ -25,10 +25,9 @@ import pytest
 
 from ...testing import LANES, settings_override
 from ..execution_modes import EXTERNAL_EXECUTION_MODES
-from ..in_process_catalog import BUILT_IN_LANES
 from ..provider_catalog_service import _DISPLAY_NAMES, ProviderCatalogService
 
-_IN_PROCESS = {lane.provider.value for lane in (*LANES, *BUILT_IN_LANES)}
+_IN_PROCESS = {lane.provider.value for lane in LANES}
 _ARMING_ENV = "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES"
 
 

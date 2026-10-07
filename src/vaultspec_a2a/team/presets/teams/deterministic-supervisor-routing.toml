@@ -4,7 +4,7 @@ display_name = "Deterministic Supervisor Routing"
 description  = """
 Scripted star scenario: the supervisor routes each human turn to its one worker
 and finishes once that worker has answered. Runs on the in-process deterministic
-provider, so it needs no credential, no network, and no tape server.
+provider, so it needs no credential and no network.
 
 Unattended by default, so a run completes on its own. A supervised run whose
 workspace holds a plan for its feature parks on the supervisor's plan approval

@@ -23,6 +23,7 @@ import pytest
 from ...cli.provision import provision_workspace
 from ...team.team_config import load_team_config
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     actor_tokens_body,
     async_catalog_run_fields,
     role_tokens,
@@ -205,7 +206,7 @@ def test_probe_harness_is_none_for_non_authoring_without_workspace() -> None:
     from ...team.team_config import load_team_config
     from ..routes.gateway import _probe_harness
 
-    assert _probe_harness(load_team_config("mock-success-single"), None) is None
+    assert _probe_harness(load_team_config(DEFAULT_TEAM_PRESET), None) is None
 
 
 @pytest.mark.asyncio(loop_scope="function")

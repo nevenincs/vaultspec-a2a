@@ -18,6 +18,7 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import DEFAULT_TEAM_PRESET
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
@@ -64,11 +65,9 @@ async def test_discovery_discards_projection_captured_before_terminal_winner(
                     content="work",
                     workspace_root=str(tmp_path),
                     recursion_limit=25,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     graph_definition=freeze_graph_definition(
-                        load_team_config(
-                            "mock-success-single", workspace_root=tmp_path
-                        ),
+                        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
                         workspace_root=tmp_path,
                     ),
                 ),

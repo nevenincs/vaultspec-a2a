@@ -282,7 +282,8 @@ def compose_native_read_tools(
     allowlist (e.g. the bridged authoring tools) and the advertised MCP servers are
     preserved unchanged; the names are added by exact name, never a wildcard, and
     never for human-in-loop runs, which keep their prompts. Models with no ACP
-    allowlist surface (mock, hosted APIs) are returned unchanged.
+    allowlist surface (in-process fixture lanes, hosted APIs) are returned
+    unchanged.
 
     Every composed name must declare its network-egress axis in
     :data:`NATIVE_TOOL_EGRESS`; an undeclared one raises :class:`ConfigError`

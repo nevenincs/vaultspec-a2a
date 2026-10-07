@@ -41,6 +41,9 @@ from ..desktop.credentials import WORKER_IPC_CREDENTIAL_NAME
 from ..desktop.profile import derive_state_paths
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_PRESET_LANE,
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
     JsonReplyHandler,
     RunVerbs,
     booted_gateway,
@@ -59,8 +62,6 @@ if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
-_PRESET = "mock-success-single"
-_REQUIRED_ROLE = "mock-coder-success"
 _ACTOR_TOKEN = "tok-coder-secret-value"
 _AUTH = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
 
@@ -138,7 +139,7 @@ def _assert_settlement_state(
     lease_id: str,
     worker_ipc: str,
 ) -> None:
-    # The mock run completes on its own; poll the receiver until it accepts the
+    # The deterministic run completes on its own; poll the receiver until it accepts the
     # settlement for this run (retry included).
     deadline = time.monotonic() + 60.0
     while time.monotonic() < deadline:
@@ -249,7 +250,7 @@ async def _settle_completed_run(app_home: Path, run_id: str) -> None:
 
 
 def _prepare_and_commit(base: str) -> dict[str, Any]:
-    """Prepare then commit one mock run; return the commit response body."""
+    """Prepare then commit one deterministic run; return the commit response body."""
     run_id = "run-terminal-settlement"
     # Resolved ONCE: prepare and commit describe the same run, so the commit is
     # only recognised as that run's commit while its selection matches.
@@ -258,16 +259,16 @@ def _prepare_and_commit(base: str) -> dict[str, Any]:
         base,
         workspace,
         headers={"Authorization": _AUTH},
-        prefer_provider_id="mock",
+        prefer_provider_id=DEFAULT_PRESET_LANE,
         cache=True,
     )
     verbs = RunVerbs(
         base_url=base,
         authorization=_AUTH,
-        team_preset=_PRESET,
+        team_preset=DEFAULT_TEAM_PRESET,
         workspace_root=workspace,
         selection=lambda _workspace: selection,
-        tokens={_REQUIRED_ROLE: _ACTOR_TOKEN},
+        tokens={DEFAULT_REQUIRED_ROLE: _ACTOR_TOKEN},
     )
     prep = verbs.prepare(run_id)
     assert prep.status_code == 201, prep.text

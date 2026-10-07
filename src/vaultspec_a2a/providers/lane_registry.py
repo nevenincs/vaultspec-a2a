@@ -1,11 +1,10 @@
 """The seam through which an in-process provider lane is contributed to this build.
 
 The product declares what an in-process lane is - :class:`LaneRegistration` - and
-never which ones exist beyond those it compiles in. Any other lane arrives through
-the ``lane_plugins`` setting: a list of module paths, each exposing
-``register_lanes(registry)``, which receives a :class:`LaneRegistry` and registers
-its lanes into it. The dependency points one way: a plugin knows this protocol,
-and nothing here knows a plugin.
+never which ones exist. A lane arrives through the ``lane_plugins`` setting: a
+list of module paths, each exposing ``register_lanes(registry)``, which receives
+a :class:`LaneRegistry` and registers its lanes into it. The dependency points
+one way: a plugin knows this protocol, and nothing here knows a plugin.
 
 **Honoured only under a double arm.** The plugins are imported only while
 ``serve_in_process_lanes`` is armed and the desktop profile is not. A plugin lane
@@ -87,13 +86,12 @@ class LaneRegistry:
     """The collector a lane plugin's ``register_lanes`` receives.
 
     A registration may not claim a provider an external lane already executes,
-    nor one this build already holds, and it must advertise at least one
-    selector; each violation refuses the plugin rather than letting one lane
+    nor one another registration already holds, and it must advertise at least
+    one selector; each violation refuses the plugin rather than letting one lane
     shadow another.
     """
 
-    def __init__(self, *, reserved: frozenset[Provider]) -> None:
-        self._reserved = reserved
+    def __init__(self) -> None:
         self._lanes: dict[Provider, LaneRegistration] = {}
 
     def register(self, lane: LaneRegistration) -> None:
@@ -104,11 +102,7 @@ class LaneRegistry:
                 advertises no selector.
         """
         provider = lane.provider
-        if (
-            provider in EXTERNAL_EXECUTION_MODES
-            or provider in self._reserved
-            or provider in self._lanes
-        ):
+        if provider in EXTERNAL_EXECUTION_MODES or provider in self._lanes:
             raise LanePluginError(
                 f"lane plugin registration claims provider {provider.value!r}, "
                 "which another lane in this build already holds"
@@ -126,14 +120,11 @@ class LaneRegistry:
         return tuple(self._lanes.values())
 
 
-def registered_lanes(
-    *, reserved: frozenset[Provider] = frozenset()
-) -> tuple[LaneRegistration, ...]:
+def registered_lanes() -> tuple[LaneRegistration, ...]:
     """Return the lanes the configured plugins register, loading them once.
 
     The result is cached per configuration, so a process imports its plugins a
-    single time and a changed configuration is resolved afresh. *reserved* names
-    the in-process providers the build itself holds, which no plugin may claim.
+    single time and a changed configuration is resolved afresh.
 
     Raises:
         LanePluginError: If plugins are configured outside the double arm, or a
@@ -144,7 +135,6 @@ def registered_lanes(
         settings.lane_plugins,
         settings.serve_in_process_lanes,
         settings.desktop_profile_armed,
-        reserved,
     )
 
 
@@ -153,7 +143,6 @@ def _load(
     plugins: tuple[str, ...],
     serve_in_process_lanes: bool,
     desktop_profile_armed: bool,
-    reserved: frozenset[Provider],
 ) -> tuple[LaneRegistration, ...]:
     if not plugins:
         return ()
@@ -163,7 +152,7 @@ def _load(
             f"only while {setting_env('serve_in_process_lanes')} is armed and the "
             "desktop profile is not; unset it or arm the in-process lanes"
         )
-    registry = LaneRegistry(reserved=reserved)
+    registry = LaneRegistry()
     for module_path in plugins:
         try:
             module = importlib.import_module(module_path)

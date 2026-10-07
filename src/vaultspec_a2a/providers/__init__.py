@@ -2,7 +2,6 @@
 
 Agent Client Protocol (ACP) exceptions load eagerly.
 :class:`vaultspec_a2a.providers.acp_chat_model.AcpChatModel`,
-:class:`vaultspec_a2a.providers.mock_chat_model.MockChatModel`,
 :class:`vaultspec_a2a.providers.factory.ProviderFactory`, and the in-process
 lane-plugin seam of :mod:`vaultspec_a2a.providers.lane_registry` load lazily.
 
@@ -32,7 +31,6 @@ if TYPE_CHECKING:
     from .lane_registry import LanePluginError as LanePluginError
     from .lane_registry import LaneRegistration as LaneRegistration
     from .lane_registry import LaneRegistry as LaneRegistry
-    from .mock_chat_model import MockChatModel as MockChatModel
 
 # Lazy imports to break circular dependency:
 #   providers.acp_chat_model -> team.team_config -> graph.compiler
@@ -42,7 +40,6 @@ _LAZY_IMPORTS = {
     "LanePluginError": ".lane_registry",
     "LaneRegistration": ".lane_registry",
     "LaneRegistry": ".lane_registry",
-    "MockChatModel": ".mock_chat_model",
     "ProviderFactory": ".factory",
 }
 
@@ -68,7 +65,6 @@ __all__ = [
     "LanePluginError",
     "LaneRegistration",
     "LaneRegistry",
-    "MockChatModel",
     "ProviderCondition",
     "ProviderFactory",
     "warm_model_imports",

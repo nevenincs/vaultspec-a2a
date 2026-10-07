@@ -53,6 +53,8 @@ from ...providers.team_selection import (
 from ...team.team_config import load_team_config
 from ...testing import (
     DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
     RunVerbs,
     adopted_spawner,
     booted_gateway,
@@ -159,7 +161,7 @@ def _current_metadata(
     )
     frozen = freeze_team_selection(
         selection=primary,
-        overrides={"mock-coder-success": primary},
+        overrides={DEFAULT_REQUIRED_ROLE: primary},
         fallbacks=(
             SelectionReference(
                 provider_id=codex_key.provider_id,
@@ -168,7 +170,7 @@ def _current_metadata(
                 entry_id="unused-codex-entry",
             ),
         ),
-        required_roles=("mock-coder-success",),
+        required_roles=(DEFAULT_REQUIRED_ROLE,),
         records=(record, codex_record),
     )
     return (
@@ -256,7 +258,7 @@ async def _seed_restart_case(case: _RestartCase) -> None:
     try:
         async with get_session_factory()() as session:
             definition = freeze_graph_definition(
-                load_team_config("mock-success-single", workspace_root=case.workspace),
+                load_team_config(DEFAULT_TEAM_PRESET, workspace_root=case.workspace),
                 workspace_root=case.workspace,
             )
             for thread_id, thread_metadata, selection in (
@@ -274,7 +276,7 @@ async def _seed_restart_case(case: _RestartCase) -> None:
                     write_authority=authority,
                     thread_id=thread_id,
                     status=ThreadStatus.RECONCILING,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     metadata=json.dumps(thread_metadata),
                 )
                 dispatch = DispatchRequest(
@@ -283,7 +285,7 @@ async def _seed_restart_case(case: _RestartCase) -> None:
                     content="recover after restart",
                     workspace_root=str(case.workspace),
                     recursion_limit=25,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     graph_definition=definition,
                     model_assignment=selection.compiler_map(),
                 )
@@ -341,7 +343,7 @@ def _assert_restart_runs(
     trigger = RunVerbs(
         base_url=str(client.base_url),
         authorization=client.headers["Authorization"],
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         workspace_root=str(case.workspace),
         selection=lambda _workspace: live_selection,
     ).start("restart-demand", message="release startup recovery")
@@ -496,7 +498,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                     write_authority=authority,
                     thread_id=thread_id,
                     status=ThreadStatus.RECONCILING,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     metadata=json.dumps(
                         {
                             "workspace_root": str(tmp_path),
@@ -518,7 +520,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                 write_authority=authority,
                 thread_id="retired-durable-model-profile-sentinel",
                 status=ThreadStatus.RECONCILING,
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(
                     {
                         "workspace_root": str(tmp_path),

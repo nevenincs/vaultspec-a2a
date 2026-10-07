@@ -938,9 +938,7 @@ class ProviderFactory:
             ProviderCatalogRegistration(
                 key, lambda key=key: _discover_in_process_catalog(key)
             )
-            for key in served_in_process_lanes(
-                armed=armed, mock_api_base=settings.mock_api_base
-            )
+            for key in served_in_process_lanes(armed=armed)
         )
         return (
             ProviderCatalogRegistration(

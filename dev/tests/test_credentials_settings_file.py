@@ -123,7 +123,7 @@ def test_the_test_suite_is_handed_no_settings_file(tmp_path: Path) -> None:
 
 
 def test_development_fixtures_need_no_application_credentials() -> None:
-    """Starting trace/mock fixtures neither requires nor imports service secrets."""
+    """Starting the trace fixture neither requires nor imports service secrets."""
     scope = SCOPES["compose"]
     child = resolve(
         scope,
@@ -131,8 +131,8 @@ def test_development_fixtures_need_no_application_credentials() -> None:
         {
             "POSTGRES_PASSWORD": "synthetic-password",
             "VAULTSPEC_A2A_INTERNAL_TOKEN": "synthetic-token",
-            "VIDAIMOCK_PORT": "18100",
+            "JAEGER_UI_PORT": "18686",
         },
     )
     assert missing_required(scope, child) == []
-    assert child == {"VIDAIMOCK_PORT": "18100"}
+    assert child == {"JAEGER_UI_PORT": "18686"}

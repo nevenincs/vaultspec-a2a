@@ -40,7 +40,7 @@ from ...ipc.schemas import DispatchRequest
 from ...providers import ProviderCondition
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
-from ...testing import current_execution_metadata
+from ...testing import DEFAULT_TEAM_PRESET, current_execution_metadata
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import GraphCompletionReceipt
@@ -79,7 +79,7 @@ async def _seed_accepted_thread(
         write_authority=authority,
         thread_id=thread_id,
         status=status,
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         metadata=metadata,
     )
     dispatch = DispatchRequest(
@@ -88,9 +88,9 @@ async def _seed_accepted_thread(
         content="relay fixture",
         workspace_root=_WORKSPACE,
         recursion_limit=25,
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=workspace),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
             workspace_root=workspace,
         ),
         model_assignment=resolve_execution_authority(metadata).model_assignment,

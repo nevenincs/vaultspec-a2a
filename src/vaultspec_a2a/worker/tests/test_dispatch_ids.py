@@ -17,7 +17,11 @@ from ...control.execution_authority import resolve_execution_authority
 from ...domain_config import domain_config
 from ...ipc.schemas import DispatchRequest, WorkerEventEnvelope
 from ...team.team_config import load_team_config
-from ...testing import current_execution_metadata
+from ...testing import (
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    current_execution_metadata,
+)
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -40,11 +44,11 @@ def _accepted_graph_dispatch(
     request: DispatchRequest, workspace: Path
 ) -> DispatchRequest:
     definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
     request = request.model_copy(
-        update={"team_preset": "mock-success-single", "graph_definition": definition}
+        update={"team_preset": DEFAULT_TEAM_PRESET, "graph_definition": definition}
     )
     intent: dict[str, object] = (
         {"content": request.content}
@@ -183,7 +187,7 @@ def test_concurrent_identical_capacity_dispatches_replay_one_acceptance(
 
     app = create_worker_app(lifespan=worker_lifespan)
     authority = resolve_execution_authority(
-        current_execution_metadata(tmp_path, required_roles=("mock-coder-success",))
+        current_execution_metadata(tmp_path, required_roles=(DEFAULT_REQUIRED_ROLE,))
     )
     dispatch = _accepted_graph_dispatch(
         DispatchRequest(
@@ -272,7 +276,7 @@ def test_concurrent_distinct_same_thread_dispatch_retains_capacity_refusal(
 
     app = create_worker_app(lifespan=worker_lifespan)
     authority = resolve_execution_authority(
-        current_execution_metadata(tmp_path, required_roles=("mock-coder-success",))
+        current_execution_metadata(tmp_path, required_roles=(DEFAULT_REQUIRED_ROLE,))
     )
 
     def request(dispatch_id: str) -> DispatchRequest:
@@ -281,7 +285,7 @@ def test_concurrent_distinct_same_thread_dispatch_retains_capacity_refusal(
                 dispatch_id=dispatch_id,
                 action="ingest",
                 thread_id="concurrent-distinct-thread",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 workspace_root=str(tmp_path),
                 content="only one ID may enter",
                 recursion_limit=25,
@@ -358,14 +362,14 @@ def test_dispatch_reserves_capacity_before_scheduling_or_checkpoint_read(
 
     app = create_worker_app(lifespan=worker_lifespan)
     authority = resolve_execution_authority(
-        current_execution_metadata(tmp_path, required_roles=("mock-coder-success",))
+        current_execution_metadata(tmp_path, required_roles=(DEFAULT_REQUIRED_ROLE,))
     )
     dispatch = _accepted_graph_dispatch(
         DispatchRequest(
             dispatch_id="capacity-refused-before-schedule",
             action="ingest",
             thread_id="over-capacity",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=str(tmp_path),
             recursion_limit=25,
             model_assignment=authority.model_assignment,

@@ -255,11 +255,6 @@ Provider construction
 
 .. py:class:: AcpChatModel
 
-.. py:module:: vaultspec_a2a.providers.mock_chat_model
-   :synopsis: Deterministic mock chat-model integration.
-
-.. py:class:: MockChatModel
-
 .. py:module:: vaultspec_a2a.providers.factory
    :synopsis: Provider selection and construction.
 

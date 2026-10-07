@@ -68,6 +68,7 @@ from ...database.models import ControlActionModel
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     adopted_spawner,
     async_catalog_run_fields,
     current_execution_metadata,
@@ -110,7 +111,6 @@ if TYPE_CHECKING:
     )
     from .clarification_harness import ParkedClarification
 
-_BUNDLE_FREE_PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
 
 type SessionFactory = async_sessionmaker[AsyncSession]
@@ -126,7 +126,7 @@ async def _cache_key_for_thread(
     assert thread is not None
     authority = resolve_execution_authority(thread.thread_metadata)
     return (
-        _BUNDLE_FREE_PRESET,
+        DEFAULT_TEAM_PRESET,
         None,
         False,
         authority.model_assignment_digest,
@@ -205,7 +205,7 @@ async def _create_parked_run(
     create_resp = await gateway_client.post(
         "/v1/runs",
         json={
-            "team_preset": _BUNDLE_FREE_PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "plan it",
             "run_id": f"clarify-loop-{next(_RUN_SEQ):02d}",
             **await async_catalog_run_fields(gateway_client),
@@ -458,7 +458,7 @@ async def _seed_clarification_run(
             db,
             write_authority=authority,
             status=ThreadStatus.RUNNING,
-            team_preset=_BUNDLE_FREE_PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
             metadata=metadata,
         )
         dispatch = DispatchRequest(
@@ -467,9 +467,9 @@ async def _seed_clarification_run(
             content="initial clarification run",
             workspace_root=str(Path.cwd()),
             recursion_limit=25,
-            team_preset=_BUNDLE_FREE_PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=freeze_graph_definition(
-                load_team_config(_BUNDLE_FREE_PRESET, workspace_root=Path.cwd()),
+                load_team_config(DEFAULT_TEAM_PRESET, workspace_root=Path.cwd()),
                 workspace_root=Path.cwd(),
             ),
             model_assignment=resolve_execution_authority(metadata).model_assignment,
@@ -515,7 +515,7 @@ async def _prepare_expired_claim(
             option_id=resolution.as_resume_value(),
             workspace_root=str(Path.cwd()),
             recursion_limit=accepted_recursion_budget(definition),
-            team_preset=_BUNDLE_FREE_PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=definition,
             model_assignment=resolve_execution_authority(metadata).model_assignment,
         )
@@ -665,7 +665,7 @@ async def test_a_worker_reported_park_reads_input_required_and_refuses_followups
         create_resp = await gateway_client.post(
             "/v1/runs",
             json={
-                "team_preset": _BUNDLE_FREE_PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "plan it",
                 "run_id": f"clarify-pause-{next(_RUN_SEQ):02d}",
                 **await async_catalog_run_fields(gateway_client),

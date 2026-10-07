@@ -8,9 +8,9 @@ first worker completes a real turn and streams real content, then the budget is
 exhausted and the graph raises, so a consumer sees genuine agent activity
 followed by a real terminal failure rather than a run that merely reports one.
 
-Runs on the in-process deterministic provider, so it needs no credential, no
-network, and no tape server, and it fails the same way on an unarmed host as on
-a fully provisioned one.
+Runs on the in-process deterministic provider, so it needs no credential and no
+network, and it fails the same way on an unarmed host as on a fully provisioned
+one.
 
 The failure it produces is a GRAPH BUDGET failure and reports the recursion-limit
 error code. It is NOT a provider failure and produces no provider condition: no

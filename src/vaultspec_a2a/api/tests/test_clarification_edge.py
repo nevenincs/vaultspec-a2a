@@ -28,6 +28,7 @@ from ...graph.nodes.clarification import (
     create_clarification_request_node,
 )
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     add_test_node,
     async_catalog_run_fields,
     compile_test_graph,
@@ -45,8 +46,6 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from ...thread.state import TeamState
-
-_PRESET = "mock-success-single"
 
 
 def _question_set(request_id: str) -> ClarificationRequest:
@@ -134,7 +133,7 @@ async def _start_run(client: httpx.AsyncClient) -> str:
     response = await client.post(
         "/v1/runs",
         json={
-            "team_preset": _PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "plan it",
             "autonomous": True,
             "run_id": f"clarify-edge-{next(_RUN_SEQ):02d}",

@@ -37,6 +37,7 @@ from ..providers.tests._terminal_process import retain_terminal_process
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     DEFAULT_OWNERSHIP_CAPABILITY,
+    DEFAULT_TEAM_PRESET,
     RunVerbs,
     armed_gateway_env,
     booted_gateway,
@@ -241,8 +242,6 @@ async def test_terminal_child_tree_contained_and_reaped(
 # Gateway-owned worker (real armed desktop gateway)
 # ---------------------------------------------------------------------------
 
-_PRESET = "mock-success-single"
-
 
 def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
     tmp_path: Path,
@@ -269,7 +268,7 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
         verbs = RunVerbs(
             base_url=base,
             authorization=auth["Authorization"],
-            team_preset=_PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=desktop_workspace(base),
             selection=lambda _workspace: unvalidated_selection(),
             tokens={"coder": "tok-coder"},

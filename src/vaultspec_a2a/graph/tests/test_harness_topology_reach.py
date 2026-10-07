@@ -56,7 +56,7 @@ DOC_EDITOR = "vaultspec-doc-editor"
 #: A shipped ``pipeline_loop`` preset. It declares no harness of its own, so the
 #: declaration is attached below; what is under test is the TOPOLOGY's compiler,
 #: and pipeline_loop needs at least two workers, which the doc-editor has not.
-LOOP_PRESET = "mock-autonomous"
+LOOP_PRESET = "deterministic-passing-loop"
 
 
 class _SessionRecordingProviderFactory:

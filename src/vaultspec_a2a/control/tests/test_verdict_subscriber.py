@@ -65,6 +65,7 @@ from ...database import (
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     add_test_node,
     adopted_spawner,
     compile_test_graph,
@@ -123,13 +124,13 @@ def _install_receipt_graph(
     builder.add_edge("worker", "__end__")
     workspace = Path.cwd()
     definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
     executor.register_compiled_graph(
         thread_id,
         (
-            "mock-success-single",
+            DEFAULT_TEAM_PRESET,
             str(workspace),
             False,
             resolve_execution_authority(
@@ -898,7 +899,7 @@ async def test_concurrent_verdict_resumes_elect_one_stable_dispatch(
             proposal_ids=["proposal:research"],
             changeset_ids=["cs:research"],
             gate_pending="proposal:research",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
         ),
     )
     async with _worker_runtime(
@@ -939,7 +940,7 @@ async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
             proposal_ids=["proposal:research"],
             changeset_ids=["cs:research"],
             gate_pending="proposal:research",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
         ),
     )
     async with _worker_runtime(

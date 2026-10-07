@@ -26,6 +26,7 @@ from ...conftest import SqlitePosture
 from ...database import create_control_action, create_thread, get_thread
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import DEFAULT_TEAM_PRESET
 from ...tests._checkpoint_seeding import real_input_checkpoint
 from ...thread import RunWriteAuthority
 from ...thread.checkpoint_evidence import CheckpointEvidenceKind
@@ -88,11 +89,9 @@ async def crashed_at_input(
                     content="work",
                     workspace_root=str(tmp_path),
                     recursion_limit=25,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     graph_definition=freeze_graph_definition(
-                        load_team_config(
-                            "mock-success-single", workspace_root=tmp_path
-                        ),
+                        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
                         workspace_root=tmp_path,
                     ),
                 ),

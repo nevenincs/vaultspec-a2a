@@ -62,6 +62,7 @@ async def test_desktop_native_read_is_refused_before_child_execution(
             provider_identity_launcher=sys.executable if identity_configured else None,
             provider_agent_uid=1002 if identity_configured else None,
             provider_agent_gid=1002 if identity_configured else None,
+            openai_api_key="synthetic-openai-key",
         ),
     ):
         with pytest.raises(NativeExecutionRefusedError, match="OS isolation backend"):
@@ -79,9 +80,9 @@ async def test_desktop_native_read_is_refused_before_child_execution(
             verdict = probe_provider_readiness(provider)
             assert not verdict.ready
             assert verdict.reason == native_execution_refusal_reason()
-        # A lane this build holds in-process launches nothing native, so the
-        # refusal does not reach it; plugin lanes are not held under this profile.
-        assert probe_provider_readiness(Provider.MOCK).ready
+        # A hosted-API lane launches nothing native, so the refusal does not
+        # reach it; no in-process lane is held under this profile.
+        assert probe_provider_readiness(Provider.OPENAI).ready
     assert not marker.exists()
     assert private.read_text(encoding="utf-8") == "synthetic-private-state"
 

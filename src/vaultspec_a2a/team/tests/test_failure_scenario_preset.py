@@ -7,7 +7,7 @@ proves nothing a typo could not also satisfy - which is exactly how the older
 tool-failure scenario came to advertise a failure while completing successfully.
 
 The graph is compiled with the in-process deterministic lane held through its
-plugin, so these run with no credential, no network, and no tape server.
+plugin, so these run with no credential and no network.
 """
 
 from __future__ import annotations
@@ -122,10 +122,9 @@ async def test_a_real_turn_completes_before_the_budget_is_exhausted() -> None:
     The turn's content is compared against what the in-process provider itself
     produces for that role, asked for directly. That is the empirical half of
     the in-process claim - it shows the turn was served in process rather than by
-    a tape server that happened to be running on the developer's machine - and
-    the expectation is derived from the production model rather than pasted
-    from an observed run, so it cannot drift into asserting whatever the code
-    currently emits.
+    an external service - and the expectation is derived from the production model
+    rather than pasted from an observed run, so it cannot drift into asserting
+    whatever the code currently emits.
     """
     first_worker = load_team_config(_PRESET).workers[0].agent_id
     in_process_turn = await DeterministicResearchAdrChatModel(

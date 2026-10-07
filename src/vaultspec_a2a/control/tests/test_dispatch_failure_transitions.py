@@ -39,7 +39,12 @@ from ...domain_config import domain_config
 from ...ipc.schemas import DispatchRequest
 from ...providers.conditions import ProviderCondition
 from ...team.team_config import load_team_config
-from ...testing import adopted_spawner, current_execution_metadata, session_scratch_dir
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    adopted_spawner,
+    current_execution_metadata,
+    session_scratch_dir,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
@@ -128,9 +133,9 @@ async def _seed_accepted_initial_action(
         thread_id=thread_id,
         content="initial fixture",
         workspace_root=str(workspace),
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=workspace),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
             workspace_root=workspace,
         ),
         model_assignment=resolve_execution_authority(metadata).model_assignment,

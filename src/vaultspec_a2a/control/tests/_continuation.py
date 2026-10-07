@@ -27,7 +27,12 @@ from ...graph.nodes.action_completion import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    add_test_node,
+    compile_test_graph,
+    new_state_graph,
+)
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
@@ -55,7 +60,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FIRST_RECEIPT",
-    "PRESET",
     "ROOMY",
     "RUN",
     "BusyRun",
@@ -71,7 +75,6 @@ __all__ = [
 ]
 
 RUN = "promotion-run"
-PRESET = "mock-success-single"
 FIRST_RECEIPT = "first-turn-dispatch"
 ROOMY = ContinuationQueueLimits(per_run_depth=3, service_cap=9)
 
@@ -89,7 +92,7 @@ class BusyRun:
 def definition(workspace: Path) -> FrozenGraphDefinition:
     """Freeze the real team the continuation suites run."""
     return freeze_graph_definition(
-        load_team_config(PRESET, workspace_root=workspace),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
 
@@ -103,7 +106,7 @@ def envelope(content: str, workspace: Path) -> dict[str, object]:
             agent_id="vaultspec-supervisor",
             content=content,
             workspace_root=str(workspace),
-            team_preset=PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=definition(workspace),
             recursion_limit=37,
         ),
@@ -127,7 +130,7 @@ async def seed_busy_run(
         db,
         thread_id=RUN,
         status=ThreadStatus.RUNNING,
-        team_preset=PRESET,
+        team_preset=DEFAULT_TEAM_PRESET,
         write_authority=RunWriteAuthority(
             0, 1, ControlActionType.INGEST, FIRST_RECEIPT
         ),

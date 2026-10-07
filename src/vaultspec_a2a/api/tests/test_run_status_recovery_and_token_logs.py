@@ -29,6 +29,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
+from ...control.run_start_policy import required_role_ids
 from ...database.thread_repository import create_thread
 from ...ipc.schemas import DispatchRequest
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
@@ -67,7 +68,7 @@ _WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
 _CODER_TOKEN = "secret-coder-acceptance"
 _REVIEWER_TOKEN = "secret-reviewer-acceptance"
 _BEARER = "secret-bearer-acceptance"
-_PRESET = "mock-success-multi"
+_PRESET = "deterministic-passing-loop"
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,14 +185,11 @@ async def _prepare_multirole_fixture(
 
     checkpoint_path = str(tmp_path / "checkpoints.db")
     workspace = pathlib.Path(_WORKSPACE)
-    definition = freeze_graph_definition(
-        load_team_config(_PRESET, workspace_root=workspace),
-        workspace_root=workspace,
-    )
+    team = load_team_config(_PRESET, workspace_root=workspace)
+    definition = freeze_graph_definition(team, workspace_root=workspace)
     model_assignment = resolve_execution_authority(
         current_execution_metadata(
-            workspace,
-            required_roles=("mock-planner", "mock-coder-success", "mock-reviewer"),
+            workspace, required_roles=tuple(required_role_ids(team))
         )
     ).model_assignment
     return _MultiroleFixture(

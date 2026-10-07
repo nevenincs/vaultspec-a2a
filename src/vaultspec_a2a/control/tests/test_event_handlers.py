@@ -52,6 +52,7 @@ from ...ipc.schemas import DispatchRequest
 from ...streaming.sse_frames import enforce_progress_allowlist
 from ...team.team_config import load_team_config
 from ...testing import (
+    DEFAULT_TEAM_PRESET,
     add_test_node,
     ainvoke_test_graph,
     compile_test_graph,
@@ -93,7 +94,7 @@ async def _seed_unapplied_leased_action(
     """Create current accepted graph authority and its unapplied lease."""
     dispatch_id = uuid4().hex
     graph_definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=Path.cwd()),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=Path.cwd()),
         workspace_root=Path.cwd(),
     )
     intent: dict[str, object]
@@ -104,7 +105,7 @@ async def _seed_unapplied_leased_action(
             thread_id=thread_id,
             content="original message",
             workspace_root=str(Path.cwd()),
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=graph_definition,
             recursion_limit=25,
         )
@@ -119,7 +120,7 @@ async def _seed_unapplied_leased_action(
             thread_id=thread_id,
             content="current follow-up",
             workspace_root=str(Path.cwd()),
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=graph_definition,
             recursion_limit=25,
         )
@@ -134,7 +135,7 @@ async def _seed_unapplied_leased_action(
             thread_id=thread_id,
             option_id={"option_id": "allow_once", "notes": None},
             workspace_root=str(Path.cwd()),
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=graph_definition,
             recursion_limit=25,
         )

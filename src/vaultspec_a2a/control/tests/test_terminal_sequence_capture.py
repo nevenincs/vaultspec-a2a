@@ -31,6 +31,7 @@ from ...graph.enums import AgentLifecycleState
 from ...ipc.schemas import DispatchRequest
 from ...streaming import EventAggregator, RunSequenceAllocator
 from ...team.team_config import load_team_config
+from ...testing import DEFAULT_TEAM_PRESET
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
@@ -68,9 +69,9 @@ async def _seed_completed_authority(
         thread_id=thread.id,
         content="sequence fixture",
         workspace_root=str(workspace),
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=workspace),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
             workspace_root=workspace,
         ),
         recursion_limit=25,

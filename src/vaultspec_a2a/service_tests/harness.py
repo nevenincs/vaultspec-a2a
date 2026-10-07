@@ -18,7 +18,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 import httpx
 from sqlalchemy.engine import make_url
@@ -85,7 +85,6 @@ def _compose_env(ports: dict[str, int], project_name: str) -> dict[str, str]:
             "COMPOSE_DISABLE_ENV_FILE": "1",
             "VAULTSPEC_A2A_PORT": str(ports["gateway"]),
             "VAULTSPEC_A2A_WORKER_PORT": str(ports["worker"]),
-            "VIDAIMOCK_PORT": str(ports["vidaimock"]),
             "JAEGER_UI_PORT": str(ports["jaeger_ui"]),
             "JAEGER_OTLP_PORT": str(ports["jaeger_otlp"]),
         }
@@ -187,10 +186,6 @@ class ServiceStack:
         return f"http://127.0.0.1:{self.ports['worker']}"
 
     @property
-    def vidaimock_url(self) -> str:
-        return f"http://127.0.0.1:{self.ports['vidaimock']}"
-
-    @property
     def jaeger_url(self) -> str:
         return f"http://127.0.0.1:{self.ports['jaeger_ui']}"
 
@@ -232,9 +227,6 @@ class ServiceStack:
 
     def _jaeger_client(self) -> httpx.Client:
         return httpx.Client(base_url=self.jaeger_url, timeout=10.0)
-
-    def _vidaimock_client(self) -> httpx.Client:
-        return httpx.Client(base_url=self.vidaimock_url, timeout=10.0)
 
     def _gateway_http_ready(self) -> bool:
         with self._client(timeout=5.0) as client:
@@ -284,20 +276,11 @@ class ServiceStack:
             self.project_name,
             "up",
             "-d",
-            "--build",
-            "vidaimock",
             "jaeger",
             ports=self.ports,
         )
 
     def _local_env(self) -> dict[str, str]:
-        # Arm the in-process lanes. This stack has no provider credentials, and
-        # a run has to present a selection naming a lane the gateway reports
-        # selectable - so without this the catalog offers nothing selectable at
-        # all and every run here is unstartable. The mock lane additionally
-        # needs a tape server, which VAULTSPEC_A2A_MOCK_API_BASE below supplies,
-        # so both in-process lanes are served and the mock presets can select
-        # their own.
         env = gateway_process_env(
             gateway_port=self.ports["gateway"],
             worker_port=self.ports["worker"],
@@ -327,7 +310,6 @@ class ServiceStack:
                 "VAULTSPEC_A2A_INTERNAL_TOKEN": _INTERNAL_TOKEN,
                 "VAULTSPEC_A2A_GATEWAY_TOKEN": _GATEWAY_SERVICE_TOKEN,
                 "VAULTSPEC_A2A_INSTALL_ROOT": str(REPO_ROOT),
-                "VAULTSPEC_A2A_MOCK_API_BASE": self.vidaimock_url,
                 "OTEL_EXPORTER_OTLP_ENDPOINT": (
                     f"http://127.0.0.1:{self.ports['jaeger_otlp']}"
                 ),
@@ -534,7 +516,6 @@ class ServiceStack:
             "ports": self.ports,
             "gateway_url": self.gateway_url,
             "worker_url": self.worker_url,
-            "vidaimock_url": self.vidaimock_url,
             "jaeger_url": self.jaeger_url,
             "started_at": self.started_at,
             "artifacts": self.artifacts,
@@ -552,7 +533,6 @@ class ServiceStack:
             self.record("health", health)
             self.worker_health()
             self.jaeger_services()
-            self.vidaimock_health()
             checks = health.get("checks", {})
             return (
                 health.get("status") == "ok"
@@ -596,37 +576,6 @@ class ServiceStack:
             resp.raise_for_status()
             payload = resp.json()
             self.record("jaeger-services", payload)
-            return payload
-
-    def vidaimock_health(self) -> dict[str, Any]:
-        """Exercise the deterministic provider route before certifying ready."""
-        with self._vidaimock_client() as client:
-            probes = {
-                "mock_coder_human": {
-                    "path": "/mock-coder-human/v1/chat/completions",
-                    "body": {
-                        "model": "mock-coder-human",
-                        "messages": [{"role": "user", "content": "health probe"}],
-                        "stream": False,
-                    },
-                },
-                "vaultspec_supervisor": {
-                    "path": "/vaultspec-supervisor/v1/chat/completions",
-                    "body": {
-                        "model": "vaultspec-supervisor",
-                        "messages": [{"role": "user", "content": "health probe"}],
-                        "stream": False,
-                    },
-                },
-            }
-            payload: dict[str, Any] = {}
-            for name, probe in probes.items():
-                path = str(probe["path"])
-                body = cast("dict[str, Any]", probe["body"])
-                resp = client.post(path, json=body)
-                resp.raise_for_status()
-                payload[name] = resp.json()
-            self.record("vidaimock-health", payload)
             return payload
 
     def jaeger_traces(
@@ -808,7 +757,6 @@ def build_service_stack(*, postgres_url: str | None = None) -> ServiceStack:
     ports = {
         "gateway": free_port(),
         "worker": free_port(),
-        "vidaimock": free_port(),
         "jaeger_ui": free_port(),
         "jaeger_otlp": free_port(),
     }

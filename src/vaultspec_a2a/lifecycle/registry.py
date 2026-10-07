@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from ..utils._process_tree import pid_is_live, port_has_listener
 from ..utils.atomic_write import atomic_write_text
+from ..utils.coercion import coerce_string_list
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -154,17 +155,6 @@ def record_path(role: str, name: str, *, home: Path | None = None) -> Path:
     return procs_home(home) / f"{role}-{name}.json"
 
 
-def _coerce_command(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    items: list[str] = []
-    for entry in cast("list[object]", value):
-        if not isinstance(entry, str):
-            return []
-        items.append(entry)
-    return items
-
-
 def _record_identity(data: dict[str, Any]) -> tuple[str, str, int, int] | None:
     """Read the required process identity fields from a parsed record."""
     name = data.get("name")
@@ -210,7 +200,7 @@ def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
         build_repo=_opt_str("build_repo"),
         workspace=_opt_str("workspace"),
         build_sha=_opt_str_or_none("build_sha"),
-        command=_coerce_command(data.get("command")),
+        command=coerce_string_list(data.get("command")) or [],
         started_at_ms=_opt_int("started_at_ms"),
         last_seen_ms=_opt_int("last_seen_ms"),
         log_path=_opt_str_or_none("log_path"),

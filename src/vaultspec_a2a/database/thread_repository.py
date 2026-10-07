@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 from uuid import uuid4
 
-from sqlalchemy import and_, exists, func, or_, select, update
+from sqlalchemy import and_, exists, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
@@ -42,10 +42,7 @@ from ..thread.lifecycle_guards import can_delete
 from ..thread.transitions import validate_transition
 from ._helpers import (
     _UNSET,
-    _coerce_approval_status,
-    _coerce_control_action_type,
-    _coerce_repair_status,
-    _coerce_status,
+    _coerce,
     _journal_row_for,
     _UnsetType,
     save_model,
@@ -58,6 +55,7 @@ from .models import (
 from .models import (
     utcnow as _utcnow,
 )
+from .write_authority_schema import WRITE_AUTHORITY_VIOLATION_PREDICATE
 
 __all__ = [
     "ActiveThreadProjection",
@@ -76,6 +74,8 @@ __all__ = [
     "normalize_workspace_identity",
     "path_safe_run_id_clause",
     "record_thread_execution_state",
+    "select_invalid_authority_thread",
+    "select_orphaned_writer_thread",
     "set_thread_approval_state",
     "set_thread_repair_state",
     "thread_owned_by",
@@ -113,11 +113,15 @@ class ThreadStatusElectionResult:
 def thread_write_expectation(thread: ThreadModel) -> ThreadWriteExpectation:
     """Snapshot the complete current election witness from a durable row."""
     return ThreadWriteExpectation(
-        status=_coerce_status(thread.status),
+        status=_coerce(ThreadStatus, thread.status, label="thread status"),
         authority=RunWriteAuthority(
             run_revision=thread.run_revision,
             writer_generation=thread.writer_generation,
-            action_type=_coerce_control_action_type(thread.writer_action_type),
+            action_type=_coerce(
+                ControlActionType,
+                thread.writer_action_type,
+                label="control action type",
+            ),
             action_receipt_id=thread.writer_action_receipt_id,
         ),
     )
@@ -149,6 +153,31 @@ def thread_owned_by(
     if run_revision is not None:
         clauses.append(ThreadModel.run_revision == run_revision)
     return and_(*clauses)
+
+
+def select_invalid_authority_thread() -> Select[tuple[str]]:
+    """Select one thread whose stored write authority breaks a current CHECK."""
+    return (
+        select(ThreadModel.id).where(text(WRITE_AUTHORITY_VIOLATION_PREDICATE)).limit(1)
+    )
+
+
+def select_orphaned_writer_thread() -> Select[tuple[str]]:
+    """Select one thread whose current writer names no journal row of its own."""
+    return (
+        select(ThreadModel.id)
+        .outerjoin(
+            ControlActionModel,
+            and_(
+                ControlActionModel.thread_id == ThreadModel.id,
+                thread_owned_by(
+                    ControlActionModel.action_type, ControlActionModel.dispatch_id
+                ),
+            ),
+        )
+        .where(ControlActionModel.id.is_(None))
+        .limit(1)
+    )
 
 
 def path_safe_run_id_clause() -> ColumnElement[bool]:
@@ -233,9 +262,15 @@ async def create_thread(
     metadata = options.get("metadata")
     nickname = options.get("nickname")
     thread_id = options.get("thread_id")
-    coerced_status = _coerce_status(options.get("status", ThreadStatus.SUBMITTED))
-    coerced_repair_status = _coerce_repair_status(
-        options.get("repair_status", RepairStatus.HEALTHY)
+    coerced_status = _coerce(
+        ThreadStatus,
+        options.get("status", ThreadStatus.SUBMITTED),
+        label="thread status",
+    )
+    coerced_repair_status = _coerce(
+        RepairStatus,
+        options.get("repair_status", RepairStatus.HEALTHY),
+        label="repair status",
     )
 
     if nickname is not None:
@@ -706,12 +741,12 @@ async def update_thread_status(
     neither leaves both untouched, which is why a failure carrying no
     classification reads as NULL here rather than as a fabricated floor.
     """
-    coerced_status = _coerce_status(status)
+    coerced_status = _coerce(ThreadStatus, status, label="thread status")
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return None
 
-    current = _coerce_status(thread.status)
+    current = _coerce(ThreadStatus, thread.status, label="thread status")
     if current == coerced_status:
         # Idempotent writes also repair a stale denormalized selector (for
         # example after an interrupted migration or legacy direct write).
@@ -764,16 +799,18 @@ async def set_thread_repair_state(
     if thread is None:
         return None
 
-    thread.repair_status = _coerce_repair_status(repair_status).value
+    thread.repair_status = _coerce(
+        RepairStatus, repair_status, label="repair status"
+    ).value
     thread.execution_readiness = thread.repair_status
     thread.repair_reason = repair_reason
     if last_requested_action is not None:
-        thread.last_requested_action = _coerce_control_action_type(
-            last_requested_action
+        thread.last_requested_action = _coerce(
+            ControlActionType, last_requested_action, label="control action type"
         ).value
     if last_applied_action is not None:
-        thread.last_applied_action = _coerce_control_action_type(
-            last_applied_action
+        thread.last_applied_action = _coerce(
+            ControlActionType, last_applied_action, label="control action type"
         ).value
     thread.updated_at = _utcnow()
     await session.flush()
@@ -802,7 +839,7 @@ async def set_thread_approval_state(
         return None
     if not isinstance(approval_status, _UnsetType):
         thread.approval_status = (
-            _coerce_approval_status(approval_status).value
+            _coerce(ApprovalStatus, approval_status, label="approval status").value
             if approval_status is not None
             else None
         )

@@ -2,23 +2,25 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from ..thread.enums import (
     RECOVERY_ACTION_TYPES,
     ControlActionResultStatus,
     ControlActionType,
 )
-from .write_authority_schema import normalize_schema_expression
+from .write_authority_schema import CONTROL_ACTION_SQL_VALUES
 
-if TYPE_CHECKING:
-    from collections.abc import Mapping
+__all__ = [
+    "CONTINUATION_ACTION_SQL_VALUE",
+    "QUEUED_RESERVATION_PREDICATE",
+    "QUEUED_RESULT_SQL_VALUE",
+    "QUEUED_ROW_PREDICATE",
+    "QUEUE_POSITION_BOUNDED_PREDICATE",
+    "RECOVERY_ACTION_SQL_VALUES",
+    "RECOVERY_DEADLINE_CHECKS",
+]
 
 RECOVERY_ACTION_SQL_VALUES = ", ".join(
     repr(action.value) for action in RECOVERY_ACTION_TYPES
-)
-CONTROL_ACTION_SQL_VALUES = ", ".join(
-    repr(action.value) for action in ControlActionType
 )
 
 #: The only action a continuation queue holds, and the status that says it is
@@ -49,15 +51,3 @@ RECOVERY_DEADLINE_CHECKS = {
         "AND recovery_deadline_at IS NULL)"
     ),
 }
-
-
-def recovery_deadline_checks_match(checks: Mapping[str, str]) -> bool:
-    """Return whether the exact current deadline discriminator is installed."""
-    normalized = {
-        name.lower(): normalize_schema_expression(predicate)
-        for name, predicate in checks.items()
-    }
-    return all(
-        normalized.get(name) == normalize_schema_expression(predicate)
-        for name, predicate in RECOVERY_DEADLINE_CHECKS.items()
-    )

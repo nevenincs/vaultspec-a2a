@@ -15,25 +15,40 @@ from alembic import context
 from alembic.runtime.environment import NameFilterParentNames, NameFilterType
 from alembic.script import ScriptDirectory
 from alembic.util import CommandError
-from sqlalchemy import inspect, pool, text
+from sqlalchemy import inspect, pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Alembic loads this file by SCRIPT LOCATION rather than importing it as a
 # module, so at runtime it has no parent package and a relative import would
-# raise "attempted relative import with no known parent package". This is the
-# one intra-package import that must stay absolute.
+# raise "attempted relative import with no known parent package". These are the
+# intra-package imports that must stay absolute.
+from vaultspec_a2a.database._write_authority_check_parser import (  # absolute-import-ok
+    extract_named_check_predicates,
+)
 from vaultspec_a2a.database.models import (  # absolute-import-ok
     Base,
 )
+from vaultspec_a2a.database.thread_repository import (  # absolute-import-ok
+    select_invalid_authority_thread,
+    select_orphaned_writer_thread,
+)
 from vaultspec_a2a.database.write_authority_schema import (  # absolute-import-ok
-    WRITE_ACTION_SQL_VALUES,
     WRITE_AUTHORITY_COLUMNS,
-    extract_named_check_predicates,
     write_authority_checks_match,
     write_authority_receipt_index_matches,
 )
+
+__all__ = [
+    "do_run_migrations",
+    "include_name",
+    "resolve_database_url",
+    "run_async_migrations",
+    "run_migrations_offline",
+    "run_migrations_online",
+    "target_metadata",
+]
 
 # -- Alembic config object ---------------------------------------------------
 config = context.config
@@ -183,31 +198,11 @@ def _has_current_write_authority_structure(
 def _validate_populated_write_authority(
     connection: Connection, tables: set[str]
 ) -> None:
-    invalid = connection.execute(
-        text(
-            f"""SELECT id FROM threads
-                 WHERE run_revision < 0
-                    OR writer_generation < 1
-                    OR writer_action_type NOT IN ({WRITE_ACTION_SQL_VALUES})
-                    OR length(trim(writer_action_receipt_id)) < 1
-                    OR length(writer_action_receipt_id) > 64
-                 LIMIT 1"""
-        )
-    ).first()
+    invalid = connection.execute(select_invalid_authority_thread()).first()
     has_actions = "control_actions" in tables
     incoherent = None
     if has_actions:
-        incoherent = connection.execute(
-            text(
-                """SELECT t.id FROM threads AS t
-                   LEFT JOIN control_actions AS a
-                     ON a.thread_id = t.id
-                    AND a.dispatch_id = t.writer_action_receipt_id
-                    AND a.action_type = t.writer_action_type
-                   WHERE a.id IS NULL
-                   LIMIT 1"""
-            )
-        ).first()
+        incoherent = connection.execute(select_orphaned_writer_thread()).first()
     if invalid is not None or not has_actions or incoherent is not None:
         connection.rollback()
         raise CommandError(

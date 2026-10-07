@@ -10,7 +10,6 @@ that bound each lease. What a held lease obliges a dispatcher to do belongs to
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -54,16 +53,26 @@ dead process to the next delete request.
 """
 
 
-@dataclass(frozen=True, slots=True, eq=False)
 class _LeaseColumns:
     """The token and expiry columns that together hold one row's lease.
 
     The two are written and cleared as a pair, so a predicate over a holder is
     always a predicate over both.
+
+    A plain class rather than a dataclass: a dataclass field typed as an ORM
+    attribute is read through that attribute's descriptor, which types
+    ``self.token`` as the column's row value instead of the column itself.
     """
 
-    token: QueryableAttribute[str | None]
-    expires_at: QueryableAttribute[datetime | None]
+    __slots__ = ("expires_at", "token")
+
+    def __init__(
+        self,
+        token: QueryableAttribute[str | None],
+        expires_at: QueryableAttribute[datetime | None],
+    ) -> None:
+        self.token: QueryableAttribute[str | None] = token
+        self.expires_at: QueryableAttribute[datetime | None] = expires_at
 
     def unheld(self, at: datetime) -> ColumnElement[bool]:
         """Nobody owns the lease at *at*: never taken, released, or lapsed."""

@@ -182,6 +182,8 @@ class RunLiveStateMirror(RunLiveState):
                 self._sync_tool_call_start(thread_id, payload)
             case "tool_call_update":
                 self._sync_tool_call_update(thread_id, payload)
+            case _:
+                return
 
     def _sync_agent_status(self, thread_id: str, payload: Mapping[str, Any]) -> None:
         agent_id = payload.get("agent_id", "")

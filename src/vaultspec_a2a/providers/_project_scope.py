@@ -34,7 +34,7 @@ __all__ = [
 ]
 
 
-def _project_scope_key(value: str | os.PathLike[str]) -> str:
+def _project_scope_key(value: str | Path) -> str:
     """Return one project path in the single form scope decisions compare.
 
     The active project reaches a scope decision in several spellings - the

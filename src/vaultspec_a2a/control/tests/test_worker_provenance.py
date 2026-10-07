@@ -113,7 +113,7 @@ async def test_probe_worker_health_returns_body_with_gateway_target() -> None:
         "gateway_url": "http://127.0.0.1:8000",
     }
     with _worker_like(body) as (url, _port, _log):
-        probe = await probe_worker_health(url)
+        probe = await probe_worker_health(url, internal_token=None)
     assert probe == WorkerHealthProbe(healthy=True, body=body)
 
 
@@ -121,7 +121,9 @@ async def test_probe_worker_health_returns_body_with_gateway_target() -> None:
 async def test_probe_worker_health_reports_unreachable_as_unhealthy_without_body() -> (
     None
 ):
-    assert await probe_worker_health("http://127.0.0.1:9") == WorkerHealthProbe(
+    assert await probe_worker_health(
+        "http://127.0.0.1:9", internal_token=None
+    ) == WorkerHealthProbe(
         healthy=False,
         body=None,
     )
@@ -136,7 +138,9 @@ async def test_ensure_worker_attaches_to_a_same_gateway_worker() -> None:
         "gateway_url": settings.gateway_url,
     }
     with _worker_like(body) as (url, port, _log):
-        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=False)
+        spawner = LazyWorkerSpawner(
+            worker_url=url, worker_port=port, auto_spawn=False, internal_token=None
+        )
         await spawner.ensure_worker()
     assert spawner.spawned is True
     assert spawner.process is None
@@ -157,6 +161,7 @@ async def test_ensure_worker_refuses_missing_or_blank_target() -> None:
                 worker_url=url,
                 worker_port=port,
                 auto_spawn=False,
+                internal_token=None,
             )
             await spawner.ensure_worker()
         assert spawner.spawned is False
@@ -171,6 +176,7 @@ async def test_auto_spawn_does_not_evict_a_worker_without_target_evidence() -> N
             worker_url=url,
             worker_port=port,
             auto_spawn=True,
+            internal_token=None,
         )
         await spawner.ensure_worker()
 
@@ -188,7 +194,9 @@ async def test_ensure_worker_refuses_a_foreign_worker_without_auto_spawn() -> No
         "gateway_url": "http://127.0.0.1:59999",
     }
     with _worker_like(body) as (url, port, _log):
-        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=False)
+        spawner = LazyWorkerSpawner(
+            worker_url=url, worker_port=port, auto_spawn=False, internal_token=None
+        )
         await spawner.ensure_worker()
     assert spawner.spawned is False
     assert spawner.process is None
@@ -200,6 +208,7 @@ async def test_ensure_worker_refuses_an_unreachable_worker_without_auto_spawn() 
         worker_url="http://127.0.0.1:9",
         worker_port=9,
         auto_spawn=False,
+        internal_token=None,
     )
     await spawner.ensure_worker()
     assert spawner.spawned is False
@@ -231,7 +240,7 @@ async def test_an_unarmed_auto_spawn_gateway_never_evicts_a_foreign_worker() -> 
         )
         await spawner.ensure_worker()
         sent_by_the_gateway = list(received)
-        still_healthy = await probe_worker_health(url)
+        still_healthy = await probe_worker_health(url, internal_token=None)
     assert log == {"called": False, "authorization": None}
     # The occupant is this process's own listener, so every probe it did receive
     # legitimately carried the bearer; none of them reached /admin/shutdown.

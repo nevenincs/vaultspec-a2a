@@ -140,7 +140,10 @@ async def _serving_contained_worker(
         stderr=subprocess.DEVNULL,
     )
     spawner = LazyWorkerSpawner(
-        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
+        worker_url=f"http://127.0.0.1:{port}",
+        worker_port=port,
+        auto_spawn=False,
+        internal_token=None,
     )
     spawner.replace_process(process, containment)
 
@@ -254,7 +257,10 @@ async def test_spawner_shutdown_clears_crashed_tree_before_replacement() -> None
     containment = ProcessContainment.create()
     process, child_pids = _spawn_tree(containment)
     spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+        worker_url="http://127.0.0.1:9",
+        worker_port=9,
+        auto_spawn=False,
+        internal_token=None,
     )
     spawner.replace_process(process, containment)
     try:

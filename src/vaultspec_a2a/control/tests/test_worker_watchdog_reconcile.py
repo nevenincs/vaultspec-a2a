@@ -63,12 +63,18 @@ def test_owns_worker_requires_a_process_and_auto_spawn() -> None:
     external_proc.wait()
     owned_proc.wait()
     try:
-        external = LazyWorkerSpawner("http://127.0.0.1:1", 1, auto_spawn=False)
+        external = LazyWorkerSpawner(
+            "http://127.0.0.1:1", 1, auto_spawn=False, internal_token=None
+        )
         # has a handle but is not auto-spawn
         external.replace_process(external_proc, external_containment)
-        owned = LazyWorkerSpawner("http://127.0.0.1:1", 1, auto_spawn=True)
+        owned = LazyWorkerSpawner(
+            "http://127.0.0.1:1", 1, auto_spawn=True, internal_token=None
+        )
         owned.replace_process(owned_proc, owned_containment)
-        adopted = LazyWorkerSpawner("http://127.0.0.1:1", 1, auto_spawn=True)
+        adopted = LazyWorkerSpawner(
+            "http://127.0.0.1:1", 1, auto_spawn=True, internal_token=None
+        )
         adopted.adopt_worker()  # auto-spawn but no owned process
 
         assert wd(external)._owns_worker() is False
@@ -81,7 +87,9 @@ def test_owns_worker_requires_a_process_and_auto_spawn() -> None:
 
 def test_restart_cooldown_gate() -> None:
     wd = WorkerWatchdog(
-        LazyWorkerSpawner("http://127.0.0.1:1", 1, auto_spawn=True),
+        LazyWorkerSpawner(
+            "http://127.0.0.1:1", 1, auto_spawn=True, internal_token=None
+        ),
         WorkerCircuitBreaker(3, 30.0),
         WorkerState(),
         SimpleNamespace(),
@@ -131,7 +139,9 @@ async def test_adopted_worker_recovers_from_transient_down_to_up() -> None:
     """
     with health_listener() as port:
         # auto_spawn True with no owned process is the same-gateway adoption shape.
-        spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=True)
+        spawner = LazyWorkerSpawner(
+            f"http://127.0.0.1:{port}", port, auto_spawn=True, internal_token=None
+        )
         spawner.adopt_worker()
         app_state = _stale_app_state(
             circuit_breaker=WorkerCircuitBreaker(3, 30.0),

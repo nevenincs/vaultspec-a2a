@@ -278,13 +278,19 @@ class LazyWorkerSpawner:
         worker_url: str,
         worker_port: int,
         auto_spawn: bool,
-        internal_token: str | None = None,
+        *,
+        internal_token: str | None,
     ) -> None:
         """Initialise with worker connection details and spawn policy.
 
         *internal_token* is the worker-IPC secret the gateway seated: every probe
         and command this spawner sends presents it, and a worker it spawns is
-        handed it. ``None`` presents none.
+        handed it. It is required, with no default, because a spawner built
+        without one behaves exactly like a DEVELOPMENT gateway that has none -
+        its probes go out unauthenticated and its worker is spawned without the
+        secret - so a forgotten argument surfaced as the worker refusing its own
+        gateway. Naming ``None`` is how a caller says it has no secret to
+        present.
         """
         self._config = _WorkerSpawnConfig(
             url=worker_url,

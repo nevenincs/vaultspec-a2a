@@ -232,7 +232,9 @@ async def _probe_admission_readiness(
 ) -> AdmissionReadiness:
     from ...control._worker_health import probe_worker_health, worker_ready_and_ours
 
-    probe = await probe_worker_health(settings.worker_url, client=worker_client)
+    probe = await probe_worker_health(
+        settings.worker_url, client=worker_client, internal_token=None
+    )
     reachable = probe.healthy
     # An indeterminate probe (the worker did not answer inside the budget) is not
     # an observation of absence, so it must not be reported as one: pass no live

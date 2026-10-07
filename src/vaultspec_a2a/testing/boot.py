@@ -975,7 +975,10 @@ def adopted_spawner(
     from ..control.worker_management import LazyWorkerSpawner
 
     spawner = LazyWorkerSpawner(
-        worker_url=worker_url, worker_port=worker_port, auto_spawn=False
+        worker_url=worker_url,
+        worker_port=worker_port,
+        auto_spawn=False,
+        internal_token=None,
     )
     spawner.adopt_worker()
     return spawner

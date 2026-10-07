@@ -212,7 +212,10 @@ def test_replacing_the_worker_handle_releases_the_containment_it_drops() -> None
     replaced worker here is a real contained process that has already exited.
     """
     spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+        worker_url="http://127.0.0.1:9",
+        worker_port=9,
+        auto_spawn=False,
+        internal_token=None,
     )
     try:
         for _ in range(5):

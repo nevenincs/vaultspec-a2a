@@ -52,10 +52,11 @@ from ...testing import (
     new_state_graph,
 )
 from ..aggregator import RunEventProducer
+from ..ingest import GraphInvocation
 from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Coroutine
+    from collections.abc import Awaitable, Callable
 
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -119,15 +120,16 @@ async def test_a_run_still_reports_every_family_of_frame_it_used_to(
     replies: list[str] = []
     producer = RunEventProducer()
     relayed = relayed_events(producer)
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     outcome = await asyncio.wait_for(
-        ingest(
-            thread_id="thread-surface",
-            agent_id="supervisor",
-            graph=_full_surface_graph(checkpointer, replies),
-            graph_input={"note": ""},
-            config={"configurable": {"thread_id": "thread-surface"}},
+        producer.ingest(
+            "thread-surface",
+            "supervisor",
+            _full_surface_graph(checkpointer, replies),
+            GraphInvocation(
+                graph_input={"note": ""},
+                config={"configurable": {"thread_id": "thread-surface"}},
+            ),
         ),
         timeout=30.0,
     )
@@ -191,15 +193,16 @@ async def test_a_parked_run_is_reported_interrupted_and_asks_for_its_answer(
     """The stream reports the park, and the projection publishes the request."""
     producer = RunEventProducer()
     relayed = relayed_events(producer)
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     outcome = await asyncio.wait_for(
-        ingest(
-            thread_id="thread-park",
-            agent_id="supervisor",
-            graph=_parking_graph(checkpointer),
-            graph_input={"note": ""},
-            config={"configurable": {"thread_id": "thread-park"}},
+        producer.ingest(
+            "thread-park",
+            "supervisor",
+            _parking_graph(checkpointer),
+            GraphInvocation(
+                graph_input={"note": ""},
+                config={"configurable": {"thread_id": "thread-park"}},
+            ),
         ),
         timeout=30.0,
     )
@@ -223,8 +226,7 @@ _UNREADABLE_STATE_PROBE = textwrap.dedent(
     from langgraph.graph import END, START
     from langgraph.types import interrupt
 
-    from vaultspec_a2a.streaming import RunEventProducer
-    from vaultspec_a2a.streaming.ingest import GraphInvocation
+    from vaultspec_a2a.streaming import GraphInvocation, RunEventProducer
     from vaultspec_a2a.testing import add_test_node, compile_test_graph, new_state_graph
 
 

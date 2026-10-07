@@ -45,10 +45,11 @@ from ...graph.events import (
 )
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import RunEventProducer
+from ..ingest import GraphInvocation
 from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
+    from collections.abc import AsyncIterator, Mapping
 
     from ...graph.events import DomainEvent
     from ..types import StreamableGraph
@@ -171,14 +172,15 @@ async def _run_identity_graph() -> list[DomainEvent]:
         await saver.setup()
         producer = RunEventProducer()
         relayed = relayed_events(producer)
-        ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
         outcome = await asyncio.wait_for(
-            ingest(
-                thread_id="thread-identity",
-                agent_id="supervisor",
-                graph=_identity_graph(saver),
-                graph_input={"note": ""},
-                config={"configurable": {"thread_id": "thread-identity"}},
+            producer.ingest(
+                "thread-identity",
+                "supervisor",
+                _identity_graph(saver),
+                GraphInvocation(
+                    graph_input={"note": ""},
+                    config={"configurable": {"thread_id": "thread-identity"}},
+                ),
             ),
             timeout=30.0,
         )

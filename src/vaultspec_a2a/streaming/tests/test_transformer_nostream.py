@@ -10,7 +10,7 @@ stream events for both; only the untagged call's text may be relayed.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import pytest
 from langchain_core.messages import HumanMessage
@@ -23,10 +23,11 @@ from ...providers import ProviderFactory
 from ...team.team_config import load_agent_config
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import RunEventProducer
+from ..ingest import GraphInvocation
 from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Coroutine
+    from collections.abc import Awaitable, Callable
 
     from langchain_core.language_models import BaseChatModel
 
@@ -77,14 +78,15 @@ async def test_a_nostream_model_call_is_not_relayed_to_clients() -> None:
 
     producer = RunEventProducer()
     events = relayed_events(producer)
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
     outcome = await asyncio.wait_for(
-        ingest(
-            thread_id="thread-nostream",
-            agent_id="supervisor",
-            graph=graph,
-            graph_input={"note": ""},
-            config={"configurable": {"thread_id": "thread-nostream"}},
+        producer.ingest(
+            "thread-nostream",
+            "supervisor",
+            graph,
+            GraphInvocation(
+                graph_input={"note": ""},
+                config={"configurable": {"thread_id": "thread-nostream"}},
+            ),
         ),
         timeout=10.0,
     )

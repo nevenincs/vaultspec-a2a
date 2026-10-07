@@ -1,11 +1,18 @@
-"""Pure run-start eligibility policy for the v1 gateway.
+"""Pure run-start REQUEST eligibility policy for the v1 gateway.
 
 The ``run-start`` verb refuses a run before dispatch when the request cannot
-produce a valid run: a document-authoring preset with no target feature, or an
-actor-token bundle that does not cover the preset's required roles. This module
-holds that decision as pure logic - no I/O, no database, no HTTP - so the gateway
-route stays a thin translator to HTTP status codes and the policy is unit
-testable against real ``TeamConfig`` objects.
+produce a valid run: a document-authoring preset with no target feature, an
+actor-token bundle that does not cover the preset's required roles, or an
+incomplete authoring harness. This module holds that decision as pure logic - no
+I/O, no database, no HTTP - so the gateway route stays a thin translator to HTTP
+status codes and the policy is unit testable against real ``TeamConfig`` objects.
+
+**This eligibility is about the REQUEST and nothing else.** It carries no
+provider, lane, model, profile, catalog or admission authority, and it must never
+be read as any of them: whether a provider lane may be served is lane admission's
+answer (a completed-turn proof and an admitted binary identity), and whether the
+gateway would admit a run right now is the admission broker's. The word is shared
+with those verdicts; the authority is not.
 
 Preset loadability and empty-prompt refusals are enforced at the route (they are
 I/O and schema concerns respectively); this module covers the semantic
@@ -31,11 +38,12 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class RunStartEligibility:
-    """Whether a run-start request may dispatch, with a safe human reason.
+    """Whether a run-start REQUEST may dispatch, with a safe human reason.
 
     ``reason`` is populated only when ``eligible`` is False and is safe to return
     to the Rust backend: it names the missing precondition without echoing any
-    token value or prompt content.
+    token value or prompt content. A False verdict says the request is
+    unsatisfiable, never that a provider or a profile is unavailable.
     """
 
     eligible: bool

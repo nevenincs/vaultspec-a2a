@@ -15,6 +15,7 @@ from ._factory_commands import (
     classify_provider_command,
     kimi_temporary_model_configuration_reason,
 )
+from .cli_resolution import ProviderRuntimeUnavailableError
 from .in_process_catalog import in_process_lane
 from .provider_catalog import HealthState
 
@@ -90,6 +91,39 @@ def _kimi_configuration() -> _ProviderConfiguration:
     return _ProviderConfiguration(state=HealthState.UNKNOWN)
 
 
+def _claude_configuration() -> _ProviderConfiguration:
+    """Read the declared Claude auth channel's own verdict on its credential.
+
+    Which credential Claude is configured with is the channel selector's
+    decision, and that selector already exists at the lane's root seam. It is
+    asked here rather than re-derived, so the channel this probe reports
+    configured is exactly the channel a served turn would launch under: a
+    re-reading of the same settings would be a second definition of what a
+    configured Claude is, and the two would disagree the moment a channel
+    changed.
+
+    The selector's own refusal - a declared channel with nothing to present -
+    is the UNAVAILABLE reason, and its sentence is safe by construction (it
+    names the channel and the setting, never a value). A channel that resolves
+    to no explicit credential is the ambient case: the CLI runs on its own
+    persisted login, which this probe cannot read, so it answers UNKNOWN
+    rather than claiming either way. The returned credential is inspected for
+    presence and discarded; nothing is logged and no value leaves this call.
+
+    Imported at call time: the root seam's module reads this probe for its other
+    lanes.
+    """
+    from .factory import claude_auth_env
+
+    try:
+        auth_env, _channel = claude_auth_env()
+    except ProviderRuntimeUnavailableError as exc:
+        return _ProviderConfiguration(state=HealthState.UNAVAILABLE, reason=str(exc))
+    if any(_has_text(value) for value in auth_env.values()):
+        return _ProviderConfiguration(state=HealthState.AVAILABLE)
+    return _ProviderConfiguration(state=HealthState.UNKNOWN)
+
+
 def probe_provider_configuration(provider: Provider) -> _ProviderConfiguration:
     """Report whether ``provider``'s own settings are present.
 
@@ -99,6 +133,8 @@ def probe_provider_configuration(provider: Provider) -> _ProviderConfiguration:
     and nothing is resolved or spawned. A lane whose configuration lives outside
     these settings answers ``UNKNOWN``.
     """
+    if provider == Provider.CLAUDE:
+        return _claude_configuration()
     if provider == Provider.OPENAI:
         return _present(
             _has_text(settings.openai_api_key), "no OpenAI API key configured"
@@ -142,8 +178,10 @@ def probe_provider_readiness(provider: Provider) -> _ProviderReadiness:
         )
 
     if provider in COMMAND_LANES:
-        # This layer does not inspect CLI authentication. Claude inherits ambient
-        # auth; Codex uses its persisted session. Each needs a resolvable command.
+        # This layer does not inspect CLI authentication. Where a lane's declared
+        # channel supplies no explicit credential the CLI runs on its own
+        # persisted login, which the configuration probe above reports as
+        # UNKNOWN rather than missing. Each lane needs a resolvable command.
         return _command_readiness(provider)
 
     if provider in (Provider.OPENAI, Provider.ZHIPU):

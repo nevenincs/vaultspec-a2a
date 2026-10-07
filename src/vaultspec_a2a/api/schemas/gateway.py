@@ -329,8 +329,12 @@ class RunStartResponse(BaseModel):
     # by run-status. Typed by the SAME vocabulary that field answers from, since
     # this is that question asked one moment earlier, not a second one.
     semantic_status: SemanticPhase = SemanticPhase.STARTING
-    # Whether the run was accepted as eligible to dispatch (always True on a 201;
-    # ineligible requests are refused with a 4xx before reaching this response).
+    # The accepted dispatch outcome, and only that: this response exists because
+    # the request passed its own eligibility, the profile admitted native
+    # execution, and the current catalog served the selection this run froze. It
+    # is never a statement about a preset, a profile or a provider lane - an
+    # unsatisfiable request is refused with a 422 and an inadmissible one with a
+    # 503, so a 201 is the only response that can carry it, and it carries True.
     eligible: bool = True
     # The complete execution authority the run was frozen with: the exact served
     # catalog selection that will produce this run's work.

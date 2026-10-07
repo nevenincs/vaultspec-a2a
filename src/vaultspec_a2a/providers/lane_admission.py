@@ -89,12 +89,15 @@ from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from .binary_version import next_minor_version, parse_binary_version
 from .execution_modes import EXTERNAL_EXECUTION_MODES
-from .in_process_catalog import in_process_catalog_key
+from .in_process_catalog import in_process_catalog_key, in_process_lane
 from .lane_registry import registered_lanes
 from .provider_catalog import ProviderCatalogKey
+from .provider_readiness import probe_provider_readiness
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
+
+    from .cli_resolution import ProviderRuntimeUnavailableReason
 
 __all__ = [
     "PROVEN_CATALOG_TURN_LANES",
@@ -106,6 +109,7 @@ __all__ = [
     "is_catalog_lane_admissible",
     "is_web_lane_proven",
     "lane_proof_accepts_version",
+    "served_lane_eligible",
     "web_tool_names_for",
 ]
 
@@ -336,6 +340,75 @@ def is_catalog_lane_admissible(key: ProviderCatalogKey) -> bool:
     return key in PROVEN_CATALOG_TURN_LANES or any(
         in_process_catalog_key(lane) == key for lane in registered_lanes()
     )
+
+
+def _launcher_admission(
+    lane: Provider,
+) -> Callable[[], ProviderRuntimeUnavailableReason | None] | None:
+    """Return the entry that measures *lane*'s resolved launcher, or ``None``.
+
+    A lane's launcher is resolved by the provider factory, and each lane
+    differently, because the binary that completed the turn is not always the
+    command the lane spawns: the Claude-backed lanes pin a CLI behind an ACP
+    wrapper, while Codex probes the service-path executable it hands its child.
+    The version comparison is therefore ASKED of the factory rather than
+    repeated here, and this function is only the pairing between a recorded
+    proof and the entry that checks it.
+
+    The pairing is hand-written beside the declaration for the same reason the
+    declaration is: a proof is a claim about a binary identity, so a lane added
+    above without an entry here carries no way to check the identity it claims,
+    and :func:`served_lane_eligible` refuses it rather than serving it on the
+    proof alone. The factory is imported at call time because it reads this
+    declaration itself.
+    """
+    if lane is not Provider.CODEX:
+        return None
+    from .factory import codex_binary_proof_reason
+
+    return codex_binary_proof_reason
+
+
+def served_lane_eligible(provider: Provider | str | None) -> bool:
+    """Return whether *provider* may be served to run work on this host.
+
+    Three terms, every one of them required, and they are conjunctive here so
+    that no consumer can assemble a weaker eligibility of its own:
+
+    1. a recorded completed-turn proof for the lane,
+    2. a resolved launcher whose reported version that proof admits, and
+    3. the lane's own readiness - its configuration present and its launch
+       command resolvable (:func:`..provider_readiness.probe_provider_readiness`).
+
+    Readiness is the LAST of the three and the weakest: it is necessary and
+    never sufficient, and a derivation that asked only for it served lanes with
+    nothing but handshake coverage because their credential resolved. Proof is
+    asked first so an unproven lane is refused without spawning anything, and
+    readiness is asked before the launcher probe so a profile that refuses
+    native execution refuses here with its own reason rather than through a
+    version probe it would not permit.
+
+    The in-process lanes this process holds are eligible as HELD lanes, exactly
+    as :func:`is_catalog_lane_admissible` admits them: they spawn no CLI, so
+    there is no external transport to complete a turn against and no launcher to
+    identify. Keeping the two predicates' treatment of them identical is what
+    stops the execution surface and the catalog surface from disagreeing about
+    which lanes are usable.
+
+    A lane this module cannot identify is refused, never raised on: an
+    unidentifiable lane is exactly a lane with no recorded proof.
+    """
+    lane = _lane_of(provider)
+    if lane is None:
+        return False
+    if in_process_lane(lane) is not None:
+        return True
+    if lane not in PROVEN_TURN_LANES:
+        return False
+    if not probe_provider_readiness(lane).ready:
+        return False
+    admission = _launcher_admission(lane)
+    return admission is not None and admission() is None
 
 
 def catalog_lane_admission_reason(key: ProviderCatalogKey) -> str | None:

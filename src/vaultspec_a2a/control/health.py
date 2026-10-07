@@ -437,31 +437,33 @@ def assemble_health_status(
 
 
 def _eligible_provider_names() -> list[str]:
-    """Return the subprocess providers that can actually run on this host.
+    """Return the subprocess providers this host may actually be served.
 
-    Uses ``probe_provider_readiness`` - the credential-aware seam that gates on
-    the configured credential FIRST and only then on command resolvability. It
-    remains no-instantiation: no model is constructed and no subprocess is
-    spawned. Resolving the launch command alone is not sufficient, because a
-    provider whose binary is installed with its credential absent cannot run;
-    admitting it here reserves execution capacity for a run that the
-    credential-aware gate applied at launch then refuses.
+    The verdict is ``served_lane_eligible``'s and nothing is re-derived here, so
+    the execution surface and the catalog surface cannot come to disagree about
+    which lanes are usable. That predicate requires a recorded completed-turn
+    proof, a resolved launcher the proof admits, AND the lane's own readiness.
+    Readiness alone - a present credential and a resolvable command - is NOT
+    eligibility: a lane with handshake coverage only resolves and configures
+    perfectly, and admitting it here reserves execution capacity for a run no
+    live test has ever completed work on.
 
-    Codex is the one provider the resolver deliberately gates on command
-    resolvability alone - its auth is a file-based persisted session in the
-    Codex home rather than a configured secret, so there is no credential to
-    check. That asymmetry is the resolver's to own; this seam does not restate
-    it, so the two can never disagree. The candidates are the system-CLI lanes,
-    which omit Z.ai because it launches the same ACP wrapper as Claude;
-    counting it again would double-count one backend.
+    No model is constructed. The launcher version probe behind the predicate is
+    cached per launch identity, so a lane costs at most one bounded
+    ``--version`` call per process, and it runs only for a lane that already
+    carries proof and already answered ready.
+
+    The candidates are the system-CLI lanes, which omit Z.ai because it launches
+    the same ACP wrapper as Claude; counting it again would double-count one
+    backend.
     """
     from ..providers import SYSTEM_CLI_LANES
-    from ..providers.provider_readiness import probe_provider_readiness
+    from ..providers.lane_admission import served_lane_eligible
 
     return [
         provider.value
         for provider in SYSTEM_CLI_LANES
-        if probe_provider_readiness(provider).ready
+        if served_lane_eligible(provider)
     ]
 
 

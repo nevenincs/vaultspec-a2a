@@ -222,7 +222,7 @@ authority to initialise fresh stores.
 
 .. py:class:: StoreOutcome
 
-.. py:function:: migrate_stores(app_home, *, expect_from=None, expect_head=None)
+.. py:function:: migrate_stores(app_home, *, expect_from=None, expect_head=None, compact=False)
 
 .. py:function:: initialize_fresh_stores(app_home)
 

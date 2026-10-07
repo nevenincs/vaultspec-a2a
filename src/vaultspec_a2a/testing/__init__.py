@@ -57,6 +57,7 @@ if TYPE_CHECKING:
         measured_child_startup_s,
         run_child,
     )
+    from .cli import run_cli
     from .endpoints import ResolvedService, resolve_gateway_url, resolve_service
     from .environment import (
         armed_desktop_app_home,
@@ -225,6 +226,7 @@ _LAZY_EXPORTS = {
         "measured_child_startup_s",
     ),
     "run_child": ("vaultspec_a2a.testing.children", "run_child"),
+    "run_cli": ("vaultspec_a2a.testing.cli", "run_cli"),
     "ResolvedService": ("vaultspec_a2a.testing.endpoints", "ResolvedService"),
     "resolve_gateway_url": (
         "vaultspec_a2a.testing.endpoints",
@@ -411,6 +413,7 @@ __all__ = [
     "resolve_service",
     "resolve_spec",
     "run_child",
+    "run_cli",
     "selection_from_served_catalog",
     "session_scratch_dir",
     "settings_override",

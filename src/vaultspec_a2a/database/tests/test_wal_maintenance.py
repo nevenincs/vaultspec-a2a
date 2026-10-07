@@ -37,8 +37,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from ...desktop.profile import derive_state_paths
-from ...testing import free_port
-from ...testing.cli import run_cli
+from ...testing import free_port, run_cli
 from ...testing.tests._support.http_handlers import JsonReplyHandler
 from ...testing.tests._support.listeners import serve_handler
 from ...tests._write_authority import make_test_thread_authority_columns

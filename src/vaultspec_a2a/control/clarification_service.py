@@ -8,7 +8,6 @@ that combines those two authorities and constructs a clarification resume.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -20,7 +19,6 @@ from ..database import (
     get_control_action,
     get_control_action_by_idempotency_key,
     get_thread,
-    get_unapplied_control_actions,
     mark_control_action_applied,
     read_latest_checkpoint,
     settle_control_action_lease,
@@ -40,8 +38,9 @@ from ..thread.clarification import (
 from ..thread.dispatch_policy import FailureType
 from ..thread.enums import NON_ACTIVE_STATUSES, ControlActionType
 from ..thread.idempotency import (
-    CLARIFICATION_RESPONSE_KEY_PREFIX,
+    ResumeIntent,
     clarification_response_action_key,
+    resume_intent,
 )
 from .accepted_input import freeze_accepted_input, read_accepted_input
 from .action_lease import (
@@ -53,11 +52,11 @@ from .action_lease import (
     prepare_control_action_claim,
 )
 from .leased_dispatch import DispatchRefusal, build_followon_dispatch, dispatch_leased
-from .pause import project_checkpoint_read, reconcile_run_pause
+from .pause import project_checkpoint_read
 from .repair_transitions import record_undelivered_dispatch
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database import Checkpointer
     from ..ipc.schemas import DispatchRequest
@@ -65,24 +64,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ClarificationRuntime",
-    "redrive_clarification_actions",
     "respond_to_clarification",
+    "settle_clarification_dispatch_receipt",
 ]
 
-logger = logging.getLogger(__name__)
-
 _RESOLUTION_CONFLICT = "A different clarification resolution is already accepted"
-
-
-@dataclass(frozen=True, slots=True)
-class ClarificationRecoverySummary:
-    """Counts from one restart recovery pass over clarification actions."""
-
-    examined: int = 0
-    applied: int = 0
-    dispatched: int = 0
-    deferred: int = 0
-    conflicted: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +118,44 @@ def _stored_resolution(
         return None
 
 
+async def _settle_accepted_action(db: AsyncSession, action: ControlActionModel) -> bool:
+    """Mark one accepted clarification resume applied, releasing any lease.
+
+    The caller owns the proof and the transaction boundary: this is only the
+    write that records application, through the lease when the row still holds
+    one so no expired claim is left behind to redrive.
+    """
+    if action.claim_token:
+        return await settle_control_action_lease(
+            db,
+            action.id,
+            claim_token=action.claim_token,
+        )
+    return await mark_control_action_applied(db, action.id) is not None
+
+
+async def settle_clarification_dispatch_receipt(
+    db: AsyncSession,
+    action: ControlActionModel,
+) -> bool:
+    """Settle one clarification resume the worker has proven it applied.
+
+    The steady-state owner. The caller has already proven that this exact resume
+    was incorporated into the run's checkpoint, which is the standard every other
+    accepted action is settled on, so the row is settled here rather than left
+    for a recovery sweep to find. The settlement moves no status: the run leaves
+    its pause through the pause recorder, which the same receipt prompts. The
+    caller owns the transaction commit.
+    """
+    if (
+        action.action_type != ControlActionType.RESUME.value
+        or resume_intent(action.idempotency_key) is not ResumeIntent.CLARIFICATION
+        or action.applied_at is not None
+    ):
+        return False
+    return await _settle_accepted_action(db, action)
+
+
 async def _settle_from_receipt(
     db: AsyncSession,
     action: ControlActionModel,
@@ -144,15 +168,7 @@ async def _settle_from_receipt(
         return False
     if action.applied_at is not None:
         return True
-    settled = False
-    if action.claim_token:
-        settled = await settle_control_action_lease(
-            db,
-            action.id,
-            claim_token=action.claim_token,
-        )
-    else:
-        settled = await mark_control_action_applied(db, action.id) is not None
+    settled = await _settle_accepted_action(db, action)
     if settled:
         await db.commit()
     return settled
@@ -524,52 +540,3 @@ async def _dispatch_claimed(
     if applied:
         await db.refresh(action)
     return _result(action, applied=applied, dispatched=True)
-
-
-async def redrive_clarification_actions(
-    session_factory: async_sessionmaker[AsyncSession],
-    *,
-    runtime: ClarificationRuntime,
-) -> ClarificationRecoverySummary:
-    """Settle receipted actions and redrive expired parked leases after restart."""
-    async with session_factory() as db:
-        rows = await get_unapplied_control_actions(
-            db, idempotency_key_prefix=CLARIFICATION_RESPONSE_KEY_PREFIX
-        )
-
-    applied = dispatched = deferred = conflicted = 0
-    for row in rows:
-        resolution = _stored_resolution(row)
-        if resolution is None or row.request_id is None:
-            conflicted += 1
-            continue
-        async with session_factory() as db:
-            result = await respond_to_clarification(
-                db,
-                thread_id=row.thread_id,
-                request_id=row.request_id,
-                resolution=resolution,
-                runtime=runtime,
-            )
-            # The receipt that would have resumed the status may have been lost
-            # with the previous process, so restart re-projects the pause too.
-            await reconcile_run_pause(
-                db, thread_id=row.thread_id, checkpointer=runtime.checkpointer
-            )
-        if result.applied:
-            applied += 1
-        elif result.dispatched:
-            dispatched += 1
-        elif result.error_status_code is not None or result.failure_type is not None:
-            conflicted += 1
-        else:
-            deferred += 1
-    summary = ClarificationRecoverySummary(
-        examined=len(rows),
-        applied=applied,
-        dispatched=dispatched,
-        deferred=deferred,
-        conflicted=conflicted,
-    )
-    logger.info("Clarification recovery pass complete: %s", summary)
-    return summary

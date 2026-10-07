@@ -59,8 +59,9 @@ from ..thread.enums import (
     ThreadStatus,
 )
 from ..thread.idempotency import (
-    AUTHORING_VERDICT_KEY_PREFIX,
+    ResumeIntent,
     authoring_verdict_action_key,
+    resume_intent,
 )
 from ..thread.resume_values import ApprovalVerdict
 from ..utils.coercion import (
@@ -127,15 +128,15 @@ async def settle_verdict_dispatch_receipt(
     """Apply an exact worker receipt for one authoring-verdict resume.
 
     Stable dispatch identity selects the action before this helper is called. The
-    journal key then distinguishes verdict resumes from clarification and permission
-    resumes that share the same wire action but have different application owners.
-    The settlement moves no status: the run leaves its pause through the pause
-    recorder, which the same receipt prompts. The caller owns the transaction
-    commit.
+    journal key's typed intent then distinguishes verdict resumes from the
+    clarification and permission resumes that share the same wire action but have
+    different application owners. The settlement moves no status: the run leaves
+    its pause through the pause recorder, which the same receipt prompts. The
+    caller owns the transaction commit.
     """
     if (
         action.action_type != ControlActionType.RESUME.value
-        or not action.idempotency_key.startswith(AUTHORING_VERDICT_KEY_PREFIX)
+        or resume_intent(action.idempotency_key) is not ResumeIntent.AUTHORING_VERDICT
         or action.applied_at is not None
     ):
         return False

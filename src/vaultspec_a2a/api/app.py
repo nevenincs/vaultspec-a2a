@@ -38,10 +38,6 @@ from ..control._worker_health import (
     internal_auth_headers,
 )
 from ..control.circuit_breaker import WorkerCircuitBreaker
-from ..control.clarification_service import (
-    ClarificationRuntime,
-    redrive_clarification_actions,
-)
 from ..control.config import settings
 from ..control.direct_control_recovery import redrive_direct_control_actions
 from ..control.dispatch import redispatch_reconciling_threads
@@ -715,7 +711,6 @@ async def _direct_recovery_pass(
 
 def _start_gateway_recovery(
     app: FastAPI,
-    checkpointer: Checkpointer,
     runtime: _GatewayRecoveryRuntime,
 ) -> asyncio.Task[None]:
     worker_client, circuit_breaker, worker_spawner, liveness = runtime
@@ -737,23 +732,6 @@ def _start_gateway_recovery(
             raise
         except Exception:
             logger.exception("Startup reconciliation dispatch failed")
-        try:
-            await redrive_clarification_actions(
-                get_session_factory(),
-                runtime=ClarificationRuntime(
-                    checkpointer,
-                    DispatchTransport(
-                        worker_client=worker_client,
-                        circuit_breaker=circuit_breaker,
-                        worker_spawner=worker_spawner,
-                        trace_headers=trace_headers(),
-                    ),
-                ),
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Clarification recovery pass failed")
         while True:
             await asyncio.sleep(_RECOVERY_POLL_SECONDS)
             await _direct_recovery_pass(
@@ -813,7 +791,6 @@ async def _gateway_lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         reconcile_task = _start_gateway_recovery(
             app,
-            checkpointer,
             (worker_client, circuit_breaker, worker_spawner, liveness),
         )
         discovery_path, discovery_pid, serve_record, discovery_task = (

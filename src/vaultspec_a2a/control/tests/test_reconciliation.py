@@ -12,7 +12,12 @@ from ...database import (
     record_permission_request,
     record_permission_response_submission,
 )
-from ...testing import current_execution_metadata, seed_create_action
+from ...testing import (
+    current_execution_metadata,
+    park_clarification,
+    seed_accepted_thread,
+    seed_create_action,
+)
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ..reconciliation import reconcile_threads_on_startup
@@ -23,6 +28,44 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+
+@pytest.mark.asyncio
+async def test_a_park_whose_nudge_died_with_its_process_is_re_projected(
+    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """Startup reads the pause off the checkpoint before reconciling against it.
+
+    The relayed nudge that records a pause is in-process state: a gateway that
+    dies between the park and the nudge leaves a parked run reading ``running``.
+    Checkpoint reconciliation reads that as a writer that died and elects
+    ``reconciling``, after which the re-dispatch sweep sends the run's accepted
+    work to a worker again - while a human is still answering its question. The
+    pause is therefore re-projected first, and a run that reads
+    ``input_required`` is left alone.
+    """
+    async with session_factory() as session:
+        thread_id, _receipt = await seed_accepted_thread(
+            session, status="running", workspace=tmp_path
+        )
+        await session.commit()
+    # A real interrupt from the real clarification nodes, over the real store.
+    await park_clarification(checkpointer, thread_id=thread_id)
+
+    async with session_factory() as session:
+        summary = await reconcile_threads_on_startup(session, checkpointer)
+        await session.commit()
+        reprojected = await get_thread(session, thread_id)
+
+    assert reprojected is not None
+    assert reprojected.status == "input_required", reprojected.status
+    assert summary["paused_resumable"] == 1, summary
+    # Not held for repair either: there is nothing wrong with a run whose
+    # checkpoint says it is waiting for an answer.
+    assert reprojected.repair_status == "healthy", reprojected.repair_status
+    assert reprojected.execution_readiness == "healthy"
 
 
 @pytest.mark.asyncio

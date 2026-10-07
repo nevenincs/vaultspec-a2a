@@ -76,9 +76,6 @@ from .control_action_repository import (
 from .control_action_repository import (
     get_or_create_control_action as get_or_create_control_action,
 )
-from .control_action_repository import (
-    get_unapplied_control_actions as get_unapplied_control_actions,
-)
 from .control_action_repository import get_writer_action as get_writer_action
 from .control_action_repository import (
     has_live_queued_continuation_lease as has_live_queued_continuation_lease,
@@ -366,7 +363,6 @@ __all__ = [
     "get_session_factory",
     "get_thread",
     "get_thread_execution_state",
-    "get_unapplied_control_actions",
     "get_writer_action",
     "has_live_queued_continuation_lease",
     "idempotency_key_admitted",

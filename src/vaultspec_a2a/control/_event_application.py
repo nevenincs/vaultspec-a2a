@@ -11,6 +11,7 @@ from ..ipc.schemas import DispatchApplicationReceiptPayload
 from ..thread import named_request_id
 from ..thread.action_receipts import GRAPH_ACTION_VERB
 from ..thread.enums import ControlActionType
+from ..thread.idempotency import ResumeIntent, resume_intent
 from ..thread.permission_fsm import compute_permission_resolution_effects
 from ..thread.repair_policy import RepairPhase, repair_state_for_action
 from .permission_options import response_is_rejection
@@ -18,7 +19,7 @@ from .permission_options import response_is_rejection
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database import Checkpointer
+    from ..database import Checkpointer, ControlActionModel
     from ..thread.action_receipts import GraphActionReceipt
 
 __all__ = [
@@ -262,7 +263,37 @@ async def commit_proven_application(
         # committed and which leaves a run whose turn already ended alone.
         await db.commit()
         return
-    from .verdict_subscriber import settle_verdict_dispatch_receipt
-
-    if await settle_verdict_dispatch_receipt(db, action):
+    if await _settle_resume(db, action):
         await db.commit()
+
+
+async def _settle_resume(db: AsyncSession, action: ControlActionModel) -> bool:
+    """Hand one proven resume to the owner its typed intent names.
+
+    Several unrelated answers arrive as the same ``RESUME`` control action, and
+    each has exactly one settlement owner. Matching the typed intent is what
+    makes this the steady-state owner for all of them: a resume whose intent is
+    known is settled here, by its own owner, on the receipt that proved it
+    applied, instead of waiting for a recovery sweep to find the unapplied row.
+    """
+    match resume_intent(action.idempotency_key):
+        case ResumeIntent.CLARIFICATION:
+            from .clarification_service import settle_clarification_dispatch_receipt
+
+            return await settle_clarification_dispatch_receipt(db, action)
+        case ResumeIntent.AUTHORING_VERDICT:
+            from .verdict_subscriber import settle_verdict_dispatch_receipt
+
+            return await settle_verdict_dispatch_receipt(db, action)
+        case None:
+            logger.warning(
+                "Refusing to settle %s action %s: its journal key names no resume"
+                " this policy owns",
+                action.action_type,
+                action.idempotency_key,
+                extra={
+                    "thread_id": action.thread_id,
+                    "action": "unowned_resume_settlement",
+                },
+            )
+            return False

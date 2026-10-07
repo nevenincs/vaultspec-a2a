@@ -25,7 +25,7 @@ from ..control.action_lease import (
     prepare_control_action_claim,
 )
 from ..control.repair_transitions import (
-    mark_ingest_requested,
+    apply_repair_transition,
 )
 from ..database import (
     ThreadStatusElectionOutcome,
@@ -54,6 +54,7 @@ from ..thread.enums import (
 from ..thread.executable_graph import freeze_graph_definition
 from ..thread.idempotency import thread_create_action_key
 from ..thread.lifecycle_guards import can_archive, can_delete
+from ..thread.repair_policy import RepairPhase, repair_state_for_action
 from .cleanup import build_cleanup_manifest, execute_cleanup_manifest
 from .leased_dispatch import accepted_recursion_budget, dispatch_leased
 from .repositories import (
@@ -378,7 +379,11 @@ async def create_and_dispatch_thread(
     if not claim.acquired:
         await db.rollback()
         raise ValueError("initial action could not establish graph receipt authority")
-    await mark_ingest_requested(db, thread.id)
+    await apply_repair_transition(
+        db,
+        thread.id,
+        repair_state_for_action(ControlActionType.INGEST, RepairPhase.REQUESTED),
+    )
 
     logger.info(
         "Dispatching ingest dispatch_id=%s for thread %s",

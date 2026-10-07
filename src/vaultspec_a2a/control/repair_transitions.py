@@ -6,11 +6,10 @@ from typing import TYPE_CHECKING
 
 from ..database import get_thread, set_thread_repair_state, update_thread_status
 from ..providers.conditions import ProviderCondition
-from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.enums import ThreadStatus
 from ..thread.repair_policy import (
     DISPATCH_FAILED_TRANSITION,
     RepairPhase,
-    repair_state_for_action,
 )
 
 if TYPE_CHECKING:
@@ -22,9 +21,6 @@ if TYPE_CHECKING:
 __all__ = [
     "apply_dispatch_failure",
     "apply_repair_transition",
-    "mark_cancel_requested",
-    "mark_ingest_requested",
-    "mark_permission_response_requested",
     "record_undelivered_dispatch",
 ]
 
@@ -141,32 +137,4 @@ async def record_undelivered_dispatch(
         thread_id,
         repair_status=thread.repair_status,
         repair_reason=reason,
-    )
-
-
-async def mark_ingest_requested(db: AsyncSession, thread_id: str) -> ThreadModel | None:
-    return await apply_repair_transition(
-        db,
-        thread_id,
-        repair_state_for_action(ControlActionType.INGEST, RepairPhase.REQUESTED),
-    )
-
-
-async def mark_permission_response_requested(
-    db: AsyncSession, thread_id: str
-) -> ThreadModel | None:
-    return await apply_repair_transition(
-        db,
-        thread_id,
-        repair_state_for_action(
-            ControlActionType.PERMISSION_RESPONSE_SUBMITTED, RepairPhase.REQUESTED
-        ),
-    )
-
-
-async def mark_cancel_requested(db: AsyncSession, thread_id: str) -> ThreadModel | None:
-    return await apply_repair_transition(
-        db,
-        thread_id,
-        repair_state_for_action(ControlActionType.CANCEL, RepairPhase.REQUESTED),
     )

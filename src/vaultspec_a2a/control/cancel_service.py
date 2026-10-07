@@ -21,7 +21,7 @@ from ..control.action_lease import (
     prepare_control_action_claim,
 )
 from ..control.repair_transitions import (
-    mark_cancel_requested,
+    apply_repair_transition,
     record_undelivered_dispatch,
 )
 from ..database import (
@@ -43,6 +43,7 @@ from ..thread.enums import (
     ThreadStatus,
 )
 from ..thread.idempotency import default_cancel_key
+from ..thread.repair_policy import RepairPhase, repair_state_for_action
 from .leased_dispatch import accepted_recursion_budget, dispatch_leased
 
 if TYPE_CHECKING:
@@ -503,7 +504,11 @@ async def _elect_cancel_authority(
             failure_type=failure_type,
         )
     if election is not None:
-        await mark_cancel_requested(db, thread_id)
+        await apply_repair_transition(
+            db,
+            thread_id,
+            repair_state_for_action(ControlActionType.CANCEL, RepairPhase.REQUESTED),
+        )
     return None
 
 

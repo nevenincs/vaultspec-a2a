@@ -36,6 +36,7 @@ from ..thread.idempotency import (
     permission_rejection_action_key,
     permission_response_action_key,
 )
+from ..thread.repair_policy import RepairPhase, repair_state_for_action
 from ..thread.snapshots import (
     LOCALLY_RESPONDABLE_PAUSE_CAUSES,
     PLAN_APPROVAL_PAUSE_CAUSES,
@@ -79,7 +80,7 @@ from .leased_dispatch import DispatchRefusal, build_followon_dispatch, dispatch_
 from .permission_options import extract_allowed_option_ids
 from .repair_transitions import (
     apply_dispatch_failure,
-    mark_permission_response_requested,
+    apply_repair_transition,
 )
 
 if TYPE_CHECKING:
@@ -760,7 +761,13 @@ async def _record_permission_transition(
             approval_reason=context.permission_description,
             approval_response_action_id=claim.action_id,
         )
-    await mark_permission_response_requested(db, context.thread_id)
+    await apply_repair_transition(
+        db,
+        context.thread_id,
+        repair_state_for_action(
+            ControlActionType.PERMISSION_RESPONSE_SUBMITTED, RepairPhase.REQUESTED
+        ),
+    )
 
     return _PermissionTransition(
         claim=claim,

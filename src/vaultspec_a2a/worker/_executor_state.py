@@ -60,6 +60,13 @@ class DispatchCapacityState:
     active_ingests: RunScopedRegistry[DispatchCapacityReservation] = field(
         default_factory=RunScopedRegistry
     )
+    #: The runs whose last ingest parked at an interrupt instead of ending.
+    #: Beside ``active_ingests`` because the two together are every run this
+    #: worker still answers for: a parked run holds no slot and no reservation,
+    #: yet its in-memory stream state has to outlive the ingest that parked it
+    #: and may only be dropped when the run truly ends. Read and written under
+    #: ``lock`` with the registry it complements.
+    parked_threads: set[str] = field(default_factory=set)
     pending_cancellations: dict[str, str] = field(default_factory=dict)
     terminal_arbitrations: dict[str, TerminalArbitration] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)

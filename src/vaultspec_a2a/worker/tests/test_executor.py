@@ -46,6 +46,7 @@ from ...testing import (
     current_execution_metadata,
     deterministic_model_assignment,
     new_state_graph,
+    settings_override,
     stand_in_definition_digest,
 )
 from ...thread.action_receipts import (
@@ -478,6 +479,42 @@ class TestIngestGating:
 
             await executor._mark_ingest_done("parked-thread", ThreadStatus.CANCELLED)
             assert executor._graph_lifecycle.thread_binding_count == 0
+        finally:
+            await bridge.close()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_a_parked_runs_pending_permission_outlives_a_sibling_terminal(
+        self, checkpointer: AsyncSqliteSaver
+    ) -> None:
+        """The janitor the sibling's terminal runs may not collect a held park.
+
+        The run is parked on a real permission request recorded through the real
+        emitters, and a different run then ends. That terminal is what runs the
+        permission janitor, which used to be keyed on age alone and so collected
+        the parked run's unanswered request once the human had taken long enough
+        to answer it. The park's own terminal is the one thing that drops it.
+        """
+        bridge = _make_bridge()
+        try:
+            executor = Executor(checkpointer=checkpointer, bridge=bridge)
+            emitters = executor._producer._emitters
+            await emitters.emit_permission_request(
+                thread_id="parked-run",
+                agent_id="agent-1",
+                request_id="perm-parked",
+                description="Allow action?",
+                options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
+            )
+            await executor._mark_ingest_done("parked-run", "interrupted")
+
+            # However long the answer takes, and whatever else settles.
+            with settings_override(pending_permission_max_age_seconds=0.0):
+                await executor._mark_ingest_done("sibling-run", ThreadStatus.COMPLETED)
+            assert emitters.has_pending_permission("perm-parked")
+
+            # Its own terminal still drops it, age-independently.
+            await executor._mark_ingest_done("parked-run", ThreadStatus.CANCELLED)
+            assert not emitters.has_pending_permission("perm-parked")
         finally:
             await bridge.close()
 

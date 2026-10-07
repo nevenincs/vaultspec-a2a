@@ -181,6 +181,14 @@ class DispatchRequest(BaseModel):
     # end — they are never checkpointed.
     actor_tokens: ActorTokenBundle | None = None
 
+    def encoded_envelope(self) -> bytes:
+        """The exact body one delivery of this dispatch sends.
+
+        Measured and sent as the same bytes, so a size budget compares the
+        number the receiver will count rather than an estimate of it.
+        """
+        return self.model_dump_json().encode("utf-8")
+
     @property
     def requires_graph_receipt(self) -> bool:
         """Whether this dispatch delivers graph input, which needs its receipt.

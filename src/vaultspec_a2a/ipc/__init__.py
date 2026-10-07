@@ -14,6 +14,7 @@ implementations.
 """
 
 from .body_limit import BoundedHttpBodyMiddleware as BoundedHttpBodyMiddleware
+from .body_limit import dispatch_envelope_budget as dispatch_envelope_budget
 from .body_limit import gateway_body_limit as gateway_body_limit
 from .body_limit import worker_body_limit as worker_body_limit
 from .schemas import DispatchRequest as DispatchRequest
@@ -25,6 +26,7 @@ __all__ = [
     "DispatchRequest",
     "DispatchResponse",
     "ExecutionStateProjectionPayload",
+    "dispatch_envelope_budget",
     "gateway_body_limit",
     "worker_body_limit",
 ]

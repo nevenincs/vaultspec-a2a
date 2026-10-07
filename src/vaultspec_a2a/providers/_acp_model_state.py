@@ -7,6 +7,17 @@ from typing import Any, cast
 from ._acp_types import AcpModelConfig, AcpResponseFutures
 from ._json_contract import JsonObject
 
+__all__ = [
+    "AcpModelState",
+    "AcpSessionBusyError",
+    "AcpSessionState",
+    "AcpTransportState",
+    "model_state_or_none",
+    "model_state_path",
+    "read_model_state",
+    "write_model_state",
+]
+
 
 @dataclass(slots=True)
 class AcpTransportState:

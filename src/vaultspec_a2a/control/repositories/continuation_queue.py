@@ -31,12 +31,16 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from ...database import (
     ControlActionModel,
     ThreadModel,
     acquire_control_action_lease,
+    count_queued_continuations,
+    enqueue_continuation,
+    get_control_action_by_idempotency_key,
+    reject_queued_continuations,
     reserve_control_action,
 )
 from ...domain_config import domain_config
@@ -53,16 +57,10 @@ __all__ = [
     "QueuedContinuation",
     "QueuedContinuationDisposition",
     "QueuedContinuationRequest",
-    "continuation_already_admitted",
-    "count_queued_continuations",
-    "count_service_queued_continuations",
     "lock_run_for_continuation_decision",
-    "next_queue_position",
     "open_promoted_continuation",
     "promoted_turn_deadline",
     "promotion_dispatch_pending",
-    "promotion_owner_holds_run",
-    "read_next_queued_continuation",
     "refuse_queued_continuations",
     "reserve_queued_continuation",
     "run_lifetime_deadline",
@@ -174,92 +172,6 @@ async def lock_run_for_continuation_decision(
     )
 
 
-async def continuation_already_admitted(
-    session: AsyncSession, *, thread_id: str, idempotency_key: str
-) -> bool:
-    """Whether this run already holds an action admitted under *idempotency_key*.
-
-    Asked before eligibility, because a repeat of an accepted key is not a new
-    offer and the run's current state is not an answer to it. A caller that
-    lost the first response and retried must learn what became of the turn it
-    already sent, not that the run has since ended.
-    """
-    return (
-        await session.scalar(
-            select(ControlActionModel.id)
-            .where(
-                ControlActionModel.thread_id == thread_id,
-                ControlActionModel.idempotency_key == idempotency_key,
-            )
-            .limit(1)
-        )
-    ) is not None
-
-
-async def count_queued_continuations(session: AsyncSession, *, thread_id: str) -> int:
-    """Return how many continuations are waiting on one run."""
-    return (
-        await session.execute(
-            select(func.count())
-            .select_from(ControlActionModel)
-            .where(
-                ControlActionModel.thread_id == thread_id,
-                ControlActionModel.result_status == _QUEUED,
-            )
-        )
-    ).scalar_one()
-
-
-async def count_service_queued_continuations(session: AsyncSession) -> int:
-    """Return how many continuations are waiting across every run."""
-    return (
-        await session.execute(
-            select(func.count())
-            .select_from(ControlActionModel)
-            .where(ControlActionModel.result_status == _QUEUED)
-        )
-    ).scalar_one()
-
-
-async def next_queue_position(session: AsyncSession, *, thread_id: str) -> int:
-    """Return the position the next continuation on this run would take.
-
-    Derived from the highest position still waiting rather than from a count,
-    so a queue drained out of order never hands a second caller a place that
-    is already taken.
-    """
-    highest = (
-        await session.execute(
-            select(func.max(ControlActionModel.queue_position)).where(
-                ControlActionModel.thread_id == thread_id,
-                ControlActionModel.result_status == _QUEUED,
-            )
-        )
-    ).scalar_one()
-    return 1 if highest is None else int(highest) + 1
-
-
-async def read_next_queued_continuation(
-    session: AsyncSession, *, thread_id: str
-) -> ControlActionModel | None:
-    """Return the continuation this run must promote first, if any.
-
-    Lowest position wins, and the row is locked for update: the reader is
-    about to promote it inside the same transaction, and a second promoter
-    must wait rather than read the same winner.
-    """
-    return await session.scalar(
-        select(ControlActionModel)
-        .where(
-            ControlActionModel.thread_id == thread_id,
-            ControlActionModel.result_status == _QUEUED,
-        )
-        .order_by(ControlActionModel.queue_position, ControlActionModel.requested_at)
-        .limit(1)
-        .with_for_update()
-    )
-
-
 def promoted_turn_deadline(
     action: ControlActionModel,
     *,
@@ -303,29 +215,13 @@ async def refuse_queued_continuations(
     between refusing accepted work and losing it. The place each was given
     stays, so the record says what was refused and where it sat.
     """
-    waiting = (
-        await session.scalars(
-            select(ControlActionModel)
-            .where(
-                ControlActionModel.thread_id == thread_id,
-                ControlActionModel.result_status == _QUEUED,
-            )
-            .with_for_update()
-        )
-    ).all()
-    for action in waiting:
-        # One statement moves the row out of "waiting" and into "settled":
-        # the journal refuses a queued row that is already applied, so these
-        # two cannot be written apart.
-        action.result_status = ControlActionResultStatus.REJECTED_INVALID_STATE.value
-        action.applied_at = refused_at
-        action.claim_token = None
-        action.claim_expires_at = None
-    if waiting:
-        await session.flush()
+    refused = await reject_queued_continuations(
+        session, thread_id=thread_id, rejected_at=refused_at
+    )
+    if refused:
         logger.warning(
             "Refused %d continuation(s) waiting on %s: %s",
-            len(waiting),
+            refused,
             thread_id,
             reason,
             extra={
@@ -334,34 +230,7 @@ async def refuse_queued_continuations(
                 "action": "continuation_refused",
             },
         )
-    return len(waiting)
-
-
-async def promotion_owner_holds_run(
-    session: AsyncSession, *, thread_id: str, observed_at: datetime
-) -> bool:
-    """Whether a waiting continuation's live lease still owns this run.
-
-    A run whose turn has ended and whose continuation has not been promoted
-    yet is RUNNING with no live worker, which from the outside looks exactly
-    like a writer that died. The lease on the waiting reservation is the
-    difference: while it is held, a promoter is answerable for this run, and
-    reconciling it as abandoned would move it into repair underneath them.
-    When the lease expires nobody is answerable any more and ordinary
-    reconciliation resumes, which is what keeps the ownership bounded.
-    """
-    return (
-        await session.scalar(
-            select(ControlActionModel.id)
-            .where(
-                ControlActionModel.thread_id == thread_id,
-                ControlActionModel.result_status == _QUEUED,
-                ControlActionModel.claim_expires_at.is_not(None),
-                ControlActionModel.claim_expires_at > observed_at,
-            )
-            .limit(1)
-        )
-    ) is not None
+    return refused
 
 
 def promotion_dispatch_pending(
@@ -418,13 +287,11 @@ async def reserve_queued_continuation(
     # Locked before the limits are read: a replay must replay even when the
     # queue is full, and a competing admission must wait for this decision
     # rather than counting the same free place twice.
-    held = await session.scalar(
-        select(ControlActionModel)
-        .where(
-            ControlActionModel.thread_id == request.thread_id,
-            ControlActionModel.idempotency_key == request.idempotency_key,
-        )
-        .with_for_update()
+    held = await get_control_action_by_idempotency_key(
+        session,
+        thread_id=request.thread_id,
+        idempotency_key=request.idempotency_key,
+        lock=True,
     )
     if held is None:
         # Asked only where a row is about to be created. A replay reserves
@@ -435,11 +302,6 @@ async def reserve_queued_continuation(
         refusal = await _queue_refusal(session, request)
         if refusal is not None:
             return refusal
-    position = (
-        await next_queue_position(session, thread_id=request.thread_id)
-        if held is None
-        else held.queue_position
-    )
     reservation = await reserve_control_action(
         session,
         thread_id=request.thread_id,
@@ -478,9 +340,7 @@ async def reserve_queued_continuation(
         claim_expires_at=instant + request.lease_ttl,
         now=instant,
     )
-    action.result_status = _QUEUED
-    action.queue_position = position
-    await session.flush()
+    position = await enqueue_continuation(session, action)
     return QueuedContinuation(
         QueuedContinuationDisposition.QUEUED,
         action.id,
@@ -495,7 +355,7 @@ async def _queue_refusal(
 ) -> QueuedContinuation | None:
     """Refuse when either configured limit is already spent."""
     per_run = await count_queued_continuations(session, thread_id=request.thread_id)
-    service = await count_service_queued_continuations(session)
+    service = await count_queued_continuations(session)
     if per_run >= request.limits.per_run_depth or service >= request.limits.service_cap:
         return QueuedContinuation(
             QueuedContinuationDisposition.QUEUE_FULL,

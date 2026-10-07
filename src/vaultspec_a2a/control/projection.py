@@ -9,11 +9,11 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..database import (
     actionable_pending_permissions,
+    count_queued_continuations,
     get_pending_permission_requests,
     get_thread_execution_state,
 )
 from ..utils.coercion import coerce_object_mapping
-from .repositories.continuation_queue import count_queued_continuations
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

@@ -205,9 +205,9 @@ async def commit_proven_application(
     from sqlalchemy import select
 
     from ..database import (
-        ControlActionModel,
         ThreadModel,
         begin_write_transaction,
+        get_control_action_by_dispatch_id,
         mark_control_action_applied,
     )
     from ..thread.enums import ControlActionType
@@ -223,14 +223,8 @@ async def commit_proven_application(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    action = await db.scalar(
-        select(ControlActionModel)
-        .where(
-            ControlActionModel.thread_id == thread_id,
-            ControlActionModel.dispatch_id == application.dispatch_id,
-        )
-        .with_for_update()
-        .execution_options(populate_existing=True)
+    action = await get_control_action_by_dispatch_id(
+        db, thread_id=thread_id, dispatch_id=application.dispatch_id, lock=True
     )
     if (
         action is None

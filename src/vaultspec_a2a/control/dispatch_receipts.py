@@ -14,9 +14,9 @@ from ..database import (
     ThreadStatusElectionOutcome,
     elect_thread_status,
     get_control_action_by_dispatch_id,
+    persist_graph_action_receipt,
     thread_write_expectation,
 )
-from ..database.graph_receipt_repository import persist_graph_action_receipt
 from ..thread.action_receipts import (
     GRAPH_ACTION_VERB,
     GraphActionReceipt,
@@ -27,7 +27,7 @@ from ..utils.coercion import decode_json_object
 from .accepted_input import AcceptedActionInput, dispatch_matches_accepted_input
 
 if TYPE_CHECKING:
-    from ..database.models import ControlActionModel
+    from ..database import ControlActionModel
     from ..ipc.schemas import DispatchRequest
     from ..thread import ThreadWriteExpectation
 

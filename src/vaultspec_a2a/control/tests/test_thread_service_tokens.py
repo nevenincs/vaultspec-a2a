@@ -37,6 +37,8 @@ from ...database import (
     create_control_action,
     delete_thread,
     elect_thread_status,
+    get_control_action_by_dispatch_id,
+    get_latest_control_action,
     get_thread,
     thread_write_expectation,
 )
@@ -66,11 +68,10 @@ def _capturing_worker(
         body = await request.json()
         captured["body"] = body
         async with session_factory() as session:
-            action = await session.scalar(
-                select(ControlActionModel).where(
-                    ControlActionModel.thread_id == body["thread_id"],
-                    ControlActionModel.dispatch_id == body["dispatch_id"],
-                )
+            action = await get_control_action_by_dispatch_id(
+                session,
+                thread_id=body["thread_id"],
+                dispatch_id=body["dispatch_id"],
             )
             assert action is not None
             assert action.payload_json is not None
@@ -529,11 +530,10 @@ async def test_initial_ingest_keeps_its_fresh_lease_during_a_real_recovery_pass(
     async def _hold_ack(request: Request) -> JSONResponse:
         body = await request.json()
         async with session_factory() as observer:
-            action = await observer.scalar(
-                select(ControlActionModel).where(
-                    ControlActionModel.thread_id == body["thread_id"],
-                    ControlActionModel.dispatch_id == body["dispatch_id"],
-                )
+            action = await get_control_action_by_dispatch_id(
+                observer,
+                thread_id=body["thread_id"],
+                dispatch_id=body["dispatch_id"],
             )
             thread = await get_thread(observer, body["thread_id"])
         assert action is not None
@@ -591,11 +591,8 @@ async def test_initial_ingest_keeps_its_fresh_lease_during_a_real_recovery_pass(
         assert recovery.dispatched == 0
         assert recovery.refused == 0
         async with session_factory() as observer:
-            action = await observer.scalar(
-                select(ControlActionModel).where(
-                    ControlActionModel.thread_id == thread_id,
-                    ControlActionModel.action_type == ControlActionType.INGEST.value,
-                )
+            action = await get_latest_control_action(
+                observer, thread_id=thread_id, action_type=ControlActionType.INGEST
             )
             thread = await get_thread(observer, thread_id)
         assert action is not None
@@ -653,11 +650,8 @@ async def test_ambiguous_initial_dispatch_retains_its_fresh_lease(
         )
     assert result.failure_type is FailureType.UNREACHABLE
     async with session_factory() as observer:
-        action = await observer.scalar(
-            select(ControlActionModel).where(
-                ControlActionModel.thread_id == thread_id,
-                ControlActionModel.action_type == ControlActionType.INGEST.value,
-            )
+        action = await get_latest_control_action(
+            observer, thread_id=thread_id, action_type=ControlActionType.INGEST
         )
     assert action is not None
     assert action.claim_token is not None

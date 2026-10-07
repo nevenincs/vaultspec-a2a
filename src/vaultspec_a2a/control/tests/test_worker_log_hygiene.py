@@ -17,9 +17,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...control._worker_health import (
-    _evict_stale_worker,
-    _worker_stderr_log_path,
+    evict_stale_worker,
     sweep_orphan_worker_logs,
+    worker_stderr_log_path,
 )
 from ...lifecycle.registry import ProcRecord, now_ms, write_record
 from ...testing import (
@@ -65,10 +65,10 @@ async def test_evict_stale_worker_deletes_its_stderr_log_once_freed(
     # Scenario 1: the server is still listening, so the port cannot be confirmed
     # free - the log must survive an eviction attempt that does not free it.
     with _a2a_home(tmp_path), _foreign_worker() as still_up_port:
-        still_up_log = _worker_stderr_log_path(still_up_port)
+        still_up_log = worker_stderr_log_path(still_up_port)
         still_up_log.write_text("stale orphan output\n", encoding="utf-8")
 
-        freed = await _evict_stale_worker(
+        freed = await evict_stale_worker(
             f"http://127.0.0.1:{still_up_port}",
             still_up_port,
             internal_token=None,
@@ -80,12 +80,12 @@ async def test_evict_stale_worker_deletes_its_stderr_log_once_freed(
     # Scenario 2: the server is torn down (a real freed port), so eviction
     # confirms the port free and deletes the now-genuinely-orphaned log.
     with _a2a_home(tmp_path), _foreign_worker() as torn_down_port:
-        torn_down_log = _worker_stderr_log_path(torn_down_port)
+        torn_down_log = worker_stderr_log_path(torn_down_port)
         torn_down_log.write_text("stale orphan output\n", encoding="utf-8")
     # The `with` block above has exited (server torn down); the port/path
     # captured from it remain valid identifiers to probe against.
     with _a2a_home(tmp_path):
-        freed = await _evict_stale_worker(
+        freed = await evict_stale_worker(
             f"http://127.0.0.1:{torn_down_port}",
             torn_down_port,
             internal_token=None,
@@ -107,10 +107,10 @@ def test_sweep_orphan_worker_logs_removes_dead_keeps_live_and_current(
     )
     try:
         with _a2a_home(a2a_home):
-            orphan_log = _worker_stderr_log_path(18801)
+            orphan_log = worker_stderr_log_path(18801)
             orphan_log.write_text("dead dev-band instance\n", encoding="utf-8")
 
-            live_log = _worker_stderr_log_path(18802)
+            live_log = worker_stderr_log_path(18802)
             live_log.write_text("still running dev-band instance\n", encoding="utf-8")
             write_record(
                 ProcRecord(
@@ -124,7 +124,7 @@ def test_sweep_orphan_worker_logs_removes_dead_keeps_live_and_current(
                 home=registry_home,
             )
 
-            current_log = _worker_stderr_log_path(18803)
+            current_log = worker_stderr_log_path(18803)
             current_log.write_text("this process's own worker\n", encoding="utf-8")
 
             removed = sweep_orphan_worker_logs(
@@ -145,7 +145,7 @@ def test_sweep_orphan_worker_logs_removes_dead_keeps_live_and_current(
 
 def test_sweep_orphan_worker_logs_ignores_non_matching_files(tmp_path: Path) -> None:
     with _a2a_home(tmp_path / "a2a-home"):
-        runtime_dir = _worker_stderr_log_path(1).parent
+        runtime_dir = worker_stderr_log_path(1).parent
         runtime_dir.mkdir(parents=True, exist_ok=True)
         stray = runtime_dir / "not-a-worker-log.txt"
         stray.write_text("unrelated file\n", encoding="utf-8")

@@ -30,9 +30,8 @@ import pytest
 
 from ...control._worker_health import WorkerLiveness, WorkerState
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.config import settings
 from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
-from ...testing import adopted_spawner, free_port
+from ...testing import adopted_spawner, free_port, settings_override
 from ...utils import ProcessContainment, spawn_contained
 
 if TYPE_CHECKING:
@@ -76,33 +75,6 @@ def _captured() -> Generator[list[logging.LogRecord]]:
     finally:
         logger.removeHandler(handler)
         logger.setLevel(original_level)
-
-
-@contextlib.contextmanager
-def _fast_polling() -> Generator[None]:
-    """Shorten the watchdog poll interval; a real attribute swap, restored after."""
-    original = settings.watchdog_poll_interval_seconds
-    settings.watchdog_poll_interval_seconds = _POLL
-    try:
-        yield
-    finally:
-        settings.watchdog_poll_interval_seconds = original
-
-
-@contextlib.contextmanager
-def _runtime_home(home: Path) -> Generator[None]:
-    """Point the machine-global runtime directory at *home*; a real swap, restored.
-
-    The watchdog derives the worker's stderr log path from this setting, so a
-    test that needs to fault that real path does it inside its own tree instead
-    of the developer's A2A home.
-    """
-    original = settings.a2a_home
-    settings.a2a_home = home
-    try:
-        yield
-    finally:
-        settings.a2a_home = original
 
 
 @contextlib.contextmanager
@@ -207,15 +179,20 @@ async def test_a_raising_tick_does_not_end_the_watchdog(tmp_path: Path) -> None:
     that is still polling can notice, so the later transition proves the loop
     outlived the failures rather than merely that the task object still exists.
     """
+    # The watchdog derives the worker's stderr log path from the A2A home, so the
+    # fault is placed inside this test's own tree instead of the developer's home.
     with (
-        _runtime_home(tmp_path),
+        settings_override(a2a_home=tmp_path),
         _crashed_owned_watchdog() as (watchdog, worker_state, spawner),
     ):
         stderr_log = spawner.stderr_log_path
         assert stderr_log is not None, "an auto-spawning spawner owns a stderr log"
         stderr_log.mkdir(parents=True)
 
-        with _captured() as records, _fast_polling():
+        with (
+            _captured() as records,
+            settings_override(watchdog_poll_interval_seconds=_POLL),
+        ):
             task = asyncio.create_task(watchdog.run())
             try:
                 # Wait for a tick to actually fail before asserting anything
@@ -263,7 +240,7 @@ async def test_cancellation_remains_the_quiet_way_to_stop_the_watchdog() -> None
     """
     watchdog, worker_state, _app_state = _unsupervised_watchdog(None)
 
-    with _fast_polling():
+    with settings_override(watchdog_poll_interval_seconds=_POLL):
         task = asyncio.create_task(watchdog.run())
         assert await _await_status(worker_state, "down", timeout=15.0), (
             "the watchdog never ran a healthy tick"
@@ -293,7 +270,7 @@ async def test_a_restart_cycle_that_raises_still_stamps_the_cooldown() -> None:
             "a watchdog that has never restarted should not be gated"
         )
 
-        with _fast_polling():
+        with settings_override(watchdog_poll_interval_seconds=_POLL):
             task = asyncio.create_task(watchdog.run())
             # The tick detects the crash and enters the restart cycle, which
             # opens with a backoff sleep far longer than this wait - so

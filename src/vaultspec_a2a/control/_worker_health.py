@@ -34,17 +34,17 @@ __all__ = [
     "WorkerHealthProbe",
     "WorkerLiveness",
     "WorkerState",
-    "_build_worker_restart_detail",
-    "_desktop_worker_port_clear",
-    "_evict_stale_worker",
-    "_read_log_tail",
-    "_shared_worker_port_clear",
-    "_worker_stderr_log_path",
+    "build_worker_restart_detail",
+    "desktop_worker_port_clear",
+    "evict_stale_worker",
     "internal_auth_headers",
     "probe_worker_health",
+    "read_log_tail",
+    "shared_worker_port_clear",
     "sweep_orphan_worker_logs",
     "worker_liveness",
     "worker_ready_and_ours",
+    "worker_stderr_log_path",
 ]
 
 logger = logging.getLogger("vaultspec_a2a.control.worker_management")
@@ -242,7 +242,7 @@ def _runtime_dir() -> Path:
     return runtime_dir
 
 
-def _worker_stderr_log_path(worker_port: int) -> Path:
+def worker_stderr_log_path(worker_port: int) -> Path:
     """Return the deterministic stderr log path for the auto-spawned worker."""
     return _runtime_dir() / f"worker-autospawn-{worker_port}.stderr.log"
 
@@ -317,7 +317,7 @@ def _advance_to_character_boundary(raw: bytes) -> bytes:
     return raw[index:]
 
 
-def _read_log_tail(log_path: Path, max_bytes: int = _WORKER_STDERR_TAIL_BYTES) -> str:
+def read_log_tail(log_path: Path, max_bytes: int = _WORKER_STDERR_TAIL_BYTES) -> str:
     """Read and decode the tail of a worker stderr log file.
 
     The tail starts at a byte offset, which for a log carrying non-ASCII provider
@@ -339,14 +339,14 @@ def _read_log_tail(log_path: Path, max_bytes: int = _WORKER_STDERR_TAIL_BYTES) -
     return raw.decode("utf-8", errors="replace").strip()
 
 
-def _build_worker_restart_detail(
+def build_worker_restart_detail(
     *,
     returncode: int | None,
     stderr_log_path: Path | None,
 ) -> str:
     """Build a compact diagnostic string for health/readiness surfaces."""
     detail = f"returncode={returncode}"
-    stderr_tail = _read_log_tail(stderr_log_path) if stderr_log_path is not None else ""
+    stderr_tail = read_log_tail(stderr_log_path) if stderr_log_path is not None else ""
     if stderr_tail:
         compact_tail = redact_text(re.sub(r"\s+", " ", stderr_tail))[:500]
         detail += f"; stderr_tail={compact_tail}"
@@ -517,7 +517,7 @@ async def worker_ready_and_ours(
     return _same_gateway(body.get("gateway_url"), settings.gateway_url)
 
 
-async def _evict_stale_worker(
+async def evict_stale_worker(
     worker_url: str,
     worker_port: int,
     *,
@@ -565,11 +565,11 @@ async def _evict_stale_worker(
         # would otherwise leave it behind exactly like the registry orphans this
         # step's kill/reap deletion closes.
         with contextlib.suppress(OSError):
-            _worker_stderr_log_path(worker_port).unlink(missing_ok=True)
+            worker_stderr_log_path(worker_port).unlink(missing_ok=True)
     return freed
 
 
-async def _desktop_worker_port_clear(
+async def desktop_worker_port_clear(
     worker_url: str,
     worker_port: int,
     generation: int,
@@ -598,7 +598,7 @@ async def _desktop_worker_port_clear(
                 worker_url,
                 verdict.value,
             )
-            if not await _evict_stale_worker(
+            if not await evict_stale_worker(
                 worker_url, worker_port, internal_token=internal_token
             ):
                 logger.error(
@@ -621,7 +621,7 @@ async def _desktop_worker_port_clear(
     return True
 
 
-async def _shared_worker_port_clear(
+async def shared_worker_port_clear(
     worker_url: str, worker_port: int, *, internal_token: str | None
 ) -> bool:
     """Handle a same-gateway worker or a stale foreign development worker."""
@@ -664,7 +664,7 @@ async def _shared_worker_port_clear(
             declared_target,
             settings.gateway_url,
         )
-        if not await _evict_stale_worker(
+        if not await evict_stale_worker(
             worker_url, worker_port, internal_token=internal_token
         ):
             # The foreign orphan would not release the port. Spawning anyway is

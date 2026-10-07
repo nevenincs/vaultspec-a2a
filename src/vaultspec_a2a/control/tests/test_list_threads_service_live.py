@@ -18,6 +18,7 @@ import pytest
 
 from ...control.thread_listing import list_threads_service
 from ...database import create_thread
+from ...testing import settings_override
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import RepairStatus
 
@@ -111,17 +112,11 @@ async def test_an_uncertain_checkpoint_degrades_the_thread(
     """
     await _seed(session_factory, 6)
 
-    from ...domain_config import domain_config
-
-    original = domain_config.thread_list_checkpoint_deadline_seconds
-    domain_config.thread_list_checkpoint_deadline_seconds = 0.05
-    try:
+    with settings_override(thread_list_checkpoint_deadline_seconds=0.05):
         async with session_factory() as session:
             result = await list_threads_service(
                 session, checkpointer=_Checkpointer(present=set(), delay=1.0)
             )
-    finally:
-        domain_config.thread_list_checkpoint_deadline_seconds = original
 
     assert any(
         s.repair_status == RepairStatus.CHECKPOINT_UNAVAILABLE.value
@@ -136,11 +131,7 @@ async def test_the_whole_list_stays_bounded_under_a_slow_store(
     """A page of slow-reading threads must not cost the per-read sum."""
     await _seed(session_factory, 10)
 
-    from ...domain_config import domain_config
-
-    original = domain_config.thread_list_checkpoint_deadline_seconds
-    domain_config.thread_list_checkpoint_deadline_seconds = 0.3
-    try:
+    with settings_override(thread_list_checkpoint_deadline_seconds=0.3):
         loop = asyncio.get_running_loop()
         started = loop.time()
         async with session_factory() as session:
@@ -148,7 +139,5 @@ async def test_the_whole_list_stays_bounded_under_a_slow_store(
                 session, checkpointer=_Checkpointer(present=set(), delay=0.5)
             )
         elapsed = loop.time() - started
-    finally:
-        domain_config.thread_list_checkpoint_deadline_seconds = original
 
     assert elapsed < 2.0, f"list took {elapsed:.2f}s; not bounded by the batch deadline"

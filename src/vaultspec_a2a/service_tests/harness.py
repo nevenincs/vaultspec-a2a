@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "COMPOSE_FILE",
+    "INTERNAL_TOKEN",
     "REPO_ROOT",
     "RETAINED_RUNTIME_DIRS",
     "RUNTIME_ROOT",
@@ -74,13 +75,13 @@ RUNTIME_ROOT = settings.a2a_home / "runtime" / "service-tests"
 # The worker interprocess-communication token the harness gives its production
 # worker. It is the single source: injected into the worker env and presented on
 # the harness's own worker probes, which the gated worker surface now requires.
-_INTERNAL_TOKEN = "vaultspec-integration-token"
+INTERNAL_TOKEN = "vaultspec-integration-token"
 # The engine-facing /v1 bearer this harness gives its gateway. The whole /v1
 # router sits behind the attach gate, so without presenting this every call the
 # harness makes - create, list, state, cancel - is a 401 and no service test can
 # reach the surface it exists to certify.
 #
-# Deliberately NOT _INTERNAL_TOKEN: that is the worker IPC secret, and the two
+# Deliberately NOT INTERNAL_TOKEN: that is the worker IPC secret, and the two
 # planes must never alias ("never shared with worker IPC or embedded in
 # discovery"). Configuring it explicitly is also what makes it knowable here at
 # all - left unset the gateway mints a per-process credential the harness has no
@@ -232,7 +233,7 @@ class ServiceStack:
         return httpx.Client(
             base_url=self.worker_url,
             timeout=10.0,
-            headers=bearer_header(_INTERNAL_TOKEN),
+            headers=bearer_header(INTERNAL_TOKEN),
         )
 
     def _jaeger_client(self) -> httpx.Client:
@@ -294,7 +295,7 @@ class ServiceStack:
                 "VAULTSPEC_A2A_GATEWAY_URL": self.gateway_url,
                 "VAULTSPEC_A2A_WORKER_URL": self.worker_url,
                 "VAULTSPEC_A2A_WORKER_HOST": "127.0.0.1",
-                "VAULTSPEC_A2A_INTERNAL_TOKEN": _INTERNAL_TOKEN,
+                "VAULTSPEC_A2A_INTERNAL_TOKEN": INTERNAL_TOKEN,
                 "VAULTSPEC_A2A_GATEWAY_TOKEN": _GATEWAY_SERVICE_TOKEN,
                 "VAULTSPEC_A2A_INSTALL_ROOT": str(REPO_ROOT),
                 "OTEL_EXPORTER_OTLP_ENDPOINT": (

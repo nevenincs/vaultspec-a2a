@@ -1,16 +1,14 @@
-"""Acceptance coverage for the six-member gateway whitelist.
+"""``run-status`` recovery of a multi-role run, and actor tokens kept out of logs.
 
-In-process, real-component coverage of the acceptance criteria that do NOT need
-the live dashboard engine or Docker (both absent here). No mocks: a real
-``Executor`` runs a real multi-role compiled graph against a real file-backed
-``AsyncSqliteSaver``; the gateway control surface then reads that durable state back
-over a real TCP socket.
+In-process, real-component coverage that does NOT need the live dashboard
+engine. No mocks: a real ``Executor`` runs a real multi-role compiled graph
+against a real file-backed ``AsyncSqliteSaver``; the gateway then reads that
+durable state back over a real TCP socket through ``GET /v1/runs/{run_id}``.
 
-Covers: per-role run through the surface, ``run-status`` as the authoritative
-recovery snapshot, restart recovery (a fresh gateway on the same durable
-checkpoint returns the same snapshot), zero ``.vault/`` writes across the run,
-and no actor token in any captured log record (closing the ``model_dump``
-residual).
+Covers: ``run-status`` as the authoritative recovery snapshot of a per-role
+run, restart recovery (a fresh gateway on the same durable checkpoint returns
+the same snapshot), zero ``.vault/`` writes across the run, and no actor token
+in any log record captured across a dispatch or a ``POST /v1/runs``.
 """
 
 from __future__ import annotations

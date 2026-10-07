@@ -150,17 +150,29 @@ def health_listener() -> Generator[int]:
 
 
 def loopback_uvicorn(
-    app: AsgiApp, *, lifespan: Lifespan = "on", log_level: str = "warning"
+    app: AsgiApp,
+    *,
+    lifespan: Lifespan = "on",
+    log_level: str = "warning",
+    timeout_graceful_shutdown: int | None = None,
+    server_factory: Callable[[uvicorn.Config], uvicorn.Server] = uvicorn.Server,
 ) -> uvicorn.Server:
     """A uvicorn server for *app* on an ephemeral loopback port, not yet serving.
 
     For a test whose subject is the server's own lifecycle - who owns its exit,
     how it drains - and so has to hold the server and its serving task itself.
-    Every other caller wants :func:`serve_on_loopback`.
+    *server_factory* builds the server from its config, for a test whose subject
+    is a uvicorn subclass rather than uvicorn itself. Every other caller wants
+    :func:`serve_on_loopback`.
     """
-    return uvicorn.Server(
+    return server_factory(
         uvicorn.Config(
-            app, host="127.0.0.1", port=0, log_level=log_level, lifespan=lifespan
+            app,
+            host="127.0.0.1",
+            port=0,
+            log_level=log_level,
+            lifespan=lifespan,
+            timeout_graceful_shutdown=timeout_graceful_shutdown,
         )
     )
 

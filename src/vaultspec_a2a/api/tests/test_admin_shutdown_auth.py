@@ -12,6 +12,7 @@ from httpx import ASGITransport
 
 from ...api.app import _bind_server_shutdown_owner, create_app
 from ...api.dependencies import LIFECYCLE_CAPABILITY_HEADER
+from ...api.routes._gateway_action_endpoints import route_signature
 from ...api.routes.gateway import admission_gate
 from ...control.drain import AdmissionState
 from ...testing import loopback_uvicorn, uvicorn_started
@@ -149,6 +150,9 @@ def test_the_stop_verb_addresses_the_path_the_gateway_actually_serves() -> None:
     posted = re.search(r'f"\{base_url\}(/[^"]*shutdown)"', source)
     assert posted is not None, "stop_service no longer posts a shutdown path"
 
-    app = _make_app()
-    served = {path for path in app.openapi()["paths"] if path.endswith("shutdown")}
+    served = {
+        signature.partition(" ")[2]
+        for signature in route_signature(_make_app())
+        if signature.endswith("shutdown")
+    }
     assert posted.group(1) in served, (posted.group(1), served)

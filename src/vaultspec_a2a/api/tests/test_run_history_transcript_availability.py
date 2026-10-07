@@ -21,12 +21,11 @@ import httpx
 import pytest
 
 from ...database import update_thread_status
-from ...testing import async_catalog_run_fields
+from ...testing import async_catalog_run_fields, serve_on_loopback
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus, TranscriptAvailability
 from .conftest import make_app
 from .test_gateway_drain import _relay_terminal, _RelayContext
-from .test_gateway_live import _live_server
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -70,7 +69,7 @@ async def test_a_completed_run_without_a_checkpoint_reports_the_transcript_lost(
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-lost-01")
@@ -114,7 +113,7 @@ async def test_an_archived_run_without_a_checkpoint_still_answers_the_durable_re
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-archived-01")
@@ -158,7 +157,7 @@ async def test_a_live_run_before_its_first_checkpoint_is_not_reported_as_a_loss(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-fresh-01")
@@ -195,7 +194,7 @@ async def test_a_parked_run_without_a_checkpoint_is_a_loss_not_a_pending_transcr
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-parked-01")
@@ -225,7 +224,7 @@ async def test_a_run_with_a_real_checkpoint_reports_its_transcript_available(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-present-01")

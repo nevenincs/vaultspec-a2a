@@ -11,14 +11,14 @@ import runpy
 import shutil
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, cast, override
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
 
+from ...testing import JsonReplyHandler, serve_handler
 from ...tests.native_build import linux_isolation_helper
 from ...utils.process import ProcessContainmentError
 from ..native_isolation import (
@@ -158,28 +158,22 @@ def test_native_grants_preserve_work_and_deny_other_planes(tmp_path: Path) -> No
     )
     (authority.workspace.path / "outside-alias").symlink_to(secret)
 
-    class Relay(http.server.BaseHTTPRequestHandler):
+    class Relay(JsonReplyHandler, http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"role-relay-ok")
 
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            return
-
-    relay = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Relay)
-    serving = threading.Thread(target=relay.serve_forever, daemon=True)
-    serving.start()
-    script = authority.workspace.path / "probe.js"
-    paths = {
-        "private": str(secret),
-        "alias": str(authority.workspace.path / "outside-alias"),
-        "other_role": str(other_home / "auth.json"),
-        "host_process_root": f"/proc/{os.getpid()}/root{secret}",
-    }
-    script.write_text(
-        """
+    with serve_handler(Relay) as relay_port:
+        script = authority.workspace.path / "probe.js"
+        paths = {
+            "private": str(secret),
+            "alias": str(authority.workspace.path / "outside-alias"),
+            "other_role": str(other_home / "auth.json"),
+            "host_process_root": f"/proc/{os.getpid()}/root{secret}",
+        }
+        script.write_text(
+            """
 const fs = require('fs'), cp = require('child_process'), http = require('http');
 const out = {};
 for (const [key, path] of Object.entries(PRIVATE_PATHS)) {
@@ -210,77 +204,76 @@ const request = http.get('http://127.0.0.1:PORT/', response => {
 request.setTimeout(3000, () => request.destroy());
 request.on('error', e => { out.loopback = e.code; console.log(JSON.stringify(out)); });
 """.replace("PRIVATE_PATHS", json.dumps(paths))
-        .replace(
-            "CONTROL_NAMES",
-            json.dumps(
-                [
-                    "VAULTSPEC_A2A_GATEWAY_TOKEN",
-                    "VAULTSPEC_A2A_INTERNAL_TOKEN",
-                    "DATABASE_URL",
-                    "gateway_token",
-                    "VAULTSPEC_A2A_AUTHORING_BEARER",
-                    "VAULTSPEC_A2A_AUTHORING_BASE_URL",
-                ]
-            ),
+            .replace(
+                "CONTROL_NAMES",
+                json.dumps(
+                    [
+                        "VAULTSPEC_A2A_GATEWAY_TOKEN",
+                        "VAULTSPEC_A2A_INTERNAL_TOKEN",
+                        "DATABASE_URL",
+                        "gateway_token",
+                        "VAULTSPEC_A2A_AUTHORING_BEARER",
+                        "VAULTSPEC_A2A_AUTHORING_BASE_URL",
+                    ]
+                ),
+            )
+            .replace(
+                "GRANT_PATHS",
+                json.dumps(
+                    [
+                        str(authority.capsule.path),
+                        str(authority.workspace.path),
+                        str(authority.home.path),
+                        str(private),
+                    ]
+                ),
+            )
+            .replace("PORT", str(relay_port)),
+            encoding="utf-8",
         )
-        .replace(
-            "GRANT_PATHS",
-            json.dumps(
-                [
-                    str(authority.capsule.path),
-                    str(authority.workspace.path),
-                    str(authority.home.path),
-                    str(private),
-                ]
-            ),
-        )
-        .replace("PORT", str(relay.server_port)),
-        encoding="utf-8",
-    )
-    env = {
-        **os.environ,
-        "VAULTSPEC_A2A_GATEWAY_TOKEN": "synthetic-gateway",
-        "VAULTSPEC_A2A_INTERNAL_TOKEN": "synthetic-worker",
-        "DATABASE_URL": "synthetic-database",
-        "gateway_token": "synthetic-alias",
-        "VAULTSPEC_A2A_AUTHORING_BEARER": "synthetic-engine",
-        "VAULTSPEC_A2A_AUTHORING_BASE_URL": "http://127.0.0.1:1",
-        "VAULTSPEC_A2A_AUTHORING_ACTOR_TOKEN": "synthetic-role",
-    }
-    descriptor = os.open(private, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        launch = linux_isolated_launch(
-            authority,
-            [str(node), str(script)],
-            cwd=str(authority.workspace.path),
-            environment=env,
-        )
-        completed = subprocess.run(
-            launch.command,
-            env=launch.environment,
-            cwd=launch.cwd,
-            pass_fds=(descriptor,),
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-        )
-        assert completed.returncode == 0, completed.stdout + completed.stderr
-        observed = json.loads(completed.stdout)
-        assert all(observed[key] == "ENOENT" for key in paths)
-        assert observed["auth"] == "selected-provider"
-        assert observed["child_exit"] == 13
-        assert observed["runtime_write"] == "EROFS"
-        assert observed["loopback"] == 200
-        assert observed["leaked_env"] == []
-        assert observed["inherited_directory_grants"] == []
-        assert observed["actor"] is True
-        assert (authority.workspace.path / "project-write").read_text() == "permitted"
-    finally:
-        os.close(descriptor)
-        relay.shutdown()
-        relay.server_close()
-        serving.join(3)
+        env = {
+            **os.environ,
+            "VAULTSPEC_A2A_GATEWAY_TOKEN": "synthetic-gateway",
+            "VAULTSPEC_A2A_INTERNAL_TOKEN": "synthetic-worker",
+            "DATABASE_URL": "synthetic-database",
+            "gateway_token": "synthetic-alias",
+            "VAULTSPEC_A2A_AUTHORING_BEARER": "synthetic-engine",
+            "VAULTSPEC_A2A_AUTHORING_BASE_URL": "http://127.0.0.1:1",
+            "VAULTSPEC_A2A_AUTHORING_ACTOR_TOKEN": "synthetic-role",
+        }
+        descriptor = os.open(private, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            launch = linux_isolated_launch(
+                authority,
+                [str(node), str(script)],
+                cwd=str(authority.workspace.path),
+                environment=env,
+            )
+            completed = subprocess.run(
+                launch.command,
+                env=launch.environment,
+                cwd=launch.cwd,
+                pass_fds=(descriptor,),
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            assert completed.returncode == 0, completed.stdout + completed.stderr
+            observed = json.loads(completed.stdout)
+            assert all(observed[key] == "ENOENT" for key in paths)
+            assert observed["auth"] == "selected-provider"
+            assert observed["child_exit"] == 13
+            assert observed["runtime_write"] == "EROFS"
+            assert observed["loopback"] == 200
+            assert observed["leaked_env"] == []
+            assert observed["inherited_directory_grants"] == []
+            assert observed["actor"] is True
+            assert (
+                authority.workspace.path / "project-write"
+            ).read_text() == "permitted"
+        finally:
+            os.close(descriptor)
 
 
 def test_changed_helper_is_refused_before_provider_work(tmp_path: Path) -> None:

@@ -36,13 +36,13 @@ from ...team.team_config import (
     WorkerRef,
     load_agent_config,
 )
-from ...testing import SseReader
+from ...testing import SseReader, serve_on_loopback
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
-from .conftest import SessionFactory, _live_server, make_app, seed_run_with_status
+from .conftest import SessionFactory, make_app, seed_run_with_status
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -204,7 +204,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
     await seed_run_with_status(session_factory, thread_id, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         bridge = WorkerBridge(

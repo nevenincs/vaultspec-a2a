@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import (
 
 from ...control.drain import DrainGate
 from ...database import get_control_action_by_dispatch_id, get_thread
-from ...testing import async_catalog_run_fields
+from ...testing import async_catalog_run_fields, serve_on_loopback
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
@@ -33,7 +33,6 @@ from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ..routes.gateway import admission_gate
 from .conftest import SessionFactory, make_app
-from .test_gateway_live import _live_server
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -165,7 +164,7 @@ async def test_run_start_admits_while_open_then_refuses_once_draining(
 ) -> None:
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         # Open gate: the run is admitted and dispatched.
@@ -257,7 +256,7 @@ async def test_unexpected_run_start_failure_releases_admission_and_drain_quiesce
     try:
         app, _agg, worker, _cp = make_app(factory, checkpointer)
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         ):
             resp = await client.post("/v1/runs", json=await _run_body(client))
@@ -287,7 +286,7 @@ async def test_client_run_id_replay_does_not_double_count_admission(
 ) -> None:
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         body = await _run_body(client, run_id="run-drain-replay")
@@ -320,7 +319,7 @@ async def test_normal_completion_releases_admission_and_drain_quiesces(
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     relay = _RelayContext(checkpointer, worker, session_factory)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         started = await client.post("/v1/runs", json=await _run_body(client))
@@ -368,7 +367,7 @@ async def test_ambiguous_start_dispatch_failure_keeps_admission(
     ) as unreachable:
         app.state.worker_client = unreachable
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         ):
             resp = await client.post(
@@ -414,7 +413,7 @@ async def test_a_queued_followup_keeps_the_live_run_admitted(
     relay = _RelayContext(checkpointer, worker, session_factory)
     run_id = "run-drain-followup-failure"
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         started = await client.post(
@@ -493,7 +492,7 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
     repeated_run = "run-drain-repeated"
     survivor = "run-drain-survivor"
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         for run_id in (cancelled_run, repeated_run, survivor):

@@ -48,6 +48,7 @@ skip naming the missing serving, never a pass.
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from ..acceptance.tests._harness import certified_gateway
@@ -91,12 +92,10 @@ def test_real_worker_run_reaches_terminal_state_with_scripted_content(
         tmp_path,
         VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
-        started = gateway.start(
-            run_id,
-            team_preset=_PRESET,
-            role=role,
-            message="Complete the task and stop.",
+        verbs = replace(
+            gateway.runs, team_preset=_PRESET, tokens={role: "tok-certification"}
         )
+        started = verbs.start(run_id, message="Complete the task and stop.")
         assert started.status_code == 201, started.text
 
         snapshot = wait_for_run_status(

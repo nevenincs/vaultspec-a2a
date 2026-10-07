@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -11,10 +10,16 @@ from uuid import uuid4
 import pytest
 
 from ..control.action_lease import CONTROL_ACTION_LEASE_TTL
-from ..testing import fetch_in_process_selection, wait_for_run_status
+from ..testing import (
+    WatchedProcess,
+    await_ready,
+    fetch_in_process_selection,
+    reap_process,
+    wait_for_run_status,
+)
 from ..testing.payloads import json_object, required_bool, required_text
 from ._state import thread_state
-from .harness import _spawn_process, _wait_for, build_service_stack
+from .harness import build_service_stack
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
@@ -25,27 +30,21 @@ if TYPE_CHECKING:
 def _start_lazy_gateway(stack: ServiceStack) -> None:
     env = stack._local_env()
     env["VAULTSPEC_A2A_AUTO_SPAWN_WORKER"] = "true"
-    process, log = _spawn_process(
-        sys.executable,
-        "-m",
-        "uvicorn",
+    process = stack.spawn_native(
         "vaultspec_a2a.api.app:create_app",
-        "--factory",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(stack.ports["gateway"]),
+        port=stack.ports["gateway"],
         env=env,
-        log_path=stack.runtime_dir / "lazy-gateway.log",
+        log_name="lazy-gateway.log",
     )
     stack._gateway_proc = process
-    stack._gateway_log = log
-    _wait_for(
-        "lazy gateway readiness",
+    await_ready(
         stack._gateway_http_ready,
+        what="lazy gateway",
+        watch=[
+            WatchedProcess("gateway", process, stack.runtime_dir / "lazy-gateway.log")
+        ],
         timeout=120.0,
         interval=0.2,
-        watch=[("gateway", process, stack.runtime_dir / "lazy-gateway.log")],
     )
 
 
@@ -101,11 +100,8 @@ def test_cancellation_survives_fresh_worker(
             stack.record("fresh-worker-running", running)
             if restart:
                 assert stack._worker_proc is not None
-                stack._stop_process(stack._worker_proc)
+                reap_process(stack._worker_proc)
                 stack._worker_proc = None
-                if stack._worker_log is not None:
-                    stack._worker_log.close()
-                    stack._worker_log = None
             cancelled = client.post(f"/v1/runs/{run_id}/cancel")
             assert cancelled.status_code == 200, cancelled.text
             assert cancelled.json()["accepted"] is True
@@ -113,11 +109,9 @@ def test_cancellation_survives_fresh_worker(
         stack.record("accepted-cancel-receipt", receipt)
         if restart:
             assert receipt[2] is None
-            stack._stop_process(stack._gateway_proc)
+            assert stack._gateway_proc is not None
+            reap_process(stack._gateway_proc)
             stack._gateway_proc = None
-            if stack._gateway_log is not None:
-                stack._gateway_log.close()
-                stack._gateway_log = None
             _start_lazy_gateway(stack)
         terminal = wait_for_run_status(
             lambda: thread_state(stack, run_id),

@@ -29,7 +29,7 @@ import pytest
 
 from ..desktop.migration import package_migration_range
 from ..desktop.profile import derive_state_paths
-from ..tests.gateway_boot import clean_subprocess_environment
+from ..testing import clean_subprocess_environment
 
 _PROJECT_ROOT: Final = Path(__file__).resolve().parents[3]
 _MODULE: Final = "vaultspec_a2a.cli.main"

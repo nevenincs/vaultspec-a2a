@@ -13,11 +13,10 @@ without a live worker process.  No ``MockTransport``, no ``unittest.mock``.
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast, override
 
 import httpx
-import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport
@@ -372,30 +371,3 @@ def make_app(
     app.state.db_session_factory = session_factory
 
     return app, aggregator, worker, checkpointer
-
-
-@asynccontextmanager
-async def _live_server(app: FastAPI) -> AsyncGenerator[str]:
-    """Serve *app* on an ephemeral loopback port and yield its base URL.
-
-    A real uvicorn server on a real TCP socket, not ``ASGITransport``: an SSE
-    consumer must read frames while the producer is still emitting, and the
-    in-memory transport buffers a whole response before returning one.
-    """
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=0, log_level="warning", lifespan="on"
-    )
-    server = uvicorn.Server(config)
-    task = asyncio.create_task(server.serve())
-    try:
-        for _ in range(500):
-            if server.started and server.servers:
-                break
-            await asyncio.sleep(0.01)
-        assert server.started and server.servers, "uvicorn did not start"
-        port = server.servers[0].sockets[0].getsockname()[1]
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        server.should_exit = True
-        with suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(task, timeout=5.0)

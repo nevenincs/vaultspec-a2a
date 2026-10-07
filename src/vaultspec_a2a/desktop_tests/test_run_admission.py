@@ -21,7 +21,7 @@ loopback sockets and HTTP, the run-admission invariants:
 The valid database is seated by the real ``migrate`` entrypoint in a
 separate process; the gateway is a second real process and the worker a third,
 gateway-owned one. No mock, monkeypatch, stub, skip, or expected failure is used;
-every child is reaped in a ``finally`` by killing the gateway process tree.
+every child is reaped by killing the gateway process tree.
 
 Desktop admission refuses while its native OS isolation backend is unavailable;
 that real armed-profile contract is covered by ``test_readiness_model.py``.
@@ -31,51 +31,33 @@ the desktop profile and make no desktop native execution claim.
 
 from __future__ import annotations
 
-import json
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from ..testing import fetch_in_process_selection_at
-from ..testing.progress import ProgressDeadline, wait_for
-from ..tests.gateway_boot import (
-    FIRST_DEMAND_TIMEOUT,
+from ..testing import (
+    DEFAULT_ATTACH_CREDENTIAL,
     LOOPBACK_TIMEOUT,
+    RunVerbs,
+    booted_gateway,
     broker_gateway_env,
     desktop_workspace,
+    fetch_in_process_selection_at,
     gateway_script,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
-    spawn_gateway,
-    spawn_until_ready,
+    seat_app_home,
+    status_and_json,
 )
+from ..testing.progress import ProgressDeadline, wait_for
 
 if TYPE_CHECKING:
-    import subprocess
     from collections.abc import Generator
     from pathlib import Path
 
-_ATTACH = "attach-credential-admission-1234567890abcdef"
-_OWNERSHIP = "ownership-capability-admission-fedcba0987654321"
 _PRESET = "mock-success-single"
 _REQUIRED_ROLE = "mock-coder-success"
 _SPAWN_LINE = "Auto-spawning worker on port"
-
-# The INFO variant: its root logging handler is the only reason the auto-spawn
-# announcement asserted on below is written to the gateway log at all.
-_GATEWAY = gateway_script(log_level="info")
-
-
-@dataclass(frozen=True, slots=True)
-class _CommitOptions:
-    """Optional bindings that vary between commit admission probes."""
-
-    roles: dict[str, str] | None = None
-    metadata: dict[str, Any] | None = None
 
 
 @contextmanager
@@ -85,41 +67,43 @@ def _running_gateway(
     *,
     log_name: str = "gateway.log",
     **extra_env: str,
-) -> Generator[tuple[str, str]]:
-    """Run one gateway process over an already seated application home."""
-    log_path = tmp_path / log_name
-    log_handle = log_path.open("wb")
+) -> Generator[RunVerbs]:
+    """Run one gateway process over an already seated application home.
 
-    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        env = broker_gateway_env(
-            app_home,
-            gateway_port=gateway_port,
-            worker_port=worker_port,
-            gateway_token=_ATTACH,
+    The INFO script variant: its root logging handler is the only reason the
+    auto-spawn announcement asserted on below is written to the gateway log at
+    all.
+    """
+    with booted_gateway(
+        broker_gateway_env(
+            app_home, gateway_token=DEFAULT_ATTACH_CREDENTIAL, extra=extra_env
+        ),
+        log_path=tmp_path / log_name,
+        script=gateway_script(log_level="info"),
+        detached=True,
+    ) as gateway:
+        base = gateway.base_url
+        auth = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
+        yield RunVerbs(
+            base_url=base,
+            authorization=auth,
+            team_preset=_PRESET,
+            workspace_root=desktop_workspace(base),
+            selection=lambda workspace: fetch_in_process_selection_at(
+                base,
+                workspace,
+                headers={"Authorization": auth},
+                prefer_provider_id="mock",
+                cache=True,
+            ),
+            tokens={_REQUIRED_ROLE: "tok-coder"},
         )
-        env.update(extra_env)
-        return spawn_gateway(
-            script=_GATEWAY,
-            gateway_port=gateway_port,
-            env=env,
-            log_handle=log_handle,
-            new_session=True,
-        )
-
-    proc, _gateway_port, _worker_port, base = spawn_until_ready(
-        _spawn, log_path=log_path
-    )
-    try:
-        yield base, f"Bearer {_ATTACH}"
-    finally:
-        reap_gateway(proc)
-        log_handle.close()
 
 
 @contextmanager
 def _admission_gateway(
     tmp_path: Path, *, warm_first_demand: bool = True, **extra_env: str
-) -> Generator[tuple[str, str]]:
+) -> Generator[RunVerbs]:
     """Seat and boot a real gateway over a migrated SQLite state home.
 
     *warm_first_demand* is opt-out for the one scenario whose subject IS the
@@ -127,210 +111,47 @@ def _admission_gateway(
     negation of what the scenario proves.
     """
     app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
-    with _running_gateway(tmp_path, app_home, **extra_env) as gateway:
+    seat_app_home(app_home)
+    with _running_gateway(tmp_path, app_home, **extra_env) as verbs:
         # Warm the catalog HERE, not inside the first prepare. The first read
         # probes every provider lane and takes seconds; paying that inside a
         # prepare shifted the timing the concurrency and replay cases depend on,
         # and their reservations aged out into an execution-readiness refusal.
         # Warming at arm time is also what the product should do - a run start
         # is not the place to discover the catalog for the first time.
-        base, auth = gateway
-        fetch_in_process_selection_at(
-            base,
-            desktop_workspace(base),
-            headers={"Authorization": auth},
-            prefer_provider_id="mock",
-            cache=True,
-        )
+        verbs.selection(verbs.workspace_root)
         if warm_first_demand:
-            _warm_first_demand(base, auth)
-        yield gateway
+            verbs.warm_first_demand()
+        yield verbs
 
 
-def _warm_first_demand(base: str, auth: str) -> None:
-    """Pay the gateway-owned worker's cold start at ARM time, then free the slot.
-
-    First demand is the prepare that finds no worker: it triggers the spawn and
-    waits for the new interpreter to import the worker stack and answer. That
-    cost belongs to nobody's reservation. Left inside a scenario's first
-    prepare, it runs INSIDE the admission window the scenarios then reason
-    about - a reservation whose time-to-live is spent waiting for a process to
-    boot, and a commit budget spent the same way - so every timing property
-    proven downstream became a property of how fast the host boots an
-    interpreter. Warming here is also what the product does at arm time.
-
-    The warm-up prepare is released immediately, so the bounded capacity each
-    scenario reasons about is exactly the capacity it was configured with.
-    """
-    run_id = "run-first-demand-warmup"
-    status, prepared = _prepare(base, auth, run_id=run_id)
-    assert status == 201, prepared
-    released_status, released = _release(
-        base, auth, prepared["reservation_id"], run_id=run_id
-    )
-    assert released_status == 201 and released["released"] is True, released
-
-
-def _prepare(
-    base: str,
-    auth: str,
-    *,
-    run_id: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> tuple[int, dict[str, Any]]:
-    """Fire one authenticated prepare and return its status and JSON body.
-
-    Blocks inside the gateway until the single-flight worker start reaches
-    readiness, so parallel calls model concurrent first demand.
-    """
-    workspace = str((metadata or {}).get("workspace_root") or desktop_workspace(base))
-    with httpx.Client(base_url=base, timeout=FIRST_DEMAND_TIMEOUT) as client:
-        resp = client.post(
-            "/v1/runs",
-            headers={"Authorization": auth},
-            json={
-                "team_preset": _PRESET,
-                "stage": "prepare",
-                "autonomous": True,
-                **({"run_id": run_id} if run_id is not None else {}),
-                # The workspace anchors the selection, so it rides even when the
-                # caller declared no metadata of its own.
-                "metadata": {"workspace_root": workspace, **(metadata or {})},
-                "selection": fetch_in_process_selection_at(
-                    base,
-                    workspace,
-                    headers={"Authorization": auth},
-                    prefer_provider_id="mock",
-                    cache=True,
-                ),
-            },
-        )
-    try:
-        payload = resp.json()
-    except json.JSONDecodeError:
-        payload = {"detail": resp.text}
-    return resp.status_code, payload
-
-
-def _commit(
-    base: str,
-    auth: str,
-    reservation_id: str,
-    *,
-    run_id: str | None = None,
-    options: _CommitOptions | None = None,
-) -> tuple[int, dict[str, Any]]:
-    """Fire one authenticated commit binding tokens under *reservation_id*."""
-    roles = options.roles if options is not None else None
-    metadata = options.metadata if options is not None else None
-    workspace = str((metadata or {}).get("workspace_root") or desktop_workspace(base))
-    with httpx.Client(base_url=base, timeout=FIRST_DEMAND_TIMEOUT) as client:
-        resp = client.post(
-            "/v1/runs",
-            headers={"Authorization": auth},
-            json={
-                "team_preset": _PRESET,
-                "stage": "commit",
-                "reservation_id": reservation_id,
-                "message": "build it",
-                "autonomous": True,
-                "actor_tokens": {
-                    "tokens": (
-                        {_REQUIRED_ROLE: "tok-coder"} if roles is None else roles
-                    ),
-                    "engine_bearer": "bearer",
-                },
-                # Commit carries the selection too: it is the stage that creates
-                # the durable run, so it is where the freeze happens. The value
-                # matches prepare's because both read the same cached served
-                # catalog - a replayed commit must be byte-identical to be
-                # recognised as a replay rather than a changed body.
-                "metadata": {"workspace_root": workspace, **(metadata or {})},
-                "selection": fetch_in_process_selection_at(
-                    base,
-                    workspace,
-                    headers={"Authorization": auth},
-                    prefer_provider_id="mock",
-                    cache=True,
-                ),
-                **({"run_id": run_id} if run_id is not None else {}),
-            },
-        )
-    try:
-        payload = resp.json()
-    except json.JSONDecodeError:
-        payload = {"detail": resp.text}
-    return resp.status_code, payload
-
-
-def _release(
-    base: str,
-    auth: str,
-    reservation_id: str,
-    *,
-    run_id: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> tuple[int, dict[str, Any]]:
-    """Explicitly release one uncommitted prepared reservation.
-
-    The release binding is the digest of the PREPARED request, so this body must
-    mirror the prepare that opened the reservation field for field - including
-    the selection and the workspace metadata. A release that omits either is not
-    a weaker request, it is a DIFFERENT one, and the broker refuses to release a
-    reservation it cannot recognise.
-    """
-    workspace = str((metadata or {}).get("workspace_root") or desktop_workspace(base))
-    with httpx.Client(base_url=base, timeout=FIRST_DEMAND_TIMEOUT) as client:
-        resp = client.post(
-            "/v1/runs",
-            headers={"Authorization": auth},
-            json={
-                "team_preset": _PRESET,
-                "stage": "release",
-                "reservation_id": reservation_id,
-                "autonomous": True,
-                **({"run_id": run_id} if run_id is not None else {}),
-                "metadata": {"workspace_root": workspace, **(metadata or {})},
-                "selection": fetch_in_process_selection_at(
-                    base,
-                    workspace,
-                    headers={"Authorization": auth},
-                    prefer_provider_id="mock",
-                    cache=True,
-                ),
-            },
-        )
-    return resp.status_code, resp.json()
-
-
-def _admitted_prepare(base: str, auth: str, run_id: str) -> int | None:
+def _admitted_prepare(verbs: RunVerbs, run_id: str) -> int | None:
     """Fire one prepare; return its status once admitted, ``None`` while refused.
 
     A capacity refusal consumes nothing, so polling this neither holds a slot
     nor disturbs the bound it is waiting on.
     """
-    status, _body = _prepare(base, auth, run_id=run_id)
+    status = verbs.prepare(run_id).status_code
     return status if status != 503 else None
 
 
-def _run_exists(base: str, auth: str, run_id: str) -> bool:
+def _run_exists(verbs: RunVerbs, run_id: str) -> bool:
     """Return whether the gateway has a durable run under *run_id*.
 
     Uses run-status, which returns a run whether it is still active or already
     terminal - robust against a fast mock run completing before the check.
     """
-    with httpx.Client(base_url=base, timeout=LOOPBACK_TIMEOUT) as client:
-        resp = client.get(f"/v1/runs/{run_id}", headers={"Authorization": auth})
+    with httpx.Client(base_url=verbs.base_url, timeout=LOOPBACK_TIMEOUT) as client:
+        resp = client.get(
+            f"/v1/runs/{run_id}", headers={"Authorization": verbs.authorization}
+        )
     return resp.status_code == 200
 
 
-def _active_run_count(base: str, auth: str) -> int:
+def _active_run_count(verbs: RunVerbs) -> int:
     """Return the number of active (non-terminal) runs the gateway discovers."""
-    with httpx.Client(base_url=base, timeout=LOOPBACK_TIMEOUT) as client:
-        resp = client.get("/v1/runs", headers={"Authorization": auth})
+    with httpx.Client(base_url=verbs.base_url, timeout=LOOPBACK_TIMEOUT) as client:
+        resp = client.get("/v1/runs", headers={"Authorization": verbs.authorization})
     assert resp.status_code == 200, resp.text
     return len(resp.json()["runs"])
 
@@ -345,7 +166,7 @@ def test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound(
     # and first-demand budgets already absorb a slow cold start.
     with _admission_gateway(
         tmp_path, warm_first_demand=False, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="2"
-    ) as (base, auth):
+    ) as verbs:
         # --- Concurrent first demand: hard reservation bound, one worker. ---
         # Four real parallel prepares race into the single-flight worker start and
         # the bounded reservation table (capacity two).
@@ -354,7 +175,10 @@ def test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound(
         ), "a worker was already spawned before the race, so it proves nothing"
 
         def _prepare_capacity(index: int) -> tuple[int, int, dict[str, Any]]:
-            return (index, *_prepare(base, auth, run_id=f"run-capacity-{index}"))
+            return (
+                index,
+                *status_and_json(verbs.prepare(f"run-capacity-{index}")),
+            )
 
         with ThreadPoolExecutor(max_workers=4) as pool:
             outcomes: list[tuple[int, int, dict[str, Any]]] = list(
@@ -388,34 +212,28 @@ def test_concurrent_prepare_bounds_capacity_and_commit_is_reservation_bound(
             assert body["lease_id"].startswith("lease-")
 
         # No run - hence no run-owned child - was created by any prepare.
-        assert _active_run_count(base, auth) == 0
+        assert _active_run_count(verbs) == 0
 
         # --- Commit is reservation-bound. ---
         # Committing a live reservation creates exactly one durable run and consumes
         # the reservation; the response carries the run and its non-secret lease.
-        status, body = _commit(
-            base, auth, reservations[0][0], run_id=reservations[0][1]
-        )
+        reservation_id, run_id = reservations[0]
+        status, body = status_and_json(verbs.commit(run_id, reservation_id))
         assert status == 201, (status, body)
         assert body["stage"] == "committed"
         assert body["run_id"] and body["lease_id"].startswith("lease-")
-        assert _run_exists(base, auth, body["run_id"])
+        assert _run_exists(verbs, body["run_id"])
 
         # The exact same stable-id commit is a durable replay, not a second run.
-        again_status, again_body = _commit(
-            base, auth, reservations[0][0], run_id=reservations[0][1]
-        )
+        again_status, again_body = status_and_json(verbs.commit(run_id, reservation_id))
         assert again_status == 201, again_status
         assert again_body["run_id"] == body["run_id"]
         assert again_body["lease_id"] == body["lease_id"]
 
         # A bogus reservation is refused the same way.
-        bogus_status, _ = _commit(
-            base,
-            auth,
-            "resv-deadbeefdeadbeefdeadbeefdeadbeef",
-            run_id="run-bogus-reservation",
-        )
+        bogus_status = verbs.commit(
+            "run-bogus-reservation", "resv-deadbeefdeadbeefdeadbeefdeadbeef"
+        ).status_code
         assert bogus_status == 409, bogus_status
 
 
@@ -437,17 +255,17 @@ def test_reservation_times_out_and_expired_commit_creates_no_run(
         tmp_path,
         VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="2",
         VAULTSPEC_A2A_ADMISSION_RESERVATION_TTL_SECONDS=f"{ttl_s:g}",
-    ) as (base, auth):
+    ) as verbs:
         # Fill the bound: two reservations, then a third refused.
-        first_status, first_body = _prepare(base, auth, run_id="run-expiring-first")
-        second_status, _ = _prepare(base, auth, run_id="run-expiring-second")
-        third_status, _ = _prepare(base, auth, run_id="run-expiring-third")
+        first_status, first_body = status_and_json(verbs.prepare("run-expiring-first"))
+        second_status = verbs.prepare("run-expiring-second").status_code
+        third_status = verbs.prepare("run-expiring-third").status_code
         assert first_status == 201 and second_status == 201, (
             first_status,
             second_status,
         )
         assert third_status == 503, third_status
-        assert _active_run_count(base, auth) == 0
+        assert _active_run_count(verbs) == 0
 
         # Capacity comes back by EXPIRY, observed rather than slept for: keep
         # asking for a slot until one is granted. A refusal costs no capacity,
@@ -456,7 +274,7 @@ def test_reservation_times_out_and_expired_commit_creates_no_run(
         # is bounded by a multiple of the configured lifetime - the product's
         # own number - because expiry cannot take longer than that plus a poll.
         fourth_status = wait_for(
-            lambda: _admitted_prepare(base, auth, "run-expiring-fourth"),
+            lambda: _admitted_prepare(verbs, "run-expiring-fourth"),
             deadline=ProgressDeadline(idle_window_s=ttl_s * 3),
             interval_s=0.5,
         )
@@ -464,56 +282,41 @@ def test_reservation_times_out_and_expired_commit_creates_no_run(
 
         # A commit against the now-expired first reservation is refused and creates
         # no run: a timed-out reservation leaks neither a slot nor a run.
-        expired_status, _ = _commit(
-            base,
-            auth,
-            first_body["reservation_id"],
-            run_id="run-expiring-first",
-        )
+        expired_status = verbs.commit(
+            "run-expiring-first", first_body["reservation_id"]
+        ).status_code
         assert expired_status == 409, expired_status
-        assert _active_run_count(base, auth) == 0
+        assert _active_run_count(verbs) == 0
 
 
-def _prepare_exact_reservation(base: str, auth: str) -> tuple[str, str]:
+def _prepare_exact_reservation(verbs: RunVerbs) -> tuple[str, str]:
     """Create a reservation and reject mismatched commit bindings."""
     run_id = "run-exact-replay"
-    status, prepared = _prepare(base, auth, run_id=run_id)
+    status, prepared = status_and_json(verbs.prepare(run_id))
     assert status == 201, prepared
     reservation_id = prepared["reservation_id"]
 
-    mismatch_status, _ = _commit(
-        base, auth, reservation_id, run_id="run-binding-mismatch"
-    )
-    assert mismatch_status == 409
-    missing_status, _ = _commit(
-        base,
-        auth,
+    mismatch = verbs.commit("run-binding-mismatch", reservation_id)
+    assert mismatch.status_code == 409
+    missing = verbs.commit(run_id, reservation_id, tokens={})
+    assert missing.status_code == 409
+    extra = verbs.commit(
+        run_id,
         reservation_id,
-        run_id=run_id,
-        options=_CommitOptions(roles={}),
+        tokens={_REQUIRED_ROLE: "tok-coder", "unexpected-role": "tok-extra"},
     )
-    assert missing_status == 409
-    extra_status, _ = _commit(
-        base,
-        auth,
-        reservation_id,
-        run_id=run_id,
-        options=_CommitOptions(
-            roles={_REQUIRED_ROLE: "tok-coder", "unexpected-role": "tok-extra"}
-        ),
-    )
-    assert extra_status == 409
-    assert _active_run_count(base, auth) == 0
+    assert extra.status_code == 409
+    assert _active_run_count(verbs) == 0
     return run_id, reservation_id
 
 
 def _assert_exact_replay_and_release(
-    base: str, auth: str, run_id: str, reservation_id: str
+    verbs: RunVerbs, run_id: str, reservation_id: str
 ) -> None:
     """Assert exact replay convergence, then release the committed lease."""
 
     def _commit_replay(_index: int) -> tuple[int, dict[str, Any]]:
-        return _commit(base, auth, reservation_id, run_id=run_id)
+        return status_and_json(verbs.commit(run_id, reservation_id))
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         replays = list(pool.map(_commit_replay, range(2)))
@@ -522,70 +325,58 @@ def _assert_exact_replay_and_release(
     assert len({body["run_id"] for body in bodies}) == 1
     assert len({body["lease_id"] for body in bodies}) == 1
 
-    with httpx.Client(base_url=base, timeout=LOOPBACK_TIMEOUT) as client:
-        response = client.get(f"/v1/runs/{run_id}", headers={"Authorization": auth})
+    with httpx.Client(base_url=verbs.base_url, timeout=LOOPBACK_TIMEOUT) as client:
+        response = client.get(
+            f"/v1/runs/{run_id}", headers={"Authorization": verbs.authorization}
+        )
     assert response.status_code == 200, response.text
     assert response.json()["lease_id"] == bodies[0]["lease_id"]
     assert response.json()["reservation_id"] == reservation_id
-    committed_release_status, committed_release = _release(
-        base, auth, reservation_id, run_id=run_id
+    committed_release_status, committed_release = status_and_json(
+        verbs.release(run_id, reservation_id)
     )
     assert committed_release_status == 201
     assert committed_release["released"] is False
 
 
-def _assert_release_commit_race(base: str, auth: str) -> None:
+def _assert_release_commit_race(verbs: RunVerbs) -> None:
     """Assert commit and release race to one linearized outcome."""
     race_run_id = "run-release-commit-race"
-    race_status, race_prepared = _prepare(base, auth, run_id=race_run_id)
+    race_status, race_prepared = status_and_json(verbs.prepare(race_run_id))
     assert race_status == 201, race_prepared
     race_reservation = race_prepared["reservation_id"]
     with ThreadPoolExecutor(max_workers=2) as pool:
-        commit_future = pool.submit(
-            _commit,
-            base,
-            auth,
-            race_reservation,
-            run_id=race_run_id,
-        )
-        release_future = pool.submit(
-            _release,
-            base,
-            auth,
-            race_reservation,
-            run_id=race_run_id,
-        )
-        commit_outcome = commit_future.result()
-        release_outcome = release_future.result()
+        commit_future = pool.submit(verbs.commit, race_run_id, race_reservation)
+        release_future = pool.submit(verbs.release, race_run_id, race_reservation)
+        commit_outcome = status_and_json(commit_future.result())
+        release_outcome = status_and_json(release_future.result())
     assert release_outcome[0] == 201
     if commit_outcome[0] == 201:
         assert release_outcome[1]["released"] is False
-        assert _run_exists(base, auth, race_run_id)
+        assert _run_exists(verbs, race_run_id)
     else:
         assert commit_outcome[0] == 409
         assert release_outcome[1]["released"] is True
-        assert not _run_exists(base, auth, race_run_id)
+        assert not _run_exists(verbs, race_run_id)
 
 
 def test_exact_commit_replay_role_binding_and_release_are_linearized(
     tmp_path: Path,
 ) -> None:
     """Exact replays converge while mismatches and release stay atomic."""
-    with _admission_gateway(tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="3") as (
-        base,
-        auth,
-    ):
-        run_id, reservation_id = _prepare_exact_reservation(base, auth)
-        _assert_exact_replay_and_release(base, auth, run_id, reservation_id)
+    with _admission_gateway(
+        tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="3"
+    ) as verbs:
+        run_id, reservation_id = _prepare_exact_reservation(verbs)
+        _assert_exact_replay_and_release(verbs, run_id, reservation_id)
 
 
 def test_release_commit_race_is_linearized(tmp_path: Path) -> None:
     """The release/commit race starts with a fresh worker and reservation."""
-    with _admission_gateway(tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="3") as (
-        base,
-        auth,
-    ):
-        _assert_release_commit_race(base, auth)
+    with _admission_gateway(
+        tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="3"
+    ) as verbs:
+        _assert_release_commit_race(verbs)
 
 
 def test_prepare_refuses_when_real_worker_is_not_execution_ready(
@@ -594,14 +385,11 @@ def test_prepare_refuses_when_real_worker_is_not_execution_ready(
     """A cold externally managed worker yields no reservation or durable run."""
     with _admission_gateway(
         tmp_path, warm_first_demand=False, VAULTSPEC_A2A_AUTO_SPAWN_WORKER="false"
-    ) as (
-        base,
-        auth,
-    ):
-        status, body = _prepare(base, auth, run_id="run-worker-not-ready")
+    ) as verbs:
+        status, body = status_and_json(verbs.prepare("run-worker-not-ready"))
         assert status == 503, body
         assert body["detail"] == "run admission is not execution-ready"
-        assert _active_run_count(base, auth) == 0
+        assert _active_run_count(verbs) == 0
 
 
 def test_pre_durability_commit_failure_restores_reservation_for_release(
@@ -610,43 +398,35 @@ def test_pre_durability_commit_failure_restores_reservation_for_release(
     """A real post-authorization conflict restores the prepared authority."""
     owner_run_id = "run-nickname-owner"
     failed_run_id = "run-pre-durability-failure"
-    with _admission_gateway(tmp_path) as (base, auth):
+    with _admission_gateway(tmp_path) as verbs:
         metadata = {
-            "workspace_root": desktop_workspace(base),
+            "workspace_root": verbs.workspace_root,
             "nickname": "post-authorization-conflict",
         }
-        owner_status, owner_prepared = _prepare(
-            base, auth, run_id=owner_run_id, metadata=metadata
+        owner_status, owner_prepared = status_and_json(
+            verbs.prepare(owner_run_id, metadata=metadata)
         )
         assert owner_status == 201, owner_prepared
-        owner_commit_status, owner_commit = _commit(
-            base,
-            auth,
-            owner_prepared["reservation_id"],
-            run_id=owner_run_id,
-            options=_CommitOptions(metadata=metadata),
+        owner_commit_status, owner_commit = status_and_json(
+            verbs.commit(
+                owner_run_id, owner_prepared["reservation_id"], metadata=metadata
+            )
         )
         assert owner_commit_status == 201, owner_commit
 
-        status, prepared = _prepare(base, auth, run_id=failed_run_id, metadata=metadata)
+        status, prepared = status_and_json(
+            verbs.prepare(failed_run_id, metadata=metadata)
+        )
         assert status == 201, prepared
         reservation_id = prepared["reservation_id"]
 
-        commit_status, conflict = _commit(
-            base,
-            auth,
-            reservation_id,
-            run_id=failed_run_id,
-            options=_CommitOptions(metadata=metadata),
+        commit_status, conflict = status_and_json(
+            verbs.commit(failed_run_id, reservation_id, metadata=metadata)
         )
         assert commit_status == 409, conflict
         assert "nickname already exists" in conflict["detail"]
-        release_status, released = _release(
-            base,
-            auth,
-            reservation_id,
-            run_id=failed_run_id,
-            metadata=metadata,
+        release_status, released = status_and_json(
+            verbs.release(failed_run_id, reservation_id, metadata=metadata)
         )
         assert release_status == 201
         assert released["released"] is True
@@ -657,34 +437,28 @@ def test_gateway_restart_recovers_durable_lease_and_exact_commit_replay(
 ) -> None:
     """A new gateway process recovers one run and lease without redispatch."""
     app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
+    seat_app_home(app_home)
     run_id = "run-restart-recovery"
 
-    with _running_gateway(tmp_path, app_home, log_name="gateway-first.log") as (
-        base,
-        auth,
-    ):
-        status, prepared = _prepare(base, auth, run_id=run_id)
+    with _running_gateway(tmp_path, app_home, log_name="gateway-first.log") as verbs:
+        status, prepared = status_and_json(verbs.prepare(run_id))
         assert status == 201, prepared
         reservation_id = prepared["reservation_id"]
-        committed_status, committed = _commit(base, auth, reservation_id, run_id=run_id)
+        committed_status, committed = status_and_json(
+            verbs.commit(run_id, reservation_id)
+        )
         assert committed_status == 201, committed
         lease_id = committed["lease_id"]
 
-    with _running_gateway(tmp_path, app_home, log_name="gateway-second.log") as (
-        base,
-        auth,
-    ):
-        with httpx.Client(base_url=base, timeout=LOOPBACK_TIMEOUT) as client:
+    with _running_gateway(tmp_path, app_home, log_name="gateway-second.log") as verbs:
+        with httpx.Client(base_url=verbs.base_url, timeout=LOOPBACK_TIMEOUT) as client:
             status_response = client.get(
-                f"/v1/runs/{run_id}", headers={"Authorization": auth}
+                f"/v1/runs/{run_id}", headers={"Authorization": verbs.authorization}
             )
         assert status_response.status_code == 200, status_response.text
         assert status_response.json()["lease_id"] == lease_id
 
-        replay_status, replay = _commit(base, auth, reservation_id, run_id=run_id)
+        replay_status, replay = status_and_json(verbs.commit(run_id, reservation_id))
         assert replay_status == 201, replay
         assert replay["run_id"] == run_id
         assert replay["lease_id"] == lease_id
@@ -699,10 +473,13 @@ def test_v1_write_body_is_rejected_before_unbounded_json_parsing(
     tmp_path: Path,
 ) -> None:
     """The live production gateway caps authenticated v1 write-body memory."""
-    with _admission_gateway(tmp_path) as (base, auth):
+    with _admission_gateway(tmp_path) as verbs:
         response = httpx.post(
-            f"{base}/v1/runs",
-            headers={"Authorization": auth, "Content-Type": "application/json"},
+            f"{verbs.base_url}/v1/runs",
+            headers={
+                "Authorization": verbs.authorization,
+                "Content-Type": "application/json",
+            },
             content=b" " * (1024 * 1024 + 1),
             timeout=10,
         )

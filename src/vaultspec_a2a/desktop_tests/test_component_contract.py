@@ -31,7 +31,7 @@ from ..desktop import (
     ComponentIdentity,
     export_component_manifest_schema,
 )
-from ..tests.gateway_boot import clean_subprocess_environment
+from ..testing import clean_subprocess_environment
 
 _PROJECT_ROOT: Final = Path(__file__).resolve().parents[3]
 _SCHEMA_SNAPSHOT: Final = _PROJECT_ROOT / "schemas" / "desktop-capsule-manifest.json"

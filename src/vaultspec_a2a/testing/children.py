@@ -50,6 +50,7 @@ __all__ = [
     "child_tree_progress",
     "file_size_fingerprint",
     "measured_child_startup_s",
+    "reap_tree",
     "run_child",
 ]
 
@@ -176,7 +177,7 @@ def await_child(
                 msg = f"still running after its {ceiling_s:.0f}s ceiling"
                 raise ProgressStalledError(msg)
         except ProgressStalledError as stalled:
-            _reap_tree(process.pid)
+            reap_tree(process.pid)
             with contextlib.suppress(subprocess.TimeoutExpired):
                 process.wait(timeout=5.0)
             context = "" if diagnostic is None else f"\n{diagnostic()}"
@@ -186,21 +187,31 @@ def await_child(
         time.sleep(_POLL_INTERVAL_S)
 
 
-def _reap_tree(pid: int) -> None:
+def reap_tree(
+    pid: int, *, term_timeout: float = 10.0, kill_timeout: float = 5.0
+) -> None:
     """Kill *pid*'s tree through the shared primitive, from any calling context.
 
     The primitive is asynchronous. Called from a test that is itself running an
-    event loop, ``asyncio.run`` would refuse and leave the wedged tree alive, so
-    the reap then runs on a thread with a loop of its own.
+    event loop, ``asyncio.run`` would refuse and leave the tree alive, so the
+    reap then runs on a thread with a loop of its own. *term_timeout* and
+    *kill_timeout* are the primitive's graceful and forced phases.
     """
     from ..utils import kill_pid_tree_async
+
+    def _reap() -> None:
+        asyncio.run(
+            kill_pid_tree_async(
+                pid, term_timeout=term_timeout, kill_timeout=kill_timeout
+            )
+        )
 
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        asyncio.run(kill_pid_tree_async(pid))
+        _reap()
         return
-    reaper = threading.Thread(target=lambda: asyncio.run(kill_pid_tree_async(pid)))
+    reaper = threading.Thread(target=_reap)
     reaper.start()
     reaper.join()
 

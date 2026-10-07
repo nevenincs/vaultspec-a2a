@@ -22,9 +22,8 @@ import pytest
 
 from ...cli.provision import provision_workspace
 from ...team.team_config import load_team_config
-from ...testing import async_catalog_run_fields
+from ...testing import async_catalog_run_fields, serve_on_loopback
 from .conftest import SessionFactory, make_app
-from .test_gateway_live import _live_server
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -98,7 +97,7 @@ async def test_unprovisioned_workspace_refused_at_run_start(
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=30.0) as client,
     ):
         resp = await client.post(
@@ -127,7 +126,7 @@ async def test_unprovisioned_preset_discovery_exposes_no_runtime_policy(
     """Preset discovery stays descriptive; run admission owns harness readiness."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=30.0) as client,
     ):
         resp = await client.get("/v1/presets", params={"workspace_root": str(tmp_path)})
@@ -150,7 +149,7 @@ async def test_provisioned_workspace_clears_the_harness_gate_at_run_start(
 
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=30.0) as client,
     ):
         resp = await client.post(
@@ -176,7 +175,7 @@ async def test_provisioned_preset_discovery_exposes_no_runtime_policy(
 
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=30.0) as client,
     ):
         resp = await client.get("/v1/presets", params={"workspace_root": str(ws)})
@@ -228,7 +227,7 @@ async def test_workspaceless_authoring_run_is_refused(
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=30.0) as client,
     ):
         resp = await client.post(

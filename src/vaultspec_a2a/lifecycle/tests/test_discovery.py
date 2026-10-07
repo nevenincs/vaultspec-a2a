@@ -12,22 +12,22 @@ import json
 import os
 import socket
 import subprocess
-import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-import uvicorn
 from fastapi import FastAPI
 
 if TYPE_CHECKING:
-    from types import TracebackType
+    from collections.abc import Generator
 
     from ...conftest import ExternalPrerequisiteRule
 
 from ...desktop._platform_acl import windows_file_is_restricted
+from ...testing import serve_on_loopback_in_thread
 from ..discovery import (
     DiscoveryState,
     another_resident_is_live,
@@ -55,40 +55,19 @@ def test_port_has_listener_true_on_a_real_listener_false_on_a_free_port() -> Non
     assert port_has_listener(bound_port, timeout=0.5) is False
 
 
-class _HealthServer:
-    """A real uvicorn server exposing only ``/health`` on an ephemeral port."""
+@contextmanager
+def _health_server(*, ready: bool = True) -> Generator[int]:
+    """Serve a real uvicorn app exposing only ``/health``; yield its port."""
+    app = FastAPI()
 
-    def __init__(self, *, ready: bool = True) -> None:
-        app = FastAPI()
+    @app.get("/health")
+    async def _health() -> dict[str, object]:
+        return {"status": "ok", "ready": ready, "pid": os.getpid()}
 
-        @app.get("/health")
-        async def _health() -> dict[str, object]:
-            return {"status": "ok", "ready": ready, "pid": os.getpid()}
-
-        config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
-        self._server = uvicorn.Server(config)
-        self._thread = threading.Thread(target=self._server.run, daemon=True)
-        self.port = 0
-
-    def __enter__(self) -> _HealthServer:
-        self._thread.start()
-        for _ in range(500):
-            if self._server.started and self._server.servers:
-                break
-            time.sleep(0.01)
-        if not (self._server.started and self._server.servers):
-            raise RuntimeError("health server did not start")
-        self.port = self._server.servers[0].sockets[0].getsockname()[1]
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        self._server.should_exit = True
-        self._thread.join(timeout=5.0)
+    with serve_on_loopback_in_thread(app, lifespan="auto") as base:
+        port = httpx.URL(base).port
+        assert port is not None
+        yield port
 
 
 def test_classifier_covers_absent_fresh_stale_malformed(tmp_path: Path) -> None:
@@ -261,17 +240,15 @@ def test_stale_pid_is_not_a_live_resident(tmp_path: Path) -> None:
 
 
 def test_single_resident_true_only_when_fresh_live_and_healthy(tmp_path: Path) -> None:
-    with _HealthServer() as server:
+    with _health_server() as port:
         path = service_json_path(tmp_path)
-        write_service_json(
-            path, port=server.port, pid=os.getpid(), allow_tokenless=True
-        )
+        write_service_json(path, port=port, pid=os.getpid(), allow_tokenless=True)
         # Fresh record + our (live) pid + a real answering /health = live resident.
         assert another_resident_is_live(tmp_path) is True
 
         state, info = read_resident_service(tmp_path)
         assert state is DiscoveryState.FRESH
-        assert info is not None and info.port == server.port
+        assert info is not None and info.port == port
 
     # Server stopped: the /health probe now fails, so no live resident.
     assert another_resident_is_live(tmp_path) is False
@@ -279,12 +256,10 @@ def test_single_resident_true_only_when_fresh_live_and_healthy(tmp_path: Path) -
 
 def test_health_while_degraded_still_counts_as_resident(tmp_path: Path) -> None:
     """A degraded gateway (ready=false) is still a live resident: /health answers."""
-    with _HealthServer(ready=False) as server:
+    with _health_server(ready=False) as port:
         path = service_json_path(tmp_path)
-        write_service_json(
-            path, port=server.port, pid=os.getpid(), allow_tokenless=True
-        )
-        body = httpx.get(f"http://127.0.0.1:{server.port}/health", timeout=2.0).json()
+        write_service_json(path, port=port, pid=os.getpid(), allow_tokenless=True)
+        body = httpx.get(f"http://127.0.0.1:{port}/health", timeout=2.0).json()
         assert body["ready"] is False
         assert another_resident_is_live(tmp_path) is True
 

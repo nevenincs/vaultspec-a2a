@@ -25,7 +25,6 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-import uvicorn
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from pydantic import TypeAdapter
 from starlette.applications import Starlette
@@ -36,8 +35,7 @@ from ...authoring.catalog import CATALOG_SCHEMA_VERSION, parse_catalog
 from ...control.config import settings
 from ...graph.enums import Provider
 from ...protocols.mcp.tools.authoring_bridge import build_authoring_mcp_server
-from ...testing import read_acp_frame
-from ...testing.ports import free_port
+from ...testing import read_acp_frame, serve_on_loopback_in_thread
 from ...workspace.environment import resolve_env_vars
 from .._acp_authoring import AuthoringToolBinding, build_authoring_mcp_servers
 from .._claude_tool_policy import claude_bypass_declined_meta
@@ -67,19 +65,17 @@ _CATALOG: JsonObject = {
 
 
 class _AuthoringHttpServer:
-    """Serve the committed authoring MCP server over streamable HTTP in a thread."""
+    """The committed authoring MCP server, served over streamable HTTP."""
 
     def __init__(self) -> None:
-        self.port = free_port()
+        self.base_url = ""
         self.connected = threading.Event()
-        self._uvicorn: uvicorn.Server | None = None
-        self._thread: threading.Thread | None = None
 
     @property
     def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}/mcp"
+        return f"{self.base_url}/mcp"
 
-    def _app(self) -> Starlette:
+    def build_app(self) -> Starlette:
         async def _dispatch(
             name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
         ) -> dict[str, Any]:
@@ -106,34 +102,17 @@ class _AuthoringHttpServer:
 
         return Starlette(lifespan=lifespan, routes=[Mount("/mcp", app=handle)])
 
-    async def start(self) -> None:
-        config = uvicorn.Config(
-            self._app(), host="127.0.0.1", port=self.port, log_level="error"
-        )
-        self._uvicorn = uvicorn.Server(config)
-        self._thread = threading.Thread(target=self._uvicorn.run, daemon=True)
-        self._thread.start()
-        for _ in range(50):
-            if self._uvicorn.started:
-                return
-            await asyncio.sleep(0.1)
-        raise RuntimeError("authoring MCP HTTP server did not start")
-
-    async def stop(self) -> None:
-        if self._uvicorn is not None:
-            self._uvicorn.should_exit = True
-        if self._thread is not None:
-            await asyncio.to_thread(self._thread.join, 5.0)
-
 
 @pytest_asyncio.fixture
 async def authoring_http() -> AsyncGenerator[_AuthoringHttpServer]:
+    # Served from its own thread: the agent connects back while this test's loop
+    # is busy driving the agent's process.
     server = _AuthoringHttpServer()
-    await server.start()
-    try:
+    with serve_on_loopback_in_thread(
+        server.build_app(), lifespan="auto", log_level="error"
+    ) as base:
+        server.base_url = base
         yield server
-    finally:
-        await server.stop()
 
 
 @pytest.mark.service

@@ -432,6 +432,12 @@ LINT = Verb(
             (dev_module("guards.storage_anchors"),),
         ),
         Target(
+            "duplication",
+            "JSCPD blocking scan (Q.2): every tier plus dev/, against the "
+            "adjudicated baseline.",
+            (dev_module("audit.duplication", "--blocking"),),
+        ),
+        Target(
             "dependencies",
             "Deptry dependency-declaration drift.",
             (uv_run("deptry", "."),),
@@ -493,6 +499,11 @@ LINT = Verb(
             # which is a burndown, and lived in `strict` and `audit` until it
             # reached zero; all three now hold that line without a baseline or
             # exclusion behind any of the three numbers.
+            #
+            # `duplication` (Q.2) GRADUATED on arrival: it holds zero new and
+            # zero stale against its adjudicated baseline from the run that
+            # wrote the baseline, the same bar every other entry here met
+            # before joining, not an exception to it.
             tuple(
                 Ref(name)
                 for name in (
@@ -511,6 +522,7 @@ LINT = Verb(
                     "toml",
                     "workflow",
                     "shell",
+                    "duplication",
                 )
             ),
             keep_going=True,
@@ -539,6 +551,7 @@ LINT = Verb(
                     "toml",
                     "workflow",
                     "shell",
+                    "duplication",
                 )
             ),
             keep_going=True,

@@ -1,0 +1,204 @@
+{
+  "categories": {
+    "test-arrangement-rhyme": "Two tests of one surface, or two phases of one scenario, sharing an arrange/act block above jscpd's token threshold. This repository's own policy already treats this as the expected shape of test code, not debt (see the sibling AST structural-duplication guard's _ACCEPTED_TESTS): collapsing it into one parametrized case would hide which configuration or phase failed.",
+    "migration-revision-boilerplate": "Each Alembic revision under database/migrations/versions/ is an immutable record of one schema change. The shared column, index and CHECK scaffolding across revisions is the migration convention, not debt: making a later revision depend on an earlier one's helper would break replay independence.",
+    "owed-test-fixture-fold": "Known debt, not accepted design. Each entry duplicates a helper, fixture builder or seeding routine that already exists (or belongs) elsewhere. Adjudicated here only because the duplicating file sits outside this guard's owned scope, and reported to the orchestrator as residue in the Step that widened this gate. Removing an entry without actually folding the duplicate it names is misuse of this category."
+  },
+  "accepted": [
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 27,
+      "first": {"path": "src/vaultspec_a2a/api/tests/test_clarification_edge.py", "start": 80},
+      "second": {"path": "src/vaultspec_a2a/api/tests/test_clarification_edge.py", "start": 431}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 27,
+      "first": {"path": "src/vaultspec_a2a/api/tests/test_clarification_edge.py", "start": 80},
+      "second": {"path": "src/vaultspec_a2a/api/tests/test_clarification_relay_sse.py", "start": 89}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 21,
+      "first": {"path": "src/vaultspec_a2a/api/tests/test_clarification_relay_sse.py", "start": 162},
+      "second": {"path": "src/vaultspec_a2a/api/tests/test_clarification_relay_sse.py", "start": 214}
+    },
+    {
+      "category": "owed-test-fixture-fold",
+      "lines": 22,
+      "first": {"path": "src/vaultspec_a2a/api/tests/test_gateway_live.py", "start": 1100},
+      "second": {"path": "src/vaultspec_a2a/testing/seeding.py", "start": 278},
+      "note": "Re-derives the checkpoint-writing body of testing.seeding.seed_completed_authority inline instead of calling the landed seeding helper."
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 21,
+      "first": {"path": "src/vaultspec_a2a/api/tests/test_internal.py", "start": 354},
+      "second": {"path": "src/vaultspec_a2a/api/tests/test_internal.py", "start": 543}
+    },
+    {
+      "category": "owed-test-fixture-fold",
+      "lines": 21,
+      "first": {"path": "src/vaultspec_a2a/api/tests/test_thread_state_service.py", "start": 30},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_authoring_completion_check.py", "start": 36},
+      "note": "Both modules define their own private _snapshot() projection helper, identical body; a shared test helper would serve both."
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 21,
+      "first": {"path": "src/vaultspec_a2a/api/tests/test_thread_stream.py", "start": 57},
+      "second": {"path": "src/vaultspec_a2a/api/tests/test_thread_stream.py", "start": 189}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 29,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_active_project_identity.py", "start": 706},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_active_project_identity.py", "start": 761}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 31,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_active_project_identity.py", "start": 706},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_active_project_identity.py", "start": 807}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 22,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_direct_control_leases.py", "start": 108},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_direct_control_leases.py", "start": 177}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 31,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 107},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 322}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 30,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 108},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 273}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 22,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 117},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 332}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 40,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_event_handlers.py", "start": 680},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_event_handlers.py", "start": 798}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 21,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_event_handlers.py", "start": 718},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_event_handlers.py", "start": 838}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 21,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py", "start": 332},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py", "start": 406}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 33,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py", "start": 452},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py", "start": 520}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 22,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 340},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 390}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 21,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 340},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 441}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 21,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 340},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 632}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 22,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 389},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 485}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 27,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_verdict_subscriber.py", "start": 135},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py", "start": 511}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 22,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py", "start": 648},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py", "start": 761}
+    },
+    {
+      "category": "migration-revision-boilerplate",
+      "lines": 31,
+      "first": {"path": "src/vaultspec_a2a/database/migrations/versions/0006_task_queue_entries.py", "start": 22},
+      "second": {"path": "src/vaultspec_a2a/database/migrations/versions/0026_remediation_schema_retirement.py", "start": 291}
+    },
+    {
+      "category": "migration-revision-boilerplate",
+      "lines": 38,
+      "first": {"path": "src/vaultspec_a2a/database/migrations/versions/0008_active_run_selectors.py", "start": 101},
+      "second": {"path": "src/vaultspec_a2a/database/migrations/versions/0009_active_run_partial_indexes.py", "start": 102}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 26,
+      "first": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py", "start": 623},
+      "second": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py", "start": 692}
+    },
+    {
+      "category": "owed-test-fixture-fold",
+      "lines": 25,
+      "first": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_worker_authoring_wiring.py", "start": 92},
+      "second": {"path": "src/vaultspec_a2a/providers/tests/test_codex_config_home.py", "start": 573},
+      "note": "Both build the same two-tool AuthoringToolBinding/CatalogSnapshot fixture by hand; a shared authoring-binding test builder would serve both."
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 25,
+      "first": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_worker_authoring_wiring.py", "start": 128},
+      "second": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_worker_authoring_wiring.py", "start": 208}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 21,
+      "first": {"path": "src/vaultspec_a2a/streaming/tests/test_stream_connection_cap.py", "start": 11},
+      "second": {"path": "src/vaultspec_a2a/streaming/tests/test_subscription_cap.py", "start": 10}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 21,
+      "first": {"path": "src/vaultspec_a2a/worker/tests/test_authoring_binding.py", "start": 239},
+      "second": {"path": "src/vaultspec_a2a/worker/tests/test_authoring_binding.py", "start": 290}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 21,
+      "first": {"path": "src/vaultspec_a2a/worker/tests/test_executor.py", "start": 769},
+      "second": {"path": "src/vaultspec_a2a/worker/tests/test_executor.py", "start": 1122}
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 22,
+      "first": {"path": "src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py", "start": 82},
+      "second": {"path": "src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py", "start": 318}
+    }
+  ]
+}

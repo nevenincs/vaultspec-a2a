@@ -363,6 +363,13 @@ check-imports:
 check-anchors:
     {{dev}} lint anchors
 
+# Gate copy-paste clones against the adjudicated baseline (Q.2): blocking,
+# every tier plus dev/. `audit-duplication` below is the separate advisory
+# production-only measurement (duplicated-line percentage, uncapped listing).
+[group('check')]
+check-duplication:
+    {{dev}} lint duplication
+
 # Gate the declared dependency surface.
 [group('check')]
 check-dependencies:

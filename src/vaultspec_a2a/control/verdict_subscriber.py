@@ -53,6 +53,7 @@ from ..database import (
     update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest, to_dispatch_action
+from ..thread import ApprovalVerdict
 from ..thread.dispatch_policy import evaluate_dispatch_failure
 from ..thread.enums import (
     VERDICT_APPROVED,
@@ -121,20 +122,6 @@ class _VerdictSetup:
     current_gate: str
     resume_value: dict[str, object]
     graph_definition: FrozenGraphDefinition
-
-
-def _verdict_resume_payload(
-    verdict: str, notes: str | None, *, request_id: str
-) -> dict[str, object]:
-    """Return the typed durable payload dispatched for a verdict resume.
-
-    The request is the proposal the run is CURRENTLY parked at, which is also
-    what gate-precision matched the verdict on. Naming it in the payload is
-    what lets the gate make the same check the dispatcher did: a resume that
-    arrives after the run re-parked at a later gate is recognised there rather
-    than consumed as that gate's decision.
-    """
-    return {"verdict": verdict, "notes": notes, "request_id": request_id}
 
 
 async def settle_verdict_dispatch_receipt(
@@ -537,7 +524,9 @@ class VerdictSubscriber:
             )
             return
 
-        resume_value = _verdict_resume_payload(verdict, notes, request_id=current_gate)
+        resume_value = ApprovalVerdict(
+            request_id=current_gate, verdict=verdict, notes=notes
+        ).as_resume_value()
         dispatch = DispatchRequest(
             action=to_dispatch_action(ControlActionType.RESUME),
             thread_id=thread_id,

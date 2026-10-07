@@ -366,7 +366,7 @@ async def _ingest_live_verdict_run(
         )
         await record_permission_request(
             db,
-            request_id=f"{context.identity.thread_id}:verdict-loop-gate",
+            request_id=context.identity.info["proposal_id"],
             thread_id=context.identity.thread_id,
             pause_reason_type="document_approval_request",
             description="Approve the test document",
@@ -443,7 +443,7 @@ async def _resume_live_verdict_run(
     # The durable gate row resolved and the thread left INPUT_REQUIRED.
     async with context.resources.session_factory() as db:
         gate_row = await get_permission_request(
-            db, f"{context.identity.thread_id}:verdict-loop-gate"
+            db, context.identity.info["proposal_id"]
         )
         assert gate_row is not None
         assert gate_row.request_status == PermissionRequestStatus.APPLIED.value

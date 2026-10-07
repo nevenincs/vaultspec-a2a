@@ -170,7 +170,6 @@ class CodexChatModel(ProcessChatModel):
     command_target: str | None = None
     version_proof_required: bool = Field(default=False, exclude=True)
 
-    _active_turns: set[tuple[str, str]] = PrivateAttr(default_factory=set)
     _runtime_identity: RuntimeIdentityBinding | None = PrivateAttr(default=None)
     _native_workspace: NativeWorkspaceAuthority | None = PrivateAttr(default=None)
 
@@ -425,10 +424,6 @@ class CodexChatModel(ProcessChatModel):
             env["CODEX_HOME"] = codex_home
         return env
 
-    def active_native_control_targets(self) -> tuple[tuple[str, str], ...]:
-        """Return the exact Codex thread/turn pairs this instance currently owns."""
-        return tuple(sorted(self._active_turns))
-
     @override
     async def _provider_astream(
         self,
@@ -585,18 +580,9 @@ class CodexChatModel(ProcessChatModel):
                     "codex_turn_id": turn_id,
                 },
             )
-            active_key = (thread_id, turn_id)
-            if active_key in self._active_turns:
-                raise _CodexProtocolError(
-                    "codex app-server reused an active thread/turn identity"
-                )
-            self._active_turns.add(active_key)
-            try:
-                async with aclosing(self._consume_turn(client, thread_id)) as stream:
-                    async for chunk in stream:
-                        yield chunk
-            finally:
-                self._active_turns.discard(active_key)
+            async with aclosing(self._consume_turn(client, thread_id)) as stream:
+                async for chunk in stream:
+                    yield chunk
         finally:
             # Independent cleanup: a failure reaping the app-server session must
             # not skip removing the per-run CODEX_HOME (it holds a copied

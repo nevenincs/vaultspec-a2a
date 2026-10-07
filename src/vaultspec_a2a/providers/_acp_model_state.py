@@ -4,11 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, cast
 
-from ._acp_types import (
-    AcpModelConfig,
-    AcpResponseFutures,
-    NativeCommandDisposition,
-)
+from ._acp_types import AcpModelConfig, AcpResponseFutures
 from ._json_contract import JsonObject
 
 
@@ -62,21 +58,6 @@ class AcpModelState:
                 session_busy=previous.session.session_busy,
             ),
         )
-
-
-@dataclass(frozen=True, slots=True)
-class NativeCommandRequest:
-    name: str
-    arguments: str | None
-
-
-class NativeCommandUnavailableError(RuntimeError):
-    def __init__(
-        self, name: str, disposition: NativeCommandDisposition, reason: str
-    ) -> None:
-        super().__init__(reason)
-        self.name = name
-        self.disposition = disposition
 
 
 class AcpSessionBusyError(RuntimeError):

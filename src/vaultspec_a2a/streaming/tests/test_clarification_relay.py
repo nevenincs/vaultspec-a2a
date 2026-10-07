@@ -38,9 +38,9 @@ from ...thread.clarification import (
     ClarificationRequest,
 )
 from ...thread.constants import MAX_REQUEST_ID_CHARS
+from .._interrupt_projection import emit_interrupt_events
 from ..aggregator import EventAggregator
 from ..sse_frames import enforce_progress_allowlist
-from ..transformer import emit_interrupt_events
 
 if TYPE_CHECKING:
     from ...thread.state import TeamState

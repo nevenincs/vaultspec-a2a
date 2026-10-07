@@ -28,7 +28,7 @@ from ...graph.nodes.clarification import (
     create_clarification_gate_node,
     create_clarification_request_node,
 )
-from ...streaming.transformer import emit_interrupt_events
+from ...streaming._interrupt_projection import emit_interrupt_events
 from ...testing import (
     add_test_node,
     async_catalog_run_fields,

@@ -9,7 +9,6 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 
 from ..database import (
@@ -37,6 +36,7 @@ from ..thread.enums import (
     RepairStatus,
     ThreadStatus,
 )
+from ..utils.coercion import decode_json_object
 from .accepted_input import (
     AcceptedActionInput,
     ActorCredentialsRequiredError,
@@ -74,7 +74,6 @@ if TYPE_CHECKING:
 __all__ = ["DirectControlRecoverySummary", "redrive_direct_control_actions"]
 
 logger = logging.getLogger(__name__)
-_JSON_OBJECT = TypeAdapter(dict[str, object])
 _RECOVERY_PAGE_SIZE = 64
 _RECOVERY_CLAIM_TTL = timedelta(seconds=45)
 
@@ -137,7 +136,7 @@ async def _expire_overdue_actions(
             ),
             thread_id=row.thread_id,
             action_type=row.action_type,
-            payload=_decode_payload(row.payload_json) or {},
+            payload=decode_json_object(row.payload_json) or {},
             worker_generation=row.worker_generation,
             recovery_deadline_at=row.recovery_deadline_at,
         )
@@ -194,15 +193,6 @@ class _StoredAction:
     payload: dict[str, object]
     worker_generation: int
     recovery_deadline_at: datetime
-
-
-def _decode_payload(encoded: str | None) -> dict[str, object] | None:
-    if encoded is None:
-        return None
-    try:
-        return _JSON_OBJECT.validate_json(encoded)
-    except ValidationError:
-        return None
 
 
 async def _reconstruct_dispatch(
@@ -678,7 +668,7 @@ async def _redrive_one_claim(
             thread_id=recovery_claim.thread_id,
             dispatch_id=recovery_claim.authority.action_receipt_id,
         )
-        payload = _decode_payload(row.payload_json) if row is not None else None
+        payload = decode_json_object(row.payload_json) if row is not None else None
         if (
             row is None
             or payload is None

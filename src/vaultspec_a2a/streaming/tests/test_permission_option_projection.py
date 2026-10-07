@@ -23,8 +23,8 @@ from ...graph.acp_options import option_kind
 from ...graph.enums import PermissionOptionKind
 from ...graph.events import PermissionRequest
 from ...testing import add_test_node, compile_test_graph, new_state_graph
+from .._interrupt_projection import emit_interrupt_events
 from ..aggregator import EventAggregator
-from ..transformer import emit_interrupt_events
 
 if TYPE_CHECKING:
     from ..types import SequencedEvent, StreamableGraph

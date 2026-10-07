@@ -38,7 +38,7 @@ from ..thread.snapshots import (
     is_permission_event,
     is_terminal_event,
 )
-from ..utils.coercion import coerce_object_mapping
+from ..utils.coercion import coerce_object_mapping, decode_json_object
 from ._event_application import (
     apply_permission_resolution as _apply_permission_resolution,
 )
@@ -83,7 +83,6 @@ _RUN_LEASE_METADATA_KEY = "run_lease"
 # Strong references to in-flight settlement callbacks so a fire-and-forget task is
 # not garbage-collected before it completes; each removes itself when done.
 _settlement_tasks: set[asyncio.Task[None]] = set()
-_JSON_OBJECT = TypeAdapter(dict[str, object])
 _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
 
 
@@ -262,14 +261,6 @@ def _skip_without_database(what: str, thread_id: str) -> None:
     )
 
 
-def _json_object(encoded: str) -> dict[str, object] | None:
-    """Decode a JSON object without leaking untyped decoder output."""
-    try:
-        return _JSON_OBJECT.validate_json(encoded)
-    except ValidationError:
-        return None
-
-
 def _option_mappings(value: object) -> list[dict[str, object]]:
     """Keep only bounded, string-keyed permission option objects."""
     try:
@@ -337,7 +328,7 @@ async def _read_run_lease(
         thread = await get_thread(db, thread_id)
     if thread is None or not thread.thread_metadata:
         return None
-    data = _json_object(thread.thread_metadata)
+    data = decode_json_object(thread.thread_metadata)
     if data is None:
         return None
     lease = coerce_object_mapping(data.get(_RUN_LEASE_METADATA_KEY))

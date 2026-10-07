@@ -1776,12 +1776,12 @@ class TestExports:
 
 
 # ---------------------------------------------------------------------------
-# Interrupt detection: _emit_interrupt_events
+# Interrupt detection: emit_interrupt_events
 # ---------------------------------------------------------------------------
 
 
 class TestEmitInterruptEvents:
-    """Tests for _emit_interrupt_events called via ingest() finally block.
+    """Tests for emit_interrupt_events called via ingest() finally block.
 
     Every scenario below suspends a REAL compiled graph on a real ``interrupt()``
     call (see ``_error_injecting_graph``), so both the stream's own park report

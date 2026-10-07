@@ -118,6 +118,34 @@ from .permission_repository import (
 from .permission_repository import (
     supersede_permission_requests as supersede_permission_requests,
 )
+from .recovery_attempt_repository import RecoveryFailureArgs as RecoveryFailureArgs
+from .recovery_attempt_repository import (
+    RecoveryRescheduleArgs as RecoveryRescheduleArgs,
+)
+from .recovery_attempt_repository import (
+    claim_recovery_attempt as claim_recovery_attempt,
+)
+from .recovery_attempt_repository import (
+    due_recovery_attempt_ids as due_recovery_attempt_ids,
+)
+from .recovery_attempt_repository import (
+    release_recovery_claim as release_recovery_claim,
+)
+from .recovery_attempt_repository import (
+    reschedule_recovery_claim as reschedule_recovery_claim,
+)
+from .recovery_attempt_repository import (
+    schedule_recovery_attempt as schedule_recovery_attempt,
+)
+from .recovery_attempt_repository import (
+    settle_expired_recovery_attempt as settle_expired_recovery_attempt,
+)
+from .recovery_attempt_repository import (
+    settle_recovery_claim as settle_recovery_claim,
+)
+from .recovery_attempt_repository import (
+    unscheduled_recovery_actions as unscheduled_recovery_actions,
+)
 from .run_event_repository import RunEventRecord as RunEventRecord
 from .run_event_repository import RunEventStore as RunEventStore
 from .runtime_identity_repository import (
@@ -197,6 +225,8 @@ __all__ = [
     "PermissionLogModel",
     "PermissionRequestModel",
     "RecoveryAttemptModel",
+    "RecoveryFailureArgs",
+    "RecoveryRescheduleArgs",
     "RunEventModel",
     "RunEventRecord",
     "RunEventStore",
@@ -213,6 +243,7 @@ __all__ = [
     "backfill_teamstate_sdd_fields",
     "begin_write_transaction",
     "build_migration_config",
+    "claim_recovery_attempt",
     "close_db",
     "commit_control_action_lease",
     "configure_sqlite_engine",
@@ -222,6 +253,7 @@ __all__ = [
     "create_control_action",
     "create_thread",
     "delete_thread",
+    "due_recovery_attempt_ids",
     "elect_thread_deleting",
     "elect_thread_status",
     "expire_pending_permission_requests",
@@ -258,22 +290,28 @@ __all__ = [
     "record_permission_response_submission",
     "record_thread_execution_state",
     "release_control_action_lease",
+    "release_recovery_claim",
+    "reschedule_recovery_claim",
     "reserve_control_action",
     "reset_permission_response_submission",
     "resolve_session_factory",
     "run_migrations",
     "save_model",
+    "schedule_recovery_attempt",
     "seat_sqlite_posture",
     "set_authoring_cursor",
     "set_thread_approval_state",
     "set_thread_repair_state",
     "settle_control_action_lease",
+    "settle_expired_recovery_attempt",
+    "settle_recovery_claim",
     "sum_cost_by_agent",
     "sum_cost_by_thread",
     "supersede_permission_requests",
     "supported_migration_head",
     "thread_owned_by",
     "thread_write_expectation",
+    "unscheduled_recovery_actions",
     "update_thread_status",
     "validate_desktop_schema",
     "verify_wal_mode",

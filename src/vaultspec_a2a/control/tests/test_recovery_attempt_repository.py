@@ -11,14 +11,14 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...database.models import (
+from ...database import (
     Base,
     ControlActionModel,
     RecoveryAttemptModel,
+    configure_sqlite_transactions,
+    create_control_action,
+    create_thread,
 )
-from ...database.permission_repository import create_control_action
-from ...database.session import configure_sqlite_transactions
-from ...database.thread_repository import create_thread
 from ...thread import RunWriteAuthority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, RecoveryCondition

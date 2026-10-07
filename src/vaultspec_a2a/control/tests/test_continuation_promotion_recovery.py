@@ -23,8 +23,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
-from ...database import get_thread
-from ...database.models import RecoveryAttemptModel
+from ...database import RecoveryAttemptModel, get_thread
 from ...database.reconciliation import reconcile_threads_on_startup
 from ...thread.enums import ControlActionType, RepairStatus, ThreadStatus
 from ..circuit_breaker import WorkerCircuitBreaker

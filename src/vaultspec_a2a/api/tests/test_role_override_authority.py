@@ -14,9 +14,8 @@ assignment the run will actually execute with.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-import pytest
 from fastapi.testclient import TestClient
 
 from ...testing import (
@@ -24,13 +23,19 @@ from ...testing import (
     DEFAULT_TEAM_PRESET,
     catalog_run_fields,
     fetch_provider_catalog,
+    is_selectable,
     named_lane_selection,
 )
 from .conftest import make_app
 
+if TYPE_CHECKING:
+    from ...conftest import ExternalPrerequisiteRule
+
 
 def _multi_entry_lane(
-    client: TestClient, workspace_root: str
+    client: TestClient,
+    workspace_root: str,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return the served payload and a lane advertising more than one entry.
 
@@ -45,15 +50,16 @@ def _multi_entry_lane(
         (
             item
             for item in payload["providers"]
-            if item["health"]["selectable"] and len(item["catalog"]["models"]) > 1
+            if is_selectable(item) and len(item["catalog"]["models"]) > 1
         ),
         None,
     )
     if lane is None:
-        pytest.skip(
+        external_prerequisite.absent(
+            "provider-catalog-override-selection",
             "no served lane advertises more than one selectable entry, so an "
             "override cannot name a DIFFERENT entry than the run-wide selection "
-            "and this claim cannot be tested honestly"
+            "and this claim cannot be tested honestly",
         )
     return payload, lane
 
@@ -78,7 +84,10 @@ class TestRoleOverrideAuthority:
     """A per-role override must beat the team's configured default."""
 
     def test_an_override_changes_the_entry_that_role_runs(
-        self, session_factory: Any, checkpointer: Any
+        self,
+        session_factory: Any,
+        checkpointer: Any,
+        external_prerequisite: ExternalPrerequisiteRule,
     ) -> None:
         """One role is redirected to a different catalog entry; the rest are not.
 
@@ -100,7 +109,9 @@ class TestRoleOverrideAuthority:
         with TestClient(app, raise_server_exceptions=True) as client:
             metadata = dict(catalog_run_fields(client)["metadata"])
             workspace_root = metadata["workspace_root"]
-            payload, lane = _multi_entry_lane(client, workspace_root)
+            payload, lane = _multi_entry_lane(
+                client, workspace_root, external_prerequisite
+            )
             entries = lane["catalog"]["models"]
 
             def _on_lane(entry_id: str) -> dict[str, Any]:

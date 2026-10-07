@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from ..providers.team_selection import FROZEN_SELECTION_SCHEMA_VERSION
 from ..service_tests._live_desktop_gateway import armed_gateway
 from ..testing import (
     LIVE_PROVIDER_PREREQUISITES,
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ..api.schemas.gateway import ProviderCatalogSelection
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
 _RUN_ID_PREFIX = "live-provider-catalog"
 _TERMINAL_DEADLINE_SECONDS = 900.0
 _POLL_SECONDS = 2.0
@@ -72,7 +73,7 @@ def _frozen_assignment(
 ) -> JsonObject:
     """Assert A2A froze the current opaque selection for every preset role."""
     frozen = json_object(envelope.get("frozen_assignment"), at="frozen assignment")
-    assert frozen.get("schema_version") == 1, frozen
+    assert frozen.get("schema_version") == FROZEN_SELECTION_SCHEMA_VERSION, frozen
     assert isinstance(frozen.get("digest"), str) and frozen["digest"], frozen
     assignments = json_object_list(frozen.get("assignments"), at="frozen assignments")
     assert assignments, frozen

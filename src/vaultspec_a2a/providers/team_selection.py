@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
@@ -15,6 +15,7 @@ from .provider_catalog import (
     MAX_CONTROLS,
     MAX_DISPLAY_LENGTH,
     MAX_FALLBACKS,
+    SELECTION_SCHEMA_VERSION,
     CatalogStatus,
     ControlSelection,
     ModelCatalogEntry,
@@ -25,6 +26,7 @@ from .provider_catalog import (
 )
 
 __all__ = [
+    "FROZEN_SELECTION_SCHEMA_VERSION",
     "FrozenLaneAssignment",
     "FrozenNativeControl",
     "FrozenTeamSelection",
@@ -36,6 +38,12 @@ __all__ = [
     "model_assignment_digest",
     "normalize_replay_selection",
 ]
+
+
+# The version of the persisted whole-team selection record and of the disclosure
+# projected from it. Distinct from the catalog and selection reference versions:
+# those version what a client sends, this versions what the run froze.
+FROZEN_SELECTION_SCHEMA_VERSION: Final = 1
 
 
 class TeamSelectionError(ValueError):
@@ -219,7 +227,7 @@ def digest_record(
         return lane_record
 
     record = {
-        "schema_version": 1,
+        "schema_version": FROZEN_SELECTION_SCHEMA_VERSION,
         "selection": digest_lane(selection),
         "overrides": {
             role: digest_lane(lane) for role, lane in sorted(overrides.items())
@@ -239,7 +247,7 @@ class FrozenTeamSelection:
     fallbacks: tuple[FrozenLaneAssignment, ...]
     roles: tuple[str, ...]
     digest: str
-    schema_version: int = 1
+    schema_version: int = FROZEN_SELECTION_SCHEMA_VERSION
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -397,7 +405,7 @@ def _normalize_reference(
         {item.control_id: item for item in catalog.native_controls},
     )
     return FrozenLaneAssignment(
-        schema_version=1,
+        schema_version=SELECTION_SCHEMA_VERSION,
         provider_id=provider,
         execution_mode=reference.execution_mode,
         catalog_revision=reference.catalog_revision,

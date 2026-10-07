@@ -16,7 +16,10 @@ from httpx import ASGITransport
 from pydantic import ValidationError
 
 from ...api.app import create_app
-from ...api.schemas.provider_catalog import ProviderCatalogResponse
+from ...api.schemas.provider_catalog import (
+    PROVIDER_CATALOG_PATH,
+    ProviderCatalogResponse,
+)
 from ...database.thread_repository import normalize_workspace_identity
 from ...providers.lane_admission import is_catalog_lane_admissible
 from ...providers.provider_catalog import (
@@ -44,7 +47,6 @@ from ...providers.provider_catalog_service import (
 )
 from ...testing import settings_override
 from ...utils import bearer_header
-from ..routes import PROVIDER_CATALOG_PATH
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:

@@ -12,11 +12,12 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ...authoring import AgentTool, CatalogSnapshot
+from ...testing import mint_raw_token
 from ...thread.actor_tokens import ActorTokenBundle
 from ..authoring_binding import AuthoringBindingProvider
 from ..catalog_store import RunCatalogStore
@@ -235,16 +236,12 @@ async def test_binding_for_fetches_catalog_once_per_run_live(
     """Live: binding_for fetches the engine catalog once and caches it per run."""
     run_id = f"binding-live-{uuid.uuid4().hex[:8]}"
     # Mint a real actor token for the run and register it, as the executor does.
-    from ...authoring import AuthoringClient, AuthoringResponse, mint_actor_token
+    from ...authoring import AuthoringClient
 
     async with AuthoringClient(
         live_engine.base_url, live_engine.bearer_token
     ) as client:
-        minted = await mint_actor_token(
-            client, actor_id=f"agent:{run_id}", kind="agent"
-        )
-        assert isinstance(minted, AuthoringResponse) and isinstance(minted.data, dict)
-        raw_token = cast("str", minted.data["raw_token"])
+        raw_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     token_store = RunTokenStore()
     token_store.register(
@@ -290,16 +287,12 @@ async def test_binding_for_concurrent_fetches_share_one_snapshot_live(
     import asyncio as _asyncio
 
     run_id = f"binding-conc-{uuid.uuid4().hex[:8]}"
-    from ...authoring import AuthoringClient, AuthoringResponse, mint_actor_token
+    from ...authoring import AuthoringClient
 
     async with AuthoringClient(
         live_engine.base_url, live_engine.bearer_token
     ) as client:
-        minted = await mint_actor_token(
-            client, actor_id=f"agent:{run_id}", kind="agent"
-        )
-        assert isinstance(minted, AuthoringResponse) and isinstance(minted.data, dict)
-        raw_token = cast("str", minted.data["raw_token"])
+        raw_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     token_store = RunTokenStore()
     token_store.register(

@@ -55,11 +55,9 @@ from langchain_core.messages import AIMessage
 
 from ...authoring import (
     AuthoringClient,
-    AuthoringResponse,
     AuthoringSession,
     EngineEndpoint,
     LifecycleEvent,
-    mint_actor_token,
 )
 from ...control.accepted_input import freeze_accepted_input
 from ...control.config import settings
@@ -82,6 +80,7 @@ from ...testing import (
     compile_test_graph,
     current_execution_metadata,
     elect_status,
+    mint_raw_token,
     new_state_graph,
 )
 from ...tests._write_authority import make_test_write_authority
@@ -273,9 +272,7 @@ async def _worker_test_lifespan(app: FastAPI):
 async def _prepare_live_verdict_case(
     client: AuthoringClient, run_id: str
 ) -> tuple[int, dict[str, str]]:
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    client._actor_token = minted.data["raw_token"]
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     baseline_snapshot = await client.recovery_snapshot(last_seq=0)
     assert isinstance(baseline_snapshot.data, dict)
@@ -286,9 +283,7 @@ async def _prepare_live_verdict_case(
 
     session = AuthoringSession(client, run_id)
     await session.create_session(scope="repo", title=run_id)
-    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
-    assert isinstance(reviewer, AuthoringResponse)
-    reviewer_token = reviewer.data["raw_token"]
+    reviewer_token = await mint_raw_token(client, f"human:{run_id}", "human")
 
     info = await _submit_proposal(session, run_id, "vl")
     await _decide(

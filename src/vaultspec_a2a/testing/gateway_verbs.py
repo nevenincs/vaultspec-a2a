@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from ..graph.enums import Provider
 from ..utils import bearer_header
 from .boot import DEFAULT_ATTACH_CREDENTIAL, LOOPBACK_TIMEOUT, desktop_workspace
 from .catalog import async_catalog_run_fields, fetch_in_process_selection_at
@@ -27,7 +26,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_ATTACH_AUTHORIZATION",
-    "DEFAULT_PRESET_LANE",
     "DEFAULT_REQUIRED_ROLE",
     "DEFAULT_TEAM_PRESET",
     "GatewayVerbs",
@@ -42,10 +40,6 @@ __all__ = [
 # it are source-only.
 DEFAULT_TEAM_PRESET = "deterministic-success-single"
 DEFAULT_REQUIRED_ROLE = "deterministic-coder-success"
-
-# The in-process lane DEFAULT_TEAM_PRESET is pinned to. A run presents ONE
-# selection, so the preference is that preset's lane, which never bills.
-DEFAULT_PRESET_LANE = Provider.DETERMINISTIC.value
 
 # The whole ``Authorization`` header value a seated home's attach credential
 # presents.
@@ -102,7 +96,6 @@ def gateway_run_verbs(
             base_url,
             workspace,
             headers={"Authorization": authorization},
-            prefer_provider_id=DEFAULT_PRESET_LANE,
             cache=True,
         )
 

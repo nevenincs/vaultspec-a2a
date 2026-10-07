@@ -152,10 +152,7 @@ async def test_codex_authoring_tool_call_reaches_the_engine(
     narrated_bridge_names: set[str] = set()
 
     async with ResilientAuthoringClient(engine_base_url, engine_bearer) as ec:
-        run_tokens = {
-            role: await harness.mint(ec, f"agent:{harness.run_id}:{role}", "agent")
-            for role in case.roles
-        }
+        run_tokens = await harness.mint_role_tokens(ec, harness.run_id, case.roles)
         # Autonomous operation mode before run-start, so the engine's eligibility
         # layer auto-approves the mutating propose_changeset INTO the review lane
         # rather than parking it as awaiting_permission. The human apply-gate

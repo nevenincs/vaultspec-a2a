@@ -53,8 +53,10 @@ if TYPE_CHECKING:
         AcceptanceHarness,
         Materialization,
         ResilientAuthoringClient,
+        extract_bridge_tools,
         is_live_lane,
         message_content,
+        mint_raw_token,
         observe_bridged_authoring_run,
         reachable_stack,
         resolve_selection,
@@ -156,7 +158,6 @@ if TYPE_CHECKING:
     from .factories import LaneInventoryFactory, build_settings
     from .gateway_verbs import (
         DEFAULT_ATTACH_AUTHORIZATION,
-        DEFAULT_PRESET_LANE,
         DEFAULT_REQUIRED_ROLE,
         DEFAULT_TEAM_PRESET,
         GatewayVerbs,
@@ -333,8 +334,13 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.acceptance",
         "ResilientAuthoringClient",
     ),
+    "extract_bridge_tools": (
+        "vaultspec_a2a.testing.acceptance",
+        "extract_bridge_tools",
+    ),
     "is_live_lane": ("vaultspec_a2a.testing.acceptance", "is_live_lane"),
     "message_content": ("vaultspec_a2a.testing.acceptance", "message_content"),
+    "mint_raw_token": ("vaultspec_a2a.testing.acceptance", "mint_raw_token"),
     "observe_bridged_authoring_run": (
         "vaultspec_a2a.testing.acceptance",
         "observe_bridged_authoring_run",
@@ -541,10 +547,6 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.gateway_verbs",
         "DEFAULT_ATTACH_AUTHORIZATION",
     ),
-    "DEFAULT_PRESET_LANE": (
-        "vaultspec_a2a.testing.gateway_verbs",
-        "DEFAULT_PRESET_LANE",
-    ),
     "DEFAULT_REQUIRED_ROLE": (
         "vaultspec_a2a.testing.gateway_verbs",
         "DEFAULT_REQUIRED_ROLE",
@@ -750,7 +752,6 @@ __all__ = [
     "DEFAULT_ATTACH_CREDENTIAL",
     "DEFAULT_IDLE_WINDOW_S",
     "DEFAULT_OWNERSHIP_CAPABILITY",
-    "DEFAULT_PRESET_LANE",
     "DEFAULT_REQUIRED_ROLE",
     "DEFAULT_TEAM_PRESET",
     "DETERMINISTIC_LANE",
@@ -854,6 +855,7 @@ __all__ = [
     "elect_status",
     "exchange_acp_request",
     "exclusive_keys",
+    "extract_bridge_tools",
     "fetch_in_process_selection",
     "fetch_in_process_selection_at",
     "fetch_provider_catalog",
@@ -893,6 +895,7 @@ __all__ = [
     "machine_cpu_budget",
     "measured_child_startup_s",
     "message_content",
+    "mint_raw_token",
     "named_lane_selection",
     "new_state_graph",
     "observe_bridged_authoring_run",

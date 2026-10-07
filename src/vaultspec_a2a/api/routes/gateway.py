@@ -48,11 +48,13 @@ from ...control.execution_authority import (
 from ...control.health import (
     assemble_desktop_readiness,
 )
+from ...control.readiness import API_VERSION
 from ...control.run_start_policy import (
     required_role_ids,
 )
 from ...domain_config import domain_config
 from ...providers.provider_catalog import (
+    SELECTION_SCHEMA_VERSION,
     ControlSelection,
     ProviderRecord,
     SelectionReference,
@@ -82,7 +84,7 @@ from ..schemas.gateway import (
 from ..workspace import require_existing_workspace_root
 
 router = APIRouter(
-    prefix="/v1",
+    prefix=f"/{API_VERSION}",
     dependencies=[Depends(authenticate_request)],
     # Every route here is behind the attach gate, so both refusals are properties
     # of the router rather than of any one verb. They were absent from the
@@ -315,7 +317,7 @@ def _selection_reference(value: ProviderCatalogSelection) -> SelectionReference:
 def _wire_reference(reference: SelectionReference) -> ProviderCatalogSelection:
     """Render a normalized domain reference into the canonical request wire."""
     return ProviderCatalogSelection(
-        schema_version=1,
+        schema_version=SELECTION_SCHEMA_VERSION,
         provider_id=reference.provider_id,
         execution_mode=reference.execution_mode,
         catalog_revision=reference.catalog_revision,

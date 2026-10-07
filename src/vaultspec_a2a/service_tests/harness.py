@@ -24,13 +24,13 @@ import httpx
 from sqlalchemy.engine import make_url
 
 from ..control.config import settings
-from ..graph.enums import Provider
 from ..testing import (
     GatewayBootError,
     NoSelectableLaneError,
     RunVerbs,
     WatchedProcess,
     armed_lane_environment,
+    await_gateway_ready,
     await_ready,
     fetch_in_process_selection,
     free_port,
@@ -40,9 +40,21 @@ from ..testing import (
     reap_process,
     spawn_logged,
 )
+from ..utils import bearer_header
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
+__all__ = [
+    "COMPOSE_FILE",
+    "REPO_ROOT",
+    "RETAINED_RUNTIME_DIRS",
+    "RUNTIME_ROOT",
+    "ServiceStack",
+    "build_service_stack",
+    "resolve_docker_executable",
+    "unstarted_service_stack",
+]
 
 
 class _PermissionResponseOptions(TypedDict, total=False):
@@ -208,7 +220,7 @@ class ServiceStack:
         return httpx.Client(
             base_url=self.gateway_url,
             timeout=timeout,
-            headers={"Authorization": f"Bearer {_GATEWAY_SERVICE_TOKEN}"},
+            headers=bearer_header(_GATEWAY_SERVICE_TOKEN),
         )
 
     def gateway_client(self, *, timeout: float | None = 10.0) -> httpx.Client:
@@ -222,16 +234,11 @@ class ServiceStack:
         return httpx.Client(
             base_url=self.worker_url,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_INTERNAL_TOKEN}"},
+            headers=bearer_header(_INTERNAL_TOKEN),
         )
 
     def _jaeger_client(self) -> httpx.Client:
         return httpx.Client(base_url=self.jaeger_url, timeout=10.0)
-
-    def _gateway_http_ready(self) -> bool:
-        with self._client(timeout=5.0) as client:
-            resp = client.get("/health")
-            return resp.status_code == 200
 
     def _watched(self, *names: str) -> list[WatchedProcess]:
         """Return the named harness-owned processes that are currently spawned.
@@ -248,14 +255,7 @@ class ServiceStack:
         self._ensure_runtime_dir()
         try:
             self._start_infra()
-            self._start_gateway()
-            await_ready(
-                self._gateway_http_ready,
-                what="gateway HTTP",
-                watch=self._watched("gateway"),
-                timeout=120.0,
-                interval=1.0,
-            )
+            self.start_gateway()
             self._start_worker()
             self._wait_for_process_health(
                 self.worker_health,
@@ -280,11 +280,11 @@ class ServiceStack:
             ports=self.ports,
         )
 
-    def _local_env(self) -> dict[str, str]:
+    def _local_env(self, *, auto_spawn_worker: bool = False) -> dict[str, str]:
         env = gateway_process_env(
             gateway_port=self.ports["gateway"],
             worker_port=self.ports["worker"],
-            auto_spawn_worker=False,
+            auto_spawn_worker=auto_spawn_worker,
             serve_in_process_lanes=True,
         )
         if self.postgres_url is None:
@@ -379,15 +379,26 @@ class ServiceStack:
             log_name="worker.log",
         )
 
-    def _start_gateway(self) -> None:
+    def start_gateway(
+        self, *, auto_spawn_worker: bool = False, log_name: str | None = None
+    ) -> None:
+        """Spawn this stack's gateway over its stores and wait until it answers.
+
+        With *auto_spawn_worker* the gateway owns a worker it spawns on demand,
+        instead of the one this harness starts beside it. *log_name* replaces the
+        log the gateway writes to, which diagnostics then read back.
+        """
         if self._gateway_proc is not None:
-            return
+            raise RuntimeError("gateway is already running")
+        if log_name is not None:
+            self._gateway_log_name = log_name
         self._gateway_proc = self.spawn_native(
             "vaultspec_a2a.api.app:create_app",
             port=self.ports["gateway"],
-            env=self._local_env(),
+            env=self._local_env(auto_spawn_worker=auto_spawn_worker),
             log_name=self._gateway_log_name,
         )
+        await_gateway_ready(self.gateway_url, self._gateway_proc, timeout=120.0)
 
     def crash_gateway(self) -> None:
         """Kill this stack's gateway while leaving its worker and stores running."""
@@ -399,9 +410,7 @@ class ServiceStack:
 
     def restart_gateway(self) -> None:
         """Start the same gateway profile over this stack's durable stores."""
-        if self._gateway_proc is not None:
-            raise RuntimeError("gateway is already running")
-        self._start_gateway()
+        self.start_gateway()
         self.wait_for_ready()
 
     def _wait_for_process_health(
@@ -625,12 +634,7 @@ class ServiceStack:
         # read on a gateway builds it cold across every registered lane.
         try:
             with self._client() as client:
-                return fetch_in_process_selection(
-                    client,
-                    workspace_root,
-                    prefer_provider_id=Provider.DETERMINISTIC.value,
-                    cache=True,
-                )
+                return fetch_in_process_selection(client, workspace_root, cache=True)
         except NoSelectableLaneError as exc:
             raise GatewayBootError(
                 f"a {team_preset!r} run cannot present a valid selection: {exc}"
@@ -662,7 +666,7 @@ class ServiceStack:
         Path(workspace_root).mkdir(parents=True, exist_ok=True)
         verbs = RunVerbs(
             base_url=self.gateway_url,
-            authorization=f"Bearer {_GATEWAY_SERVICE_TOKEN}",
+            authorization=bearer_header(_GATEWAY_SERVICE_TOKEN)["Authorization"],
             team_preset=team_preset,
             workspace_root=workspace_root,
             selection=lambda workspace: self.catalog_selection(workspace, team_preset),
@@ -764,3 +768,13 @@ def build_service_stack(*, postgres_url: str | None = None) -> ServiceStack:
     return ServiceStack(
         project_name=project_name, ports=ports, postgres_url=postgres_url
     )
+
+
+def unstarted_service_stack(project_name: str) -> ServiceStack:
+    """A stack built to inspect its wiring, never started.
+
+    Its ports are placeholders nothing listens on, and construction creates
+    nothing on disk, so it can be built freely.
+    """
+    ports = {"gateway": 18000, "worker": 18001, "jaeger_ui": 16686, "jaeger_otlp": 4317}
+    return ServiceStack(project_name=project_name, ports=ports)

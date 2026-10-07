@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from ...control.readiness import API_VERSION
 from ...providers.catalog_recommendation import recommended_entry_id
 from ...providers.provider_catalog import (
+    CATALOG_SCHEMA_VERSION,
     MAX_CAPABILITIES,
     MAX_CONTROL_ID_LENGTH,
     MAX_CONTROLS,
@@ -27,6 +29,12 @@ from ...providers.provider_catalog import (
     HealthState,
     ProviderRecord,
 )
+
+PROVIDER_CATALOG_ROUTE: Final = "/provider-catalog"
+
+# The path a client requests. Built from the API version the router mounts under,
+# so no client restates the version segment or the verb's name.
+PROVIDER_CATALOG_PATH: Final = f"/{API_VERSION}{PROVIDER_CATALOG_ROUTE}"
 
 
 class _StrictModel(BaseModel):
@@ -110,7 +118,7 @@ class ProviderNativeControlResponse(_StrictModel):
 
 
 class ProviderLaneCatalogResponse(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1] = CATALOG_SCHEMA_VERSION
     state: ProviderCatalogStateResponse
     # A2A's opinionated default for this lane, and the only field here that is
     # A2A's opinion rather than the provider's report. It always names one of the
@@ -135,7 +143,7 @@ class ProviderCatalogRecordResponse(_StrictModel):
 
 
 class ProviderCatalogResponse(_StrictModel):
-    api_version: Literal["v1"] = "v1"
+    api_version: Literal["v1"] = API_VERSION
     providers: list[ProviderCatalogRecordResponse] = Field(
         default_factory=list, max_length=MAX_PROVIDER_LANES
     )
@@ -205,4 +213,8 @@ class ProviderCatalogResponse(_StrictModel):
         return cls(providers=providers)
 
 
-__all__ = ["ProviderCatalogResponse"]
+__all__ = [
+    "PROVIDER_CATALOG_PATH",
+    "PROVIDER_CATALOG_ROUTE",
+    "ProviderCatalogResponse",
+]

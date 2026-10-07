@@ -10,9 +10,7 @@ from uuid import uuid4
 import pytest
 
 from ..control.action_lease import CONTROL_ACTION_LEASE_TTL
-from ..graph.enums import Provider
 from ..testing import (
-    await_ready,
     fetch_in_process_selection,
     json_object,
     reap_process,
@@ -25,32 +23,10 @@ from .harness import build_service_stack
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
     from .harness import ServiceStack
 
-# The in-process lane the cancel-window preset is pinned to. The shared selection
-# refuses every lane that bills, so a host holding a live provider session cannot
-# turn these cancellation proofs into spend.
-_PRESET_LANE = Provider.DETERMINISTIC.value
-
-
-def _start_lazy_gateway(stack: ServiceStack) -> None:
-    env = stack._local_env()
-    env["VAULTSPEC_A2A_AUTO_SPAWN_WORKER"] = "true"
-    gateway = stack.spawn_native(
-        "vaultspec_a2a.api.app:create_app",
-        port=stack.ports["gateway"],
-        env=env,
-        log_name="lazy-gateway.log",
-    )
-    stack._gateway_proc = gateway
-    await_ready(
-        stack._gateway_http_ready,
-        what="lazy gateway",
-        watch=[gateway],
-        timeout=120.0,
-        interval=0.2,
-    )
+_LAZY_GATEWAY_LOG = "lazy-gateway.log"
 
 
 def _cancel_receipt(stack: ServiceStack, run_id: str) -> tuple[str, str, str | None]:
@@ -80,7 +56,7 @@ def test_cancellation_survives_fresh_worker(
         else:
             stack._ensure_runtime_dir()
             stack._start_infra()
-            _start_lazy_gateway(stack)
+            stack.start_gateway(auto_spawn_worker=True, log_name=_LAZY_GATEWAY_LOG)
         workspace = stack.runtime_dir / "fresh-worker-cancel"
         workspace.mkdir()
         run_id = f"fresh-worker-{uuid4().hex}"
@@ -91,9 +67,7 @@ def test_cancellation_survives_fresh_worker(
                     "run_id": run_id,
                     "message": "Wait for cancellation.",
                     "team_preset": "deterministic-cancel-window",
-                    "selection": fetch_in_process_selection(
-                        client, str(workspace), prefer_provider_id=_PRESET_LANE
-                    ),
+                    "selection": fetch_in_process_selection(client, str(workspace)),
                     "metadata": {"workspace_root": str(workspace)},
                     "autonomous": True,
                 },
@@ -116,10 +90,8 @@ def test_cancellation_survives_fresh_worker(
         stack.record("accepted-cancel-receipt", receipt)
         if restart:
             assert receipt[2] is None
-            assert stack._gateway_proc is not None
-            reap_process(stack._gateway_proc)
-            stack._gateway_proc = None
-            _start_lazy_gateway(stack)
+            stack.crash_gateway()
+            stack.start_gateway(auto_spawn_worker=True, log_name=_LAZY_GATEWAY_LOG)
         terminal = wait_for_run_status(
             lambda: thread_state(stack, run_id),
             _is_cancelled,
@@ -160,9 +132,7 @@ def test_blocked_deterministic_stream_cancellation_settles_terminally(
                 "run_id": run_id,
                 "message": "Block in the deterministic cancellation window.",
                 "team_preset": "deterministic-cancel-window",
-                "selection": fetch_in_process_selection(
-                    client, workspace_root, prefer_provider_id=_PRESET_LANE
-                ),
+                "selection": fetch_in_process_selection(client, workspace_root),
                 "metadata": {"workspace_root": workspace_root},
                 "autonomous": True,
             },
@@ -212,9 +182,7 @@ def test_pre_ingest_deterministic_cancellation_settles_terminally(
                 "run_id": run_id,
                 "message": "Cancel before the deterministic ingest begins.",
                 "team_preset": "deterministic-cancel-window",
-                "selection": fetch_in_process_selection(
-                    client, workspace_root, prefer_provider_id=_PRESET_LANE
-                ),
+                "selection": fetch_in_process_selection(client, workspace_root),
                 "metadata": {"workspace_root": workspace_root},
                 "autonomous": True,
             },

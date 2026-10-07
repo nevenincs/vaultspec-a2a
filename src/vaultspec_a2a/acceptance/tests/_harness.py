@@ -36,18 +36,18 @@ from ...conftest import ExternalPrerequisiteRule
 from ...testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     DEFAULT_OWNERSHIP_CAPABILITY,
-    DEFAULT_PRESET_LANE,
     DEFAULT_REQUIRED_ROLE,
     DEFAULT_TEAM_PRESET,
     GatewayVerbs,
-    NoSelectableLaneError,
     RunVerbs,
     booted_gateway,
     broker_gateway_env,
     fetch_in_process_selection,
     gateway_script,
+    in_process_lane_required,
     seat_app_home,
 )
+from ...utils import bearer_header
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -96,11 +96,7 @@ class CertifiedGateway(GatewayVerbs):
         return str(self.runs.selection(str(self.workspace_root))["provider_id"])
 
     def served_in_process_selection(
-        self,
-        workspace_root: str,
-        *,
-        prefer_provider_id: str,
-        cache: bool = False,
+        self, workspace_root: str, *, cache: bool = False
     ) -> dict[str, Any]:
         """Select an in-process lane from the catalog this stack serves.
 
@@ -115,16 +111,11 @@ class CertifiedGateway(GatewayVerbs):
         Keeping a billable lane out is the shared mechanism's own guarantee, so the
         refusal is the only thing decided here.
         """
-        try:
-            with self.client() as client:
-                return fetch_in_process_selection(
-                    client,
-                    workspace_root,
-                    prefer_provider_id=prefer_provider_id,
-                    cache=cache,
-                )
-        except NoSelectableLaneError as exc:
-            ExternalPrerequisiteRule().absent("in-process-lanes", str(exc))
+        with (
+            in_process_lane_required(ExternalPrerequisiteRule()),
+            self.client() as client,
+        ):
+            return fetch_in_process_selection(client, workspace_root, cache=cache)
 
     # -- versioned run-start verb (prepare / commit / release / start) --------
 
@@ -141,7 +132,7 @@ class CertifiedGateway(GatewayVerbs):
             team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=str(self.workspace_root),
             selection=lambda workspace: self.served_in_process_selection(
-                workspace, prefer_provider_id=DEFAULT_PRESET_LANE, cache=True
+                workspace, cache=True
             ),
             tokens={DEFAULT_REQUIRED_ROLE: "tok-certification"},
             message="certify the assembled product",
@@ -187,7 +178,7 @@ def certified_gateway(
     ) as gateway:
         running = CertifiedGateway(
             base_url=gateway.base_url,
-            authorization=f"Bearer {attach_token}",
+            authorization=bearer_header(attach_token)["Authorization"],
             app_home=app_home,
             workspace_root=workspace_root,
         )

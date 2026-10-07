@@ -43,7 +43,7 @@ from ._harness import certified_gateway
 
 if TYPE_CHECKING:
     from ...authoring.discovery import EngineEndpoint
-    from ...providers._json_contract import JsonObject
+    from ...providers import JsonObject
     from ._harness import CertifiedGateway
 
 _SCENARIO_PATH = (

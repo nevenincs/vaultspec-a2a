@@ -73,7 +73,6 @@ import pytest
 
 from ..acceptance.tests._harness import certified_gateway
 from ..authoring.discovery import resolve_engine_with_retry
-from ..graph.enums import Provider
 from ..team.team_config import load_team_config
 from ..testing import (
     ProgressDeadline,
@@ -97,7 +96,7 @@ if TYPE_CHECKING:
     from ..acceptance.tests._harness import CertifiedGateway
     from ..api.schemas.gateway import ProviderCatalogSelection
     from ..conftest import ExternalPrerequisiteRule
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
 
 # The preset that declares a questionnaire. Its questions are read from the
 # preset itself below, never restated here.
@@ -114,12 +113,6 @@ _FEATURE_TAG = "clarification-loop"
 # compiles. Nothing here writes to it: the run parks before any authoring, and
 # documents move through the engine's proposal path rather than the filesystem.
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
-
-# The loop's ONE substitution is the model, expressed as a selection naming the
-# served in-process lane. The freeze wins outright at compilation, so any other
-# served lane would hand every document role to a real external provider; the
-# shared selection refuses every lane that bills.
-_DOCUMENT_LANE = Provider.DETERMINISTIC.value
 
 _WORKER_READY_BUDGET_SECONDS = "120"
 
@@ -595,9 +588,7 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
         started = _start_document_run(
             gateway,
             run_id,
-            selection=gateway.served_in_process_selection(
-                str(_WORKSPACE_ROOT), prefer_provider_id=_DOCUMENT_LANE
-            ),
+            selection=gateway.served_in_process_selection(str(_WORKSPACE_ROOT)),
         )
         assert started.status_code == 201, started.text
 
@@ -696,9 +687,7 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
         started = _start_document_run(
             gateway,
             run_id,
-            selection=gateway.served_in_process_selection(
-                str(_WORKSPACE_ROOT), prefer_provider_id=_DOCUMENT_LANE
-            ),
+            selection=gateway.served_in_process_selection(str(_WORKSPACE_ROOT)),
         )
         assert started.status_code == 201, started.text
 

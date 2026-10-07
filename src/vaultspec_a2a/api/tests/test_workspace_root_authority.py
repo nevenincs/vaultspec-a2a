@@ -22,8 +22,8 @@ from ...testing import (
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ...utils import bearer_header
-from ..routes import PROVIDER_CATALOG_PATH
 from ..routes._gateway_run_start import _require_settled_predecessor
+from ..schemas.provider_catalog import PROVIDER_CATALOG_PATH
 from .conftest import SEATED_ATTACH_TOKEN, make_app
 
 if TYPE_CHECKING:

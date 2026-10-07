@@ -31,6 +31,7 @@ from ...database import (
     get_thread,
     list_threads,
 )
+from ...providers.team_selection import FROZEN_SELECTION_SCHEMA_VERSION
 from ...streaming import RelayHub
 from ...testing import (
     DEFAULT_TEAM_PRESET,
@@ -62,11 +63,10 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
     from ...control.drain import DrainGate
+    from ...providers import JsonObject
     from .conftest import _InProcessWorker
 
 type SessionFactory = async_sessionmaker[AsyncSession]
-type JsonValue = bool | int | float | str | list[JsonValue] | JsonObject | None
-type JsonObject = dict[str, JsonValue]
 
 
 @runtime_checkable
@@ -785,7 +785,7 @@ def _assert_modern_race_results(
     frozen = [response.json()["frozen_assignment"] for response in responses]
     assert all(item is not None for item in frozen)
     assert frozen[0] == frozen[1] == frozen[2]
-    assert frozen[0]["schema_version"] == 1
+    assert frozen[0]["schema_version"] == FROZEN_SELECTION_SCHEMA_VERSION
     assert frozen[0]["digest"]
     assert len([d for d in worker.dispatches if d.get("thread_id") == run_id]) == 1
     assert sorted(response.status_code for response in nickname_responses) == [201, 409]

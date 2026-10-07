@@ -137,7 +137,7 @@ async def _armed_model(workspace: Path, rule: ExternalPrerequisiteRule) -> AcpCh
 
 async def _run_turn(armed: AcpChatModel, prompt: str) -> str:
     messages = [SystemMessage(content="You are terse."), HumanMessage(content=prompt)]
-    _, meta = _classify_acp_command(settings.acp_backend)
+    meta = _classify_acp_command(settings.acp_backend).metadata()
     try:
         return "".join([str(chunk.content) async for chunk in armed.astream(messages)])
     finally:

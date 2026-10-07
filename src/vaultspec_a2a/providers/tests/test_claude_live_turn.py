@@ -58,16 +58,16 @@ async def test_claude_candidate_live_turn_completes_before_admission(
     served, reason = await declared_lane_model_value(Provider.CLAUDE.value, tmp_path)
     if served is None:
         external_prerequisite.absent("provider-catalog-live-selection", reason)
-    command, meta = _classify_acp_command(settings.acp_backend)
+    command = _classify_acp_command(settings.acp_backend)
     env_vars, auth_mode = claude_auth_env()
     model = AcpChatModel(
-        command=command,
+        command=list(command.argv),
         env_vars=env_vars,
         desired_model=served,
         workspace_root=str(tmp_path),
-        use_exec=(meta["acp_backend"] == "binary"),
+        use_exec=(command.acp_backend == "binary"),
         provider=Provider.CLAUDE.value,
-        execution_mode=f"claude-agent-acp:{meta['acp_backend']}",
+        execution_mode=f"claude-agent-acp:{command.acp_backend}",
         auth_mode=auth_mode,
     )
     result = await model.ainvoke(
@@ -121,7 +121,7 @@ async def test_claude_live_turn_completes_and_returns_content(
         HumanMessage(content="Reply with exactly the single word: pong"),
     ]
 
-    _, meta = _classify_acp_command(settings.acp_backend)
+    meta = _classify_acp_command(settings.acp_backend).metadata()
     try:
         streamed = "".join(
             [str(chunk.content) async for chunk in model.astream(messages)]

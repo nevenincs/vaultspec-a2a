@@ -54,8 +54,10 @@ async def test_workspace_planted_node_never_launches_the_adapter(
     # directory holding the planted launcher.
     assert env["PATH"].split(os.pathsep)[0] == str(planted.parent)
 
-    command, _metadata = _classify_acp_command("node")
-    process = await spawn_acp_process(command, env, str(workspace), metadata=None)
+    command = _classify_acp_command("node")
+    process = await spawn_acp_process(
+        list(command.argv), env, str(workspace), metadata=None
+    )
     try:
         # A planted launcher answers no handshake, so the reader's failure names
         # what the child wrote instead, which is where its marker would show.
@@ -83,13 +85,16 @@ def test_classified_acp_command_names_an_absolute_service_runtime(
 ) -> None:
     """The Claude ACP command carries the service's own Node, by absolute path."""
     del installed_acp_adapter
-    command, metadata = _classify_acp_command("node")
+    command = _classify_acp_command("node")
 
-    assert command == [resolve_service_executable("node"), str(claude_acp_entry())]
-    assert Path(command[0]).is_absolute()
-    assert Path(command[0]).is_file()
-    assert metadata["command_executable"] == Path(command[0]).name
-    assert metadata["command_target"] == str(claude_acp_entry())
+    assert command.argv == (
+        resolve_service_executable("node"),
+        str(claude_acp_entry()),
+    )
+    assert Path(command.argv[0]).is_absolute()
+    assert Path(command.argv[0]).is_file()
+    assert command.command_executable == Path(command.argv[0]).name
+    assert command.command_target == str(claude_acp_entry())
 
 
 def test_trusted_search_drops_working_directory_entries(tmp_path: Path) -> None:

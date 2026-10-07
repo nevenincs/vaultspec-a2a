@@ -6,20 +6,21 @@ import functools
 import os
 import platform
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..control.config import settings
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from .cli_resolution import resolve_provider_cli_executable, resolve_service_executable
+from .execution_modes import ACP_BACKEND_LANES
 
 __all__ = [
+    "COMMAND_LANES",
     "_BIN_PATH",
+    "ProviderCommand",
     "_build_kimi_env",
-    "_build_zai_env",
     "_classify_acp_command",
-    "_classify_codex_command",
-    "_classify_kimi_command",
     "_kimi_home_env",
     "capsule_acp_entry",
     "capsule_claude_executable",
@@ -28,6 +29,45 @@ __all__ = [
     "claude_acp_entry",
     "kimi_temporary_model_configuration_reason",
 ]
+
+
+_FALLBACK_CLI_NAME = "fallback_cli_name"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCommand:
+    """One provider launch command and the runtime facts its resolution found.
+
+    The command is resolved once and every consumer reads these facts rather
+    than re-testing the argv. ``resolved`` is false only for the bare-name
+    fallback that no trusted search path answered; every other origin carries
+    an absolute launcher.
+    """
+
+    argv: tuple[str, ...]
+    runtime_authority: str
+    command_origin: str
+    command_kind: str
+    command_executable: str
+    command_target: str
+    acp_backend: str | None = None
+
+    @property
+    def resolved(self) -> bool:
+        return self.command_origin != _FALLBACK_CLI_NAME
+
+    def metadata(self) -> dict[str, str]:
+        """Return the bounded runtime metadata attached to launches and probes."""
+        fields = {
+            "runtime_authority": self.runtime_authority,
+            "command_origin": self.command_origin,
+            "command_kind": self.command_kind,
+            "command_executable": self.command_executable,
+            "command_target": self.command_target,
+        }
+        if self.acp_backend is not None:
+            fields["acp_backend"] = self.acp_backend
+        return fields
 
 
 # Resolve the claude-agent-acp entry point from the checkout's node_modules.
@@ -76,28 +116,6 @@ _CAPSULE_ACP_RELATIVE_PATH = (
     / "dist"
     / "index.js"
 )
-
-
-def _build_zai_env(
-    zai_base_url: str | None = None,
-    zai_auth_token: str | None = None,
-) -> dict[str, str]:
-    """Return explicit Z.ai auth env vars for the Claude ACP subprocess.
-
-    Z.ai rides the Claude ACP path: the wrapper's
-    Claude Code CLI honours ``ANTHROPIC_BASE_URL``/``ANTHROPIC_AUTH_TOKEN`` to
-    retarget the Anthropic Messages API at Z.ai's compatible gateway. The base env
-    removes ambient credentials and gateway overrides, so the selected provider
-    supplies both names explicitly after scrubbing. The token
-    is a secret: it is placed in the returned dict but never logged.
-    """
-    env_vars: dict[str, str] = {}
-    if not (zai_auth_token and zai_auth_token.strip()):
-        return env_vars
-    if zai_base_url and zai_base_url.strip():
-        env_vars["ANTHROPIC_BASE_URL"] = zai_base_url
-    env_vars["ANTHROPIC_AUTH_TOKEN"] = zai_auth_token
-    return env_vars
 
 
 def _build_kimi_env(
@@ -278,9 +296,7 @@ def _resolve_capsule_asset(
     return canonical_asset
 
 
-def _classify_capsule_acp_command(
-    capsule_assets_root: Path,
-) -> tuple[list[str], dict[str, str]]:
+def _classify_capsule_acp_command(capsule_assets_root: Path) -> ProviderCommand:
     """Resolve the Node ACP command strictly from capsule-owned assets.
 
     The desktop capsule owns Node.js and the ACP adapter, so resolution never
@@ -303,14 +319,15 @@ def _classify_capsule_acp_command(
         asset_name="Claude ACP entry point",
         repair_hint="the bundled @agentclientprotocol/claude-agent-acp adapter",
     )
-    return [str(node_executable), str(acp_entry)], {
-        "runtime_authority": "capsule",
-        "command_origin": "capsule",
-        "command_kind": "node_entry",
-        "command_executable": node_executable.name,
-        "command_target": str(acp_entry),
-        "acp_backend": "node",
-    }
+    return ProviderCommand(
+        argv=(str(node_executable), str(acp_entry)),
+        runtime_authority="capsule",
+        command_origin="capsule",
+        command_kind="node_entry",
+        command_executable=node_executable.name,
+        command_target=str(acp_entry),
+        acp_backend="node",
+    )
 
 
 def _classify_acp_command(
@@ -319,7 +336,7 @@ def _classify_acp_command(
     capsule_assets_root: Path | _CapsuleAssetsRootOmitted | None = (
         _CAPSULE_ASSETS_ROOT_OMITTED
     ),
-) -> tuple[list[str], dict[str, str]]:
+) -> ProviderCommand:
     """Return the ACP gateway subprocess command for the given backend.
 
     Args:
@@ -347,14 +364,15 @@ def _classify_acp_command(
                 f"ACP binary not found at {_BIN_PATH}. "
                 "Place a claude-agent-acp binary in src/vaultspec_a2a/bin/."
             )
-        return [str(_BIN_PATH)], {
-            "runtime_authority": "package_bin",
-            "command_origin": "package_bin",
-            "command_kind": "bun_binary",
-            "command_executable": _BIN_PATH.name,
-            "command_target": str(_BIN_PATH),
-            "acp_backend": "binary",
-        }
+        return ProviderCommand(
+            argv=(str(_BIN_PATH),),
+            runtime_authority="package_bin",
+            command_origin="package_bin",
+            command_kind="bun_binary",
+            command_executable=_BIN_PATH.name,
+            command_target=str(_BIN_PATH),
+            acp_backend="binary",
+        )
     # default: "node"
     root = (
         settings.capsule_assets_root
@@ -377,99 +395,82 @@ def _classify_acp_command(
     if node_executable is None:
         raise ConfigError(
             "Node.js runtime not found on this service's PATH, so the Claude ACP "
-            f"entry point {claude_acp_entry()} cannot be launched. Install the Node "
+            f"entry point {entry} cannot be launched. Install the Node "
             "version named by .node-version and make it reachable from the "
             "service environment."
         )
-    return [node_executable, str(claude_acp_entry())], {
-        "runtime_authority": "project_local",
-        "command_origin": "project_node_modules_entry",
-        "command_kind": "node_entry",
-        "command_executable": Path(node_executable).name,
-        "command_target": str(claude_acp_entry()),
-        "acp_backend": "node",
-    }
+    return ProviderCommand(
+        argv=(node_executable, str(entry)),
+        runtime_authority="project_local",
+        command_origin="project_node_modules_entry",
+        command_kind="node_entry",
+        command_executable=Path(node_executable).name,
+        command_target=str(entry),
+        acp_backend="node",
+    )
 
 
-def _classify_codex_command() -> tuple[list[str], dict[str, str]]:
-    """Return the ``codex app-server`` command plus bounded runtime metadata.
+# The system-CLI lanes and the subcommand that serves each: Codex is a non-ACP
+# JSON-RPC ``app-server``; Kimi speaks ACP natively through ``kimi acp``.
+_SYSTEM_CLI_SUBCOMMANDS: dict[Provider, str] = {
+    Provider.CODEX: "app-server",
+    Provider.KIMI: "acp",
+}
 
-    Codex is a non-ACP JSON-RPC subprocess. Resolution prefers the codex
-    executable on PATH; the bare-name ``fallback_cli_name`` origin (no resolved
-    path) is what ``classify_provider_command`` treats as unresolvable.
+#: Every lane launched as a native subprocess: exactly the lanes
+#: :func:`classify_provider_command` classifies.
+COMMAND_LANES: frozenset[Provider] = ACP_BACKEND_LANES | frozenset(
+    _SYSTEM_CLI_SUBCOMMANDS
+)
+
+
+def _classify_system_cli_command(provider: Provider) -> ProviderCommand:
+    """Return a system-CLI lane's command, resolved from this service's PATH.
+
+    An unresolved CLI keeps its bare name under the ``fallback_cli_name``
+    origin, which :attr:`ProviderCommand.resolved` reports as unresolved.
     """
-    system_codex = resolve_provider_cli_executable(Provider.CODEX)
-    if system_codex:
-        return [system_codex, "app-server"], {
-            "runtime_authority": "system_cli",
-            "command_origin": "system_path_executable",
-            "command_kind": "codex_cli",
-            "command_executable": Path(system_codex).name,
-            "command_target": system_codex,
-        }
-    return ["codex", "app-server"], {
-        "runtime_authority": "system_cli",
-        "command_origin": "fallback_cli_name",
-        "command_kind": "codex_cli",
-        "command_executable": "codex",
-        "command_target": "codex",
-    }
-
-
-def _classify_kimi_command() -> tuple[list[str], dict[str, str]]:
-    """Return the ``kimi acp`` command plus bounded runtime metadata.
-
-    Kimi speaks ACP natively (``kimi acp`` is a stdio ACP server). Resolution
-    prefers the installed Kimi Code executable on PATH. The bare-name
-    ``fallback_cli_name`` origin is treated as unresolvable by readiness and
-    catalog registration.
-    """
-    system_kimi = resolve_provider_cli_executable(Provider.KIMI)
-    if system_kimi:
-        return [system_kimi, "acp"], {
-            "runtime_authority": "system_cli",
-            "command_origin": "system_path_executable",
-            "command_kind": "kimi_cli",
-            "command_executable": Path(system_kimi).name,
-            "command_target": system_kimi,
-        }
-    return ["kimi", "acp"], {
-        "runtime_authority": "system_cli",
-        "command_origin": "fallback_cli_name",
-        "command_kind": "kimi_cli",
-        "command_executable": "kimi",
-        "command_target": "kimi",
-    }
+    subcommand = _SYSTEM_CLI_SUBCOMMANDS[provider]
+    kind = f"{provider.value}_cli"
+    executable = resolve_provider_cli_executable(provider)
+    if executable:
+        return ProviderCommand(
+            argv=(executable, subcommand),
+            runtime_authority="system_cli",
+            command_origin="system_path_executable",
+            command_kind=kind,
+            command_executable=Path(executable).name,
+            command_target=executable,
+        )
+    return ProviderCommand(
+        argv=(provider.value, subcommand),
+        runtime_authority="system_cli",
+        command_origin=_FALLBACK_CLI_NAME,
+        command_kind=kind,
+        command_executable=provider.value,
+        command_target=provider.value,
+    )
 
 
 def classify_provider_command(
     provider: Provider, *, backend: str | None = None
-) -> dict[str, str]:
+) -> ProviderCommand:
     """Resolve a subprocess provider's launch command without instantiating it.
 
-    Returns the command metadata for a genuinely resolvable command and raises
-    when it cannot be resolved. ``_classify_acp_command`` raises when the Claude
-    ACP entry point is missing, and bare-name command fallbacks are treated as
-    unresolvable rather than silently accepted.
+    The one classification of a lane's launch: the returned command carries
+    what resolution established, including whether a system CLI resolved at
+    all, so no caller looks the binary up a second time.
 
     Raises:
-        ValueError: The provider has no resolvable subprocess command.
+        ValueError: The provider has no subprocess command.
         ConfigError: The Claude ACP entry point/binary does not exist.
     """
-    if provider in (Provider.CLAUDE, Provider.ZAI):
+    if provider in ACP_BACKEND_LANES:
         # Z.ai launches the same claude-agent-acp wrapper as Claude; only the
         # injected auth env differs.
-        resolved_backend = backend if backend is not None else settings.acp_backend
-        _, meta = _classify_acp_command(resolved_backend)
-        return meta
-    if provider == Provider.CODEX:
-        _, meta = _classify_codex_command()
-        if meta.get("command_origin") == "fallback_cli_name":
-            raise ValueError("Codex CLI not resolvable: 'codex' not found on PATH.")
-        return meta
-    if provider == Provider.KIMI:
-        _, meta = _classify_kimi_command()
-        if meta.get("command_origin") == "fallback_cli_name":
-            raise ValueError("Kimi Code CLI not resolvable: 'kimi' not found on PATH.")
-        return meta
+        return _classify_acp_command(
+            backend if backend is not None else settings.acp_backend
+        )
+    if provider in _SYSTEM_CLI_SUBCOMMANDS:
+        return _classify_system_cli_command(provider)
     raise ValueError(f"provider {provider.value} has no subprocess command to classify")

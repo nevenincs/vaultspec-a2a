@@ -11,11 +11,11 @@ from ...control.config import settings
 from ...graph._compiler_models import resolve_model_for_worker
 from ...graph.enums import Provider
 from ...team.team_config import load_agent_config, load_team_config
+from ...testing import settings_override
 from ...thread.errors import ConfigError
 from .._factory_commands import (
     _BIN_PATH,
     _build_kimi_env,
-    _build_zai_env,
     _classify_acp_command,
     _kimi_home_env,
     classify_provider_command,
@@ -30,7 +30,7 @@ from ..cli_resolution import (
     resolve_service_executable,
 )
 from ..codex_chat_model import CodexChatModel
-from ..factory import ProviderFactory
+from ..factory import ProviderFactory, _zai_auth_env
 from ..provider_catalog import (
     SELECTION_SCHEMA_VERSION,
     AuthenticationState,
@@ -110,9 +110,9 @@ def test_classify_acp_command_binary_returns_bin_path() -> None:
     if _BIN_PATH is None:
         _assert_binary_backend_unavailable(lambda: _classify_acp_command("binary"))
         return
-    command, _ = _classify_acp_command("binary")
-    assert len(command) == 1
-    assert "claude-agent-acp" in command[0]
+    command = _classify_acp_command("binary")
+    assert len(command.argv) == 1
+    assert "claude-agent-acp" in command.argv[0]
 
 
 def test_classify_acp_command_binary_path_matches_bin_path() -> None:
@@ -120,8 +120,8 @@ def test_classify_acp_command_binary_path_matches_bin_path() -> None:
     if _BIN_PATH is None:
         _assert_binary_backend_unavailable(lambda: _classify_acp_command("binary"))
         return
-    command, _ = _classify_acp_command("binary")
-    assert Path(command[0]) == _BIN_PATH
+    command = _classify_acp_command("binary")
+    assert Path(command.argv[0]) == _BIN_PATH
 
 
 def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
@@ -155,8 +155,6 @@ def test_provider_factory_claude_default_never_injects_a_setting_token() -> None
         )
         return
     from pydantic import SecretStr
-
-    from ...testing import settings_override
 
     with settings_override(
         claude_auth_channel="subscription_login",
@@ -210,32 +208,41 @@ def test_provider_factory_claude_retains_requested_model_for_acp_selection() -> 
 # ---------------------------------------------------------------------------
 
 
-def test_build_zai_env_injects_base_url_and_token() -> None:
-    """Z.ai env builder maps configured settings to the Anthropic gateway vars."""
-    env = _build_zai_env(
-        zai_base_url="https://api.z.ai/api/anthropic",
-        zai_auth_token="zai-secret",
-    )
+def test_zai_auth_env_injects_base_url_and_token() -> None:
+    """Z.ai env selection maps configured settings to the Anthropic gateway vars."""
+    with settings_override(
+        zai_base_url="https://api.z.ai/api/anthropic", zai_auth_token="zai-secret"
+    ):
+        env, auth_mode = _zai_auth_env()
     assert env == {
         "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
         "ANTHROPIC_AUTH_TOKEN": "zai-secret",
     }
+    assert auth_mode == "zai_auth_token"
 
 
-def test_build_zai_env_without_token_returns_empty() -> None:
+def test_zai_auth_env_without_token_returns_empty() -> None:
     """No token means no auth env — the base URL alone is not injected."""
-    assert _build_zai_env("https://api.z.ai/api/anthropic", None) == {}
+    with settings_override(
+        zai_base_url="https://api.z.ai/api/anthropic", zai_auth_token=None
+    ):
+        assert _zai_auth_env() == ({}, "none_detected")
 
 
-def test_build_zai_env_ignores_blank_token() -> None:
+def test_zai_auth_env_ignores_blank_token() -> None:
     """A whitespace-only token must not produce an ANTHROPIC_AUTH_TOKEN var."""
-    assert _build_zai_env("https://api.z.ai/api/anthropic", "  ") == {}
+    with settings_override(
+        zai_base_url="https://api.z.ai/api/anthropic", zai_auth_token="  "
+    ):
+        assert _zai_auth_env() == ({}, "none_detected")
 
 
-def test_build_zai_env_omits_blank_base_url() -> None:
+def test_zai_auth_env_omits_blank_base_url() -> None:
     """A blank base URL is dropped while a real token still authenticates."""
-    env = _build_zai_env(" ", "zai-secret")
+    with settings_override(zai_base_url=" ", zai_auth_token="zai-secret"):
+        env, auth_mode = _zai_auth_env()
     assert env == {"ANTHROPIC_AUTH_TOKEN": "zai-secret"}
+    assert auth_mode == "zai_auth_token"
 
 
 def test_provider_factory_zai_refuses_without_current_turn_proof(
@@ -251,10 +258,7 @@ def test_provider_factory_zai_refuses_without_current_turn_proof(
 def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
     """Kimi builds an AcpChatModel on the `kimi acp` command with the kimi family."""
     if resolve_provider_cli_executable(Provider.KIMI) is None:
-        with pytest.raises(ValueError, match="Kimi Code CLI not resolvable"):
-            from .._factory_commands import classify_provider_command
-
-            classify_provider_command(Provider.KIMI)
+        assert classify_provider_command(Provider.KIMI).resolved is False
         return
     model = ProviderFactory().create(Provider.KIMI, model=_FROZEN_KIMI_MODEL)
     assert isinstance(model, AcpChatModel)
@@ -343,15 +347,17 @@ def test_every_partial_kimi_temporary_definition_fails_closed(
         _build_kimi_env(key, base_url, name)
 
 
-def test_classify_provider_command_kimi_resolves_or_hints_install() -> None:
+def test_classify_provider_command_kimi_resolves_or_flags_unresolved() -> None:
     """Kimi classifies to the installed Kimi Code ACP executable."""
-    if resolve_provider_cli_executable(Provider.KIMI) is None:
-        with pytest.raises(ValueError, match="Kimi Code CLI not resolvable"):
-            classify_provider_command(Provider.KIMI)
+    installed = resolve_provider_cli_executable(Provider.KIMI)
+    command = classify_provider_command(Provider.KIMI)
+    assert command.command_kind == "kimi_cli"
+    if installed is None:
+        assert command.resolved is False
         return
-    meta = classify_provider_command(Provider.KIMI)
-    assert meta["command_kind"] == "kimi_cli"
-    assert meta["command_origin"] == "system_path_executable"
+    assert command.resolved is True
+    assert command.command_origin == "system_path_executable"
+    assert command.argv == (installed, "acp")
 
 
 def test_classify_provider_command_zai_returns_acp_meta() -> None:
@@ -360,11 +366,11 @@ def test_classify_provider_command_zai_returns_acp_meta() -> None:
         with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
             classify_provider_command(Provider.ZAI)
         return
-    meta = classify_provider_command(Provider.ZAI)
-    assert meta["command_kind"] == "node_entry"
-    assert meta["acp_backend"] == "node"
+    command = classify_provider_command(Provider.ZAI)
+    assert command.command_kind == "node_entry"
+    assert command.acp_backend == "node"
     node = str(resolve_service_executable("node"))
-    assert meta["command_executable"] == Path(node).name
+    assert command.command_executable == Path(node).name
 
 
 def test_provider_factory_explicit_string_model() -> None:

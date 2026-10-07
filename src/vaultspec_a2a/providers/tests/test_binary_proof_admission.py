@@ -15,6 +15,7 @@ from ...graph.enums import Provider
 from ...testing import settings_override
 from .. import factory as factory_module
 from .._catalog_discovery import ProviderCatalogDiscovery
+from .._factory_commands import ProviderCommand
 from ..acp_chat_model import AcpChatModel
 from ..binary_version import probe_binary_version
 from ..cli_resolution import (
@@ -114,17 +115,18 @@ def test_factory_refuses_out_of_range_codex_before_model_construction(
 ) -> None:
     """A caller bypassing catalog selection still cannot construct that binary."""
     binary = str(tmp_path / "codex")
-    metadata = {
-        "runtime_authority": "system_cli",
-        "command_origin": "system_path_executable",
-        "command_kind": "codex_cli",
-        "command_executable": "codex",
-        "command_target": binary,
-    }
+    classified = ProviderCommand(
+        argv=(binary, "app-server"),
+        runtime_authority="system_cli",
+        command_origin="system_path_executable",
+        command_kind="codex_cli",
+        command_executable="codex",
+        command_target=binary,
+    )
     monkeypatch.setattr(
         factory_module,
-        "_classify_codex_command",
-        lambda: ([binary, "app-server"], metadata),
+        "classify_provider_command",
+        lambda _provider: classified,
     )
 
     def report(_path: Path | str) -> str:

@@ -65,17 +65,17 @@ def test_capsule_root_resolves_node_and_acp_only_from_capsule(tmp_path: Path) ->
     node = _write(capsule_node_executable(root), "node runtime\n")
     acp = _write(capsule_acp_entry(root), "// acp entry\n")
 
-    command, meta = _classify_acp_command("node", capsule_assets_root=root)
+    command = _classify_acp_command("node", capsule_assets_root=root)
 
-    assert command == [str(node), str(acp)]
+    assert command.argv == (str(node), str(acp))
     # The executable is the explicit capsule binary, never a bare PATH ``node``.
-    assert command[0] == str(node)
-    assert meta["runtime_authority"] == "capsule"
-    assert meta["command_origin"] == "capsule"
-    assert meta["command_kind"] == "node_entry"
-    assert meta["command_target"] == str(acp)
-    assert meta["command_executable"] == node.name
-    assert meta["acp_backend"] == "node"
+    assert command.argv[0] == str(node)
+    assert command.runtime_authority == "capsule"
+    assert command.command_origin == "capsule"
+    assert command.command_kind == "node_entry"
+    assert command.command_target == str(acp)
+    assert command.command_executable == node.name
+    assert command.acp_backend == "node"
 
 
 def test_capsule_missing_node_fails_loud_naming_the_asset(tmp_path: Path) -> None:
@@ -134,11 +134,11 @@ def test_relative_capsule_root_returns_absolute_canonical_assets() -> None:
         node = _write(capsule_node_executable(root), "node runtime\n")
         acp = _write(capsule_acp_entry(root), "// acp entry\n")
 
-        command, meta = _classify_acp_command("node", capsule_assets_root=relative_root)
+        command = _classify_acp_command("node", capsule_assets_root=relative_root)
 
-        assert command == [str(node.resolve()), str(acp.resolve())]
-        assert all(Path(part).is_absolute() for part in command)
-        assert meta["command_target"] == str(acp.resolve())
+        assert command.argv == (str(node.resolve()), str(acp.resolve()))
+        assert all(Path(part).is_absolute() for part in command.argv)
+        assert command.command_target == str(acp.resolve())
 
 
 @pytest.mark.parametrize(
@@ -189,7 +189,8 @@ def test_explicit_none_forces_project_resolution_despite_configured_root(
 import json
 import sys
 sys.path.insert(0, {str(source_root)!r})
-from vaultspec_a2a.providers.factory import _classify_acp_command, settings
+from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.providers._factory_commands import _classify_acp_command
 from vaultspec_a2a.thread.errors import ConfigError
 
 try:
@@ -199,11 +200,14 @@ except ConfigError as error:
 else:
     omitted = {{"status": "resolved"}}
 
-command, metadata = _classify_acp_command("node", capsule_assets_root=None)
+command = _classify_acp_command("node", capsule_assets_root=None)
 print(json.dumps({{
     "configured_root": str(settings.capsule_assets_root),
     "omitted": omitted,
-    "explicit_none": {{"command": command, "metadata": metadata}},
+    "explicit_none": {{
+        "command": list(command.argv),
+        "metadata": command.metadata(),
+    }},
 }}))
 """
     env = os.environ.copy()
@@ -239,7 +243,10 @@ def test_explicit_none_keeps_project_backend_behavior(
 ) -> None:
     """Explicit None selects the existing Compose/project-local classifier."""
     del installed_acp_adapter
-    command, meta = _classify_acp_command("node", capsule_assets_root=None)
-    assert command == [resolve_service_executable("node"), str(claude_acp_entry())]
-    assert meta["runtime_authority"] == "project_local"
-    assert meta["command_origin"] == "project_node_modules_entry"
+    command = _classify_acp_command("node", capsule_assets_root=None)
+    assert command.argv == (
+        resolve_service_executable("node"),
+        str(claude_acp_entry()),
+    )
+    assert command.runtime_authority == "project_local"
+    assert command.command_origin == "project_node_modules_entry"

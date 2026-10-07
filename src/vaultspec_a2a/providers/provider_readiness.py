@@ -11,6 +11,7 @@ from ..control.provider_execution import native_execution_refusal_reason
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from ._factory_commands import (
+    COMMAND_LANES,
     classify_provider_command,
     kimi_temporary_model_configuration_reason,
 )
@@ -32,12 +33,6 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
-
-#: Lanes launched as a native subprocess: the desktop profile refuses them, and
-#: each is ready only once its launch command resolves.
-_COMMAND_LANES = frozenset(
-    {Provider.CLAUDE, Provider.CODEX, Provider.ZAI, Provider.KIMI}
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +127,8 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
     workspace-independent, so no workspace is taken. The reason string is safe -
     it names what is missing, never a secret value.
     """
-    if provider in _COMMAND_LANES:
+    if provider in COMMAND_LANES:
+        # The desktop profile refuses every lane launched as a native subprocess.
         reason = native_execution_refusal_reason()
         if reason is not None:
             return ProviderReadiness(provider=provider, ready=False, reason=reason)
@@ -149,7 +145,7 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
             provider=provider, ready=False, reason=configuration.reason
         )
 
-    if provider in _COMMAND_LANES:
+    if provider in COMMAND_LANES:
         # This layer does not inspect CLI authentication. Claude inherits ambient
         # auth; Codex uses its persisted session. Each needs a resolvable command.
         return _command_readiness(provider)
@@ -170,15 +166,19 @@ def _command_readiness(provider: Provider) -> ProviderReadiness:
     never surfaced in the served reason.
     """
     try:
-        classify_provider_command(provider)
+        command = classify_provider_command(provider)
     except (ValueError, ConfigError, FileNotFoundError) as exc:
-        logger.debug("provider %s command not resolvable: %s", provider.value, exc)
-        return ProviderReadiness(
-            provider=provider,
-            ready=False,
-            reason="provider launch command is not installed or resolvable",
-        )
-    return ProviderReadiness(provider=provider, ready=True)
+        detail = str(exc)
+    else:
+        if command.resolved:
+            return ProviderReadiness(provider=provider, ready=True)
+        detail = f"{command.command_executable!r} not found on PATH"
+    logger.debug("provider %s command not resolvable: %s", provider.value, detail)
+    return ProviderReadiness(
+        provider=provider,
+        ready=False,
+        reason="provider launch command is not installed or resolvable",
+    )
 
 
 def probe_harness_ready(

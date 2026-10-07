@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 from vaultspec_core.config import env_value
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Sequence
     from pathlib import Path
 
     from langchain_core.language_models import BaseChatModel
@@ -39,11 +39,8 @@ from ._catalog_discovery import ProviderCatalogDiscovery, unavailable_discovery
 from ._claude_tool_policy import claude_bypass_declined_meta
 from ._factory_commands import (
     _build_kimi_env,
-    _build_zai_env,
-    _classify_acp_command,
-    _classify_codex_command,
-    _classify_kimi_command,
     _kimi_home_env,
+    classify_provider_command,
 )
 from ._native_role import (
     capture_native_workspace,
@@ -178,9 +175,7 @@ def binary_proof_reason(
     proof = PROVEN_TURN_LANES.get(provider)
     if proof is None:
         return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
-    expected_binary = (
-        "claude" if provider in {Provider.CLAUDE, Provider.ZAI} else provider.value
-    )
+    expected_binary = "claude" if provider in ACP_BACKEND_LANES else provider.value
     if proof.binary != expected_binary:
         return ProviderRuntimeUnavailableReason.BINARY_OUT_OF_PROOF_RANGE
     if native_authority is None and settings.desktop_profile_armed:
@@ -207,18 +202,25 @@ def binary_proof_reason(
 
 
 def codex_binary_proof_reason(
-    command: list[str] | None = None,
+    command: Sequence[str] | None = None,
     *,
     native_authority: NativeLaunchAuthority | None = None,
     workspace_root: Path | None = None,
 ) -> ProviderRuntimeUnavailableReason | None:
-    """Probe the service-path Codex launcher selected by the factory."""
+    """Probe the service-path Codex launcher selected by the factory.
+
+    ``command`` is the launch a model already holds; without one the lane is
+    classified here, once. An unresolved classification is refused unprobed,
+    and a held launcher is probed exactly as handed over, so a bare name is
+    refused by the probe rather than looked up again.
+    """
     if Provider.CODEX not in PROVEN_TURN_LANES:
         return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
     if command is None:
-        command, _ = _classify_codex_command()
-    if not os.path.isabs(command[0]):
-        return ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
+        classified = classify_provider_command(Provider.CODEX)
+        if not classified.resolved:
+            return ProviderRuntimeUnavailableReason.BINARY_VERSION_UNAVAILABLE
+        command = classified.argv
     return binary_proof_reason(
         Provider.CODEX,
         command[0],
@@ -290,11 +292,32 @@ def claude_auth_env() -> tuple[dict[str, str], str]:
     return {"CLAUDE_CODE_OAUTH_TOKEN": token}, "oauth_token"
 
 
+def _zai_auth_env() -> tuple[dict[str, str], str]:
+    """Select the configured Z.ai credential for the Claude ACP child.
+
+    Z.ai rides the Claude ACP path: the wrapper's Claude Code CLI honours
+    ``ANTHROPIC_BASE_URL``/``ANTHROPIC_AUTH_TOKEN`` to retarget the Anthropic
+    Messages API at Z.ai's compatible gateway. The base env removes ambient
+    credentials and gateway overrides, so the selected provider supplies both
+    names explicitly after scrubbing. Whether a token is configured is the
+    lane's configuration probe's answer. The token is a secret: it is placed in
+    the returned dict but never logged.
+    """
+    token = settings.zai_auth_token
+    if probe_provider_configuration(Provider.ZAI).reason is not None or token is None:
+        return {}, "none_detected"
+    env_vars: dict[str, str] = {}
+    if settings.zai_base_url.strip():
+        env_vars["ANTHROPIC_BASE_URL"] = settings.zai_base_url
+    env_vars["ANTHROPIC_AUTH_TOKEN"] = token
+    return env_vars, "zai_auth_token"
+
+
 async def _discover_claude_catalog(
     key: ProviderCatalogKey, workspace_root: Path
 ) -> ProviderCatalogDiscovery:
     try:
-        command, metadata = _classify_acp_command(settings.acp_backend)
+        command = classify_provider_command(Provider.CLAUDE)
     except (ConfigError, ValueError):
         return unavailable_discovery(
             key,
@@ -322,7 +345,7 @@ async def _discover_claude_catalog(
             configured=HealthState.UNAVAILABLE,
         )
     env.update(auth_env)
-    use_exec = metadata["acp_backend"] == "binary"
+    use_exec = command.acp_backend == "binary"
     if use_exec:
         env["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
     scope = capture_native_workspace(workspace_root)
@@ -332,14 +355,14 @@ async def _discover_claude_catalog(
         if native is not None:
             env.update(role_environment(native))
         discovered = await discover_acp_catalog(
-            tuple(command),
+            command.argv,
             env=env,
             cwd=str(workspace_root),
             key=key,
             use_exec=use_exec,
             metadata={
                 "provider": Provider.CLAUDE.value,
-                **metadata,
+                **command.metadata(),
                 "cli_runtime_authority": cli_resolution.authority,
                 "cli_executable": str(cli_resolution.path),
                 "auth_mode": auth_mode,
@@ -358,11 +381,8 @@ async def _discover_claude_catalog(
 async def _discover_codex_catalog(
     key: ProviderCatalogKey, workspace_root: Path
 ) -> ProviderCatalogDiscovery:
-    try:
-        command, _ = _classify_codex_command()
-        if command[0] == "codex":
-            raise ValueError("Codex CLI is not resolvable")
-    except ValueError:
+    command = classify_provider_command(Provider.CODEX)
+    if not command.resolved:
         return unavailable_discovery(
             key,
             reason="provider catalog command is unavailable",
@@ -389,7 +409,7 @@ async def _discover_codex_catalog(
             native = scope.for_home(home)
             env["CODEX_HOME"] = str(home)
         discovered = await discover_codex_catalog(
-            tuple(command),
+            command.argv,
             env=env,
             cwd=str(workspace_root),
             key=key,
@@ -430,14 +450,7 @@ async def _discover_antigravity_catalog(
 async def _discover_kimi_catalog(
     key: ProviderCatalogKey, workspace_root: Path
 ) -> ProviderCatalogDiscovery:
-    command: list[str] | None = None
-    metadata: dict[str, str] = {}
-    try:
-        command, metadata = _classify_kimi_command()
-        if metadata["command_origin"] == "fallback_cli_name":
-            raise ValueError("Kimi Code CLI is not resolvable")
-    except ValueError:
-        command = None
+    command = classify_provider_command(Provider.KIMI)
     configuration = probe_provider_configuration(Provider.KIMI)
     if configuration.reason is not None:
         return unavailable_discovery(
@@ -445,12 +458,10 @@ async def _discover_kimi_catalog(
             reason=configuration.reason,
             configured=configuration.state,
             transport=(
-                HealthState.AVAILABLE
-                if command is not None
-                else HealthState.UNAVAILABLE
+                HealthState.AVAILABLE if command.resolved else HealthState.UNAVAILABLE
             ),
         )
-    if command is None:
+    if not command.resolved:
         return unavailable_discovery(
             key,
             reason="provider catalog command is unavailable",
@@ -477,11 +488,11 @@ async def _discover_kimi_catalog(
     env.update(_kimi_home_env(settings.kimi_code_home))
     # Discovery is a sibling command, never `kimi acp provider list`.
     discovered = await discover_kimi_catalog(
-        (command[0],),
+        (command.argv[0],),
         env=env,
         cwd=str(workspace_root),
         key=key,
-        metadata={"provider": Provider.KIMI.value, **metadata},
+        metadata={"provider": Provider.KIMI.value, **command.metadata()},
     )
     normalized = replace(discovered, configured=configuration.state)
     return replace(normalized, transport=_transport_evidence(normalized))
@@ -642,14 +653,14 @@ def _create_codex_model(
 ) -> BaseChatModel:
     from .codex_chat_model import CodexChatModel
 
-    command, command_meta = _classify_codex_command()
+    command = classify_provider_command(Provider.CODEX)
     require_binary_proof(
-        codex_binary_proof_reason(command, workspace_root=workspace_root)
+        codex_binary_proof_reason(command.argv, workspace_root=workspace_root)
     )
     # Codex auth is file-based; no secret env is injected.
     codex_controls = _native_control_fields(selected_controls)
     return CodexChatModel(
-        command=command,
+        command=list(command.argv),
         model_name=model_name,
         effort=codex_controls.get("reasoning_effort"),
         service_tier=codex_controls.get("service_tier"),
@@ -659,11 +670,11 @@ def _create_codex_model(
         timeout=float(timeout),
         provider=str(Provider.CODEX.value),
         execution_mode=EXTERNAL_EXECUTION_MODES[Provider.CODEX],
-        runtime_authority=command_meta["runtime_authority"],
-        command_origin=command_meta["command_origin"],
-        command_kind=command_meta["command_kind"],
-        command_executable=command_meta["command_executable"],
-        command_target=command_meta["command_target"],
+        runtime_authority=command.runtime_authority,
+        command_origin=command.command_origin,
+        command_kind=command.command_kind,
+        command_executable=command.command_executable,
+        command_target=command.command_target,
         version_proof_required=True,
     )
 
@@ -686,7 +697,7 @@ def _create_claude_model(
     backend = backend if backend is not None else settings.acp_backend
     logger.debug("[%s] Instantiating ACP Wrapper. backend=%s", Provider.CLAUDE, backend)
     try:
-        command, command_meta = _classify_acp_command(backend)
+        command = classify_provider_command(Provider.CLAUDE, backend=backend)
     except ConfigError as exc:
         raise ProviderRuntimeUnavailableError(str(exc)) from exc
     cli = _require_claude_cli(workspace_root)
@@ -700,7 +711,7 @@ def _create_claude_model(
     if backend == "binary":
         env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
     return AcpChatModel(
-        command=command,
+        command=list(command.argv),
         env_vars=env_vars,
         desired_model=model_name,
         desired_config_options=selected_controls,
@@ -709,12 +720,12 @@ def _create_claude_model(
         use_exec=(backend == "binary"),
         provider=str(Provider.CLAUDE.value),
         execution_mode=external_execution_mode(Provider.CLAUDE, backend),
-        runtime_authority=command_meta["runtime_authority"],
-        command_origin=command_meta["command_origin"],
-        command_kind=command_meta["command_kind"],
-        command_executable=command_meta["command_executable"],
-        command_target=command_meta["command_target"],
-        acp_backend=command_meta["acp_backend"],
+        runtime_authority=command.runtime_authority,
+        command_origin=command.command_origin,
+        command_kind=command.command_kind,
+        command_executable=command.command_executable,
+        command_target=command.command_target,
+        acp_backend=command.acp_backend,
         auth_mode=auth_mode,
         version_proof_required=True,
     )
@@ -730,14 +741,15 @@ def _create_zai_model(
     from .acp_chat_model import AcpChatModel
 
     backend = backend if backend is not None else settings.acp_backend
+    env_vars, auth_mode = _zai_auth_env()
     logger.debug(
-        "[%s] Instantiating ACP Wrapper. Auth token configuration: %s, backend=%s",
+        "[%s] Instantiating ACP Wrapper. auth_mode=%s, backend=%s",
         Provider.ZAI,
-        probe_provider_configuration(Provider.ZAI).state,
+        auth_mode,
         backend,
     )
     try:
-        command, command_meta = _classify_acp_command(backend)
+        command = classify_provider_command(Provider.ZAI, backend=backend)
     except ConfigError as exc:
         raise ProviderRuntimeUnavailableError(str(exc)) from exc
     cli = _require_claude_cli(workspace_root)
@@ -746,14 +758,10 @@ def _create_zai_model(
             Provider.ZAI, str(cli.path), cli.authority, workspace_root=workspace_root
         )
     )
-    env_vars = _build_zai_env(
-        zai_base_url=settings.zai_base_url,
-        zai_auth_token=settings.zai_auth_token,
-    )
     if backend == "binary":
         env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
     return AcpChatModel(
-        command=command,
+        command=list(command.argv),
         env_vars=env_vars,
         desired_model=model_name,
         desired_config_options=selected_controls,
@@ -762,15 +770,13 @@ def _create_zai_model(
         use_exec=(backend == "binary"),
         provider=str(Provider.ZAI.value),
         execution_mode=external_execution_mode(Provider.ZAI, backend),
-        runtime_authority=command_meta["runtime_authority"],
-        command_origin=command_meta["command_origin"],
-        command_kind=command_meta["command_kind"],
-        command_executable=command_meta["command_executable"],
-        command_target=command_meta["command_target"],
-        acp_backend=command_meta["acp_backend"],
-        auth_mode=(
-            "zai_auth_token" if "ANTHROPIC_AUTH_TOKEN" in env_vars else "none_detected"
-        ),
+        runtime_authority=command.runtime_authority,
+        command_origin=command.command_origin,
+        command_kind=command.command_kind,
+        command_executable=command.command_executable,
+        command_target=command.command_target,
+        acp_backend=command.acp_backend,
+        auth_mode=auth_mode,
         version_proof_required=True,
     )
 
@@ -784,8 +790,8 @@ def _create_kimi_model(
     from .acp_chat_model import AcpChatModel
 
     # The exact catalog alias travels through Kimi's own -m option.
-    base_command, command_meta = _classify_kimi_command()
-    command = [base_command[0], "-m", model_name, *base_command[1:]]
+    classified = classify_provider_command(Provider.KIMI)
+    command = [classified.argv[0], "-m", model_name, *classified.argv[1:]]
     api_key = (
         settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
     )
@@ -815,11 +821,11 @@ def _create_kimi_model(
         provider=str(Provider.KIMI.value),
         execution_mode=EXTERNAL_EXECUTION_MODES[Provider.KIMI],
         acp_family="kimi",
-        runtime_authority=command_meta["runtime_authority"],
-        command_origin=command_meta["command_origin"],
-        command_kind=command_meta["command_kind"],
-        command_executable=command_meta["command_executable"],
-        command_target=command_meta["command_target"],
+        runtime_authority=classified.runtime_authority,
+        command_origin=classified.command_origin,
+        command_kind=classified.command_kind,
+        command_executable=classified.command_executable,
+        command_target=classified.command_target,
         acp_backend="kimi-code",
         auth_mode=(
             "temporary_model"

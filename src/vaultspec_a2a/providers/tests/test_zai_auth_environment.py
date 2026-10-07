@@ -11,14 +11,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing import armed_environment
+from ...testing import armed_environment, settings_override
 from ...workspace.environment import scrub_agent_environment
 from .._acp_rpc_terminal_handlers import _terminal_environment
-from .._factory_commands import _build_zai_env
 from .._mcp_contract import _probe_environment
 from ..acp_chat_model import AcpChatModel
 from ..binary_version import probe_binary_version
 from ..codex_chat_model import CodexChatModel
+from ..factory import _zai_auth_env
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -85,7 +85,10 @@ def test_zai_alias_scrubbing_is_case_insensitive(name: str) -> None:
 def test_only_selected_zai_auth_reaches_the_zai_child(
     tmp_path: Path, token: str | None
 ) -> None:
-    selected = _build_zai_env("https://selected.invalid/anthropic", token)
+    with settings_override(
+        zai_base_url="https://selected.invalid/anthropic", zai_auth_token=token
+    ):
+        selected, _auth_mode = _zai_auth_env()
     with armed_environment(**_AMBIENT):
         model = AcpChatModel(
             command=[],

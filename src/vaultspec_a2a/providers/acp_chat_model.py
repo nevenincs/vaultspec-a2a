@@ -29,6 +29,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
+from ..control.infra_config import AcpBackend
 from ..desktop.native_isolation import NativeLaunchAuthority, NativeWorkspaceAuthority
 from ..team.team_config import AgentConfig
 from ..workspace.environment import resolve_env_vars
@@ -92,6 +93,7 @@ from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import AcpError
 from .binary_version import probe_binary_version
 from .cli_resolution import pin_claude_executable
+from .execution_modes import NODE_BACKEND
 
 if TYPE_CHECKING:
     from ..graph.protocols import RuntimeIdentityRecordArgs
@@ -165,9 +167,12 @@ class AcpChatModel(ProcessChatModel):
         default=None,
         description="Bounded runtime authority classification for the ACP command.",
     )
-    acp_backend: str | None = Field(
+    acp_backend: AcpBackend | None = Field(
         default=None,
-        description="ACP backend classification such as node, binary, or kimi-code.",
+        description=(
+            "ACP gateway backend the Claude-family adapter runs on. Unset for a "
+            "lane with no selectable backend."
+        ),
     )
     acp_family: str = Field(
         default="claude",
@@ -461,7 +466,7 @@ class AcpChatModel(ProcessChatModel):
             )
             node = (
                 identity_path(self.command[0], field="Node executable path")
-                if self.acp_backend == "node" and self.command
+                if self.acp_backend == NODE_BACKEND and self.command
                 else None
             )
         else:

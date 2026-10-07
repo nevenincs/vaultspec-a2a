@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ...control.config import Settings
-from ...control.env_registry import ENV_FILE_VARIABLE
+from ...control.env_registry import ENV_FILE_VARIABLE, FOREIGN_PROVIDER_ENV_NAMES
 from ...control.settings_base import field_env_names
 from ...protocols.mcp.authoring_stdio import AuthoringBridgeSettings
 from ...testing.session_root import TestSessionSettings
@@ -41,24 +41,22 @@ _HARNESS_HEADING = "# Development harness\n"
 
 #: Names the example documents outside service settings, each with the
 #: owner that does. Anything else in the file is a dead or misspelled setting.
-DOCUMENTED_BUT_NOT_READ = {
+_DOCUMENTED_ELSEWHERE = {
     "VAULTSPEC_A2A_ENV_FILE": "the settings loader",
     "VAULTSPEC_A2A_NATIVE_PACKET_COUNT": "native launch environment decoder",
     "VAULTSPEC_A2A_NATIVE_PACKET_0": "native launch environment decoder chunk family",
     # Read by the langsmith SDK straight from the process environment.
-    "LANGSMITH_API_KEY": "langsmith SDK",
     "LANGSMITH_ENDPOINT": "langsmith SDK",
     "LANGSMITH_PROJECT": "langsmith SDK",
     "LANGSMITH_TRACING": "langsmith SDK",
-    "LANGCHAIN_TRACING_V2": "langsmith SDK",
-    # Documented as deliberately absent: the agent scrub strips it.
-    "ANTHROPIC_API_KEY": "documented absence",
     # Substituted by the development fixture Compose file, not the service.
     "JAEGER_OTLP_PORT": "development fixture docker compose",
     "JAEGER_UI_PORT": "development fixture docker compose",
     # Named in the port table as the place a Postgres port is embedded.
     "DATABASE_URL": "port table prose",
 }
+
+_NAME = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
 
 _ASSIGNMENT = re.compile(r"^(?P<commented># )?(?P<name>[A-Z][A-Z0-9_]*)=(?P<value>.*)$")
 
@@ -118,6 +116,18 @@ def setting_field_by_name() -> dict[str, str]:
     }
 
 
+def _documented_foreign_names() -> dict[str, str]:
+    """The registry's foreign provider names the example mentions.
+
+    The registry declares each as a name the service never reads and the agent
+    scrub strips, so a mention of one needs no owner of its own. A foreign name
+    a settings class does read as an alias is already declared.
+    """
+    text = ENV_EXAMPLE.read_text(encoding="utf-8") if ENV_EXAMPLE.is_file() else ""
+    unread = (FOREIGN_PROVIDER_ENV_NAMES & set(_NAME.findall(text))) - declared_names()
+    return dict.fromkeys(sorted(unread), "foreign provider name, stripped from agents")
+
+
 def declared_names() -> set[str]:
     """Every environment name any settings class in the code reads.
 
@@ -131,3 +141,8 @@ def declared_names() -> set[str]:
         for field in settings_cls.model_fields
         for name in field_env_names(settings_cls, field)
     }
+
+
+#: Every name the example documents without a settings class reading it, each
+#: with what accounts for it.
+DOCUMENTED_BUT_NOT_READ = {**_DOCUMENTED_ELSEWHERE, **_documented_foreign_names()}

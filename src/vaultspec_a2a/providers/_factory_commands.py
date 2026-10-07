@@ -7,13 +7,27 @@ import os
 import platform
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Final
 
 from ..control.config import settings
+from ..control.env_prefix import ENV_PREFIX
+from ..control.env_registry import CREDENTIAL_VARIABLES
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from .cli_resolution import resolve_provider_cli_executable, resolve_service_executable
+from .execution_modes import BINARY_BACKEND, NODE_BACKEND
+
+if TYPE_CHECKING:
+    from vaultspec_core.config import ConfigVariable
+
+    from ..control.infra_config import AcpBackend
 
 __all__ = [
+    "ANTHROPIC_AUTH_TOKEN_ENV",
+    "CLAUDE_CONFIG_DIR_ENV",
+    "CLAUDE_OAUTH_TOKEN",
+    "CODEX_HOME_ENV",
+    "KIMI_API_KEY_ENV",
     "_BIN_PATH",
     "_build_kimi_env",
     "_build_zai_env",
@@ -21,11 +35,13 @@ __all__ = [
     "_classify_codex_command",
     "_classify_kimi_command",
     "_kimi_home_env",
+    "acp_launch_options",
     "capsule_acp_entry",
     "capsule_claude_executable",
     "capsule_node_executable",
     "classify_provider_command",
     "claude_acp_entry",
+    "foreign_credential",
     "kimi_temporary_model_configuration_reason",
 ]
 
@@ -78,6 +94,47 @@ _CAPSULE_ACP_RELATIVE_PATH = (
 )
 
 
+def foreign_credential(field: str) -> ConfigVariable:
+    """Return the registry entry for the name a lane's own tool reads ``field`` by.
+
+    A credential is registered under its canonical a2a name and the owning
+    tool's own spelling. A child process reads the latter, so the provider layer
+    takes it from the registry instead of spelling it again.
+
+    Raises:
+        ValueError: ``field`` is not registered under exactly one foreign name.
+    """
+    (variable,) = (
+        entry
+        for entry in CREDENTIAL_VARIABLES[field]
+        if not entry.env_name.startswith(ENV_PREFIX)
+    )
+    return variable
+
+
+CLAUDE_OAUTH_TOKEN: Final = foreign_credential("claude_code_oauth_token")
+KIMI_API_KEY_ENV: Final = foreign_credential("kimi_model_api_key").env_name
+
+# Names the provider tools read that no credential entry declares. The registry
+# lists ANTHROPIC_AUTH_TOKEN only as a name a child never inherits, so the Z.ai
+# lane is the sole writer of it.
+ANTHROPIC_AUTH_TOKEN_ENV: Final = "ANTHROPIC_AUTH_TOKEN"
+CLAUDE_CONFIG_DIR_ENV: Final = "CLAUDE_CONFIG_DIR"
+CODEX_HOME_ENV: Final = "CODEX_HOME"
+_BUN_SINGLE_FILE_ENV: Final = "CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"
+
+
+def acp_launch_options(backend: AcpBackend) -> tuple[bool, dict[str, str]]:
+    """Return ``use_exec`` and the adapter environment ``backend`` launches with.
+
+    The precompiled Bun executable is a native binary that needs no ``.cmd``
+    shim, and it must be told it is the single-file build.
+    """
+    if backend == BINARY_BACKEND:
+        return True, {_BUN_SINGLE_FILE_ENV: "1"}
+    return False, {}
+
+
 def _build_zai_env(
     zai_base_url: str | None = None,
     zai_auth_token: str | None = None,
@@ -96,7 +153,7 @@ def _build_zai_env(
         return env_vars
     if zai_base_url and zai_base_url.strip():
         env_vars["ANTHROPIC_BASE_URL"] = zai_base_url
-    env_vars["ANTHROPIC_AUTH_TOKEN"] = zai_auth_token
+    env_vars[ANTHROPIC_AUTH_TOKEN_ENV] = zai_auth_token
     return env_vars
 
 
@@ -124,7 +181,7 @@ def _build_kimi_env(
         raise ValueError(reason)
     env_vars: dict[str, str] = {}
     if kimi_api_key and kimi_base_url and kimi_temporary_model_name:
-        env_vars["KIMI_MODEL_API_KEY"] = kimi_api_key.strip()
+        env_vars[KIMI_API_KEY_ENV] = kimi_api_key.strip()
         env_vars["KIMI_MODEL_BASE_URL"] = kimi_base_url.strip()
         env_vars["KIMI_MODEL_NAME"] = kimi_temporary_model_name.strip()
         if kimi_temporary_model_max_context_size is not None:
@@ -309,7 +366,7 @@ def _classify_capsule_acp_command(
         "command_kind": "node_entry",
         "command_executable": node_executable.name,
         "command_target": str(acp_entry),
-        "acp_backend": "node",
+        "acp_backend": NODE_BACKEND,
     }
 
 
@@ -336,7 +393,7 @@ def _classify_acp_command(
     Raises:
         ConfigError: If the resolved entry point does not exist.
     """
-    if backend == "binary":
+    if backend == BINARY_BACKEND:
         if _BIN_PATH is None:
             raise ConfigError(
                 f"ACP binary backend requested but no executable found in {_BIN_DIR}. "
@@ -353,7 +410,7 @@ def _classify_acp_command(
             "command_kind": "bun_binary",
             "command_executable": _BIN_PATH.name,
             "command_target": str(_BIN_PATH),
-            "acp_backend": "binary",
+            "acp_backend": BINARY_BACKEND,
         }
     # default: "node"
     root = (
@@ -387,7 +444,7 @@ def _classify_acp_command(
         "command_kind": "node_entry",
         "command_executable": Path(node_executable).name,
         "command_target": str(claude_acp_entry()),
-        "acp_backend": "node",
+        "acp_backend": NODE_BACKEND,
     }
 
 

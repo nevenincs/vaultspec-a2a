@@ -24,12 +24,11 @@ if TYPE_CHECKING:
 
     from langchain_core.language_models import BaseChatModel
 
+    from ..control.infra_config import AcpBackend
     from ..desktop.native_isolation import NativeLaunchAuthority
     from ..team.team_config import AgentConfig
 
 from ..control.config import settings
-from ..control.env_registry import CREDENTIAL_VARIABLES
-from ..control.infra_config import ACP_BACKENDS
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from ..utils.async_cleanup import complete_cleanup
@@ -38,12 +37,18 @@ from ..workspace.environment import resolve_env_vars
 from ._catalog_discovery import ProviderCatalogDiscovery, unavailable_discovery
 from ._claude_tool_policy import claude_bypass_declined_meta
 from ._factory_commands import (
+    ANTHROPIC_AUTH_TOKEN_ENV,
+    CLAUDE_OAUTH_TOKEN,
+    CODEX_HOME_ENV,
+    KIMI_API_KEY_ENV,
     _build_kimi_env,
     _build_zai_env,
     _classify_acp_command,
     _classify_codex_command,
     _classify_kimi_command,
     _kimi_home_env,
+    acp_launch_options,
+    foreign_credential,
 )
 from ._native_role import (
     capture_native_workspace,
@@ -65,6 +70,7 @@ from .execution_modes import (
     ACP_BACKEND_LANES,
     EXTERNAL_EXECUTION_MODES,
     external_execution_mode,
+    is_acp_backend,
 )
 from .in_process_catalog import (
     discover_in_process_catalog,
@@ -269,14 +275,9 @@ def claude_auth_env() -> tuple[dict[str, str], str]:
     if settings.claude_auth_channel == "subscription_login":
         # Preserve an explicit operator export only at the Claude root seam.
         # The shared environment must never grant this credential to other lanes.
-        variable = next(
-            variable
-            for variable in CREDENTIAL_VARIABLES["claude_code_oauth_token"]
-            if variable.env_name == "CLAUDE_CODE_OAUTH_TOKEN"
-        )
-        token = env_value(variable, environ=os.environ) or ""
+        token = env_value(CLAUDE_OAUTH_TOKEN, environ=os.environ) or ""
         return (
-            {"CLAUDE_CODE_OAUTH_TOKEN": token} if token.strip() else {},
+            {CLAUDE_OAUTH_TOKEN.env_name: token} if token.strip() else {},
             "subscription_login",
         )
     if settings.claude_auth_channel != "oauth_token":
@@ -287,7 +288,7 @@ def claude_auth_env() -> tuple[dict[str, str], str]:
         raise ProviderRuntimeUnavailableError(
             "Claude oauth_token auth channel requires a configured OAuth token"
         )
-    return {"CLAUDE_CODE_OAUTH_TOKEN": token}, "oauth_token"
+    return {CLAUDE_OAUTH_TOKEN.env_name: token}, "oauth_token"
 
 
 async def _discover_claude_catalog(
@@ -322,9 +323,8 @@ async def _discover_claude_catalog(
             configured=HealthState.UNAVAILABLE,
         )
     env.update(auth_env)
-    use_exec = metadata["acp_backend"] == "binary"
-    if use_exec:
-        env["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
+    use_exec, launch_env = acp_launch_options(settings.acp_backend)
+    env.update(launch_env)
     scope = capture_native_workspace(workspace_root)
     async with prepare_acp_role(
         scope, environment=env, provider=Provider.CLAUDE.value
@@ -370,7 +370,7 @@ async def _discover_codex_catalog(
         )
     env = resolve_env_vars(workspace_root)
     if settings.codex_home:
-        env["CODEX_HOME"] = settings.codex_home
+        env[CODEX_HOME_ENV] = settings.codex_home
     scope = capture_native_workspace(workspace_root)
     home = None
     try:
@@ -387,7 +387,7 @@ async def _discover_codex_catalog(
                 [], base, web_search=CodexWebSearchMode.DISABLED
             )
             native = scope.for_home(home)
-            env["CODEX_HOME"] = str(home)
+            env[CODEX_HOME_ENV] = str(home)
         discovered = await discover_codex_catalog(
             tuple(command),
             env=env,
@@ -566,7 +566,9 @@ def _admit_and_resolve_model_name(provider: Provider, model: object) -> str:
 
 def _admit_execution_mode(
     provider: Provider, backend: str | None, execution_mode: object
-) -> str | None:
+) -> AcpBackend | None:
+    if backend is not None and not is_acp_backend(backend):
+        raise ValueError(f"Unsupported ACP backend: {backend!r}")
     if execution_mode is not None:
         if not isinstance(execution_mode, str):
             raise ValueError("execution_mode must be a string")
@@ -577,7 +579,7 @@ def _admit_execution_mode(
         )
         if acp_prefix is not None and execution_mode.startswith(acp_prefix):
             frozen_backend = execution_mode.removeprefix(acp_prefix)
-            if frozen_backend not in ACP_BACKENDS:
+            if not is_acp_backend(frozen_backend):
                 raise ValueError(
                     f"Provider {provider.value!r} cannot execute mode "
                     f"{execution_mode!r}"
@@ -622,7 +624,7 @@ def _native_control_fields(selected_controls: dict[str, str]) -> dict[str, str]:
 
 def _admit_create_options(
     provider: Provider, backend: str | None, kwargs: dict[str, Any]
-) -> tuple[Any, str | None, dict[str, str]]:
+) -> tuple[Any, AcpBackend | None, dict[str, str]]:
     timeout = kwargs.pop("timeout", settings.provider_timeout_seconds)
     backend = _admit_execution_mode(
         provider, backend, kwargs.pop("execution_mode", None)
@@ -679,7 +681,7 @@ def _create_claude_model(
     agent_config: AgentConfig | None,
     workspace_root: Path | None,
     selected_controls: dict[str, str],
-    backend: str | None,
+    backend: AcpBackend | None,
 ) -> BaseChatModel:
     from .acp_chat_model import AcpChatModel
 
@@ -697,8 +699,8 @@ def _create_claude_model(
     )
 
     env_vars, auth_mode = claude_auth_env()
-    if backend == "binary":
-        env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
+    use_exec, launch_env = acp_launch_options(backend)
+    env_vars.update(launch_env)
     return AcpChatModel(
         command=command,
         env_vars=env_vars,
@@ -706,7 +708,7 @@ def _create_claude_model(
         desired_config_options=selected_controls,
         agent_config=agent_config,
         workspace_root=str(workspace_root) if workspace_root else None,
-        use_exec=(backend == "binary"),
+        use_exec=use_exec,
         provider=str(Provider.CLAUDE.value),
         execution_mode=external_execution_mode(Provider.CLAUDE, backend),
         runtime_authority=command_meta["runtime_authority"],
@@ -714,7 +716,7 @@ def _create_claude_model(
         command_kind=command_meta["command_kind"],
         command_executable=command_meta["command_executable"],
         command_target=command_meta["command_target"],
-        acp_backend=command_meta["acp_backend"],
+        acp_backend=backend,
         auth_mode=auth_mode,
         version_proof_required=True,
     )
@@ -725,7 +727,7 @@ def _create_zai_model(
     agent_config: AgentConfig | None,
     workspace_root: Path | None,
     selected_controls: dict[str, str],
-    backend: str | None,
+    backend: AcpBackend | None,
 ) -> BaseChatModel:
     from .acp_chat_model import AcpChatModel
 
@@ -750,8 +752,8 @@ def _create_zai_model(
         zai_base_url=settings.zai_base_url,
         zai_auth_token=settings.zai_auth_token,
     )
-    if backend == "binary":
-        env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
+    use_exec, launch_env = acp_launch_options(backend)
+    env_vars.update(launch_env)
     return AcpChatModel(
         command=command,
         env_vars=env_vars,
@@ -759,7 +761,7 @@ def _create_zai_model(
         desired_config_options=selected_controls,
         agent_config=agent_config,
         workspace_root=str(workspace_root) if workspace_root else None,
-        use_exec=(backend == "binary"),
+        use_exec=use_exec,
         provider=str(Provider.ZAI.value),
         execution_mode=external_execution_mode(Provider.ZAI, backend),
         runtime_authority=command_meta["runtime_authority"],
@@ -767,9 +769,11 @@ def _create_zai_model(
         command_kind=command_meta["command_kind"],
         command_executable=command_meta["command_executable"],
         command_target=command_meta["command_target"],
-        acp_backend=command_meta["acp_backend"],
+        acp_backend=backend,
         auth_mode=(
-            "zai_auth_token" if "ANTHROPIC_AUTH_TOKEN" in env_vars else "none_detected"
+            "zai_auth_token"
+            if ANTHROPIC_AUTH_TOKEN_ENV in env_vars
+            else "none_detected"
         ),
         version_proof_required=True,
     )
@@ -802,10 +806,11 @@ def _create_kimi_model(
     kimi_effort = _native_control_fields(selected_controls).get("thinking_effort")
     if kimi_effort is not None:
         env_vars["KIMI_MODEL_THINKING_EFFORT"] = kimi_effort
+    temporary_definition = KIMI_API_KEY_ENV in env_vars
     logger.debug(
         "[%s] Instantiating Kimi ACP agent. Temporary definition present: %s",
         Provider.KIMI,
-        "KIMI_MODEL_API_KEY" in env_vars,
+        temporary_definition,
     )
     return AcpChatModel(
         command=command,
@@ -820,12 +825,7 @@ def _create_kimi_model(
         command_kind=command_meta["command_kind"],
         command_executable=command_meta["command_executable"],
         command_target=command_meta["command_target"],
-        acp_backend="kimi-code",
-        auth_mode=(
-            "temporary_model"
-            if "KIMI_MODEL_API_KEY" in env_vars
-            else "persisted_config"
-        ),
+        auth_mode="temporary_model" if temporary_definition else "persisted_config",
     )
 
 
@@ -836,11 +836,11 @@ def _create_openai_compatible_model(
 
     if provider == Provider.ZHIPU:
         setting_key = settings.zhipu_api_key
-        env_name = "ZHIPU_API_KEY"
+        env_name = foreign_credential("zhipu_api_key").env_name
         base_url = "https://open.bigmodel.cn/api/paas/v4/"
     elif provider == Provider.OPENAI:
         setting_key = settings.openai_api_key
-        env_name = "OPENAI_API_KEY"
+        env_name = foreign_credential("openai_api_key").env_name
         base_url = settings.openai_base_url
     else:
         raise ValueError(f"Unsupported provider: {provider}")

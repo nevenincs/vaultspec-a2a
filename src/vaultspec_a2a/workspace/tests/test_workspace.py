@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from ...control.env_registry import CREDENTIAL_ENV_NAMES, FOREIGN_PROVIDER_ENV_NAMES
 from ..environment import resolve_env_vars, resolve_venv
 
 
@@ -115,29 +116,11 @@ _SCRUB_PROBE_SCRIPT = textwrap.dedent(
     """
 )
 
-_SCRUB_SECRET_KEYS: list[str] = [
-    "ANTHROPIC_API_KEY",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "OPENAI_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "AWS_SECRET_ACCESS_KEY",
-    "AZURE_OPENAI_API_KEY",
-    "ZHIPU_API_KEY",
-    "LANGCHAIN_API_KEY",
-    "LANGSMITH_API_KEY",
-    "LANGCHAIN_TRACING_V2",
-    # ANTHROPIC_LOG causes SDK debug text on stdout → JSON-RPC corruption.
-    "ANTHROPIC_LOG",
-    # Kimi Code temporary-provider definitions are never inherited piecemeal.
-    "KIMI_API_KEY",
-    "KIMI_BASE_URL",
-    "KIMI_MODEL_API_KEY",
-    "KIMI_MODEL_BASE_URL",
-    "KIMI_MODEL_NAME",
-    "KIMI_MODEL_MAX_CONTEXT_SIZE",
-    "KIMI_MODEL_CAPABILITIES",
-]
+# Every name the registry declares as a provider credential or a provider name
+# the service never accepts: the scrub is held to the registry, not to a copy.
+_SCRUB_SECRET_KEYS: list[str] = sorted(
+    CREDENTIAL_ENV_NAMES | FOREIGN_PROVIDER_ENV_NAMES
+)
 
 _SCRUB_VAULTSPEC_KEYS: dict[str, str] = {
     "VAULTSPEC_SECRET_TOKEN": "should-not-leak",

@@ -9,24 +9,34 @@ the lane everywhere it is admitted, frozen, and replayed.
 
 The two Claude-backed lanes run on a selectable ACP backend and carry it as a
 ``:<backend>`` suffix. :func:`external_execution_mode` is the one place that
-suffix is rendered.
+suffix is rendered. The backends themselves are the members of ``AcpBackend``,
+named here so a comparison says which one it means.
 """
 
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final, TypeIs
 
+from ..control.infra_config import ACP_BACKENDS
 from ..graph.enums import Provider
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from ..control.infra_config import AcpBackend
+
 __all__ = [
     "ACP_BACKEND_LANES",
+    "BINARY_BACKEND",
     "EXTERNAL_EXECUTION_MODES",
+    "NODE_BACKEND",
     "external_execution_mode",
+    "is_acp_backend",
 ]
+
+NODE_BACKEND: Final[AcpBackend] = "node"
+BINARY_BACKEND: Final[AcpBackend] = "binary"
 
 
 EXTERNAL_EXECUTION_MODES: Mapping[Provider, str] = MappingProxyType(
@@ -45,7 +55,12 @@ EXTERNAL_EXECUTION_MODES: Mapping[Provider, str] = MappingProxyType(
 ACP_BACKEND_LANES: frozenset[Provider] = frozenset({Provider.CLAUDE, Provider.ZAI})
 
 
-def external_execution_mode(provider: Provider, acp_backend: str) -> str:
+def is_acp_backend(value: str) -> TypeIs[AcpBackend]:
+    """Return whether *value* names a selectable ACP backend."""
+    return value in ACP_BACKENDS
+
+
+def external_execution_mode(provider: Provider, acp_backend: AcpBackend) -> str:
     """Return the exact mode *provider* executes under on *acp_backend*.
 
     Raises:

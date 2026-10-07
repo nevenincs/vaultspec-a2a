@@ -112,11 +112,11 @@ def test_factory_refuses_out_of_range_codex_before_model_construction(
         command_executable="codex",
         command_target=binary,
     )
-    monkeypatch.setattr(
-        factory_module,
-        "classify_provider_command",
-        lambda _provider: classified,
-    )
+
+    def classify(_provider: Provider) -> ProviderCommand:
+        return classified
+
+    monkeypatch.setattr(factory_module, "classify_provider_command", classify)
 
     def report(_path: Path | str) -> str:
         return PROVEN_TURN_LANES[Provider.CODEX].ceiling_exclusive

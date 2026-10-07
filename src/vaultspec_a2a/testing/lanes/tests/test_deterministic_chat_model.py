@@ -13,7 +13,6 @@ from ....providers.in_process_catalog import in_process_lane
 from ....team.team_config import AgentConfig, AgentPersonaConfig, load_team_config
 from ....thread.constants import DEFAULT_SUPERVISOR_ID
 from .. import UNATTENDED_REPLY, DeterministicResearchAdrChatModel
-from ..deterministic import _role_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -154,10 +153,19 @@ def test_sync_generate_unsupported() -> None:
         _model("vaultspec-researcher").invoke([HumanMessage(content="x")])
 
 
-def test_role_of_resolves_every_contract_role() -> None:
-    """Every research_adr role resolves from its namespaced agent id via _role_of."""
+@pytest.mark.asyncio
+async def test_every_contract_role_resolves_from_its_namespaced_agent_id() -> None:
+    """Every research_adr role answers with its own content, not the fallback.
+
+    An agent id that resolves to no role is answered with a generic marker
+    naming only the topic, so any other reply is the resolved role's content.
+    """
+    unresolved = "Deterministic content for `layout`."
     for role in RESEARCH_ADR_ROLES:
-        assert _role_of(f"vaultspec-{role}") == role
+        reply = await _authored(f"vaultspec-{role}", topic="layout").ainvoke(
+            [HumanMessage(content="x")]
+        )
+        assert str(reply.content) != unresolved, f"{role} did not resolve"
 
 
 @pytest.mark.asyncio

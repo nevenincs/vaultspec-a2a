@@ -236,7 +236,7 @@ def test_replay_contract_only_ever_writes_declared_members() -> None:
                     result = finalize_snapshot_replay_status(
                         ThreadStateData(
                             thread_id="replay-contract",
-                            status=status.value,
+                            status=status,
                             last_sequence=0,
                         ),
                         checkpoint_loaded=loaded,

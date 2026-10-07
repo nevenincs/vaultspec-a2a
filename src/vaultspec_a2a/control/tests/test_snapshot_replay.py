@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...thread.enums import DegradedReason, RepairStatus
+from ...thread.enums import DegradedReason, RepairStatus, ThreadStatus
 from ...thread.snapshots import ThreadStateData
 from ..projection import finalize_snapshot_replay_status
 
@@ -12,7 +12,7 @@ from ..projection import finalize_snapshot_replay_status
 
 
 def test_finalize_durable() -> None:
-    snap = ThreadStateData(thread_id="t1", status="running", last_sequence=0)
+    snap = ThreadStateData(thread_id="t1", status=ThreadStatus.RUNNING, last_sequence=0)
     result = finalize_snapshot_replay_status(
         snap,
         checkpoint_loaded=True,
@@ -24,7 +24,7 @@ def test_finalize_durable() -> None:
 
 
 def test_finalize_checkpoint_error() -> None:
-    snap = ThreadStateData(thread_id="t1", status="running", last_sequence=0)
+    snap = ThreadStateData(thread_id="t1", status=ThreadStatus.RUNNING, last_sequence=0)
     finalize_snapshot_replay_status(
         snap,
         checkpoint_loaded=False,
@@ -37,7 +37,7 @@ def test_finalize_checkpoint_error() -> None:
 
 
 def test_finalize_best_effort() -> None:
-    snap = ThreadStateData(thread_id="t1", status="running", last_sequence=0)
+    snap = ThreadStateData(thread_id="t1", status=ThreadStatus.RUNNING, last_sequence=0)
     finalize_snapshot_replay_status(
         snap,
         checkpoint_loaded=False,
@@ -50,7 +50,9 @@ def test_finalize_best_effort() -> None:
 
 
 def test_finalize_submitted_no_checkpoint() -> None:
-    snap = ThreadStateData(thread_id="t1", status="submitted", last_sequence=0)
+    snap = ThreadStateData(
+        thread_id="t1", status=ThreadStatus.SUBMITTED, last_sequence=0
+    )
     finalize_snapshot_replay_status(
         snap,
         checkpoint_loaded=False,
@@ -63,7 +65,7 @@ def test_finalize_submitted_no_checkpoint() -> None:
 
 
 def test_finalize_gap_detected() -> None:
-    snap = ThreadStateData(thread_id="t1", status="running", last_sequence=0)
+    snap = ThreadStateData(thread_id="t1", status=ThreadStatus.RUNNING, last_sequence=0)
     finalize_snapshot_replay_status(
         snap,
         checkpoint_loaded=False,
@@ -90,7 +92,9 @@ def test_replay_gap_is_distinct_from_checkpoint_unavailable() -> None:
     names a replay gap only for the second and leaves the first to the reader
     that knows why its probe failed.
     """
-    missing = ThreadStateData(thread_id="t1", status="running", last_sequence=0)
+    missing = ThreadStateData(
+        thread_id="t1", status=ThreadStatus.RUNNING, last_sequence=0
+    )
     finalize_snapshot_replay_status(
         missing,
         checkpoint_loaded=False,
@@ -98,7 +102,9 @@ def test_replay_gap_is_distinct_from_checkpoint_unavailable() -> None:
         checkpoint_error=False,
         thread_status="running",
     )
-    unread = ThreadStateData(thread_id="t1", status="running", last_sequence=0)
+    unread = ThreadStateData(
+        thread_id="t1", status=ThreadStatus.RUNNING, last_sequence=0
+    )
     finalize_snapshot_replay_status(
         unread,
         checkpoint_loaded=False,

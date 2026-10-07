@@ -55,6 +55,7 @@ from pydantic import Field, PrivateAttr
 
 from ...authoring.contract import RESEARCH_ADR_ROLES
 from ...graph.nodes.phase_gate import REVIEW_REVISION_SENTINEL
+from ...providers import JsonObject
 from ...providers._acp_types import PermissionCallback
 from ...team import AgentConfig, AgentPersonaConfig, load_agent_config
 from ...thread.constants import DEFAULT_SUPERVISOR_ID
@@ -333,7 +334,7 @@ def _research_branch(messages: list[BaseMessage]) -> str:
     )
 
 
-def _offered_permission_options() -> list[dict[str, str]]:
+def _offered_permission_options() -> list[JsonObject]:
     """The options every scripted permission request offers, in wire shape."""
     return [
         {"optionId": choice_id, "name": name}

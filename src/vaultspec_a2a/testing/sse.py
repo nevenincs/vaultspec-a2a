@@ -34,6 +34,8 @@ from ..thread.snapshots import wire_event_type
 if TYPE_CHECKING:
     from collections.abc import AsyncIterable, Callable, Iterable
 
+    from ..providers import JsonValue
+
 __all__ = [
     "SseFrame",
     "SseReader",
@@ -55,7 +57,7 @@ class SseFrame:
     @classmethod
     def from_event(cls, event: SseEvent) -> SseFrame:
         """Decode the JSON object an event carries in its ``data`` field."""
-        payload = json.loads(event.data)
+        payload: JsonValue = json.loads(event.data)
         if not isinstance(payload, dict):
             raise AssertionError(f"SSE data is not a JSON object: {event.data!r}")
         return cls(
@@ -77,10 +79,15 @@ class SseFrame:
 
 
 class SseReader:
-    """Pull dispatched frames, one at a time, from one streaming response."""
+    """Pull dispatched frames, one at a time, from one streaming response.
+
+    ``received`` is every frame the reader has returned, in stream order, for a
+    test that asserts on the whole conversation after reading it step by step.
+    """
 
     def __init__(self, lines: AsyncIterable[str]) -> None:
         self._events = iter_sse_events(lines)
+        self.received: list[SseFrame] = []
 
     async def next_frame(self, *, timeout: float = 10.0) -> SseFrame:
         """Return the next dispatched frame, waiting at most *timeout* for it."""
@@ -88,7 +95,9 @@ class SseReader:
             event = await asyncio.wait_for(anext(self._events), timeout=timeout)
         except StopAsyncIteration:
             raise AssertionError("stream closed before another frame") from None
-        return SseFrame.from_event(event)
+        frame = SseFrame.from_event(event)
+        self.received.append(frame)
+        return frame
 
     async def until(self, frame_type: str, *, limit: int = 200) -> list[SseFrame]:
         """Read frames up to and including the first one of *frame_type*."""

@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from ...providers import JsonObject
     from ...thread.snapshots import ThreadStateData
 
 
@@ -873,7 +874,7 @@ async def test_a_relayed_permission_alone_does_not_surface_in_thread_state(
         await session.commit()
 
     aggregator = RelayHub()
-    relayed_request = {
+    relayed_request: JsonObject = {
         "type": "permission_request",
         "event_type": "permission_request",
         "thread_id": "thread-aggregator-only-permission",

@@ -65,7 +65,7 @@ def _handler(state: _Rotation) -> type[JsonReplyHandler]:
             if self.path.endswith("/v1/sessions"):
                 if state.rotate_after_session:
                     state.bearer = _FRESH
-                    write_engine_record(state.record, self.port, _FRESH)
+                    write_engine_record(state.record, self.server.server_port, _FRESH)
                 self._reply(200, {"data": {"session_id": "sess:refresh"}})
             elif state.actor_rejection:
                 self._reply(

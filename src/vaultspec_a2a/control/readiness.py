@@ -69,16 +69,19 @@ class WorkerLifecycleState(StrEnum):
 
 
 class ProviderEligibility(StrEnum):
-    """Whether at least one subprocess provider can actually run on this host.
+    """Whether at least one subprocess provider may be served work on this host.
 
-    Computed through the credential-aware readiness probe: the configured
-    credential is checked first, then command resolvability. The probe is still
-    no-instantiation - no provider is constructed and no subprocess is spawned
-    to determine it - but a resolvable launch command is not on its own
-    sufficient, because a provider whose binary is installed with its
-    credential absent cannot run. Codex is the deliberate exception: its auth
-    is a file-based persisted session rather than a configured secret, so it
-    gates on command resolvability alone.
+    Decided by lane admission, which requires a recorded completed-turn proof
+    for the lane, a resolved launcher whose reported version that proof admits,
+    and the lane's own readiness - its configuration present and its launch
+    command resolvable. All three, conjunctively.
+
+    Credential readiness is NECESSARY and never SUFFICIENT: a lane whose
+    credential resolves and whose launcher is installed is still ``ineligible``
+    until a live test has completed a real turn on it. An eligibility that
+    stopped at the credential served lanes with handshake coverage only, which
+    is the whole reason the proof term exists. No provider is constructed to
+    decide this, and the launcher's version report is cached per launch identity.
     """
 
     ELIGIBLE = "eligible"
@@ -88,10 +91,10 @@ class ProviderEligibility(StrEnum):
 class RunAdmission(StrEnum):
     """Whether the gateway would admit a run right now - the execution-ready fact.
 
-    ``ready`` means execution-ready: a reachable worker and a provider that is
-    both installed and credentialed, so this staged gate and the
-    credential-aware gate launch applies agree, rather than admitting a run and
-    reserving capacity for it that the latter then refuses.
+    ``ready`` means execution-ready: a reachable worker and a provider this host
+    may be served, so this staged gate and the admission gate launch applies
+    agree, rather than admitting a run and reserving capacity for it that the
+    latter then refuses.
     ``deferred`` means gateway-ready but not yet execution-ready - the worker is
     cold or starting and will start on demand. It remains informational on the
     readiness surface, while staged ``prepare`` admission refuses it fail-closed.

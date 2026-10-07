@@ -10,6 +10,7 @@ from langgraph.checkpoint.base.id import uuid6
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START
 
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..state import (
     TeamState,
     append_artifacts,
@@ -18,7 +19,6 @@ from ..state import (
     merge_unique_strs,
     replace_plan,
 )
-from ._graph_helpers import add_node, compile_graph, new_builder
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -367,14 +367,14 @@ class TestUndeclaredCheckpointKeys:
             seen.append(dict(state))
             return {"active_agent": "probe"}
 
-        builder = new_builder()
-        add_node(builder, "probe", probe)
+        builder = new_state_graph()
+        add_test_node(builder, "probe", probe)
         builder.add_edge(START, "probe")
         builder.add_edge("probe", END)
 
         db = tmp_path / "checkpoints.sqlite"
         async with AsyncSqliteSaver.from_conn_string(str(db)) as saver:
-            graph = compile_graph(builder, checkpointer=saver)
+            graph = compile_test_graph(builder, checkpointer=saver)
             config: RunnableConfig = {
                 "configurable": {"thread_id": "retired-key-thread"},
             }

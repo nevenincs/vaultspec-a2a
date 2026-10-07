@@ -22,17 +22,22 @@ import pytest
 from fastapi import FastAPI
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
 from ...api.app import _initialize_gateway_database
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
-from ...testing import settings_override
-from ...thread.state import TeamState
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    new_state_graph,
+    settings_override,
+)
 from .. import close_db
 from ..migrations import backfill_teamstate_sdd_fields, count_pending_sdd_backfill
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from ...thread.state import TeamState
 
 _SDD_CHANNELS = ("active_feature", "pipeline_phase", "vault_index", "validation_errors")
 
@@ -42,7 +47,7 @@ def _graph(saver: Any) -> Any:
         del state
         return {"messages": [AIMessage(content="answered")]}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, "answer", answer)
     builder.add_edge(START, "answer")
     builder.add_edge("answer", END)

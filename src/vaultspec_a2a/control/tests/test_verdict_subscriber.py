@@ -40,7 +40,6 @@ if TYPE_CHECKING:
 
     from langchain_core.runnables import RunnableConfig
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import AuthoringClient, LifecycleEvent, StreamError
 from ...control._verdict_subscriber_config import VerdictSubscriberConfig
 from ...control.accepted_input import freeze_accepted_input
@@ -68,6 +67,7 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.enums import ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ...worker.app import create_worker_app
@@ -130,7 +130,7 @@ def _install_receipt_graph(
         return {"messages": [AIMessage(content="resumed")], "next": "FINISH"}
 
     builder = new_state_graph()
-    builder.add_node("worker", complete)
+    add_test_node(builder, "worker", complete)
     builder.add_edge("__start__", "worker")
     builder.add_edge("worker", "__end__")
     workspace = Path.cwd()
@@ -149,7 +149,7 @@ def _install_receipt_graph(
             ).model_assignment_digest,
             definition.digest(),
         ),
-        builder.compile(checkpointer=checkpointer),
+        compile_test_graph(builder, checkpointer=checkpointer),
     )
 
 

@@ -1,17 +1,18 @@
 """Tests for deterministic supervisor routing and gating logic."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END
 from langgraph.types import Command
 from pydantic import PrivateAttr
 
+from ....testing import add_test_node, compile_test_graph, new_state_graph
 from ....thread.state import TeamState
 from ...nodes.supervisor import (
     _build_supervisor_messages,
@@ -21,7 +22,6 @@ from ...nodes.supervisor import (
     create_plan_approval_node,
     create_supervisor_node,
 )
-from .._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -96,7 +96,7 @@ def _build_approval_graph(
     worker_phase_map: dict[str, str] | None,
 ) -> Any:
     """Mirror the star wiring: supervisor marks pending, plan_approval interrupts."""
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, "supervisor", supervisor_node)
     add_test_node(
         builder, "plan_approval", create_plan_approval_node(workers, worker_phase_map)

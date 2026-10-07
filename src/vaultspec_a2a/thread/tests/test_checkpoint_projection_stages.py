@@ -13,20 +13,20 @@ from __future__ import annotations
 
 import operator
 from datetime import UTC, datetime
-from typing import Annotated, Any, TypedDict, cast
+from typing import Annotated, Any, TypedDict
 
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple, PendingWrite
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import Command, Interrupt, interrupt
 
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..snapshots import (
     extract_checkpoint_fields,
     fold_pending_writes,
     project_checkpoint_tuple,
 )
-from ._graph_helpers import add_node, compile_graph
 
 
 def _tuple(*, pending: list[PendingWrite] | None = None) -> CheckpointTuple:
@@ -133,14 +133,14 @@ def _fan_out_graph(saver: InMemorySaver) -> Any:
 
         return node
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _FanOutState))
-    add_node(builder, "alpha", gate("request-alpha"))
-    add_node(builder, "beta", gate("request-beta"))
+    builder = new_state_graph(_FanOutState)
+    add_test_node(builder, "alpha", gate("request-alpha"))
+    add_test_node(builder, "beta", gate("request-beta"))
     builder.add_edge(START, "alpha")
     builder.add_edge(START, "beta")
     builder.add_edge("alpha", END)
     builder.add_edge("beta", END)
-    return compile_graph(builder, checkpointer=saver)
+    return compile_test_graph(builder, checkpointer=saver)
 
 
 @pytest.mark.asyncio

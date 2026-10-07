@@ -20,15 +20,15 @@ file already drives a real blocked node. Neither is this fixture's job.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END
 from langgraph.types import interrupt
 
 from ...graph.nodes._config_contract import accepting_runnable_config
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ...providers import AcpPromptCancelledError
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..custom_writes import emit_custom_node_write
 
 if TYPE_CHECKING:
@@ -137,9 +137,7 @@ def build_error_injecting_graph() -> Any:
     convention, ``graph/compiler.py``) to reproduce a team preset's declared
     budget must not leak that value onto an unrelated test.
     """
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(
-        cast("Any", InjectableGraphInput)
-    )
+    builder = new_state_graph(InjectableGraphInput)
     add_test_node(builder, ERROR_INJECTION_NODE, _inject)
     builder.set_entry_point(ERROR_INJECTION_NODE)
 

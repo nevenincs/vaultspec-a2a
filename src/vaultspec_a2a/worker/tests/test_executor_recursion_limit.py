@@ -16,9 +16,9 @@ import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...providers.team_selection import model_assignment_digest
 from ...team.team_config import load_team_config
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..executor import Executor, _recursion_limit
 from .test_executor import _current_ingest_dispatch, _make_bridge
 
@@ -55,12 +55,14 @@ async def test_a_run_longer_than_its_preset_budget_fails_on_the_limit() -> None:
             request = _current_ingest_dispatch("limit-run", recursion_limit=100)
             builder = new_state_graph()
             for node in nodes:
-                builder.add_node(node, step)
+                add_test_node(builder, node, step)
             builder.add_edge("__start__", nodes[0])
             for current, following in pairwise(nodes):
                 builder.add_edge(current, following)
             builder.add_edge(nodes[-1], "__end__")
-            graph: RegisteredCompiledGraph = builder.compile(checkpointer=checkpointer)
+            graph: RegisteredCompiledGraph = compile_test_graph(
+                builder, checkpointer=checkpointer
+            )
             definition = request.require_graph_definition()
             executor.register_compiled_graph(
                 request.thread_id,

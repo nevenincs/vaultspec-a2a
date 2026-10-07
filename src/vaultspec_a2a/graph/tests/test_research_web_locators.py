@@ -27,7 +27,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
-from ...thread.state import TeamState
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from .._compiler_research import _make_research_producer
 from ..compiler import _wire_diverge_stage
 from ..nodes.diverge import (
@@ -37,11 +37,11 @@ from ..nodes.diverge import (
     WEB_LOCATOR_KIND,
     create_researcher_node,
 )
-from ._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
 
+    from ...thread.state import TeamState
     from ..nodes.diverge import ResearchFindingProducer
 
 SIMULATOR_PATH = Path(__file__).parent / "acp_simulator.py"
@@ -89,7 +89,7 @@ def _build_graph(
     producer: ResearchFindingProducer,
 ) -> StateGraph[Any, None, Any, Any]:
     """Wire the real diverge stage around a single researcher branch."""
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     dispatch = _wire_diverge_stage(
         builder,
         dispatch_name="research_dispatch",

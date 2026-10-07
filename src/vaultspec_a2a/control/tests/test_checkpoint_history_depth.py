@@ -21,11 +21,11 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
 from ...control.snapshot import checkpoint_history_depth
 from ...database.checkpoint_retention import prune_settled_checkpoints
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping
@@ -51,7 +51,7 @@ def _append(entry: str) -> Any:
 
 
 def _flat_graph(saver: Any) -> Any:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
+    builder = new_state_graph(_Log)
     add_test_node(builder, "step", _append("flat"))
     builder.add_edge(START, "step")
     builder.add_edge("step", END)
@@ -60,12 +60,12 @@ def _flat_graph(saver: Any) -> Any:
 
 def _nested_graph(saver: Any) -> Any:
     """A graph with a subgraph, so the thread spans several namespaces."""
-    inner: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
+    inner = new_state_graph(_Log)
     add_test_node(inner, "inner_step", _append("inner"))
     inner.add_edge(START, "inner_step")
     inner.add_edge("inner_step", END)
 
-    outer: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Log))
+    outer = new_state_graph(_Log)
     add_test_node(outer, "nested", compile_test_graph(inner))
     outer.add_edge(START, "nested")
     outer.add_edge("nested", END)

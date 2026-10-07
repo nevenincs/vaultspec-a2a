@@ -2,26 +2,27 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import Command, interrupt
 
+from ....testing import add_test_node, compile_test_graph, new_state_graph
 from ....thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
 )
 from ....thread.enums import ControlActionType
-from ....thread.state import TeamState
 from ...nodes.action_completion import GRAPH_COMPLETION_NODE, record_graph_completion
-from .._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
+
+    from ....thread.state import TeamState
 
 
 def _receipt(dispatch_id: str) -> dict[str, object]:
@@ -60,7 +61,7 @@ def _gate(state: TeamState) -> dict[str, object]:
 async def test_completion_survives_restart_and_does_not_complete_next_action(
     tmp_path: Path,
 ) -> None:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, "gate", _gate)
     add_test_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(START, "gate")

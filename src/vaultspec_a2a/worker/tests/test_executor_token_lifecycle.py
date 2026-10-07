@@ -29,13 +29,13 @@ from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...control.tests._catalog_authority import current_execution_metadata
 from ...ipc.schemas import DispatchRequest
 from ...providers.team_selection import model_assignment_digest
 from ...team.team_config import load_team_config
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -165,11 +165,11 @@ def _install_probe_graph(
         return {"messages": [AIMessage(content="done")], "next": "FINISH"}
 
     builder = new_state_graph()
-    builder.add_node("coder", coder_node)
+    add_test_node(builder, "coder", coder_node)
     builder.add_edge("__start__", "coder")
     builder.add_edge("coder", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(
-        checkpointer=executor._checkpointer
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=executor._checkpointer
     )
 
     cache_key = (

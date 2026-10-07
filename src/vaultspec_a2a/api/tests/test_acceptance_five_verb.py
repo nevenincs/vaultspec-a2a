@@ -38,6 +38,7 @@ from ...database.thread_repository import create_thread
 from ...ipc.schemas import DispatchRequest
 from ...providers.team_selection import model_assignment_digest
 from ...team.team_config import load_team_config
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import (
     GraphActionReceipt,
@@ -48,7 +49,6 @@ from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
-from .clarification_harness import new_state_graph
 from .conftest import SessionFactory, async_catalog_run_fields, make_app
 
 if TYPE_CHECKING:
@@ -141,13 +141,13 @@ def _install_multirole_graph(
         }
 
     builder = new_state_graph()
-    builder.add_node("coder", coder)
-    builder.add_node("reviewer", reviewer)
+    add_test_node(builder, "coder", coder)
+    add_test_node(builder, "reviewer", reviewer)
     builder.add_edge("__start__", "coder")
     builder.add_edge("coder", "reviewer")
     builder.add_edge("reviewer", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(
-        checkpointer=executor._checkpointer
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=executor._checkpointer
     )
 
     cache_key = (

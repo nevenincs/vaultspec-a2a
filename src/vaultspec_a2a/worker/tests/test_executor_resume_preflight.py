@@ -17,9 +17,9 @@ import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...control.permission_dispatch import permission_resume_value
 from ...providers.team_selection import model_assignment_digest
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.enums import ThreadStatus
 from ..executor import Executor
 from ..state_projection import ResumeRefusalCause
@@ -82,13 +82,13 @@ def _install_gate_behind_a_step(
         return {"messages": [AIMessage(content="done")], "next": "FINISH"}
 
     builder = new_state_graph()
-    builder.add_node("before", before)
-    builder.add_node("gate", gate)
+    add_test_node(builder, "before", before)
+    add_test_node(builder, "gate", gate)
     builder.add_edge("__start__", "before")
     builder.add_edge("before", "gate")
     builder.add_edge("gate", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(
-        checkpointer=executor._checkpointer
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=executor._checkpointer
     )
     executor.register_compiled_graph(request.thread_id, _cache_key(request), graph)
     return graph
@@ -175,11 +175,11 @@ def _install_single_permission_graph(
         return {"messages": [AIMessage(content="done")], "next": "FINISH"}
 
     builder = new_state_graph()
-    builder.add_node("worker", worker_node)
+    add_test_node(builder, "worker", worker_node)
     builder.add_edge("__start__", "worker")
     builder.add_edge("worker", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(
-        checkpointer=executor._checkpointer
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=executor._checkpointer
     )
     executor.register_compiled_graph(request.thread_id, _cache_key(request), graph)
     return graph

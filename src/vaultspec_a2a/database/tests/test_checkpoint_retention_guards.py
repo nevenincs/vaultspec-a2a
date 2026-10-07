@@ -23,9 +23,9 @@ import pytest_asyncio
 from langgraph.channels import DeltaChannel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..checkpoint_retention import prune_settled_checkpoints
 from ._checkpoint_history import config_for, stored_history
 
@@ -72,7 +72,7 @@ def _one_step_graph(saver: Checkpointer, state_schema: type[Any]) -> Any:
         del state
         return {"log": ["step"]}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", state_schema))
+    builder = new_state_graph(state_schema)
     add_test_node(builder, "step", step)
     builder.add_edge(START, "step")
     builder.add_edge("step", END)

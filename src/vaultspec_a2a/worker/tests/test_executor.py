@@ -31,7 +31,6 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, Span, TracerProvider
 from pydantic import ValidationError
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...control.tests._catalog_authority import current_execution_metadata
@@ -43,6 +42,7 @@ from ...providers.acp_exceptions import AcpPromptError
 from ...providers.conditions import condition_from_acp_error
 from ...providers.team_selection import model_assignment_digest
 from ...team.team_config import load_agent_config, load_team_config
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -254,11 +254,11 @@ def _inject_graph(
         return {}
 
     builder = new_state_graph()
-    builder.add_node("finish", finish_node)
+    add_test_node(builder, "finish", finish_node)
     builder.add_edge("__start__", "finish")
     builder.add_edge("finish", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(
-        checkpointer=executor._checkpointer
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=executor._checkpointer
     )
     executor.register_compiled_graph(thread_id, cache_key, graph)
 
@@ -276,10 +276,10 @@ def _terminal_graph(executor: Executor) -> RegisteredCompiledGraph:
         return {}
 
     builder = new_state_graph()
-    builder.add_node("finish", finish_node)
+    add_test_node(builder, "finish", finish_node)
     builder.add_edge("__start__", "finish")
     builder.add_edge("finish", "__end__")
-    return builder.compile(checkpointer=executor._checkpointer)
+    return compile_test_graph(builder, checkpointer=executor._checkpointer)
 
 
 # ---------------------------------------------------------------------------
@@ -1508,11 +1508,11 @@ def _install_completing_graph(executor: Executor, request: DispatchRequest) -> N
         return {"messages": [AIMessage(content="done")], "next": "FINISH"}
 
     builder = new_state_graph()
-    builder.add_node("worker", worker_node)
+    add_test_node(builder, "worker", worker_node)
     builder.add_edge("__start__", "worker")
     builder.add_edge("worker", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(
-        checkpointer=executor._checkpointer
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=executor._checkpointer
     )
 
     cache_key = (
@@ -1536,11 +1536,11 @@ def _install_gated_graph(executor: Executor, request: DispatchRequest) -> None:
         }
 
     builder = new_state_graph()
-    builder.add_node("gate", gate_node)
+    add_test_node(builder, "gate", gate_node)
     builder.add_edge("__start__", "gate")
     builder.add_edge("gate", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(
-        checkpointer=executor._checkpointer
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=executor._checkpointer
     )
 
     cache_key = (
@@ -2171,10 +2171,12 @@ class TestPreRunRefusalsCarryTheirReason:
                     raise RuntimeError("node exploded")
 
                 builder = new_state_graph()
-                builder.add_node("boom", exploding_node)
+                add_test_node(builder, "boom", exploding_node)
                 builder.add_edge("__start__", "boom")
                 builder.add_edge("boom", "__end__")
-                graph: RegisteredCompiledGraph = builder.compile(checkpointer=cp)
+                graph: RegisteredCompiledGraph = compile_test_graph(
+                    builder, checkpointer=cp
+                )
                 first = _current_ingest_dispatch(thread_id)
                 executor.register_compiled_graph(
                     thread_id,
@@ -2304,10 +2306,10 @@ class TestTheFailureStashCannotOutliveItsRun:
             )
 
         builder = new_state_graph()
-        builder.add_node("prompt", rate_limited_node)
+        add_test_node(builder, "prompt", rate_limited_node)
         builder.add_edge("__start__", "prompt")
         builder.add_edge("prompt", "__end__")
-        return builder.compile(checkpointer=executor._checkpointer)
+        return compile_test_graph(builder, checkpointer=executor._checkpointer)
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_a_dispatch_that_dies_before_its_settle_strands_nothing(

@@ -22,15 +22,15 @@ from typing import Annotated, Any, NotRequired, TypedDict, cast
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import Command
 
+from ....testing import add_test_node, compile_test_graph, new_state_graph
 from ....thread.state import merge_permission_answers
 from ...nodes._worker_permissions import (
     permission_callback_for,
     recorded_permission_answers,
 )
-from .._state_graph_helpers import add_test_node, compile_test_graph
 
 _OPTIONS = [
     {"optionId": "allow_once", "name": "Allow once", "kind": "allow_once"},
@@ -59,7 +59,7 @@ def _graph(calls: list[tuple[str, dict[str, Any]]], granted: list[str]) -> Any:
         granted.append(f"{tool_name}:{option}")
         return {"granted": [option]}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Turn))
+    builder = new_state_graph(_Turn)
     add_test_node(builder, "ask", ask)
     builder.add_edge(START, "ask")
     builder.add_edge("ask", END)
@@ -171,7 +171,7 @@ async def test_a_turn_reordering_its_calls_still_gets_each_answer() -> None:
         ]
         return {"granted": granted}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Turn))
+    builder = new_state_graph(_Turn)
     add_test_node(builder, "ask", two_calls)
     builder.add_edge(START, "ask")
     builder.add_edge("ask", END)
@@ -206,7 +206,7 @@ async def test_a_remembered_approval_is_never_offered_or_accepted() -> None:
         granted.append(option)
         return {"granted": [option]}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Turn))
+    builder = new_state_graph(_Turn)
     add_test_node(builder, "ask", ask)
     builder.add_edge(START, "ask")
     builder.add_edge("ask", END)

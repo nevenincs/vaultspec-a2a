@@ -56,7 +56,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import (
     AuthoringClient,
     AuthoringResponse,
@@ -90,6 +89,7 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
@@ -613,7 +613,7 @@ def _install_receipt_graph(
         return {"messages": [AIMessage(content="resumed")], "next": "FINISH"}
 
     builder = new_state_graph()
-    builder.add_node("worker", complete)
+    add_test_node(builder, "worker", complete)
     builder.add_edge("__start__", "worker")
     builder.add_edge("worker", "__end__")
     workspace = Path.cwd()
@@ -632,7 +632,7 @@ def _install_receipt_graph(
             ).model_assignment_digest,
             definition.digest(),
         ),
-        builder.compile(checkpointer=checkpointer),
+        compile_test_graph(builder, checkpointer=checkpointer),
     )
 
 

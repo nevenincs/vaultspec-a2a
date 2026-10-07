@@ -59,7 +59,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import (
     AuthoringClient,
     AuthoringResponse,
@@ -84,6 +83,7 @@ from ...database import (
 from ...graph.nodes.phase_gate import create_phase_gate_node
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...tests._write_authority import make_test_write_authority
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
@@ -232,14 +232,14 @@ def _install_verdict_loop_graph(
         }
 
     builder = new_state_graph()
-    builder.add_node("seed", seed_node)
-    builder.add_node("gate", gate_node)
-    builder.add_node("finish", finish_node)
+    add_test_node(builder, "seed", seed_node)
+    add_test_node(builder, "gate", gate_node)
+    add_test_node(builder, "finish", finish_node)
     builder.add_edge("__start__", "seed")
     builder.add_edge("seed", "gate")
     builder.add_edge("finish", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(
-        checkpointer=executor._checkpointer
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=executor._checkpointer
     )
 
     executor.register_compiled_graph(

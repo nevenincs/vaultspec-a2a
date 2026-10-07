@@ -8,12 +8,12 @@ isolates the gate's determinism, routing, and state recording from any engine.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import Command
 
 from ....graph.nodes.phase_gate import (
@@ -22,8 +22,10 @@ from ....graph.nodes.phase_gate import (
     create_phase_gate_node,
     create_phase_submit_node,
 )
-from ....thread.state import TeamState
-from .._state_graph_helpers import add_test_node, compile_test_graph
+from ....testing import add_test_node, compile_test_graph, new_state_graph
+
+if TYPE_CHECKING:
+    from ....thread.state import TeamState
 
 
 class _RefusingSubmitter:
@@ -74,7 +76,7 @@ def _gate_graph(submitter: DocumentProposalSubmitter, *, max_revisions: int = 2)
     pure gate node parks at its interrupt, so the correlation id is durable in the
     checkpoint while parked.
     """
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
 
     async def approved_end(state: TeamState) -> dict[str, Any]:
         return {}
@@ -349,7 +351,7 @@ async def test_a_gate_with_no_committed_proposal_revises_instead_of_parking() ->
     every answer away. Parking there would leave the run waiting on a question
     nothing can answer.
     """
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
 
     async def approved_end(state: TeamState) -> dict[str, Any]:
         return {}

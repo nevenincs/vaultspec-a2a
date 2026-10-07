@@ -15,18 +15,17 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import interrupt
 from typing_extensions import TypedDict
 
 from ...graph.enums import PermissionOptionKind
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import EventAggregator
 from ..transformer import emit_interrupt_events
 from ..types import resolve_acp_option_kind
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from ..types import StreamableGraph
 
 
@@ -52,13 +51,11 @@ async def _suspend_on_permission(
         )
         return state
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _GateState))
-    typed_add_node = cast("Callable[[str, Any], None]", builder.add_node)
-    typed_add_node("gate", gate)
+    builder = new_state_graph(_GateState)
+    add_test_node(builder, "gate", gate)
     builder.add_edge(START, "gate")
     builder.add_edge("gate", END)
-    typed_compile = cast("Callable[..., Any]", builder.compile)
-    graph = typed_compile(checkpointer=InMemorySaver())
+    graph = compile_test_graph(builder, checkpointer=InMemorySaver())
 
     config = RunnableConfig(configurable={"thread_id": thread_id})
     result = await graph.ainvoke({"acp_options": acp_options}, config)

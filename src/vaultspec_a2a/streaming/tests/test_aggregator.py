@@ -35,8 +35,8 @@ from ...graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ...providers import AcpPromptError, ProviderCondition
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.enums import ThreadStatus
 from ...thread.errors import EventAggregatorError
 from .. import EventAggregator as CoreAggregator
@@ -119,14 +119,14 @@ async def test_cancel_during_post_read_callback_drops_event(
     aggregator: EventAggregator,
 ) -> None:
     from langgraph.checkpoint.memory import InMemorySaver
-    from langgraph.graph import END, StateGraph
+    from langgraph.graph import END
 
     from ...thread.state import TeamState
 
     def finish(_state: TeamState) -> dict[str, object]:
         return {}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, "finish", finish)
     builder.set_entry_point("finish")
     builder.add_edge("finish", END)
@@ -2254,11 +2254,10 @@ def _failing_provider_graph(
     exist to observe.
     """
     from langgraph.checkpoint.memory import InMemorySaver
-    from langgraph.graph import END, StateGraph
+    from langgraph.graph import END
 
     from ...graph.nodes.worker import create_worker_node
     from ...providers.acp_chat_model import AcpChatModel
-    from ...thread.state import TeamState
 
     command = [
         sys.executable,
@@ -2274,7 +2273,7 @@ def _failing_provider_graph(
         provider=lane,
         workspace_root=workspace_root,
     )
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(
         builder, "coder", create_worker_node(model, "You are a coder.", "coder")
     )
@@ -2534,7 +2533,7 @@ def _cancellable_stalling_graph(
 ) -> StreamableGraph:
     """Compile a real graph with a blocked node and observable cleanup."""
     from langgraph.checkpoint.memory import InMemorySaver
-    from langgraph.graph import END, StateGraph
+    from langgraph.graph import END
 
     from ...thread.state import TeamState
 
@@ -2546,7 +2545,7 @@ def _cancellable_stalling_graph(
             closed.set()
         return {}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, "wait_for_cancel", wait_for_cancel)
     builder.set_entry_point("wait_for_cancel")
     builder.add_edge("wait_for_cancel", END)

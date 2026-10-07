@@ -38,6 +38,12 @@ if TYPE_CHECKING:
         armed_environment,
         settings_override,
     )
+    from .graph import (
+        add_test_node,
+        ainvoke_test_graph,
+        compile_test_graph,
+        new_state_graph,
+    )
     from .harness_names import CPU_BUDGET_ENV
     from .leases import (
         LEASE_TTL_MS,
@@ -133,6 +139,10 @@ _LAZY_EXPORTS = {
     ),
     "armed_environment": ("vaultspec_a2a.testing.environment", "armed_environment"),
     "settings_override": ("vaultspec_a2a.testing.environment", "settings_override"),
+    "add_test_node": ("vaultspec_a2a.testing.graph", "add_test_node"),
+    "ainvoke_test_graph": ("vaultspec_a2a.testing.graph", "ainvoke_test_graph"),
+    "compile_test_graph": ("vaultspec_a2a.testing.graph", "compile_test_graph"),
+    "new_state_graph": ("vaultspec_a2a.testing.graph", "new_state_graph"),
     "LEASE_TTL_MS": ("vaultspec_a2a.testing.leases", "LEASE_TTL_MS"),
     "Lease": ("vaultspec_a2a.testing.leases", "Lease"),
     "LeaseAcquisitionTimeoutError": (
@@ -228,12 +238,15 @@ __all__ = [
     "ResourceDeclarationError",
     "ResourceDiedError",
     "ResourceSpec",
+    "add_test_node",
+    "ainvoke_test_graph",
     "allocate_free_ports",
     "apply_layer_markers",
     "armed_desktop_app_home",
     "armed_environment",
     "await_child",
     "child_tree_progress",
+    "compile_test_graph",
     "declared_claims",
     "effective_worker_count",
     "exclusive_keys",
@@ -246,6 +259,7 @@ __all__ = [
     "live_peer_sessions",
     "machine_cpu_budget",
     "measured_child_startup_s",
+    "new_state_graph",
     "plant_link_to_file",
     "register_session",
     "registry_watch",

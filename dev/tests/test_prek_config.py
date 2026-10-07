@@ -6,7 +6,7 @@ import sys
 import tomllib
 from typing import TYPE_CHECKING
 
-from dev.paths import REPO_ROOT
+from dev.paths import PYTHON_PATHS, REPO_ROOT
 from dev.process import run_captured
 
 if TYPE_CHECKING:
@@ -53,6 +53,31 @@ def test_vaultspec_validation_hooks_are_read_only() -> None:
 
     justfile = (REPO_ROOT / "Justfile").read_text(encoding="utf-8")
     assert "vault-sanitize:\n    {{core}} vault sanitize annotations" in justfile
+
+
+def test_the_ty_hook_agrees_with_python_paths() -> None:
+    """prek.toml cannot import dev.paths.PYTHON_PATHS; it must restate it exactly.
+
+    `ty` (Q.4) is the one hook in this file that scans a tree rather than one
+    changed file (``pass_filenames = false``), so it names its scope as a
+    literal argument list instead. Every OTHER caller of that scope -
+    `dev/toolchain.py`'s `python` lint target, `dev/quality/types.py`'s own ty
+    invocation - reaches it by importing :data:`PYTHON_PATHS`, which cannot
+    drift from itself; this hand-written TOML copy is the one place that can,
+    silently, the next time a tree is added or removed from the scanned set.
+    """
+    ty_entries = [
+        hook["entry"]
+        for hook in _hooks()
+        if hook.get("id") == "ty" and isinstance(hook.get("entry"), str)
+    ]
+    assert len(ty_entries) == 1, ty_entries
+    entry = ty_entries[0]
+    assert isinstance(entry, str)
+
+    marker = "ty check "
+    start = entry.index(marker) + len(marker)
+    assert tuple(entry[start:].split()) == PYTHON_PATHS
 
 
 def test_the_repository_annotation_gate_survives_a_core_sync() -> None:

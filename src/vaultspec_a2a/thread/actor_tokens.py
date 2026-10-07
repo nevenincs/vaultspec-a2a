@@ -41,7 +41,6 @@ __all__ = ["MAX_ROLES_PER_RUN", "ActorTokenBundle"]
 MAX_ROLES_PER_RUN = 64
 _MAX_ROLES = MAX_ROLES_PER_RUN
 _MAX_TOKEN_BYTES = 512
-_ROLE_ID = re.compile(ROLE_ID_PATTERN)
 
 
 class ActorTokenBundle(BaseModel):
@@ -78,7 +77,10 @@ class ActorTokenBundle(BaseModel):
         for role, token in value.items():
             if not role or not role.strip():
                 raise ValueError("actor token bundle has an empty role key")
-            if len(role) > MAX_ROLE_ID_CHARS or _ROLE_ID.fullmatch(role) is None:
+            if (
+                len(role) > MAX_ROLE_ID_CHARS
+                or re.fullmatch(ROLE_ID_PATTERN, role) is None
+            ):
                 raise ValueError(f"actor token role must match {ROLE_ID_PATTERN}")
             if not token:
                 raise ValueError(f"actor token for role {role!r} is empty")

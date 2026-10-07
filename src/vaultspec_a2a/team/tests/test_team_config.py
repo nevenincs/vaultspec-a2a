@@ -504,7 +504,7 @@ class TestLoadAgentConfigValidation:
 
     def test_agent_id_with_hyphens_passes(self) -> None:
         """agent_id with hyphens (allowed by pattern) passes validation."""
-        # Hyphens are allowed by _SAFE_AGENT_ID_RE — raises NotFound, not ConfigError
+        # Hyphens are allowed by the role-id grammar — raises NotFound, not ConfigError
         with pytest.raises(AgentConfigNotFoundError):
             load_agent_config("valid-agent-id")
 

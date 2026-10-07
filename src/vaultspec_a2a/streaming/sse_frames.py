@@ -50,12 +50,18 @@ from typing import Final, TypeGuard, cast
 # here: the qualifier names the ONE topology it maps, and a shorter local name
 # would read as though it applied to any node.
 from ..graph.enums import ServerEventType, StreamFrameKind, research_adr_semantic_phase
+from ..thread.constants import (
+    MAX_PERMISSION_DESCRIPTION_CHARS,
+    MAX_REQUEST_ID_CHARS,
+    MAX_ROLE_ID_CHARS,
+    MAX_RUN_ID_CHARS,
+    MAX_TOOL_CALL_CHARS,
+)
 
 # The wire event-type key pair is owned by ``thread.snapshots`` - the one layer
 # every producer and consumer of a relayed payload can import. Reading and
 # stamping the frame type through it keeps this catalog, the frames this module
 # mints, and the relay predicates on one rule.
-from ..thread.clarification import MAX_REQUEST_ID_CHARS
 from ..thread.snapshots import normalize_wire_event_type, wire_event_type
 
 __all__ = [
@@ -315,12 +321,12 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
         "detail": _Text(256),
     },
     ServerEventType.TEAM_STATUS: {
-        "active_thread_ids": _TextList(64, 128),
+        "active_thread_ids": _TextList(64, MAX_RUN_ID_CHARS),
         "agents": _ObjectList(
             64,
             {
-                "thread_id": _Text(128),
-                "agent_id": _Text(63),
+                "thread_id": _Text(MAX_RUN_ID_CHARS),
+                "agent_id": _Text(MAX_ROLE_ID_CHARS),
                 "state": _ENUM,
                 "node_name": _Text(128),
                 "provider": _Text(64),
@@ -361,11 +367,13 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
         # this entry never reaches the wire however carefully it is set.
         "first_sequence": _Integer(),
     },
+    # The description is cut at the durable row's own bound, so the text a
+    # viewer reads live is the text a reload re-reads from the row.
     ServerEventType.PERMISSION_REQUEST: {
-        "request_id": _Text(128),
-        "tool_call": _Text(128),
+        "request_id": _Text(MAX_REQUEST_ID_CHARS),
+        "tool_call": _Text(MAX_TOOL_CALL_CHARS),
         "tool_kind": _ENUM,
-        "description": _Text(512),
+        "description": _Text(MAX_PERMISSION_DESCRIPTION_CHARS),
         "options": _ObjectList(
             16, {"option_id": _Text(64), "name": _Text(128), "kind": _ENUM}
         ),

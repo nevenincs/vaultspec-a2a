@@ -55,6 +55,17 @@ class CatalogRefreshSuppressedError(RuntimeError):
 
 
 __all__ = [
+    "MAX_CAPABILITIES",
+    "MAX_CONTROLS",
+    "MAX_CONTROL_ID_LENGTH",
+    "MAX_DISPLAY_LENGTH",
+    "MAX_FALLBACKS",
+    "MAX_HEALTH_REASONS",
+    "MAX_MODELS",
+    "MAX_OPTIONS",
+    "MAX_PROVIDER_LANES",
+    "MAX_PUBLIC_ID_LENGTH",
+    "MAX_TEXT_LENGTH",
     "AdmissionState",
     "AuthenticationState",
     "CacheFreshness",
@@ -86,6 +97,14 @@ MAX_CONTROLS: Final = 32
 MAX_OPTIONS: Final = 128
 MAX_CAPABILITIES: Final = 64
 MAX_HEALTH_REASONS: Final = 16
+# The public catalog and the selections naming it carry tighter identifier
+# bounds than the internal text bound: a provider, mode, revision, entry, or
+# option identity is a public id, and a native control's identity is shorter.
+MAX_PUBLIC_ID_LENGTH: Final = 512
+MAX_CONTROL_ID_LENGTH: Final = 128
+MAX_PROVIDER_LANES: Final = 128
+# How many ordered fallback lanes one team selection may name.
+MAX_FALLBACKS: Final = 8
 
 
 def required_text(

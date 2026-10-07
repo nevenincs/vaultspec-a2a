@@ -9,6 +9,16 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from ...providers.catalog_recommendation import recommended_entry_id
 from ...providers.provider_catalog import (
+    MAX_CAPABILITIES,
+    MAX_CONTROL_ID_LENGTH,
+    MAX_CONTROLS,
+    MAX_DISPLAY_LENGTH,
+    MAX_HEALTH_REASONS,
+    MAX_MODELS,
+    MAX_OPTIONS,
+    MAX_PROVIDER_LANES,
+    MAX_PUBLIC_ID_LENGTH,
+    MAX_TEXT_LENGTH,
     AdmissionState,
     AuthenticationState,
     CatalogStatus,
@@ -22,13 +32,15 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+_NO_CONTROL_CHARACTERS = r"^[^\x00-\x1f\x7f]+$"
+
 PublicId = Annotated[
     str,
     StringConstraints(
         strip_whitespace=True,
         min_length=1,
-        max_length=512,
-        pattern=r"^[^\x00-\x1f\x7f]+$",
+        max_length=MAX_PUBLIC_ID_LENGTH,
+        pattern=_NO_CONTROL_CHARACTERS,
     ),
 ]
 ControlId = Annotated[
@@ -36,12 +48,16 @@ ControlId = Annotated[
     StringConstraints(
         strip_whitespace=True,
         min_length=1,
-        max_length=128,
-        pattern=r"^[^\x00-\x1f\x7f]+$",
+        max_length=MAX_CONTROL_ID_LENGTH,
+        pattern=_NO_CONTROL_CHARACTERS,
     ),
 ]
-DisplayText = Annotated[str, StringConstraints(min_length=1, max_length=256)]
-BoundedText = Annotated[str, StringConstraints(min_length=1, max_length=1024)]
+DisplayText = Annotated[
+    str, StringConstraints(min_length=1, max_length=MAX_DISPLAY_LENGTH)
+]
+BoundedText = Annotated[
+    str, StringConstraints(min_length=1, max_length=MAX_TEXT_LENGTH)
+]
 
 
 class ProviderHealthResponse(_StrictModel):
@@ -51,7 +67,9 @@ class ProviderHealthResponse(_StrictModel):
     catalog: CatalogStatus
     admission: AdmissionState
     selectable: bool
-    reasons: list[BoundedText] = Field(default_factory=list, max_length=16)
+    reasons: list[BoundedText] = Field(
+        default_factory=list, max_length=MAX_HEALTH_REASONS
+    )
     checked_at: datetime
 
 
@@ -67,8 +85,12 @@ class ProviderCatalogEntryResponse(_StrictModel):
     entry_id: PublicId
     display_name: DisplayText
     description: BoundedText | None = None
-    capabilities: list[BoundedText] = Field(default_factory=list, max_length=64)
-    native_control_ids: list[ControlId] = Field(default_factory=list, max_length=32)
+    capabilities: list[BoundedText] = Field(
+        default_factory=list, max_length=MAX_CAPABILITIES
+    )
+    native_control_ids: list[ControlId] = Field(
+        default_factory=list, max_length=MAX_CONTROLS
+    )
 
 
 class ProviderNativeControlOptionResponse(_StrictModel):
@@ -82,7 +104,7 @@ class ProviderNativeControlResponse(_StrictModel):
     kind: ControlKind
     display_name: DisplayText
     options: list[ProviderNativeControlOptionResponse] = Field(
-        default_factory=list, max_length=128
+        default_factory=list, max_length=MAX_OPTIONS
     )
     default_option_id: PublicId | None = None
     description: BoundedText | None = None
@@ -98,10 +120,10 @@ class ProviderLaneCatalogResponse(_StrictModel):
     # means the lane advertises nothing to have an opinion about.
     recommended_entry_id: PublicId | None = None
     models: list[ProviderCatalogEntryResponse] = Field(
-        default_factory=list, max_length=256
+        default_factory=list, max_length=MAX_MODELS
     )
     native_controls: list[ProviderNativeControlResponse] = Field(
-        default_factory=list, max_length=32
+        default_factory=list, max_length=MAX_CONTROLS
     )
 
 
@@ -116,7 +138,7 @@ class ProviderCatalogRecordResponse(_StrictModel):
 class ProviderCatalogResponse(_StrictModel):
     api_version: Literal["v1"] = "v1"
     providers: list[ProviderCatalogRecordResponse] = Field(
-        default_factory=list, max_length=128
+        default_factory=list, max_length=MAX_PROVIDER_LANES
     )
 
     @classmethod

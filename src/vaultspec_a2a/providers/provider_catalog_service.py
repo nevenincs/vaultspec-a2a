@@ -20,6 +20,8 @@ from .lane_admission import (
     is_catalog_lane_admissible,
 )
 from .provider_catalog import (
+    MAX_CONTROL_ID_LENGTH,
+    MAX_PUBLIC_ID_LENGTH,
     AdmissionState,
     AuthenticationState,
     CacheFreshness,
@@ -368,7 +370,9 @@ def _catalog_public_ids(catalog: ProviderCatalog) -> tuple[str, ...]:
 def validate_public_catalog_bounds(catalog: ProviderCatalog) -> None:
     """Reject one unsafe lane before it can poison the whole public response."""
     public_ids = _catalog_public_ids(catalog)
-    if not all(_valid_public_id(value, max_length=512) for value in public_ids):
+    if not all(
+        _valid_public_id(value, max_length=MAX_PUBLIC_ID_LENGTH) for value in public_ids
+    ):
         raise ValueError("catalog contains an invalid public identifier")
     control_ids = (
         *(control.control_id for control in catalog.native_controls),
@@ -378,7 +382,10 @@ def validate_public_catalog_bounds(catalog: ProviderCatalog) -> None:
             for control_id in model.native_control_ids
         ),
     )
-    if not all(_valid_public_id(value, max_length=128) for value in control_ids):
+    if not all(
+        _valid_public_id(value, max_length=MAX_CONTROL_ID_LENGTH)
+        for value in control_ids
+    ):
         raise ValueError("catalog contains an invalid public control identifier")
 
 

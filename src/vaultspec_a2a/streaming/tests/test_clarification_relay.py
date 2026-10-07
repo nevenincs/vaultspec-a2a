@@ -32,11 +32,11 @@ from ...graph.nodes.clarification import (
     create_clarification_request_node,
 )
 from ...thread.clarification import (
-    MAX_REQUEST_ID_CHARS,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
 )
+from ...thread.constants import MAX_REQUEST_ID_CHARS
 from ...thread.state import TeamState
 from ..aggregator import EventAggregator
 from ..sse_frames import enforce_progress_allowlist

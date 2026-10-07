@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -60,6 +61,7 @@ from ...providers.team_selection import (
     freeze_team_selection,
     normalize_replay_selection,
 )
+from ...thread.constants import RUN_ID_PATTERN
 from ...thread.dispatch_policy import FailureType
 from ...utils.coercion import coerce_object_mapping
 from ..auth import authenticate_request
@@ -587,16 +589,7 @@ def _persist_lease(metadata_json: str | None, binding: _RunLeaseBinding) -> str:
 
 
 def _legacy_lease_id(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    if (
-        1 <= len(value) <= 128
-        and value[0].isalnum()
-        and all(
-            character.isascii() and (character.isalnum() or character in {"_", "-"})
-            for character in value
-        )
-    ):
+    if isinstance(value, str) and re.fullmatch(RUN_ID_PATTERN, value):
         return value
     return None
 

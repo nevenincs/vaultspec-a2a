@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING
 from ..database import list_active_thread_page
 from ..database import normalize_workspace_identity as normalize_workspace_identity
 from ..domain_config import domain_config
-from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
+from ..thread.constants import (
+    MAX_DISCOVERY_RESULTS,
+    MAX_FEATURE_TAG_LENGTH,
+    MAX_RUN_ID_CHARS,
+    MAX_WORKSPACE_ROOT_LENGTH,
+)
 from ..thread.enums import ThreadStatus
 from .recovery_authority import (
     RecoveryRequest,
@@ -28,9 +33,6 @@ if TYPE_CHECKING:
     from ..database.checkpoints import Checkpointer
 
 __all__ = ["ActiveRunDiscoveryResult", "discover_active_runs"]
-
-_MAX_DISCOVERY_RESULTS = 100
-_MAX_RUN_ID_LENGTH = 128
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,8 +59,8 @@ def _validate_discovery_inputs(
     workspace_root: Path | None,
 ) -> str | None:
     """Validate selectors and return the workspace source for normalization."""
-    if not 1 <= limit <= _MAX_DISCOVERY_RESULTS:
-        raise ValueError(f"limit must be between 1 and {_MAX_DISCOVERY_RESULTS}")
+    if not 1 <= limit <= MAX_DISCOVERY_RESULTS:
+        raise ValueError(f"limit must be between 1 and {MAX_DISCOVERY_RESULTS}")
     if feature_tag is not None and not 1 <= len(feature_tag) <= MAX_FEATURE_TAG_LENGTH:
         raise ValueError(
             f"feature_tag must be between 1 and {MAX_FEATURE_TAG_LENGTH} characters"
@@ -123,7 +125,7 @@ def _project_active_runs(
             feature_tag=thread.feature_tag,
         )
         for thread in page[:limit]
-        if 1 <= len(thread.id) <= _MAX_RUN_ID_LENGTH
+        if 1 <= len(thread.id) <= MAX_RUN_ID_CHARS
     ]
 
 

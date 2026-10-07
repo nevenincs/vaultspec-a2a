@@ -63,7 +63,10 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
             RelayContext(checkpointer, worker, session_factory),
         )
         checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-lineage-final"
+        # The saver answers a thread's latest checkpoint by the greatest id, so
+        # the final one must sort after the completion checkpoint the relay
+        # recorded as ``cp-lineage-parent``, as a real run's later id does.
+        checkpoint["id"] = "cp-lineage-parent-final"
         checkpoint["channel_values"] = {
             "messages": [
                 HumanMessage(content=f"history-{index}")

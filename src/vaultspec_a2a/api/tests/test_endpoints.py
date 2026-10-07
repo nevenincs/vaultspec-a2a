@@ -15,7 +15,6 @@ helper in `conftest.py` so tests never touch the production `vaultspec.db`.
 
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -2293,7 +2292,6 @@ class TestPermissionRespond:
                     idempotency_key="same-invalid-response",
                     payload={"option_id": "hostile-option"},
                     result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
-                    recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 )
                 stored = await session.get(ControlActionModel, action.id)
                 assert stored is not None

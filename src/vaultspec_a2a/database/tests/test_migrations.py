@@ -20,11 +20,13 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from .. import migrations as _migrations_package
+from .._write_authority_check_parser import extract_named_check_predicates
 from ..migrate import (
     build_migration_config,
     migration_script_location,
     run_migrations,
 )
+from ..write_authority_schema import normalize_schema_expression
 
 _APP_TABLES = {
     "threads",
@@ -128,6 +130,53 @@ def _get_columns(db_path: Path, table: str) -> set[str]:
             str(row[0])
             for row in conn.execute("SELECT name FROM pragma_table_info(?)", (table,))
         }
+    finally:
+        conn.close()
+
+
+def _deadline_check(db_path: Path) -> str:
+    """Return the journal's recovery-deadline CHECK as the store holds it.
+
+    Read as a named predicate rather than as whole-table DDL: a batch rebuild
+    reorders a table's constraints, so comparing the CREATE statement text would
+    fail a round trip that restored the invariant exactly.
+    """
+    checks = extract_named_check_predicates(
+        _stored_sql(db_path, "table", "control_actions")
+    )
+    predicate = checks.get("ck_control_actions_recovery_deadline_required")
+    assert predicate is not None, checks
+    return normalize_schema_expression(predicate)
+
+
+def _insert_refusal_row(
+    db_path: Path,
+    *,
+    deadline: str,
+    action_id: str = "refusal-action",
+    key: str = "permission-rejection:refusal-key",
+    result_status: str = "rejected_invalid_state",
+) -> None:
+    """Write one journal row of a recovery type straight through the CHECK."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT INTO control_actions (id, thread_id, action_type, "
+            "idempotency_key, requested_at, result_status, recovery_deadline_at) "
+            f"VALUES (?, 'refusal-run', 'permission_response_submitted', ?, "
+            f"'2026-10-07 00:00:00', ?, {deadline})",
+            (action_id, key, result_status),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _delete_refusal_row(db_path: Path, action_id: str = "refusal-action") -> None:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("DELETE FROM control_actions WHERE id = ?", (action_id,))
+        conn.commit()
     finally:
         conn.close()
 
@@ -245,6 +294,56 @@ class TestAlembicUpgradeDowngrade:
         assert version == ("0025",)
         assert _get_tables(db) >= _RETIRED_TABLES
         assert "worker_generation" in _get_columns(db, "control_actions")
+
+    def test_dispatchable_deadline_narrows_and_reverses(
+        self, runtime_dir: Path
+    ) -> None:
+        """0027 binds the deadline to a dispatchable row and steps back.
+
+        The narrowed predicate only ADMITS what 0021 rejected, so a refusal row
+        with no deadline is storable at 0027 and not at 0021. The downgrade
+        therefore refuses such a store before any DDL, and reverses cleanly once
+        the row is gone.
+        """
+        db = runtime_dir / "dispatchable-deadline.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0026")
+        before = _deadline_check(db)
+        assert "result_status" not in before, before
+
+        command.upgrade(cfg, "0027")
+        assert "'accepted_not_applied','queued'" in _deadline_check(db)
+
+        _insert_refusal_row(db, deadline="NULL")
+        with pytest.raises(RuntimeError, match="carries no recovery deadline"):
+            command.downgrade(cfg, "0026")
+        assert "'accepted_not_applied','queued'" in _deadline_check(db)
+
+        _delete_refusal_row(db)
+        command.downgrade(cfg, "0026")
+        assert _deadline_check(db) == before
+
+    def test_a_refusal_row_without_a_deadline_is_storable_only_at_head(
+        self, runtime_dir: Path
+    ) -> None:
+        """The CHECK itself, exercised by the write the old invariant refused."""
+        db = runtime_dir / "deadlineless-refusal.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0026")
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_refusal_row(db, deadline="NULL")
+
+        command.upgrade(cfg, "0027")
+        _insert_refusal_row(db, deadline="NULL")
+        # A row still owed a delivery keeps the deadline requirement.
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_refusal_row(
+                db,
+                deadline="NULL",
+                action_id="still-owed",
+                key="still-owed-key",
+                result_status="accepted_not_applied",
+            )
 
     def test_upgrade_head_creates_all_app_tables(self, runtime_dir: Path) -> None:
         db = runtime_dir / "test.db"

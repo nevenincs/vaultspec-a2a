@@ -52,6 +52,7 @@ from pathlib import Path
 
 from dev.download import UnverifiedDownloadError, download_verified
 from dev.exit_codes import OK, TOOL_MISSING
+from dev.paths import REPO_ROOT
 from dev.runner import resolve_executable, run
 
 __all__ = ["ARCHIVES", "RELEASE_PATH", "VERSION", "ensure", "find", "main"]
@@ -120,7 +121,7 @@ def _cache_root() -> Path:
     runner_tool_cache = os.environ.get("RUNNER_TOOL_CACHE")
     if runner_tool_cache:
         return Path(runner_tool_cache) / "actionlint" / VERSION
-    return Path.cwd() / ".venv" / "tools" / "actionlint" / VERSION
+    return REPO_ROOT / ".venv" / "tools" / "actionlint" / VERSION
 
 
 def _extract_member(archive: Path, suffix: str, destination: Path) -> None:

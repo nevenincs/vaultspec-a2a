@@ -93,7 +93,7 @@ def _execute(verb: Verb, target: Target) -> int:
     Returns:
         For an advisory target, 0 when its tools ran (findings and all) and
         ADVISORY_BROKEN when one failed to run. Otherwise the code of the first
-        failing step (or of the last failing step when ``keep_going`` is set).
+        failing step; ``keep_going`` decides only whether later steps still run.
     """
     worst = OK
     for step in target.steps:

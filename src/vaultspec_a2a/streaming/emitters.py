@@ -153,10 +153,6 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
         self._sequences[thread_id] += 1
         return self._sequences[thread_id]
 
-    def get_sequence(self, thread_id: str) -> int:
-        """Return the current sequence counter for a thread (0 if unseen)."""
-        return self._sequences.get(thread_id, 0)
-
     def prune_sequences(self, active_thread_ids: set[str]) -> int:
         """Remove sequence counters for threads not in *active_thread_ids*."""
         stale = [tid for tid in self._sequences if tid not in active_thread_ids]
@@ -658,17 +654,13 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
     ) -> None:
         """Sync a relayed worker event into aggregator state.
 
-        Validates the event type and dispatches to the per-type sync handler;
-        each handler owns its own state mutation and sequence projection. An
-        unrecognized but non-empty event still advances the sequence, matching
-        the prior trailing catch-all.
+        Validates the event type and dispatches to the per-type sync handler,
+        which owns its own state mutation. Numbering is not part of this: the
+        gateway numbers a relayed frame where it enters subscriber queues.
         """
-        event_type = payload.get("type", "")
-        handler_name = self._SYNC_EVENT_HANDLERS.get(event_type)
+        handler_name = self._SYNC_EVENT_HANDLERS.get(payload.get("type", ""))
         if handler_name is not None:
             getattr(self, handler_name)(thread_id, payload)
-        elif thread_id and event_type:
-            self.next_sequence(thread_id)
 
     def _sync_agent_status(self, thread_id: str, payload: dict[str, Any]) -> None:
         agent_id = payload.get("agent_id", "")
@@ -683,7 +675,6 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
                 )
                 return
             self._agent_states[(thread_id, agent_id)] = lifecycle
-        self.next_sequence(thread_id)
 
     def _sync_graph_registered(self, thread_id: str, payload: dict[str, Any]) -> None:
         nodes_raw: object = payload.get("nodes", {})
@@ -702,15 +693,6 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
                 len(nodes),
             )
 
-    def _sync_plan_update(self, thread_id: str, _payload: dict[str, Any]) -> None:
-        self.next_sequence(thread_id)
-
-    def _sync_artifact_update(self, thread_id: str, payload: dict[str, Any]) -> None:
-        artifact_id = payload.get("artifact_id", "")
-        filename = payload.get("filename", "")
-        if artifact_id and filename:
-            self.next_sequence(thread_id)
-
     def _sync_tool_call_start(self, thread_id: str, payload: dict[str, Any]) -> None:
         tc_id = payload.get("tool_call_id", "")
         tc_title = payload.get("title", "unknown_tool")
@@ -723,7 +705,6 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
                 "status": ToolCallStatus.PENDING.value,
                 "agent_id": agent_id,
             }
-        self.next_sequence(thread_id)
 
     def _sync_tool_call_update(self, thread_id: str, payload: dict[str, Any]) -> None:
         tc_id = payload.get("tool_call_id", "")
@@ -748,15 +729,12 @@ class EventEmitters:  # pylint: disable=too-many-public-methods
                 ToolCallStatus.FAILED.value,
             ):
                 self._prune_completed_tool_calls(thread_id)
-        self.next_sequence(thread_id)
 
-    # Event type -> bound sync-handler method name. A type absent here falls to
-    # the trailing catch-all in sync_worker_event.
+    # Event type -> bound sync-handler method name. A type absent here carries no
+    # aggregator state to mirror and is ignored by sync_worker_event.
     _SYNC_EVENT_HANDLERS: ClassVar[dict[str, str]] = {
         "agent_status": "_sync_agent_status",
         "graph_registered": "_sync_graph_registered",
-        "plan_update": "_sync_plan_update",
-        "artifact_update": "_sync_artifact_update",
         "tool_call_start": "_sync_tool_call_start",
         "tool_call_update": "_sync_tool_call_update",
     }

@@ -211,11 +211,8 @@ async def _relay_single_event(
         publish_terminal = partial(context.agg.relay_payload, thread_id, payload)
     else:
         context.agg.relay_payload(thread_id, payload)
-    # Left in front of the decision even for a held terminal. This is the
-    # aggregator's own per-run counter, which no client reads and no frame
-    # carries - the number a subscriber sees is taken in ``relay_payload``
-    # above - and the settled run's recorded cursor is read off it, so
-    # moving it would change what a settlement records.
+    # Mirrors the event into the aggregator's agent, tool-call and node state
+    # before the handlers below, whose settled path purges that state.
     context.agg.sync_worker_event(thread_id, payload)
     await relay_event(
         thread_id,

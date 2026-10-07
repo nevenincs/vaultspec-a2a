@@ -34,6 +34,7 @@ from ..control.snapshot import (
     enrich_snapshot_from_state,
 )
 from ..database import ThreadModel, get_thread, read_latest_checkpoint
+from ..database.run_event_repository import retained_high_water_mark
 from ..domain_config import domain_config
 from ..graph.enums import SemanticPhase, research_adr_semantic_phase
 from ..team.team_config import AuthoringCapability, authoring_capability
@@ -389,6 +390,26 @@ def _should_clear_permissions_without_checkpoint(
     )
 
 
+async def _served_last_sequence(
+    db: AsyncSession, thread: ThreadModel, aggregator: EventAggregator
+) -> int:
+    """Return the run's frame cursor: the highest number its stream has issued.
+
+    The durable column wins once it exists: settle wrote it from the sequence
+    allocator, and a settled run is never revived, so no later turn moves it.
+    Otherwise the allocator's issued mark answers, then the retained window's
+    greatest sequence - the mark a restarted gateway seeds its numbering from,
+    so a restart does not rewind the cursor - then 0, the honest answer for a
+    run no allocator numbered.
+    """
+    if thread.last_sequence is not None:
+        return thread.last_sequence
+    issued = aggregator.issued_sequence(thread.id)
+    if issued is not None:
+        return issued
+    return await retained_high_water_mark(db, thread.id) or 0
+
+
 async def capture_thread_state(
     db: AsyncSession,
     *,
@@ -423,26 +444,10 @@ async def capture_thread_state(
     thread = await db.get(ThreadModel, thread_id, populate_existing=True)
     if thread is None or thread.status == ThreadStatus.DELETING.value:
         return None
-    # The durable column wins once it exists (captured at terminal settle,
-    # control/event_handlers.py::_handle_terminal_event, before the aggregator
-    # prunes its in-memory copy - F19). The live aggregator read is the
-    # fallback for a run that has not settled yet, where nothing has been
-    # captured because there is nothing terminal to capture: the run is still
-    # active and the aggregator's own counter is the current truth. A settled
-    # run whose row predates this column (last_sequence IS NULL forever, no
-    # captured value ever existed for it) falls back to the same pruned
-    # default 0 it always answered - a known limitation for rows written
-    # before the fix, not a regression this introduces.
-    last_seq = (
-        thread.last_sequence
-        if thread.last_sequence is not None
-        else aggregator.get_sequence(thread_id)
-    )
-
     snapshot = ThreadStateData(
         thread_id=thread_id,
         status=thread.status,
-        last_sequence=last_seq,
+        last_sequence=await _served_last_sequence(db, thread, aggregator),
         approval_status=thread.approval_status,
         approval_request_id=thread.approval_request_id,
         failure_reason=thread.failure_reason,

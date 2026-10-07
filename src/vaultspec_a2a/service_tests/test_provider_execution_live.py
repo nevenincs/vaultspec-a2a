@@ -46,7 +46,7 @@ async def test_the_claude_lane_completes_a_turn_inside_the_runs_project(
     training data can supply it. The only way to answer is to read the file in
     the workspace the run was sited in.
     """
-    if Provider.CLAUDE.value not in {str(lane) for lane in PROVEN_TURN_LANES}:
+    if Provider.CLAUDE not in PROVEN_TURN_LANES:
         pytest.skip("the claude lane is not declared turn-proven")
     external_prerequisite("claude-credential")
 

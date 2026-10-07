@@ -46,7 +46,7 @@ async def test_an_agent_completes_a_turn_through_the_core_read_surface(
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """A real turn calls a declared core tool and reports what it returned."""
-    if Provider.CLAUDE.value not in {str(lane) for lane in PROVEN_TURN_LANES}:
+    if Provider.CLAUDE not in PROVEN_TURN_LANES:
         pytest.skip("the claude lane is not declared turn-proven")
     external_prerequisite("claude-credential")
 

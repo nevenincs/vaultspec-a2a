@@ -1,9 +1,10 @@
-"""Unit tests for engine discovery skip/non-raise behavior.
+"""Engine discovery skip/non-raise behavior, against real files and listeners.
 
-Exercises the file-resolution guards without a live server: a malformed or
-stale candidate must be skipped, and ``resolve_engine`` must never raise on bad
-input (its non-raising contract lets a caller poll it on a loop). The record is
-redirected through the official ``engine_service_json`` setting.
+Exercises the file-resolution guards: a malformed or stale candidate must be
+skipped, and ``resolve_engine`` must never raise on bad input (its non-raising
+contract lets a caller poll it on a loop). The record is redirected through the
+official ``engine_service_json`` setting, and the retry window is driven against
+a real loopback listener.
 """
 
 from __future__ import annotations

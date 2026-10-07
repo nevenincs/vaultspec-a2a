@@ -44,11 +44,11 @@ from ..conditions import (
     condition_from_codex_turn_error,
 )
 from ._installed_vocabulary import (
-    MissingInstalledVocabularyError,
     acp_adapter_error_kinds,
     acp_adapter_failure_categories,
     acp_error_kinds,
     codex_error_info_variants,
+    read_installed,
 )
 
 if TYPE_CHECKING:
@@ -85,10 +85,9 @@ def installed_acp_kinds(
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> frozenset[str]:
     """Every error kind the installed ACP lane can put on the wire."""
-    try:
-        return acp_error_kinds() | acp_adapter_error_kinds()
-    except MissingInstalledVocabularyError as exc:
-        external_prerequisite.absent("claude-acp-adapter", str(exc))
+    return read_installed(
+        external_prerequisite, lambda: acp_error_kinds() | acp_adapter_error_kinds()
+    )
 
 
 @pytest.fixture
@@ -96,10 +95,7 @@ def installed_acp_categories(
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> dict[str, str]:
     """The remedy category the installed adapter assigns each kind."""
-    try:
-        return acp_adapter_failure_categories()
-    except MissingInstalledVocabularyError as exc:
-        external_prerequisite.absent("claude-acp-adapter", str(exc))
+    return read_installed(external_prerequisite, acp_adapter_failure_categories)
 
 
 @pytest.fixture
@@ -107,10 +103,10 @@ def installed_codex_variants(
     external_prerequisite: ExternalPrerequisiteRule, tmp_path: Path
 ) -> frozenset[str]:
     """Every error-info variant the installed Codex app-server declares."""
-    try:
-        return codex_error_info_variants(tmp_path / "codex-schema")
-    except MissingInstalledVocabularyError as exc:
-        external_prerequisite.absent("codex-cli", str(exc))
+    return read_installed(
+        external_prerequisite,
+        lambda: codex_error_info_variants(tmp_path / "codex-schema"),
+    )
 
 
 async def _drive_codex_frames(

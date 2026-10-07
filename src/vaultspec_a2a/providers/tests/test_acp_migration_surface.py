@@ -30,7 +30,8 @@ ambiently carries. Completed-turn coverage for this provider lives in
 ``test_claude_live_turn.py``; the strict-MCP surfacing loop is proven in
 ``test_acp_strict_mcp_surface.py``.
 
-Skips with a pointer when the Claude CLI entry point is unavailable (an infra gate).
+Skips naming the missing prerequisite when the Claude ACP adapter is unavailable
+(an infra gate).
 """
 
 from __future__ import annotations
@@ -52,13 +53,15 @@ from ...workspace.environment import resolve_env_vars
 from .._acp_session import claude_session_options
 from .._acp_types import AcpModelConfig
 from .._claude_tool_policy import AUTONOMOUS_PERMISSION_MODE, MODE_CONFIG_OPTION_ID
-from .._factory_commands import _classify_acp_command, claude_acp_entry
+from .._factory_commands import _classify_acp_command
 from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
 
 if TYPE_CHECKING:
     from asyncio.subprocess import Process
+
+    from ...conftest import ExternalPrerequisiteRule
 
 
 async def _assert_initialize_surface(proc: Process) -> None:
@@ -228,12 +231,10 @@ async def _start_acp_session(proc: Process, workspace: str) -> tuple[str, str, s
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_migrated_adapter_preserves_handshake_surface() -> None:
-    if settings.acp_backend != "binary" and not claude_acp_entry().exists():
-        pytest.fail(
-            "migrated ACP node entry not installed; run 'npm install' "
-            "(@agentclientprotocol/claude-agent-acp) per the ACP runbook"
-        )
+async def test_migrated_adapter_preserves_handshake_surface(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    external_prerequisite("claude-acp-adapter")
 
     command, meta = _classify_acp_command(settings.acp_backend)
     workspace = str(Path.cwd())

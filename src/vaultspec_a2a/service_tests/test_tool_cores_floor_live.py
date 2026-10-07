@@ -286,9 +286,9 @@ async def _prepare_named_adr_floor(
     """Select the live ADR and prepare its read-evidence harness."""
     target_adr = _pick_named_adr(vault_root)
     if target_adr is None:
-        pytest.skip(
-            f"engine vault {vault_root / 'adr'} carries no ADR to name; the "
-            "read-a-named-ADR floor proof needs at least one existing ADR to read"
+        external_prerequisite.absent(
+            "engine-vault-adr",
+            f"engine vault {vault_root / 'adr'} carries no ADR to name",
         )
     adr_name = target_adr.name
     adr_stem = target_adr.stem
@@ -297,9 +297,10 @@ async def _prepare_named_adr_floor(
     case = _floor_case(feature, adr_name)
     tokens = _distinctive_tokens(adr_text, case.prompt)
     if not tokens:
-        pytest.skip(
+        external_prerequisite.absent(
+            "engine-vault-adr",
             f"ADR {adr_name} carries no distinctive interior token absent from the "
-            "prompt; cannot form hallucination-resistant read evidence"
+            "prompt, so it cannot yield hallucination-resistant read evidence",
         )
     selection, overrides = await resolve_selection(
         case, gateway_url, str(vault_root.parent), external_prerequisite

@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ..thread.enums import TERMINAL_STATUS_VALUES
-from .progress import ProgressDeadline, ProgressStalledError, wait_for, wait_for_async
+from .progress import ProgressDeadline, wait_for, wait_for_async
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
@@ -53,12 +53,10 @@ def _fingerprint(body: Mapping[str, Any] | None) -> object:
     return None if body is None else (body.get("status"), body.get("last_sequence"))
 
 
-def _unsatisfied(
-    label: str, last: Mapping[str, Any] | None, stalled: ProgressStalledError
-) -> AssertionError:
-    return AssertionError(
+def _unsatisfied(label: str, last: Mapping[str, Any] | None) -> str:
+    return (
         f"{label} never satisfied the awaited status predicate; "
-        f"last snapshot: {'never readable' if last is None else last} ({stalled})"
+        f"last snapshot: {'never readable' if last is None else last}"
     )
 
 
@@ -73,8 +71,8 @@ def wait_for_run_status[B: Mapping[str, Any]](
     """Poll *read* until *predicate* holds (default: terminal); return that body.
 
     *timeout* is the idle window: the longest the observed status and cursor may
-    stay unchanged. Failure raises ``AssertionError`` naming *label* and the last
-    body read.
+    stay unchanged. Failure raises :class:`~.progress.ProgressStalledError`, an
+    ``AssertionError``, naming *label* and the last body read.
     """
     last: B | None = None
 
@@ -86,15 +84,13 @@ def wait_for_run_status[B: Mapping[str, Any]](
         last = body
         return body if predicate(body) else None
 
-    try:
-        return wait_for(
-            _poll,
-            deadline=ProgressDeadline(idle_window_s=timeout),
-            fingerprint=lambda: _fingerprint(last),
-            interval_s=interval,
-        )
-    except ProgressStalledError as stalled:
-        raise _unsatisfied(label, last, stalled) from stalled
+    return wait_for(
+        _poll,
+        deadline=ProgressDeadline(idle_window_s=timeout),
+        fingerprint=lambda: _fingerprint(last),
+        interval_s=interval,
+        stalled=lambda: _unsatisfied(label, last),
+    )
 
 
 async def wait_for_run_status_async[B: Mapping[str, Any]](
@@ -119,12 +115,10 @@ async def wait_for_run_status_async[B: Mapping[str, Any]](
         last = body
         return body if predicate(body) else None
 
-    try:
-        return await wait_for_async(
-            _poll,
-            deadline=ProgressDeadline(idle_window_s=timeout),
-            fingerprint=lambda: _fingerprint(last),
-            interval_s=interval,
-        )
-    except ProgressStalledError as stalled:
-        raise _unsatisfied(label, last, stalled) from stalled
+    return await wait_for_async(
+        _poll,
+        deadline=ProgressDeadline(idle_window_s=timeout),
+        fingerprint=lambda: _fingerprint(last),
+        interval_s=interval,
+        stalled=lambda: _unsatisfied(label, last),
+    )

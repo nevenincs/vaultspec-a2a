@@ -35,7 +35,12 @@ from ...control._worker_process_stop import _shutdown_worker_process
 from ...control._worker_readiness import _reap_unready_worker
 from ...control.worker_management import LazyWorkerSpawner
 from ...lifecycle.shutdown import ShutdownDeadline
-from ...testing import free_port
+from ...testing import (
+    ProgressDeadline,
+    ProgressStalledError,
+    free_port,
+    wait_for_async,
+)
 from ...utils import (
     ProcessContainment,
     ProcessContainmentError,
@@ -138,13 +143,21 @@ async def _serving_contained_worker(
         worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
     )
     spawner.replace_process(process, containment)
-    ready_deadline = time.monotonic() + 5.0
-    while time.monotonic() < ready_deadline:
-        if await port_has_listener_async(port, timeout=0.5):
-            return process, containment, spawner
-        await asyncio.sleep(0.02)
-    await containment.terminate(term_timeout=2.0, kill_timeout=2.0)
-    raise AssertionError("contained worker socket did not become ready")
+
+    async def _serving() -> bool | None:
+        return await port_has_listener_async(port, timeout=0.5) or None
+
+    try:
+        await wait_for_async(
+            _serving,
+            deadline=ProgressDeadline(idle_window_s=5.0),
+            interval_s=0.02,
+            stalled=lambda: "contained worker socket did not become ready",
+        )
+    except ProgressStalledError:
+        await containment.terminate(term_timeout=2.0, kill_timeout=2.0)
+        raise
+    return process, containment, spawner
 
 
 def _await_gone(pids: list[int], *, timeout: float = 20.0) -> list[int]:

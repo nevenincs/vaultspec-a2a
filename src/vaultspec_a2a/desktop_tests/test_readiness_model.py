@@ -27,13 +27,12 @@ from ..control.health import SERVICE_WORKER_PROBE_TIMEOUT_SECONDS
 from ..testing import (
     DEFAULT_ATTACH_AUTHORIZATION,
     DEFAULT_REQUIRED_ROLE,
-    DEFAULT_TEAM_PRESET,
     LOOPBACK_TIMEOUT,
     GatewayVerbs,
-    RunVerbs,
     armed_gateway_env,
     booted_gateway,
     desktop_workspace,
+    gateway_run_verbs,
     gateway_script,
     log_tail,
     seat_app_home,
@@ -151,11 +150,8 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
     # Each new-run entry refuses before worker startup or capacity/token binding.
     workspace = desktop_workspace(str(client.base_url))
     selection = unvalidated_selection()
-    verbs = RunVerbs(
-        base_url=str(client.base_url),
-        authorization=DEFAULT_ATTACH_AUTHORIZATION,
-        team_preset=DEFAULT_TEAM_PRESET,
-        workspace_root=workspace,
+    verbs = gateway_run_verbs(
+        str(client.base_url),
         selection=lambda _workspace: selection,
         message="synthetic read",
     )

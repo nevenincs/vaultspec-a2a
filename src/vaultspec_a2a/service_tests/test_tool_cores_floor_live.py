@@ -52,13 +52,12 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 import httpx
 import pytest
 
 from ..control.run_start_policy import required_role_ids
-from ..streaming.sse_frames import iter_sse_events
 from ..team.team_config import load_team_config
 from ..testing import (
     GATEWAY_AUTH_HEADERS,
@@ -67,8 +66,8 @@ from ..testing import (
     AcceptanceCase,
     AcceptanceHarness,
     ResilientAuthoringClient,
-    SseFrame,
     message_content,
+    observe_run_stream,
     reachable_stack,
     resolve_selection,
     snapshot_vault,
@@ -175,38 +174,30 @@ async def _observe_named_adr_run(
     **options: Unpack[_NamedAdrObservationOptions],
 ) -> tuple[bool, list[str]]:
     """Observe the named-ADR evidence stream and cancel the run on exit."""
-    deadline = time.monotonic() + OBSERVE_DEADLINE_SECONDS
     cited = False
     matched_tokens: list[str] = []
-    try:
-        async with gateway_client.stream(
-            "GET",
-            f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
-            timeout=httpx.Timeout(OBSERVE_DEADLINE_SECONDS, connect=10.0),
-        ) as response:
-            response.raise_for_status()
-            async for event in iter_sse_events(response.aiter_lines()):
-                payload = SseFrame.from_event(event).data
-                content = message_content(payload)
-                if content:
-                    options["output_parts"].append(content)
-                    joined = "".join(options["output_parts"])
-                    if _cites_named_adr(
-                        joined, options["adr_name"], options["adr_stem"]
-                    ):
-                        cited = True
-                    matched_tokens = [
-                        token for token in options["tokens"] if token in joined
-                    ]
-                if payload.get("type") == "thread_terminal":
-                    break
-                if (cited and matched_tokens) or time.monotonic() > deadline:
-                    break
-    finally:
-        await gateway_client.post(
-            f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
-            timeout=30.0,
-        )
+
+    async def _on_frame(payload: dict[str, Any]) -> bool:
+        nonlocal cited, matched_tokens
+        content = message_content(payload)
+        if content:
+            options["output_parts"].append(content)
+            joined = "".join(options["output_parts"])
+            if _cites_named_adr(joined, options["adr_name"], options["adr_stem"]):
+                cited = True
+            matched_tokens = [token for token in options["tokens"] if token in joined]
+        return cited and bool(matched_tokens)
+
+    await observe_run_stream(
+        harness,
+        gateway_client,
+        _on_frame,
+        stalled=lambda: (
+            f"no document agent cited {options['adr_name']!r} together with its "
+            f"interior tokens (run {harness.run_id}); cited={cited}, "
+            f"matched tokens={len(matched_tokens)}"
+        ),
+    )
     return cited, matched_tokens
 
 
@@ -218,37 +209,33 @@ async def _observe_rag_run(
     output_parts: list[str],
 ) -> tuple[bool, bool, list[str]]:
     """Observe RAG evidence and cancel the run on exit."""
-    deadline = time.monotonic() + OBSERVE_DEADLINE_SECONDS
     rag_invoked = False
     service_down = False
     resolving: list[str] = []
-    try:
-        async with gateway_client.stream(
-            "GET",
-            f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
-            timeout=httpx.Timeout(OBSERVE_DEADLINE_SECONDS, connect=10.0),
-        ) as response:
-            response.raise_for_status()
-            async for event in iter_sse_events(response.aiter_lines()):
-                payload = SseFrame.from_event(event).data
-                content = message_content(payload)
-                if content:
-                    output_parts.append(content)
-                    joined = "".join(output_parts)
-                    if any(tool in joined for tool in _RAG_TOOLS):
-                        rag_invoked = True
-                    if _RAG_SERVICE_DOWN in joined.lower():
-                        service_down = True
-                    resolving = _resolving_citations(joined, workspace_root)
-                if payload.get("type") == "thread_terminal":
-                    break
-                if (rag_invoked and resolving) or time.monotonic() > deadline:
-                    break
-    finally:
-        await gateway_client.post(
-            f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
-            timeout=30.0,
-        )
+
+    async def _on_frame(payload: dict[str, Any]) -> bool:
+        nonlocal rag_invoked, service_down, resolving
+        content = message_content(payload)
+        if content:
+            output_parts.append(content)
+            joined = "".join(output_parts)
+            if any(tool in joined for tool in _RAG_TOOLS):
+                rag_invoked = True
+            if _RAG_SERVICE_DOWN in joined.lower():
+                service_down = True
+            resolving = _resolving_citations(joined, workspace_root)
+        return rag_invoked and bool(resolving)
+
+    await observe_run_stream(
+        harness,
+        gateway_client,
+        _on_frame,
+        stalled=lambda: (
+            f"no rag search with resolving citations (run {harness.run_id}); "
+            f"rag invoked={rag_invoked}, service down={service_down}, "
+            f"resolving citations={len(resolving)}"
+        ),
+    )
     return rag_invoked, service_down, resolving
 
 

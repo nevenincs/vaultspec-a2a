@@ -93,7 +93,7 @@ from .catalog import (
 )
 from .endpoints import resolve_gateway_url
 from .payloads import json_object, json_object_list
-from .progress import ProgressDeadline, ProgressStalledError, wait_for_async
+from .progress import ProgressDeadline, wait_for_async
 from .sse import SseFrame
 from .verbs import actor_tokens_body
 
@@ -123,6 +123,7 @@ __all__ = [
     "message_content",
     "mint_raw_token",
     "observe_bridged_authoring_run",
+    "observe_run_stream",
     "reachable_stack",
     "resolve_selection",
     "runtime_budget_for",
@@ -1175,16 +1176,12 @@ class AcceptanceHarness:
 
         # The run's phases share one deadline, so this wait is bounded by
         # whatever of it remains.
-        try:
-            found = await wait_for_async(
-                _poll,
-                deadline=ProgressDeadline(idle_window_s=deadline - started),
-                interval_s=poll_seconds,
-            )
-        except ProgressStalledError as stalled:
-            raise AssertionError(
-                f"timed out waiting for {what}; phases={self.phases_seen}"
-            ) from stalled
+        found = await wait_for_async(
+            _poll,
+            deadline=ProgressDeadline(idle_window_s=deadline - started),
+            interval_s=poll_seconds,
+            stalled=lambda: f"timed out waiting for {what}; phases={self.phases_seen}",
+        )
         # Per-transition wall time - the harness's own runtime profile. A
         # throwaway overlay of this line attributed the 300-900s lane runtimes to
         # since-fixed stalls (the healthy mixed lane runs in ~8s); keeping it at
@@ -1481,6 +1478,52 @@ async def _run_changeset_ids(ec: AuthoringClient, run_id: str) -> set[str]:
     return found
 
 
+async def observe_run_stream(
+    harness: AcceptanceHarness,
+    gateway_client: httpx.AsyncClient,
+    on_frame: Callable[[dict[str, Any]], Awaitable[bool]],
+    *,
+    stalled: Callable[[], str],
+) -> None:
+    """Feed each frame of the run's public stream to *on_frame*, then cancel the run.
+
+    *on_frame* returns ``True`` once the evidence it watches for is complete. The
+    run settling or the stream closing ends the observation too: neither is an
+    error here, because whether the evidence arrived is the caller's assertion.
+    The observation is bounded by :data:`OBSERVE_DEADLINE_SECONDS`; past it the
+    wait raises with *stalled*'s text. The run is cancelled however it ends.
+    """
+    try:
+        async with gateway_client.stream(
+            "GET",
+            f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
+            timeout=httpx.Timeout(OBSERVE_DEADLINE_SECONDS, connect=10.0),
+        ) as response:
+            response.raise_for_status()
+            events = iter_sse_events(response.aiter_lines())
+
+            async def _next_frame() -> bool | None:
+                try:
+                    event = await anext(events)
+                except StopAsyncIteration:
+                    return True
+                payload = SseFrame.from_event(event).data
+                settled = await on_frame(payload)
+                return settled or payload.get("type") == "thread_terminal" or None
+
+            await wait_for_async(
+                _next_frame,
+                deadline=ProgressDeadline(idle_window_s=OBSERVE_DEADLINE_SECONDS),
+                interval_s=0,
+                stalled=stalled,
+            )
+    finally:
+        await gateway_client.post(
+            f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
+            timeout=30.0,
+        )
+
+
 async def observe_bridged_authoring_run(
     ec: AuthoringClient,
     harness: AcceptanceHarness,
@@ -1494,39 +1537,37 @@ async def observe_bridged_authoring_run(
     call landed. The narration it collects is diagnostic only: the prompt names
     the bridge tools itself, so a name merely spoken proves nothing.
     """
-    deadline = time.monotonic() + OBSERVE_DEADLINE_SECONDS
     last_engine_poll = 0.0
     run_changesets: set[str] = set()
-    try:
-        async with gateway_client.stream(
-            "GET",
-            f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
-            timeout=httpx.Timeout(OBSERVE_DEADLINE_SECONDS, connect=10.0),
-        ) as response:
-            response.raise_for_status()
-            async for event in iter_sse_events(response.aiter_lines()):
-                payload = SseFrame.from_event(event).data
-                content = message_content(payload)
-                if content:
-                    output_parts.append(content)
-                    narrated_bridge_names.update(
-                        extract_bridge_tools("".join(output_parts))
-                    )
-                terminal = payload.get("type") == "thread_terminal"
-                now = time.monotonic()
-                # Poll the engine (not the narration) for this run's changeset.
-                if now - last_engine_poll >= _ENGINE_POLL_SECONDS:
-                    last_engine_poll = now
-                    run_changesets = await _run_changeset_ids(ec, harness.run_id)
-                if run_changesets or now > deadline:
-                    break
-                if terminal:
-                    # Final authoritative check after the run settles.
-                    run_changesets = await _run_changeset_ids(ec, harness.run_id)
-                    break
-    finally:
-        await gateway_client.post(
-            f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
-            timeout=30.0,
-        )
+
+    async def _on_frame(payload: dict[str, Any]) -> bool:
+        nonlocal last_engine_poll, run_changesets
+        content = message_content(payload)
+        if content:
+            output_parts.append(content)
+            narrated_bridge_names.update(extract_bridge_tools("".join(output_parts)))
+        now = time.monotonic()
+        # Poll the engine (not the narration) for this run's changeset.
+        if now - last_engine_poll >= _ENGINE_POLL_SECONDS:
+            last_engine_poll = now
+            run_changesets = await _run_changeset_ids(ec, harness.run_id)
+        if run_changesets:
+            return True
+        if payload.get("type") == "thread_terminal":
+            # Final authoritative check after the run settles.
+            run_changesets = await _run_changeset_ids(ec, harness.run_id)
+            return True
+        return False
+
+    await observe_run_stream(
+        harness,
+        gateway_client,
+        _on_frame,
+        stalled=lambda: (
+            f"no engine changeset scoped to run {harness.run_id} appeared "
+            f"(cs:{harness.run_id}:* absent from /authoring/v1/proposals); "
+            "narrated bridge names seen (diagnostic, not proof): "
+            f"{sorted(narrated_bridge_names)}"
+        ),
+    )
     return run_changesets

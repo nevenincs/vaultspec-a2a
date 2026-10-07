@@ -15,12 +15,16 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ...testing import inherited_environment
+from ...testing import (
+    LivenessWatch,
+    ProgressDeadline,
+    inherited_environment,
+    wait_until,
+)
 from ...utils.enums import CodexWebSearchMode
 from .._codex_auth import (
     _MAX_RETURNED_AUTH_BYTES,
@@ -359,11 +363,21 @@ with _credential_lock(pathlib.Path({str(source)!r})):
         text=True,
     )
     try:
-        deadline = time.monotonic() + 20.0
-        while not ready.exists():
-            assert child.poll() is None, child.communicate()
-            assert time.monotonic() < deadline, "the holder never took the lock"
-            time.sleep(0.05)
+
+        def _holder_exited() -> str | None:
+            if child.poll() is None:
+                return None
+            return f"exited before taking the lock: {child.communicate()}"
+
+        wait_until(
+            ready.exists,
+            deadline=ProgressDeadline(
+                idle_window_s=20.0,
+                watches=(LivenessWatch(label="lock holder", verdict=_holder_exited),),
+            ),
+            interval_s=0.05,
+            stalled=lambda: "the holder never took the lock",
+        )
 
         with caplog.at_level(logging.ERROR, logger="vaultspec_a2a.providers"):
             assert (

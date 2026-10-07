@@ -23,6 +23,7 @@ from ..leases import (
     hold_lease,
     lease_home,
 )
+from ..progress import ProgressDeadline, wait_until
 
 if TYPE_CHECKING:
     import subprocess
@@ -94,12 +95,12 @@ def test_refresher_heartbeats_the_marker(tmp_path: Path) -> None:
     lease = acquire("scratch-beat", home=tmp_path, refresh_interval_s=0.1)
     try:
         first = lease.path.stat().st_mtime
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline:
-            if lease.path.stat().st_mtime > first:
-                break
-            time.sleep(0.05)
-        assert lease.path.stat().st_mtime > first, "mtime never advanced"
+        wait_until(
+            lambda: lease.path.stat().st_mtime > first,
+            deadline=ProgressDeadline(idle_window_s=10.0),
+            interval_s=0.05,
+            stalled=lambda: "mtime never advanced",
+        )
     finally:
         lease.release()
 

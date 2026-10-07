@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-import time
 from typing import TYPE_CHECKING
 
 import pytest
@@ -13,10 +12,12 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ..control.accepted_input import AcceptedActionInput, restore_accepted_dispatch
 from ..testing import (
+    ProgressDeadline,
     held_turns,
     json_object,
     json_object_list,
     read_frames_until,
+    wait_for_async,
     wait_for_run_status,
 )
 from ..thread.action_receipts import GraphActionReceipt
@@ -37,17 +38,22 @@ async def _wait_for_completed_checkpoint(path: Path, run_id: str) -> None:
     """Observe the real worker's durable turn evidence while the gateway is down."""
     async with AsyncSqliteSaver.from_conn_string(str(path)) as saver:
         await saver.setup()
-        deadline = time.monotonic() + 90.0
-        while time.monotonic() < deadline:
+
+        async def _completed() -> bool | None:
             stored = await saver.aget_tuple(
                 {"configurable": {"thread_id": run_id, "checkpoint_ns": ""}}
             )
-            if stored is not None:
-                values = stored.checkpoint.get("channel_values", {})
-                if values.get("graph_completion_receipts"):
-                    return
-            await asyncio.sleep(0.2)
-    raise AssertionError(f"worker did not commit completed checkpoint for {run_id}")
+            if stored is None:
+                return None
+            values = stored.checkpoint.get("channel_values", {})
+            return bool(values.get("graph_completion_receipts")) or None
+
+        await wait_for_async(
+            _completed,
+            deadline=ProgressDeadline(idle_window_s=90.0),
+            interval_s=0.2,
+            stalled=lambda: f"worker did not commit completed checkpoint for {run_id}",
+        )
 
 
 def _replay_events(stack: ServiceStack, run_id: str) -> list[tuple[int, str]]:

@@ -6,14 +6,13 @@ import json
 import os
 import subprocess
 import sys
-import time
 import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
 
-from ..testing import free_port
+from ..testing import ProgressDeadline, free_port, wait_for
 from .harness import COMPOSE_FILE, REPO_ROOT, resolve_docker_executable
 
 if TYPE_CHECKING:
@@ -157,17 +156,20 @@ def test_request_url_privacy_survives_export(
         timeout=45,
     )
     assert json.loads(result.stdout)["query"] == query.removeprefix("?")
-    deadline = time.monotonic() + 30
-    payload: dict[str, Any] = {}
     with httpx.Client(base_url=query_url, timeout=5) as client:
-        while time.monotonic() < deadline:
+
+        def _exported() -> dict[str, Any] | None:
             response = client.get(f"/api/traces/{trace_id}")
             response.raise_for_status()
-            payload = cast("dict[str, Any]", response.json())
-            if payload.get("data"):
-                break
-            time.sleep(0.25)
-    assert payload.get("data"), "middleware span was not exported to Jaeger"
+            body = cast("dict[str, Any]", response.json())
+            return body if body.get("data") else None
+
+        payload = wait_for(
+            _exported,
+            deadline=ProgressDeadline(idle_window_s=30.0),
+            interval_s=0.25,
+            stalled=lambda: "middleware span was not exported to Jaeger",
+        )
     spans = payload["data"][0]["spans"]
     assert len(spans) == 1
     span = spans[0]

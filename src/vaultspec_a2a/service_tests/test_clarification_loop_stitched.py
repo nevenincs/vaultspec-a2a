@@ -76,7 +76,6 @@ from ..authoring.discovery import resolve_engine_with_retry
 from ..team.team_config import load_team_config
 from ..testing import (
     ProgressDeadline,
-    ProgressStalledError,
     fetch_provider_catalog,
     is_terminal,
     json_object,
@@ -533,12 +532,12 @@ def _replay_codex_continuation(
         last = _response_object(replay, at="replayed Codex continuation")
         return last if last.get("applied") is True else None
 
-    try:
-        replay_body = wait_for(
-            _applied, deadline=ProgressDeadline(idle_window_s=90.0), interval_s=0.5
-        )
-    except ProgressStalledError as stalled:
-        raise AssertionError(f"continuation never applied: {last}") from stalled
+    replay_body = wait_for(
+        _applied,
+        deadline=ProgressDeadline(idle_window_s=90.0),
+        interval_s=0.5,
+        stalled=lambda: f"continuation never applied: {last}",
+    )
     assert replay_body.get("action_status") == "applied"
     return replay_body
 

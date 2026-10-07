@@ -63,7 +63,6 @@ refused for rate and cannot say which of the two it was.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -85,6 +84,7 @@ from ..testing import (
     PRESET_LIVE,
     AcceptanceCase,
     AcceptanceHarness,
+    ProgressDeadline,
     ResilientAuthoringClient,
     json_object,
     json_object_list,
@@ -93,6 +93,7 @@ from ..testing import (
     resolve_selection,
     snapshot_vault,
     vault_write_delta,
+    wait_for_async,
 )
 from ..utils.coercion import coerce_object_list, coerce_object_mapping
 
@@ -394,8 +395,6 @@ async def _observe_web_grounding_run(
     feature: str,
 ) -> tuple[_Evidence, str, str]:
     evidence = _Evidence(claims="", locator_urls=[], body="")
-    failure_reason = ""
-    failure_condition = ""
 
     async with ResilientAuthoringClient(
         harness.engine_base_url, harness.engine_bearer
@@ -420,7 +419,26 @@ async def _observe_web_grounding_run(
                 feature=feature,
                 expect=201,
             )
-            deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
+
+            async def _observed() -> tuple[_Evidence, str, str] | None:
+                nonlocal evidence
+                evidence = await _read_evidence(harness.run_id)
+                if evidence.complete:
+                    return evidence, "", ""
+                status = await harness.run_status(hc)
+                if status.get("status") in {"failed", "cancelled"}:
+                    # Both are read from run-status rather than from the relay:
+                    # the frame carrying the condition is droppable, and this
+                    # response is where the run's terminal state is
+                    # authoritative. The condition decides what happens next;
+                    # the reason only informs whichever message is reported.
+                    return (
+                        evidence,
+                        str(status.get("failure_reason") or ""),
+                        str(status.get("provider_condition") or ""),
+                    )
+                return None
+
             try:
                 # Observe until the EVIDENCE is complete, not until the run is. What
                 # this Step proves is that a retrieval reached both citation channels;
@@ -428,27 +446,26 @@ async def _observe_web_grounding_run(
                 # later phases, the human gates - is governed by other Steps, and
                 # riding the run through it would make this proof hostage to verdicts
                 # about document quality that have nothing to do with web grounding.
-                while time.monotonic() < deadline:
-                    evidence = await _read_evidence(harness.run_id)
-                    if evidence.complete:
-                        break
-                    status = await harness.run_status(hc)
-                    if status.get("status") in {"failed", "cancelled"}:
-                        # Both are read from run-status rather than from the relay:
-                        # the frame carrying the condition is droppable, and this
-                        # response is where the run's terminal state is
-                        # authoritative. The condition decides what happens next;
-                        # the reason only informs whichever message is reported.
-                        failure_reason = str(status.get("failure_reason") or "")
-                        failure_condition = str(status.get("provider_condition") or "")
-                        break
-                    await asyncio.sleep(_POLL_SECONDS)
+                return await wait_for_async(
+                    _observed,
+                    deadline=ProgressDeadline(idle_window_s=_OBSERVE_DEADLINE_SECONDS),
+                    fingerprint=lambda: (
+                        evidence.claims,
+                        tuple(evidence.locator_urls),
+                        evidence.body,
+                    ),
+                    interval_s=_POLL_SECONDS,
+                    stalled=lambda: (
+                        f"run {harness.run_id} landed no complete retrieval evidence "
+                        f"(web locators: {len(evidence.locator_urls)}, writer body: "
+                        f"{'present' if evidence.body else 'absent'})"
+                    ),
+                )
             finally:
                 await hc.post(
                     f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
                     timeout=30.0,
                 )
-    return evidence, failure_reason, failure_condition
 
 
 def _assert_web_grounding_evidence(

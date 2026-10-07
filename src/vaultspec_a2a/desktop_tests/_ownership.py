@@ -17,7 +17,6 @@ from ..control.config import setting_env
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     ProgressDeadline,
-    ProgressStalledError,
     armed_gateway_env,
     booted_gateway,
     broker_gateway_env,
@@ -121,11 +120,9 @@ def worker_health(port: int, secret: str, *, timeout: float = 60.0) -> dict[str,
         assert isinstance(body, dict), body
         return cast("dict[str, Any]", body)
 
-    try:
-        return wait_for(
-            _health, deadline=ProgressDeadline(idle_window_s=timeout), interval_s=0.25
-        )
-    except ProgressStalledError as stalled:
-        raise AssertionError(
-            f"worker on port {port} never served health (last: {last})"
-        ) from stalled
+    return wait_for(
+        _health,
+        deadline=ProgressDeadline(idle_window_s=timeout),
+        interval_s=0.25,
+        stalled=lambda: f"worker on port {port} never served health (last: {last})",
+    )

@@ -32,7 +32,6 @@ from ...team.team_config import load_team_config
 from ...testing import (
     AcceptanceHarness,
     ProgressDeadline,
-    ProgressStalledError,
     actor_tokens_body,
     json_object,
     json_object_list,
@@ -246,15 +245,14 @@ async def _await_materialized_documents(
                 materialized[kind] = matches[0]
         return materialized if len(materialized) == 2 else None
 
-    try:
-        return await wait_for_async(
-            _materialized, deadline=ProgressDeadline(idle_window_s=timeout)
-        )
-    except ProgressStalledError as stalled:
-        raise AssertionError(
+    return await wait_for_async(
+        _materialized,
+        deadline=ProgressDeadline(idle_window_s=timeout),
+        stalled=lambda: (
             f"deterministic completion did not materialize research and ADR "
             f"documents for feature {feature_tag!r} under {vault_root}"
-        ) from stalled
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)

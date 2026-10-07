@@ -1,0 +1,30 @@
+[team]
+id           = "deterministic-supervisor-routing"
+display_name = "Deterministic Supervisor Routing"
+description  = """
+Scripted star scenario: the supervisor routes each human turn to its one worker
+and finishes once that worker has answered. Runs on the in-process deterministic
+provider, so it needs no credential, no network, and no tape server.
+
+Unattended by default, so a run completes on its own. A supervised run whose
+workspace holds a plan for its feature parks on the supervisor's plan approval
+before the worker runs, and the worker then parks on one permission request
+before it answers.
+"""
+
+[team.topology]
+type = "star"
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = "Route each turn to the scripted worker, then finish once it has answered."
+
+[team.graph]
+step_timeout_seconds = 60
+run_timeout_seconds  = 1200
+recursion_limit      = 20
+
+[[team.workers]]
+agent_id = "deterministic-permission-pause"

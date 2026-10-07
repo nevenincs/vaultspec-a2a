@@ -15,7 +15,7 @@ def test_thread_lifecycle_reaches_completion(service_stack: ServiceStack) -> Non
     """Create a thread and prove the public lifecycle reaches completion."""
     created = service_stack.create_thread(
         initial_message="Run the deterministic success preset.",
-        team_preset="mock-success-single",
+        team_preset="deterministic-supervisor-routing",
         title="service lifecycle",
     )
     thread_id = created["run_id"]

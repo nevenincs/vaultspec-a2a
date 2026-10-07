@@ -119,7 +119,7 @@ def _approve_during_initial_stream(
                 service_stack.respond_permission(
                     required_text(request, "request_id", at="pending permission"),
                     thread_id=thread_id,
-                    option_id=select_option_id(request, label="approve"),
+                    option_id=select_option_id(request, label="Allow once"),
                 ),
                 at="permission response",
             )
@@ -155,7 +155,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     """Consume SSE for a real run, then verify terminal replay semantics."""
     created = service_stack.create_thread(
         initial_message="Request approval and then continue with a follow-up.",
-        team_preset="mock-human-in-loop",
+        team_preset="deterministic-permission-pause",
         title="service stream follow-up",
     )
     created_body = json_object(created, at="created thread")
@@ -182,8 +182,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     ]
     assert assistant_messages, "resume flow should emit a deterministic assistant reply"
     assert required_text(assistant_messages[-1], "content", at="assistant message") == (
-        "Permission approved. The privileged command completed successfully "
-        "and the task is now finished."
+        "Deterministic permission approved with allow_once."
     )
 
     with (

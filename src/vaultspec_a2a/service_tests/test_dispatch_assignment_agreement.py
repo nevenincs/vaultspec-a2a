@@ -34,11 +34,10 @@ A transport symptom is explicitly NOT the trigger: the run is required to comple
 first, so a dispatch failure or an unreachable worker fails as itself rather than
 masquerading as a disagreement.
 
-Absence is loud: the scripted model backend is probed over real loopback, the
-in-process lane is resolved from the gateway's own served catalog, and a
-missing substrate is a skip naming it and what supplies it - because a run
-frozen on any OTHER served lane would execute a real external provider, which
-this deterministic certification must never do.
+Absence is loud: the in-process deterministic lane is resolved from the
+gateway's own served catalog, and a missing lane is a skip naming it and what
+supplies it - because a run frozen on any OTHER served lane would execute a real
+external provider, which this deterministic certification must never do.
 """
 
 from __future__ import annotations
@@ -55,15 +54,14 @@ from ..testing import (
     ok_body,
     wait_for_run_status,
 )
-from ._net import TAPE_SERVER_ENV, tape_server_base
 
 if TYPE_CHECKING:
     from ..acceptance.tests._harness import CertifiedGateway
     from ..conftest import ExternalPrerequisiteRule
 
-# A multi-role preset, so agreement is asserted across several roles in one run
-# rather than generalised from a single worker.
-_PRESET = "mock-success-multi"
+# A star preset, so the run crosses the supervisor's routing turns as well as its
+# worker's; agreement is asserted for every role the freeze discloses.
+_PRESET = "deterministic-supervisor-routing"
 _PRESET_PATH = (
     Path(__file__).resolve().parents[1]
     / "team"
@@ -103,7 +101,7 @@ def _served_in_process_selection(
     try:
         with gateway.client(timeout=120.0) as client:
             return fetch_in_process_selection(
-                client, workspace_root, prefer_provider_id="mock"
+                client, workspace_root, prefer_provider_id="deterministic"
             )
     except NoSelectableLaneError as exc:
         external_prerequisite.absent("in-process-lanes", str(exc))
@@ -116,16 +114,10 @@ def test_advertised_assignment_is_the_assignment_the_worker_executes(
     """Every role executes on the provider and capability admission advertised."""
     roles = _preset_roles()
 
-    tape_server = tape_server_base()
-    external_prerequisite("tape-server", f"nothing is listening at {tape_server}")
-
     run_id = f"assignment-agreement-{uuid.uuid4().hex[:12]}"
     with certified_gateway(
         tmp_path,
-        **{
-            TAPE_SERVER_ENV: tape_server,
-            "VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS": _WORKER_READY_BUDGET_SECONDS,
-        },
+        VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
         workspace_root = str(tmp_path)
         selection = _served_in_process_selection(

@@ -1,0 +1,22 @@
+[team]
+id           = "deterministic-looping"
+display_name = "Deterministic Looping"
+description  = "ProviderFactory scenario for a turn that keeps generating output until it is cancelled."
+
+[team.topology]
+type  = "pipeline"
+order = ["deterministic-looping"]
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = "Run the in-process deterministic looping scenario."
+
+[team.graph]
+step_timeout_seconds = 60
+run_timeout_seconds = 600
+recursion_limit      = 10
+
+[[team.workers]]
+agent_id = "deterministic-looping"

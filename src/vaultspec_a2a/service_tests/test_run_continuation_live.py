@@ -165,7 +165,7 @@ def _assert_queued_turn_runs_after_a_live_turn_with_one_terminal(
 ) -> None:
     created = stack.create_thread(
         initial_message="Complete this turn before the next one.",
-        team_preset="mock-success-single",
+        team_preset="deterministic-supervisor-routing",
         autonomous=True,
     )
     run_id = str(created["run_id"])
@@ -262,7 +262,7 @@ def _assert_admission_at_the_worker_completion_boundary_has_one_outcome(
 ) -> None:
     created = stack.create_thread(
         initial_message="Finish the first turn near admission.",
-        team_preset="mock-success-single",
+        team_preset="deterministic-supervisor-routing",
         autonomous=True,
     )
     run_id = str(created["run_id"])

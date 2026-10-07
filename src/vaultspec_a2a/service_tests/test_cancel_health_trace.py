@@ -100,7 +100,7 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
     """A running thread can be cancelled through the public REST API."""
     created = service_stack.create_thread(
         initial_message="Start a long-running task and then cancel it.",
-        team_preset="mock-looping",
+        team_preset="deterministic-looping",
         title="service cancel",
     )
     thread_id = required_text(
@@ -145,7 +145,7 @@ def test_health_and_trace_surface_are_observable(
     trace_started_at = time.time()
     created = service_stack.create_thread(
         initial_message="Run a short task so worker IPC generates traceable traffic.",
-        team_preset="mock-success-single",
+        team_preset="deterministic-supervisor-routing",
         title="service trace probe",
     )
     thread_id = required_text(

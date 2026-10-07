@@ -29,8 +29,6 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from ...database import create_control_action
-from ...database.thread_repository import create_thread
 from ...testing import (
     LOOPBACK_TIMEOUT,
     armed_gateway_env,
@@ -39,10 +37,9 @@ from ...testing import (
     log_tail,
     read_worker_ipc_secret,
     seat_app_home,
+    seed_journaled_thread,
 )
-from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
-from ...thread.idempotency import thread_create_action_key
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -82,19 +79,10 @@ async def _seed_running_thread(database_path: Path) -> None:
     try:
         factory = async_sessionmaker(engine, expire_on_commit=False)
         async with factory() as session:
-            authority = make_test_write_authority()
-            await create_thread(
+            await seed_journaled_thread(
                 session,
-                write_authority=authority,
                 thread_id=_RUN,
                 status=ThreadStatus.RUNNING,
-            )
-            await create_control_action(
-                session,
-                thread_id=_RUN,
-                action_type=authority.action_type,
-                idempotency_key=thread_create_action_key(_RUN),
-                dispatch_id=authority.action_receipt_id,
                 recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=30),
             )
             await session.commit()

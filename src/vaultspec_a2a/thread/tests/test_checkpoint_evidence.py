@@ -72,7 +72,10 @@ def _gate(state: TeamState) -> dict[str, str]:
     on raises a fresh interrupt rather than failing the run.
     """
     del state
-    while interrupt({"type": "plan_approval_request"}) != _SETTLING_ANSWER:
+    while (
+        interrupt({"type": "plan_approval_request", "request_id": "repark-approval"})
+        != _SETTLING_ANSWER
+    ):
         pass
     return {"active_agent": "settled"}
 

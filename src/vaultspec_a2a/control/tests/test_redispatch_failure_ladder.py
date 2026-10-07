@@ -20,7 +20,12 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...testing import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET, adopted_spawner
+from ...testing import (
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    adopted_spawner,
+    frozen_deterministic_selection,
+)
 from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
@@ -42,21 +47,6 @@ from ...control.execution_authority import (
 from ...database import create_control_action, create_thread, get_thread
 from ...database.session import close_db, get_session_factory, init_db
 from ...ipc.schemas import DispatchRequest
-from ...providers.provider_catalog import (
-    AdmissionState,
-    AuthenticationState,
-    CatalogState,
-    CatalogStatus,
-    HealthState,
-    ModelCatalogEntry,
-    ProviderCatalog,
-    ProviderCatalogKey,
-    ProviderHealthAxes,
-    ProviderRecord,
-    SelectionReference,
-    StructuredProviderHealth,
-)
-from ...providers.team_selection import freeze_team_selection
 from ...team.team_config import load_team_config
 from ...thread.enums import ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
@@ -122,53 +112,7 @@ async def _create_reconciling_thread_with_receipt(
 
 def _current_metadata(workspace_root: str | None) -> dict[str, object]:
     """Build a valid current selection record for redispatch-path tests."""
-    now = datetime.now(UTC)
-    key = ProviderCatalogKey("deterministic", "in-process-deterministic")
-    catalog = ProviderCatalog(
-        key=key,
-        state=CatalogState(
-            status=CatalogStatus.AVAILABLE,
-            checked_at=now,
-            revision="test-revision",
-            expires_at=now + timedelta(minutes=5),
-        ),
-        models=(
-            ModelCatalogEntry(
-                entry_id="deterministic",
-                provider_value="deterministic",
-                display_name="Deterministic",
-            ),
-        ),
-    )
-    health = StructuredProviderHealth.derive(
-        axes=ProviderHealthAxes(
-            configured=HealthState.AVAILABLE,
-            transport=HealthState.AVAILABLE,
-            authentication=AuthenticationState.NOT_APPLICABLE,
-            catalog=CatalogStatus.AVAILABLE,
-            admission=AdmissionState.ADMITTED,
-        ),
-        checked_at=now,
-    )
-    record = ProviderRecord(
-        provider_id="deterministic",
-        display_name="Deterministic",
-        execution_mode="in-process-deterministic",
-        health=health,
-        catalog=catalog,
-    )
-    frozen = freeze_team_selection(
-        selection=SelectionReference(
-            provider_id="deterministic",
-            execution_mode="in-process-deterministic",
-            catalog_revision="test-revision",
-            entry_id="deterministic",
-        ),
-        overrides={},
-        fallbacks=(),
-        required_roles=(DEFAULT_REQUIRED_ROLE,),
-        records=(record,),
-    )
+    frozen = frozen_deterministic_selection((DEFAULT_REQUIRED_ROLE,))
     metadata: dict[str, object] = {"provider_catalog_selection": frozen.to_record()}
     if workspace_root is not None:
         metadata["workspace_root"] = workspace_root

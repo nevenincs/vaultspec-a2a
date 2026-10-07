@@ -22,7 +22,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from ...api.tests.test_internal import _elect_status, _seed_accepted_thread
 from ...conftest import SqlitePosture
 from ...control.accepted_input import freeze_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
@@ -56,7 +55,9 @@ from ...testing import (
     add_test_node,
     ainvoke_test_graph,
     compile_test_graph,
+    elect_status,
     new_state_graph,
+    seed_accepted_thread,
 )
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
@@ -831,8 +832,8 @@ async def test_an_answer_applied_by_a_turn_that_then_failed_leaves_the_run_faile
                 request_id=request_id,
             ),
         )
-        await _elect_status(session, thread.id, ThreadStatus.RUNNING)
-        await _elect_status(session, thread.id, ThreadStatus.FAILED)
+        await elect_status(session, thread.id, ThreadStatus.RUNNING)
+        await elect_status(session, thread.id, ThreadStatus.FAILED)
         await session.commit()
 
     await _handle_progress_event(
@@ -870,7 +871,7 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
     the dispatch that raised it, once, however often the request is replayed.
     """
     async with session_factory() as session:
-        thread_id, receipt = await _seed_accepted_thread(session, status="running")
+        thread_id, receipt = await seed_accepted_thread(session, status="running")
         await session.commit()
 
     request_id = f"{thread_id}:plan-approval-1"
@@ -929,76 +930,6 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
             .all()
         )
         assert len(actions) == 1
-
-
-@pytest.mark.asyncio
-async def test_stale_permission_creation_replay_cannot_reclaim_newer_authority(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Stale permission replay",
-        )
-        await session.commit()
-        thread_id = thread.id
-    request_id = f"{thread_id}:stale-permission"
-    payload: dict[str, object] = {
-        "type": "permission_request",
-        "request_id": request_id,
-        "description": "Allow the first action?",
-        "options": [{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
-        "tool_call": "bash",
-    }
-    await _handle_permission_event(
-        thread_id,
-        payload,
-        session_factory=session_factory,
-    )
-
-    async with session_factory() as session:
-        thread = await session.get(ThreadModel, thread_id)
-        assert thread is not None
-        expectation = thread_write_expectation(thread)
-        response = await create_control_action(
-            session,
-            thread_id=thread_id,
-            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-            request_id=request_id,
-            idempotency_key=permission_response_action_key(request_id),
-            payload={"option_id": "allow"},
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-        )
-        assert response.dispatch_id is not None
-        election = await elect_thread_status(
-            session,
-            thread_id,
-            expectation=expectation,
-            status=ThreadStatus.RUNNING,
-            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-            action_receipt_id=response.dispatch_id,
-        )
-        assert election.outcome is ThreadStatusElectionOutcome.WON
-        await session.commit()
-        expected_revision = thread.run_revision
-        expected_generation = thread.writer_generation
-        expected_receipt = thread.writer_action_receipt_id
-
-    await _handle_permission_event(
-        thread_id,
-        payload,
-        session_factory=session_factory,
-    )
-
-    async with session_factory() as session:
-        thread = await session.get(ThreadModel, thread_id)
-    assert thread is not None
-    assert thread.status == ThreadStatus.RUNNING.value
-    assert thread.run_revision == expected_revision
-    assert thread.writer_generation == expected_generation
-    assert thread.writer_action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED
-    assert thread.writer_action_receipt_id == expected_receipt
 
 
 @pytest.mark.asyncio
@@ -1162,7 +1093,7 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
     reads parked because the pause recorder found the interrupt in its checkpoint.
     """
     async with session_factory() as session:
-        thread_id, _receipt = await _seed_accepted_thread(session, status="running")
+        thread_id, _receipt = await seed_accepted_thread(session, status="running")
         await session.commit()
 
     request_id = f"{thread_id}:document-approval-1"

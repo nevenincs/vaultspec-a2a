@@ -6,17 +6,15 @@ import asyncio
 import json
 import sqlite3
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
 
-from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.dispatch import redispatch_reconciling_threads
-from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...database import (
     close_db,
     create_control_action,
@@ -25,8 +23,6 @@ from ...database import (
     init_db,
 )
 from ...database.thread_repository import create_thread
-from ...graph.enums import Provider
-from ...ipc.schemas import DispatchRequest
 from ...providers.provider_catalog import (
     AdmissionState,
     AuthenticationState,
@@ -45,12 +41,7 @@ from ...providers.provider_catalog import (
     StructuredProviderHealth,
 )
 from ...providers.provider_catalog_service import stamp_catalog_expiry
-from ...providers.team_selection import (
-    FrozenTeamSelection,
-    freeze_team_selection,
-    model_assignment_digest,
-)
-from ...team.team_config import load_team_config
+from ...providers.team_selection import FrozenTeamSelection, model_assignment_digest
 from ...testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     DEFAULT_REQUIRED_ROLE,
@@ -60,15 +51,15 @@ from ...testing import (
     booted_gateway,
     broker_gateway_env,
     fetch_in_process_selection,
+    frozen_deterministic_selection,
     gateway_script,
-    in_process_lane_selection,
     log_tail,
     seat_app_home,
+    seed_create_action,
     wait_for_run_status,
 )
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
 from ...thread.idempotency import thread_create_action_key
 from ..schemas.gateway import FrozenTeamAssignmentSummary
 from .conftest import _InProcessWorker
@@ -81,28 +72,9 @@ def _current_metadata(
     workspace: Path,
     *,
     catalog_revision: str | None = None,
-    model_value: str = "deterministic",
+    model_value: str | None = None,
 ) -> tuple[dict[str, object], FrozenTeamSelection]:
-    served, _reference = in_process_lane_selection(Provider.DETERMINISTIC)
     now = datetime.now(UTC)
-    catalog = served.catalog
-    if model_value != catalog.models[0].provider_value:
-        catalog = replace(
-            catalog,
-            models=(
-                replace(
-                    catalog.models[0],
-                    provider_value=model_value,
-                    display_name=f"Historical {model_value}",
-                ),
-            ),
-        )
-    if catalog_revision is not None:
-        catalog = replace(
-            catalog, state=replace(catalog.state, revision=catalog_revision)
-        )
-    record = replace(served, catalog=catalog)
-    model = record.catalog.models[0]
     codex_key = ProviderCatalogKey("codex", "codex-app-server")
     codex_revision = "frozen-unused-codex-fallback"
     codex_record = ProviderRecord(
@@ -153,25 +125,22 @@ def _current_metadata(
             )
         ),
     )
-    primary = SelectionReference(
-        provider_id=record.provider_id,
-        execution_mode=record.execution_mode,
-        catalog_revision=record.catalog.state.revision or "",
-        entry_id=model.entry_id,
-    )
-    frozen = freeze_team_selection(
-        selection=primary,
-        overrides={DEFAULT_REQUIRED_ROLE: primary},
+    frozen = frozen_deterministic_selection(
+        (DEFAULT_REQUIRED_ROLE,),
+        model_value=model_value,
+        catalog_revision=catalog_revision,
+        pinned_roles=(DEFAULT_REQUIRED_ROLE,),
         fallbacks=(
-            SelectionReference(
-                provider_id=codex_key.provider_id,
-                execution_mode=codex_key.execution_mode,
-                catalog_revision=codex_revision,
-                entry_id="unused-codex-entry",
+            (
+                codex_record,
+                SelectionReference(
+                    provider_id=codex_key.provider_id,
+                    execution_mode=codex_key.execution_mode,
+                    catalog_revision=codex_revision,
+                    entry_id="unused-codex-entry",
+                ),
             ),
         ),
-        required_roles=(DEFAULT_REQUIRED_ROLE,),
-        records=(record, codex_record),
     )
     return (
         {
@@ -257,57 +226,20 @@ async def _seed_restart_case(case: _RestartCase) -> None:
     await init_db(str(case.database_path))
     try:
         async with get_session_factory()() as session:
-            definition = freeze_graph_definition(
-                load_team_config(DEFAULT_TEAM_PRESET, workspace_root=case.workspace),
-                workspace_root=case.workspace,
-            )
-            for thread_id, thread_metadata, selection in (
-                ("current-schema-restart", case.metadata, case.frozen_selection),
-                ("same-assignment-restart", case.metadata, case.frozen_selection),
-                (
-                    "other-assignment-restart",
-                    case.other_metadata,
-                    case.other_frozen_selection,
-                ),
+            for thread_id, thread_metadata in (
+                ("current-schema-restart", case.metadata),
+                ("same-assignment-restart", case.metadata),
+                ("other-assignment-restart", case.other_metadata),
             ):
-                authority = make_test_write_authority()
                 await create_thread(
                     session,
-                    write_authority=authority,
+                    write_authority=make_test_write_authority(),
                     thread_id=thread_id,
                     status=ThreadStatus.RECONCILING,
                     team_preset=DEFAULT_TEAM_PRESET,
                     metadata=json.dumps(thread_metadata),
                 )
-                dispatch = DispatchRequest(
-                    action="ingest",
-                    thread_id=thread_id,
-                    content="recover after restart",
-                    workspace_root=str(case.workspace),
-                    recursion_limit=25,
-                    team_preset=DEFAULT_TEAM_PRESET,
-                    graph_definition=definition,
-                    model_assignment=selection.compiler_map(),
-                )
-                await create_control_action(
-                    session,
-                    thread_id=thread_id,
-                    action_type=authority.action_type,
-                    idempotency_key=thread_create_action_key(thread_id),
-                    dispatch_id=authority.action_receipt_id,
-                    recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-                    payload=freeze_accepted_input(
-                        dispatch, intent={"content": "recover after restart"}
-                    ),
-                )
-                assert (
-                    await prepare_graph_action_receipt(
-                        session,
-                        thread_id=thread_id,
-                        dispatch_id=authority.action_receipt_id,
-                    )
-                    is not None
-                )
+                await seed_create_action(session, thread_id, workspace=case.workspace)
             await session.commit()
     finally:
         await close_db()

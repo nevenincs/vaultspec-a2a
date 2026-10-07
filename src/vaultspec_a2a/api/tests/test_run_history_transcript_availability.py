@@ -20,12 +20,16 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...testing import DEFAULT_TEAM_PRESET, async_catalog_run_fields, serve_on_loopback
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    async_catalog_run_fields,
+    elect_status,
+    serve_on_loopback,
+)
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus, TranscriptAvailability
+from ._relay_events import RelayContext, relay_terminal
 from .conftest import make_app
-from .test_gateway_drain import _relay_terminal, _RelayContext
-from .test_internal import _elect_status
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -71,8 +75,8 @@ async def test_a_completed_run_without_a_checkpoint_reports_the_transcript_lost(
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-lost-01")
-        await _relay_terminal(
-            client, run_id, _RelayContext(checkpointer, worker, session_factory)
+        await relay_terminal(
+            client, run_id, RelayContext(checkpointer, worker, session_factory)
         )
         await checkpointer.adelete_thread(run_id)
 
@@ -115,8 +119,8 @@ async def test_an_archived_run_without_a_checkpoint_still_answers_the_durable_re
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-archived-01")
-        await _relay_terminal(
-            client, run_id, _RelayContext(checkpointer, worker, session_factory)
+        await relay_terminal(
+            client, run_id, RelayContext(checkpointer, worker, session_factory)
         )
         await checkpointer.adelete_thread(run_id)
         archived = await client.post(f"/v1/runs/{run_id}/archive")
@@ -197,7 +201,7 @@ async def test_a_parked_run_without_a_checkpoint_is_a_loss_not_a_pending_transcr
     ):
         run_id = await _start_run(client, "hist-parked-01")
         async with session_factory() as db:
-            await _elect_status(db, run_id, ThreadStatus.INPUT_REQUIRED)
+            await elect_status(db, run_id, ThreadStatus.INPUT_REQUIRED)
             await db.commit()
 
         history = await client.get(f"/v1/runs/{run_id}/history")

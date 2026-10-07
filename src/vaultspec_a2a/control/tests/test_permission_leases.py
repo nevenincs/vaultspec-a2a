@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...api.tests.permission_harness import park_permission
 from ...control._permission_response_contract import PermissionInput
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.leased_dispatch import DispatchTransport
@@ -18,12 +17,16 @@ from ...database import (
     get_control_action_by_idempotency_key,
     record_permission_request,
 )
-from ...testing import adopted_spawner, current_execution_metadata
+from ...testing import (
+    adopted_spawner,
+    current_execution_metadata,
+    park_permission,
+    seed_create_action,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
 from ...thread.idempotency import permission_response_action_key
-from .test_dispatch_failure_transitions import _seed_accepted_initial_action
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,7 +64,7 @@ async def _run_case(
             description="Allow the operation?",
             allowed_options=_OPTIONS,
         )
-        await _seed_accepted_initial_action(session, thread.id, workspace=runtime_dir)
+        await seed_create_action(session, thread.id, workspace=runtime_dir)
         await session.commit()
         thread_id = thread.id
 

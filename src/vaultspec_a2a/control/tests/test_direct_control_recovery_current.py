@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import anyio
 import httpx
 import pytest
 from fastapi import FastAPI, Request
@@ -29,7 +27,12 @@ from ...database import (
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import DEFAULT_TEAM_PRESET, adopted_spawner, current_execution_metadata
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    adopted_spawner,
+    current_execution_metadata,
+    served_worker,
+)
 from ...thread import RunWriteAuthority
 from ...thread.enums import (
     ControlActionResultStatus,
@@ -39,12 +42,8 @@ from ...thread.enums import (
     ThreadStatus,
 )
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
 from ..accepted_input import freeze_accepted_input
 from ..circuit_breaker import WorkerCircuitBreaker
-from ..config import settings
 from ..direct_control_recovery import (
     DirectControlRecoverySummary,
     redrive_direct_control_actions,
@@ -54,8 +53,6 @@ from ..execution_authority import resolve_execution_authority
 from ..recovery import seed_recovery_attempts
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -626,43 +623,7 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
     assert attempt is not None and attempt.settled_at is not None
 
 
-@pytest.fixture
-def _dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give both sides of real worker dispatch the current IPC credential."""
-    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
-
-
-@asynccontextmanager
-async def _worker_already_running(
-    checkpointer: AsyncSqliteSaver, thread_id: str
-) -> AsyncGenerator[httpx.AsyncClient]:
-    """Serve the production worker app with one run's slot genuinely taken.
-
-    The slot is taken through the executor's own reservation verb, so the 409
-    the recovery pass meets is the refusal the worker composes for a run it is
-    already executing rather than a status written here.
-    """
-    bridge = WorkerBridge("http://control", "direct-control-recovery-test")
-    executor = Executor(checkpointer, bridge)
-    reservation, _reason = await executor.reserve_dispatch_capacity(thread_id)
-    assert reservation is not None
-    app = create_worker_app()
-    app.state.executor = executor
-    async with anyio.create_task_group() as tasks:
-        app.state.task_group = tasks
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://worker",
-            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-        ) as client:
-            yield client
-        tasks.cancel_scope.cancel()
-    await executor.shutdown()
-    await bridge.close()
-
-
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("_dispatch_auth")
 async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
@@ -682,10 +643,12 @@ async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
         await _persist_case(db, case)
         await db.commit()
 
-    async with _worker_already_running(checkpointer, case.thread_id) as client:
+    async with served_worker(
+        checkpointer, token=_TEST_INTERNAL_TOKEN, held_threads=(case.thread_id,)
+    ) as worker:
         summary = await redrive_direct_control_actions(
             session_factory,
-            worker_client=client,
+            worker_client=worker.client,
             circuit_breaker=WorkerCircuitBreaker(
                 failure_threshold=3, recovery_timeout=30
             ),

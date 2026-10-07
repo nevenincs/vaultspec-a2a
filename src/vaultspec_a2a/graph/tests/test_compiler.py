@@ -49,6 +49,7 @@ from ...testing import (
     add_test_node,
     compile_test_graph,
     deterministic_model_assignment,
+    frozen_deterministic_selection,
     new_state_graph,
 )
 from ...thread.errors import (
@@ -156,20 +157,6 @@ class _ObservedFactory:
         )
 
 
-def _deterministic_lane(model_name: str) -> dict[str, Any]:
-    """One frozen deterministic lane record, selected under *model_name*."""
-    return {
-        "schema_version": 1,
-        "provider_id": Provider.DETERMINISTIC.value,
-        "execution_mode": "in-process-deterministic",
-        "catalog_revision": "rev",
-        "entry_id": model_name,
-        "model_name": model_name,
-        "controls": [],
-        "defaulted_control_ids": [],
-    }
-
-
 # (preset, topology, expected_worker_nodes, has_supervisor)
 _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
     ("vaultspec-solo-coder", "pipeline", {"vaultspec-coder"}, False),
@@ -244,12 +231,11 @@ def test_valid_frozen_fallback_runs_only_after_runtime_unavailability() -> None:
     agent = load_agent_config(worker.agent_id)
 
     factory = _ObservedFactory(unavailable=frozenset({"primary"}))
-    lane = FrozenLaneAssignment.model_validate(
-        {
-            **_deterministic_lane("primary"),
-            "provenance": {"selection_source": "team_selection"},
-            "fallbacks": [_deterministic_lane("fallback")],
-        }
+    roles = (worker.agent_id,)
+    primary = frozen_deterministic_selection(roles, model_value="primary")
+    fallback = frozen_deterministic_selection(roles, model_value="fallback")
+    lane = primary.compiler_map()[worker.agent_id].model_copy(
+        update={"fallbacks": (fallback.selection,)}
     )
     _model, provider, model_name = resolve_model_for_worker(
         worker,

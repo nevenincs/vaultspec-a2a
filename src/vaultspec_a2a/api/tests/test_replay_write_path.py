@@ -17,22 +17,17 @@ boundary and lands in a table.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
 
-from ...database import create_control_action
 from ...database.run_event_repository import RunEventStore
-from ...database.thread_repository import create_thread
 from ...streaming.aggregator import EventAggregator
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import RunSequenceAllocator
-from ...testing import serve_on_loopback
-from ...tests._write_authority import make_test_write_authority
+from ...testing import seed_journaled_thread, serve_on_loopback
 from ...thread.enums import ThreadStatus
-from ...thread.idempotency import thread_create_action_key
 from .._replay_writer_seat import replay_writer_seat
 from .conftest import make_app, seed_run_with_status
 
@@ -66,20 +61,8 @@ async def _seed_deletable_run(factory: SessionFactory, run_id: str) -> None:
     proof assert on a delete that never happened.
     """
     async with factory() as session:
-        authority = make_test_write_authority()
-        await create_thread(
-            session,
-            write_authority=authority,
-            thread_id=run_id,
-            status=ThreadStatus.COMPLETED,
-        )
-        await create_control_action(
-            session,
-            thread_id=run_id,
-            action_type=authority.action_type,
-            idempotency_key=thread_create_action_key(run_id),
-            dispatch_id=authority.action_receipt_id,
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+        await seed_journaled_thread(
+            session, thread_id=run_id, status=ThreadStatus.COMPLETED
         )
         await session.commit()
 

@@ -101,16 +101,6 @@ _ACCEPTED: Final[tuple[frozenset[str], ...]] = (
 # Reviewed groups in the TEST tier, held separately so the two floors stay
 # legible. The bar for accepting one here is the same: a reason, not a recording.
 _ACCEPTED_TESTS: Final[tuple[frozenset[str], ...]] = (
-    # QUEUED, not endorsed. Investigated during the sweep and found safe to
-    # share - both build against an unreachable bridge and an in-memory
-    # checkpointer, so the live file's live-ness is not in this helper - but it
-    # spans two packages and was deferred rather than done.
-    frozenset(
-        {
-            "control/tests/test_verdict_subscriber.py::_install_receipt_graph",
-            "control/tests/test_verdict_subscriber_live.py::_install_receipt_graph",
-        }
-    ),
     # Two tests of ONE endpoint differing in whether the aggregator is the only
     # thing wired. The bodies rhyme because the arrangement does; collapsing
     # them into one parametrized case would hide which configuration failed.

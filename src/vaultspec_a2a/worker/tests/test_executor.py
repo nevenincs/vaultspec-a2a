@@ -1478,7 +1478,13 @@ def _install_gated_graph(executor: Executor, request: DispatchRequest) -> None:
     """Compile a real one-node graph that parks on an interrupt, then completes."""
 
     async def gate_node(state: Any) -> dict[str, Any]:
-        decision = interrupt({"type": "plan_approval_request", "prompt": "ok?"})
+        decision = interrupt(
+            {
+                "type": "plan_approval_request",
+                "request_id": "settle-approval",
+                "prompt": "ok?",
+            }
+        )
         return {
             "messages": [AIMessage(content=f"resumed:{decision}")],
             "next": "FINISH",

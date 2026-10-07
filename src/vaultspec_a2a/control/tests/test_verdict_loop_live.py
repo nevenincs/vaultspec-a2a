@@ -53,7 +53,6 @@ from fastapi.responses import Response
 from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 
-from ...api.tests.test_internal import _elect_status
 from ...authoring import (
     AuthoringClient,
     AuthoringResponse,
@@ -82,6 +81,7 @@ from ...testing import (
     adopted_spawner,
     compile_test_graph,
     current_execution_metadata,
+    elect_status,
     new_state_graph,
 )
 from ...tests._write_authority import make_test_write_authority
@@ -361,7 +361,7 @@ async def _ingest_live_verdict_run(
     # Seed the durable gate row the subscriber correlates against - the same
     # shape the engine-side reconcile tests seed, now AFTER a genuine interrupt.
     async with context.resources.session_factory() as db:
-        await _elect_status(db, context.identity.thread_id, ThreadStatus.INPUT_REQUIRED)
+        await elect_status(db, context.identity.thread_id, ThreadStatus.INPUT_REQUIRED)
         await record_permission_request(
             db,
             request_id=context.identity.info["proposal_id"],

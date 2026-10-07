@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
@@ -24,20 +23,17 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ...control.drain import DrainGate
-from ...database import get_control_action_by_dispatch_id, get_thread
+from ...database import get_thread
 from ...testing import DEFAULT_TEAM_PRESET, async_run_start_body, serve_on_loopback
-from ...tests._checkpoint_seeding import real_checkpoint
-from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
-from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ..routes.gateway import admission_gate
+from ._relay_events import RelayContext, relay_terminal
 from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 
@@ -45,13 +41,6 @@ if TYPE_CHECKING:
 # host, so a dispatch POST to it is refused by the real transport. The repo's
 # established way to produce a genuine unreachable worker without a mock.
 _UNREACHABLE_WORKER = "http://127.0.0.1:9"
-
-
-@dataclass(frozen=True, slots=True)
-class _RelayContext:
-    checkpointer: AsyncSqliteSaver
-    worker: Any
-    session_factory: SessionFactory
 
 
 _RUN_SEQ = itertools.count(1)
@@ -72,87 +61,6 @@ async def _run_body(
         team_preset=DEFAULT_TEAM_PRESET,
         tokens={"coder": "tok-coder"},
     )
-
-
-def _terminal_envelope(run_id: str, status: str = "completed") -> dict[str, Any]:
-    """The worker-IPC envelope carrying one run's terminal event."""
-    return {
-        "thread_id": run_id,
-        "payload": {
-            "type": "thread_terminal",
-            "event_type": "thread_terminal",
-            "thread_id": run_id,
-            "status": status,
-        },
-    }
-
-
-async def _relay_terminal(
-    client: httpx.AsyncClient,
-    run_id: str,
-    relay: _RelayContext,
-    *,
-    status: str = "completed",
-) -> None:
-    """Deliver a run's terminal event over the real worker relay endpoint."""
-    checkpointer = relay.checkpointer
-    worker = relay.worker
-    session_factory = relay.session_factory
-    envelope = _terminal_envelope(run_id, status)
-    payload = envelope["payload"]
-    if status == "completed":
-        async with session_factory() as db:
-            thread = await get_thread(db, run_id)
-            assert thread is not None
-            action = await get_control_action_by_dispatch_id(
-                db,
-                thread_id=run_id,
-                dispatch_id=thread.writer_action_receipt_id,
-            )
-            assert action is not None and action.graph_receipt_json is not None
-            receipt = GraphActionReceipt.model_validate_json(action.graph_receipt_json)
-        config: RunnableConfig = {
-            "configurable": {"thread_id": run_id, "checkpoint_ns": ""}
-        }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = f"cp-drain-{run_id}"
-        checkpoint["channel_values"] = {
-            "active_graph_action_receipt": receipt.model_dump(mode="json"),
-            "graph_action_receipts": {
-                receipt.dispatch_id: receipt.model_dump(mode="json")
-            },
-            "graph_completion_receipts": {
-                receipt.dispatch_id: GraphCompletionReceipt(
-                    schema_version="graph-completion-v1",
-                    action=receipt,
-                    outcome="completed",
-                ).model_dump(mode="json")
-            },
-        }
-        checkpoint["channel_versions"] = {
-            "active_graph_action_receipt": checkpointer.get_next_version(None, None),
-            "graph_action_receipts": checkpointer.get_next_version(None, None),
-            "graph_completion_receipts": checkpointer.get_next_version(None, None),
-        }
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            checkpoint["channel_versions"],
-        )
-    elif status == "cancelled":
-        dispatch = next(
-            item
-            for item in reversed(worker.dispatches)
-            if item["thread_id"] == run_id and item["action"] == "cancel"
-        )
-        payload["cancellation_evidence"] = CancellationEvidence(
-            schema_version="cancellation-evidence-v1",
-            dispatch_id=str(dispatch["dispatch_id"]),
-            outcome="no_active_work",
-        ).model_dump(mode="json")
-    resp = await client.post("/internal/events/batch", json={"events": [envelope]})
-    assert resp.status_code == 200, resp.text
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -314,7 +222,7 @@ async def test_normal_completion_releases_admission_and_drain_quiesces(
     run stays active for the life of the process and the gate can never quiesce.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
-    relay = _RelayContext(checkpointer, worker, session_factory)
+    relay = RelayContext(checkpointer, worker, session_factory)
     async with (
         serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
@@ -334,7 +242,7 @@ async def test_normal_completion_releases_admission_and_drain_quiesces(
         assert not busy.quiescent, busy
         assert busy.active_runs == 1, busy
 
-        await _relay_terminal(client, run_id, relay)
+        await relay_terminal(client, run_id, relay)
 
         # The run left the active set on its terminal event.
         assert not gate.is_active(run_id)
@@ -407,7 +315,7 @@ async def test_a_queued_followup_keeps_the_live_run_admitted(
     worker for this to come back 202 at all.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
-    relay = _RelayContext(checkpointer, worker, session_factory)
+    relay = RelayContext(checkpointer, worker, session_factory)
     run_id = "run-drain-followup-failure"
     async with (
         serve_on_loopback(app) as base,
@@ -450,12 +358,12 @@ async def test_a_queued_followup_keeps_the_live_run_admitted(
         # waiting turn is promoted and the run keeps its admission. A drain
         # that quiesced here would declare the run over one turn early.
         app.state.worker_client = worker.client
-        await _relay_terminal(client, run_id, relay)
+        await relay_terminal(client, run_id, relay)
         assert gate.is_active(run_id)
 
         # The last turn's terminal is the release, and the promotion left the
         # accounting intact enough to take it.
-        await _relay_terminal(client, run_id, relay)
+        await relay_terminal(client, run_id, relay)
         assert not gate.is_active(run_id)
         result = await gate.drain(timeout=1.0)
         assert result.quiescent and result.active_runs == 0, result
@@ -484,7 +392,7 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
     absorbs it with no coordination.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
-    relay = _RelayContext(checkpointer, worker, session_factory)
+    relay = RelayContext(checkpointer, worker, session_factory)
     cancelled_run = "run-drain-cancelled"
     repeated_run = "run-drain-repeated"
     survivor = "run-drain-survivor"
@@ -512,7 +420,7 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
         assert gate.active_run_count == 3
 
         # Its terminal event then releases it - and only it.
-        await _relay_terminal(
+        await relay_terminal(
             client,
             cancelled_run,
             relay,
@@ -523,9 +431,9 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
 
         # A repeated terminal event releases the same run twice; the second
         # delivery takes the already-terminal branch.
-        await _relay_terminal(client, repeated_run, relay)
+        await relay_terminal(client, repeated_run, relay)
         assert not gate.is_active(repeated_run)
-        await _relay_terminal(client, repeated_run, relay)
+        await relay_terminal(client, repeated_run, relay)
         assert not gate.is_active(repeated_run)
 
         # Exactly the two settled runs left; the survivor's accounting is intact.
@@ -538,6 +446,6 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
         assert not not_yet.quiescent, not_yet
         assert not_yet.active_runs == 1, not_yet
 
-        await _relay_terminal(client, survivor, relay)
+        await relay_terminal(client, survivor, relay)
         result = await gate.drain(timeout=1.0)
         assert result.quiescent and result.active_runs == 0, result

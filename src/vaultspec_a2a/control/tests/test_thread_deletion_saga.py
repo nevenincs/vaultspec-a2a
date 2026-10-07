@@ -12,15 +12,13 @@ assert on the rows and checkpoints that survive.
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
 
 from ...authoring._tool_calls import ToolCallJournal, tool_call_journal_path
-from ...testing import settings_override
+from ...testing import seed_journaled_thread, settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
-from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -40,13 +38,10 @@ from ...control.deletion_saga import (
 )
 from ...control.thread_service import DeleteResult, delete_thread_service
 from ...database import (
-    create_control_action,
-    create_thread,
     get_thread,
 )
 from ...database.models import ThreadDeletionSagaModel
 from ...thread.enums import CleanupKind, ThreadStatus
-from ...thread.idempotency import thread_create_action_key
 
 
 def _config(thread_id: str, namespace: str = "") -> RunnableConfig:
@@ -72,20 +67,8 @@ async def _checkpoint_present(checkpointer: AsyncSqliteSaver, thread_id: str) ->
 
 
 async def _create_terminal_thread(session: AsyncSession, thread_id: str) -> None:
-    authority = make_test_write_authority()
-    await create_thread(
-        session,
-        write_authority=authority,
-        thread_id=thread_id,
-        status=ThreadStatus.COMPLETED,
-    )
-    await create_control_action(
-        session,
-        thread_id=thread_id,
-        action_type=authority.action_type,
-        dispatch_id=authority.action_receipt_id,
-        idempotency_key=thread_create_action_key(thread_id),
-        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+    await seed_journaled_thread(
+        session, thread_id=thread_id, status=ThreadStatus.COMPLETED
     )
 
 

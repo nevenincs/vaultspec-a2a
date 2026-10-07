@@ -19,10 +19,6 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...api.tests.permission_harness import (
-    park_document_approval,
-    park_permission,
-)
 from ...control._permission_response_contract import PermissionInput
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.leased_dispatch import DispatchTransport
@@ -35,11 +31,16 @@ from ...database import (
     supersede_permission_requests,
 )
 from ...database.models import ControlActionModel
-from ...testing import adopted_spawner, current_execution_metadata
+from ...testing import (
+    adopted_spawner,
+    current_execution_metadata,
+    park_document_approval,
+    park_permission,
+    seed_create_action,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionResultStatus, ThreadStatus
-from .test_dispatch_failure_transitions import _seed_accepted_initial_action
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -252,7 +253,7 @@ async def test_a_held_request_is_answerable_whatever_its_journal_row_says(
             status=ThreadStatus.INPUT_REQUIRED.value,
             metadata=current_execution_metadata(tmp_path),
         )
-        await _seed_accepted_initial_action(session, thread.id, workspace=tmp_path)
+        await seed_create_action(session, thread.id, workspace=tmp_path)
         await session.commit()
     thread_id = thread.id
     held_request_id = await park_permission(

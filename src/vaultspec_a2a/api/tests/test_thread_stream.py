@@ -22,11 +22,10 @@ from fastapi.testclient import TestClient
 from ...database.thread_repository import create_thread
 from ...providers.conditions import ProviderCondition
 from ...streaming.sse_frames import decode_sse_text
-from ...testing import SseFrame
+from ...testing import SseFrame, elect_status, seed_accepted_thread
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from .conftest import SessionFactory, make_app
-from .test_internal import _elect_status, _seed_accepted_thread
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -100,10 +99,10 @@ class TestStreamThreadEvents:
 
         async def _seed() -> str:
             async with session_factory() as session:
-                thread_id, _receipt = await _seed_accepted_thread(
+                thread_id, _receipt = await seed_accepted_thread(
                     session, status="running"
                 )
-                await _elect_status(
+                await elect_status(
                     session,
                     thread_id,
                     ThreadStatus.FAILED,
@@ -155,10 +154,10 @@ class TestStreamThreadEvents:
 
         async def _seed() -> str:
             async with session_factory() as session:
-                thread_id, _receipt = await _seed_accepted_thread(
+                thread_id, _receipt = await seed_accepted_thread(
                     session, status="running"
                 )
-                await _elect_status(
+                await elect_status(
                     session,
                     thread_id,
                     ThreadStatus.FAILED,

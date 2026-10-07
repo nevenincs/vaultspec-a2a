@@ -6,8 +6,8 @@ TOML's own fields. A scenario preset asserted only against its own declaration
 proves nothing a typo could not also satisfy - which is exactly how the older
 tool-failure scenario came to advertise a failure while completing successfully.
 
-The graph is compiled with the in-process deterministic lane held through its
-plugin, so these run with no credential and no network.
+The graph is compiled with the in-process deterministic lane the session holds
+through its plugin, so these run with no credential and no network.
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ from ...team.team_config import (
 from ...testing import (
     DeterministicResearchAdrChatModel,
     deterministic_model_assignment,
-    seated_lanes,
 )
 
 if TYPE_CHECKING:
@@ -64,15 +63,14 @@ def _compiled_graph() -> CompiledTeamGraph:
     }
     step_timeout_seconds = team_config.graph.step_timeout_seconds
     assert step_timeout_seconds is not None
-    with seated_lanes():
-        return compile_team_graph(
-            team_config,
-            agent_configs,
-            step_timeout=float(step_timeout_seconds),
-            provider_factory=ProviderFactory(),
-            workspace_root=Path.cwd(),
-            model_assignment=deterministic_model_assignment(team_config),
-        )
+    return compile_team_graph(
+        team_config,
+        agent_configs,
+        step_timeout=float(step_timeout_seconds),
+        provider_factory=ProviderFactory(),
+        workspace_root=Path.cwd(),
+        model_assignment=deterministic_model_assignment(team_config),
+    )
 
 
 def test_the_preset_is_discoverable() -> None:

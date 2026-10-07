@@ -49,25 +49,13 @@ from ...thread.action_receipts import GraphActionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import ThreadStatus
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
+from ._relay_events import terminal_event
 from .conftest import SessionFactory, _InProcessWorker, make_app
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 _RUN_SEQ = itertools.count(1)
-
-
-def _terminal_envelope(run_id: str, status: str) -> dict[str, object]:
-    """The worker-IPC envelope carrying one run's terminal event."""
-    return {
-        "thread_id": run_id,
-        "payload": {
-            "type": "thread_terminal",
-            "event_type": "thread_terminal",
-            "thread_id": run_id,
-            "status": status,
-        },
-    }
 
 
 async def _start_run(client: httpx.AsyncClient) -> str:
@@ -114,7 +102,7 @@ async def _settle(
     worker: _InProcessWorker,
 ) -> None:
     """Drive *run_id* terminal through the real worker relay, then confirm it."""
-    envelope = _terminal_envelope(run_id, status)
+    envelope = terminal_event(run_id, status=status)
     payload = cast("dict[str, object]", envelope["payload"])
     if status == ThreadStatus.COMPLETED.value:
         receipt = GraphActionReceipt.model_validate(
@@ -243,7 +231,7 @@ async def test_accepted_cancel_rejects_late_completion_and_settles_exact_receipt
         await _complete_checkpoint(checkpointer, graph_receipt)
         completion = await client.post(
             "/internal/events/batch",
-            json={"events": [_terminal_envelope(run_id, "completed")]},
+            json={"events": [terminal_event(run_id, status="completed")]},
         )
         assert completion.status_code == 200, completion.text
         snapshot = await client.get(f"/v1/runs/{run_id}")

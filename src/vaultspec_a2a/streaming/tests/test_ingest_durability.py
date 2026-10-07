@@ -132,7 +132,13 @@ async def test_ingest_commits_each_superstep_before_the_next_one_starts(
 def _gated_graph(saver: AsyncSqliteSaver, log: list[str]) -> StreamableGraph:
     async def gate(state: _State) -> dict[str, str]:
         del state
-        answer = interrupt({"type": "permission_request", "tool_name": "probe"})
+        answer = interrupt(
+            {
+                "type": "permission_request",
+                "request_id": "probe-permission",
+                "tool_name": "probe",
+            }
+        )
         log.append("node:gate")
         return {"note": str(answer)}
 

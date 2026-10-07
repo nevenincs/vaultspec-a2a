@@ -14,10 +14,10 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from ...database.models import ThreadModel
+from ...testing import seed_completed_authority
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus
 from ..event_handlers import CheckpointPruneRegistry, _handle_terminal_event
-from .test_terminal_sequence_capture import _seed_completed_authority
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -68,7 +68,7 @@ async def test_a_proven_completion_prunes_the_superseded_checkpoints(
     session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     async with session_factory() as session:
-        thread_id, _receipt = await _seed_completed_authority(
+        thread_id, _receipt = await seed_completed_authority(
             session, checkpointer, title="settled history"
         )
     # Sorts beneath the seeded completion, as an earlier superstep's id would.
@@ -99,7 +99,7 @@ async def test_an_unproven_completion_keeps_the_whole_history(
     session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     async with session_factory() as session:
-        thread_id, _receipt = await _seed_completed_authority(
+        thread_id, _receipt = await seed_completed_authority(
             session, checkpointer, title="unproven history"
         )
     # A newer checkpoint carrying no completion receipt is what the proof reads,

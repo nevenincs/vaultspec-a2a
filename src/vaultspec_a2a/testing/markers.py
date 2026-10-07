@@ -182,7 +182,6 @@ _DIRECTORY_RULES: Final[Mapping[str, LayerRule]] = {
         # ``core`` but are NOT pure, so the orthogonal ``unit`` marker is withheld.
         impure_files=frozenset(
             {
-                "test_compiler.py",
                 "test_harness_topology_reach.py",
                 # Live AsyncSqliteSaver against a real database file.
                 "test_action_completion.py",
@@ -192,7 +191,6 @@ _DIRECTORY_RULES: Final[Mapping[str, LayerRule]] = {
                 "test_persona_web_composition.py",
                 "test_research_adr.py",
                 "test_research_adr_clarification.py",
-                "test_research_branch_models.py",
                 "test_research_permission_rung.py",
                 "test_research_web_locators.py",
                 # Real .vault/ trees on disk, scanned by the index refresh.
@@ -231,10 +229,7 @@ _DIRECTORY_RULES: Final[Mapping[str, LayerRule]] = {
         # Real SQLite engines and savers.
         impure_files=frozenset(
             {
-                "test_ingest_durability.py",
                 "test_public_stream_ingest.py",
-                "test_run_event_writer.py",
-                "test_run_sequence_allocation.py",
                 "test_stream_identity.py",
             }
         ),
@@ -248,7 +243,6 @@ _DIRECTORY_RULES: Final[Mapping[str, LayerRule]] = {
                 "test_action_receipts.py",
                 "test_checkpoint_evidence.py",
                 "test_input_checkpoint_evidence.py",
-                "test_state.py",
             }
         ),
     ),

@@ -17,7 +17,10 @@ built around it (``gateway_verbs``), the acceptance harness that drives a
 document-authoring run end to end (``acceptance``), the readers that check a
 decoded JSON response's shape (``payloads``), the inputs a test chooses for a
 production constructor (``factories``, ``catalog_authority``), and the in-process
-fixture lanes a test gateway or test process holds (``lanes``).
+fixture lanes a test gateway or test process holds (``lanes``). The control plane's
+test peers sit with them: the production worker served in-process over a real
+executor (``worker_app``), the run rows a test seats through the repositories
+(``seeding``), and the runs it parks on a real interrupt (``parking``).
 
 The plugin is loaded by the repository-root ``conftest.py``, which is the one
 channel that neither an ``addopts`` override can strip nor a consumer
@@ -187,6 +190,7 @@ if TYPE_CHECKING:
         LANES,
         armed_lane_environment,
         deterministic_model_assignment,
+        frozen_deterministic_selection,
         held_turns,
         register_lanes,
         seated_lanes,
@@ -202,6 +206,16 @@ if TYPE_CHECKING:
     )
     from .links import plant_link_to_file
     from .markers import LayerRule, apply_layer_markers
+    from .parking import (
+        ClarificationGraph,
+        ParkedClarification,
+        clarification_graph,
+        park_clarification,
+        park_document_approval,
+        park_permission,
+        park_permissions,
+        park_plan_approval,
+    )
     from .payloads import (
         json_list,
         json_object,
@@ -252,6 +266,15 @@ if TYPE_CHECKING:
         exclusive_keys,
         resolve_spec,
     )
+    from .seeding import (
+        elect_status,
+        record_completed_checkpoint,
+        seed_accepted_thread,
+        seed_completed_authority,
+        seed_create_action,
+        seed_journaled_thread,
+        seed_live_thread,
+    )
     from .session_root import (
         TEST_ROOT_NAME,
         TestSessionSettings,
@@ -272,6 +295,7 @@ if TYPE_CHECKING:
         actor_tokens_body,
         status_and_json,
     )
+    from .worker_app import ServedWorker, capacity_holders, served_worker
 
 
 #: Fully-qualified (never relative) submodule names: this dict's string values
@@ -544,6 +568,10 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.lanes",
         "deterministic_model_assignment",
     ),
+    "frozen_deterministic_selection": (
+        "vaultspec_a2a.testing.lanes",
+        "frozen_deterministic_selection",
+    ),
     "seated_lanes": ("vaultspec_a2a.testing.lanes", "seated_lanes"),
     "DETERMINISTIC_LANE": ("vaultspec_a2a.testing.lanes", "DETERMINISTIC_LANE"),
     "LANES": ("vaultspec_a2a.testing.lanes", "LANES"),
@@ -576,6 +604,17 @@ _LAZY_EXPORTS = {
     "plant_link_to_file": ("vaultspec_a2a.testing.links", "plant_link_to_file"),
     "LayerRule": ("vaultspec_a2a.testing.markers", "LayerRule"),
     "apply_layer_markers": ("vaultspec_a2a.testing.markers", "apply_layer_markers"),
+    "ClarificationGraph": ("vaultspec_a2a.testing.parking", "ClarificationGraph"),
+    "ParkedClarification": ("vaultspec_a2a.testing.parking", "ParkedClarification"),
+    "clarification_graph": ("vaultspec_a2a.testing.parking", "clarification_graph"),
+    "park_clarification": ("vaultspec_a2a.testing.parking", "park_clarification"),
+    "park_document_approval": (
+        "vaultspec_a2a.testing.parking",
+        "park_document_approval",
+    ),
+    "park_permission": ("vaultspec_a2a.testing.parking", "park_permission"),
+    "park_permissions": ("vaultspec_a2a.testing.parking", "park_permissions"),
+    "park_plan_approval": ("vaultspec_a2a.testing.parking", "park_plan_approval"),
     "json_list": ("vaultspec_a2a.testing.payloads", "json_list"),
     "json_object": ("vaultspec_a2a.testing.payloads", "json_object"),
     "json_object_list": ("vaultspec_a2a.testing.payloads", "json_object_list"),
@@ -626,6 +665,22 @@ _LAZY_EXPORTS = {
     "declared_claims": ("vaultspec_a2a.testing.resources", "declared_claims"),
     "exclusive_keys": ("vaultspec_a2a.testing.resources", "exclusive_keys"),
     "resolve_spec": ("vaultspec_a2a.testing.resources", "resolve_spec"),
+    "elect_status": ("vaultspec_a2a.testing.seeding", "elect_status"),
+    "record_completed_checkpoint": (
+        "vaultspec_a2a.testing.seeding",
+        "record_completed_checkpoint",
+    ),
+    "seed_accepted_thread": ("vaultspec_a2a.testing.seeding", "seed_accepted_thread"),
+    "seed_completed_authority": (
+        "vaultspec_a2a.testing.seeding",
+        "seed_completed_authority",
+    ),
+    "seed_create_action": ("vaultspec_a2a.testing.seeding", "seed_create_action"),
+    "seed_journaled_thread": (
+        "vaultspec_a2a.testing.seeding",
+        "seed_journaled_thread",
+    ),
+    "seed_live_thread": ("vaultspec_a2a.testing.seeding", "seed_live_thread"),
     "CPU_BUDGET_ENV": ("vaultspec_a2a.testing.harness_names", "CPU_BUDGET_ENV"),
     "COMPLETION_ENDPOINT_ENV": (
         "vaultspec_a2a.testing.harness_names",
@@ -662,6 +717,9 @@ _LAZY_EXPORTS = {
     "RunVerbs": ("vaultspec_a2a.testing.verbs", "RunVerbs"),
     "actor_tokens_body": ("vaultspec_a2a.testing.verbs", "actor_tokens_body"),
     "status_and_json": ("vaultspec_a2a.testing.verbs", "status_and_json"),
+    "ServedWorker": ("vaultspec_a2a.testing.worker_app", "ServedWorker"),
+    "capacity_holders": ("vaultspec_a2a.testing.worker_app", "capacity_holders"),
+    "served_worker": ("vaultspec_a2a.testing.worker_app", "served_worker"),
 }
 
 
@@ -728,6 +786,7 @@ __all__ = [
     "AcceptanceCase",
     "AcceptanceHarness",
     "BootedGateway",
+    "ClarificationGraph",
     "DeterministicResearchAdrChatModel",
     "GatewayBootError",
     "GatewayVerbs",
@@ -739,6 +798,7 @@ __all__ = [
     "LivenessWatch",
     "Materialization",
     "NoSelectableLaneError",
+    "ParkedClarification",
     "PortAllocationError",
     "ProgressDeadline",
     "ProgressStalledError",
@@ -749,6 +809,7 @@ __all__ = [
     "ResourceDiedError",
     "ResourceSpec",
     "RunVerbs",
+    "ServedWorker",
     "SignalledChild",
     "SseFrame",
     "SseReader",
@@ -776,8 +837,10 @@ __all__ = [
     "booted_gateway",
     "broker_gateway_env",
     "build_settings",
+    "capacity_holders",
     "catalog_run_fields",
     "child_tree_progress",
+    "clarification_graph",
     "clean_subprocess_environment",
     "combined_output",
     "compile_test_graph",
@@ -788,6 +851,7 @@ __all__ = [
     "desktop_workspace",
     "deterministic_model_assignment",
     "effective_worker_count",
+    "elect_status",
     "exchange_acp_request",
     "exclusive_keys",
     "fetch_in_process_selection",
@@ -797,6 +861,7 @@ __all__ = [
     "foreign_worker",
     "forfeits_purity",
     "free_port",
+    "frozen_deterministic_selection",
     "gateway_process_env",
     "gateway_run_verbs",
     "gateway_script",
@@ -833,6 +898,11 @@ __all__ = [
     "observe_bridged_authoring_run",
     "ok_body",
     "override_selection_from_served_catalog",
+    "park_clarification",
+    "park_document_approval",
+    "park_permission",
+    "park_permissions",
+    "park_plan_approval",
     "plant_link_to_file",
     "prune_stale_dirs",
     "reachable_stack",
@@ -842,6 +912,7 @@ __all__ = [
     "read_worker_ipc_secret",
     "reap_contained",
     "reap_process",
+    "record_completed_checkpoint",
     "register_lanes",
     "register_session",
     "registry_watch",
@@ -861,10 +932,16 @@ __all__ = [
     "seat_app_home",
     "seat_test_session",
     "seated_lanes",
+    "seed_accepted_thread",
+    "seed_completed_authority",
+    "seed_create_action",
+    "seed_journaled_thread",
+    "seed_live_thread",
     "selection_from_served_catalog",
     "serve_handler",
     "serve_on_loopback",
     "serve_on_loopback_in_thread",
+    "served_worker",
     "session_scratch_dir",
     "settings_override",
     "simulator_command",

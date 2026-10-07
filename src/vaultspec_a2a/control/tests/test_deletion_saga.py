@@ -18,9 +18,9 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import func, select, update
 
-from ...database import create_control_action, create_thread, get_thread
+from ...database import get_thread
 from ...database.models import ThreadDeletionSagaModel
-from ...tests._write_authority import make_test_write_authority
+from ...testing import seed_journaled_thread
 from ...thread.enums import CleanupKind, ThreadStatus
 from ..deletion_saga import (
     CleanupItem,
@@ -69,21 +69,7 @@ async def _seed_terminal_thread(
     status: ThreadStatus = ThreadStatus.COMPLETED,
 ) -> str:
     async with session_factory() as session:
-        authority = make_test_write_authority()
-        await create_thread(
-            session,
-            write_authority=authority,
-            thread_id=thread_id,
-            status=status,
-        )
-        await create_control_action(
-            session,
-            thread_id=thread_id,
-            action_type=authority.action_type,
-            dispatch_id=authority.action_receipt_id,
-            idempotency_key=f"seed:{thread_id}",
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-        )
+        await seed_journaled_thread(session, thread_id=thread_id, status=status)
         await session.commit()
     return thread_id
 

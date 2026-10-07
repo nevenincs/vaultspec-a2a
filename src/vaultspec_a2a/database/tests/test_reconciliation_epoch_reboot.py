@@ -12,16 +12,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control.tests.test_dispatch_failure_transitions import (
-    _seed_accepted_initial_action,
-)
 from ...database import (
     create_thread,
     get_thread,
     record_permission_request,
 )
 from ...database.reconciliation import reconcile_threads_on_startup
-from ...testing import current_execution_metadata
+from ...testing import current_execution_metadata, seed_create_action
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ControlActionType
@@ -45,7 +42,7 @@ async def _seed_paused_thread(session: AsyncSession, tid: str) -> None:
         status="running",
         metadata=current_execution_metadata(Path.cwd()),
     )
-    await _seed_accepted_initial_action(session, tid, workspace=Path.cwd())
+    await seed_create_action(session, tid, workspace=Path.cwd())
     await record_permission_request(
         session,
         request_id=f"{thread.id}:perm-1",

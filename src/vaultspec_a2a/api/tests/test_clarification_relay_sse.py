@@ -68,7 +68,7 @@ async def _park_real_run(
     goes through. Builds its graph through the shared harness's typed
     ``new_state_graph`` boundary rather than constructing ``StateGraph``
     directly, matching the pattern already proven clean in
-    ``clarification_harness.py``.
+    ``testing/parking.py``.
     """
     request = ClarificationRequest(
         request_id=_REQUEST_ID,

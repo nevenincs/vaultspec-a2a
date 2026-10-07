@@ -12,24 +12,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-import anyio
 import httpx
 import pytest
-from fastapi import FastAPI, Response
-from langchain_core.messages import AIMessage
 
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import (
@@ -39,10 +32,7 @@ if TYPE_CHECKING:
 
 from ...authoring import AuthoringClient, LifecycleEvent, StreamError
 from ...control._verdict_subscriber_config import VerdictSubscriberConfig
-from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.config import settings
-from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import (
     VerdictSubscriber,
@@ -53,7 +43,6 @@ from ...control.verdict_subscriber import (
     _StreamInterruptedError,
 )
 from ...database import (
-    create_control_action,
     create_thread,
     get_authoring_cursor,
     get_control_action_by_idempotency_key,
@@ -62,30 +51,19 @@ from ...database import (
     pending_document_approval_thread,
     record_permission_request,
 )
-from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import (
     DEFAULT_TEAM_PRESET,
-    add_test_node,
     adopted_spawner,
-    compile_test_graph,
     current_execution_metadata,
-    new_state_graph,
+    seed_create_action,
+    served_worker,
 )
 from ...thread.enums import ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
-from ...thread.idempotency import authoring_verdict_action_key, thread_create_action_key
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
+from ...thread.idempotency import authoring_verdict_action_key
 
 _TEST_INTERNAL_TOKEN = "verdict-subscriber-test-token"
-
-
-@pytest.fixture(autouse=True)
-def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give both sides of the real ASGI dispatch the current IPC credential."""
-    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
 
 
 def _make_subscriber(
@@ -106,76 +84,6 @@ def _make_subscriber(
             endpoint_provider=lambda: None,
         )
     )
-
-
-def _install_receipt_graph(
-    executor: Executor,
-    checkpointer: AsyncSqliteSaver,
-    thread_id: str,
-) -> None:
-    """Register a real graph so a resume crosses Executor application."""
-
-    async def complete(_state: Any) -> dict[str, Any]:
-        return {"messages": [AIMessage(content="resumed")], "next": "FINISH"}
-
-    builder = new_state_graph()
-    add_test_node(builder, "worker", complete)
-    builder.add_edge("__start__", "worker")
-    builder.add_edge("worker", "__end__")
-    workspace = Path.cwd()
-    definition = freeze_graph_definition(
-        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
-        workspace_root=workspace,
-    )
-    executor.register_compiled_graph(
-        thread_id,
-        (
-            DEFAULT_TEAM_PRESET,
-            str(workspace),
-            False,
-            resolve_execution_authority(
-                current_execution_metadata(workspace)
-            ).model_assignment_digest,
-            definition.digest(),
-        ),
-        compile_test_graph(builder, checkpointer=checkpointer),
-    )
-
-
-@asynccontextmanager
-async def _worker_runtime(
-    checkpointer: AsyncSqliteSaver,
-    *,
-    receipt_threads: tuple[str, ...] = (),
-) -> AsyncGenerator[tuple[httpx.AsyncClient, FastAPI, WorkerBridge]]:
-    event_sink = FastAPI()
-
-    @event_sink.post("/internal/events/batch")
-    async def _accept_event_batch() -> Response:
-        return Response(content='{"status":"ok"}', media_type="application/json")
-
-    bridge = WorkerBridge("http://control", "verdict-receipt-test")
-    await bridge._client.aclose()
-    bridge._client = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=event_sink),
-        base_url="http://control",
-    )
-    executor = Executor(checkpointer, bridge)
-    for thread_id in receipt_threads:
-        _install_receipt_graph(executor, checkpointer, thread_id)
-    app = create_worker_app()
-    app.state.executor = executor
-    async with anyio.create_task_group() as tasks:
-        app.state.task_group = tasks
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://worker",
-            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-        ) as client:
-            yield client, app, bridge
-        tasks.cancel_scope.cancel()
-    await executor.shutdown()
-    await bridge.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,44 +144,21 @@ async def _seed_parked_thread(
         {},
     )
     async with session_factory() as session:
-        authority = make_test_write_authority()
         await create_thread(
             session,
-            write_authority=authority,
+            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             team_preset=seed.team_preset,
             metadata=metadata,
             status=seed.status,
         )
-        if seed.team_preset is not None and definition is not None:
-            dispatch = DispatchRequest(
-                dispatch_id=authority.action_receipt_id,
-                action="ingest",
-                thread_id=thread_id,
-                content="seed accepted graph authority",
+        if seed.team_preset is not None:
+            await seed_create_action(
+                session,
+                thread_id,
+                workspace=workspace,
                 team_preset=seed.team_preset,
-                graph_definition=definition,
-                workspace_root=str(workspace),
-                recursion_limit=25,
-                model_assignment=execution_authority.model_assignment,
             )
-            await create_control_action(
-                session,
-                thread_id=thread_id,
-                action_type=authority.action_type,
-                idempotency_key=thread_create_action_key(thread_id),
-                dispatch_id=authority.action_receipt_id,
-                recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-                payload=freeze_accepted_input(
-                    dispatch, intent={"content": "seed accepted graph authority"}
-                ),
-            )
-            receipt = await prepare_graph_action_receipt(
-                session,
-                thread_id=thread_id,
-                dispatch_id=authority.action_receipt_id,
-            )
-            assert receipt is not None
         if seed.gate_pending is not None:
             await record_permission_request(
                 session,
@@ -864,16 +749,12 @@ async def test_resume_skips_a_superseded_gate_verdict(
             gate_pending="proposal:adr",
         ),
     )
-    async with _worker_runtime(checkpointer) as (
-        worker_client,
-        worker_app,
-        _bridge,
-    ):
-        subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
+        subscriber = _make_subscriber(session_factory, checkpointer, worker.client)
         await subscriber._resume_with_verdict(
             "superseded", "request_changes", None, {"proposal:research"}
         )
-        assert len(worker_app.state.dispatch_ids) == 0
+        assert len(worker.app.state.dispatch_ids) == 0
     async with session_factory() as session:
         thread = await get_thread(session, "superseded")
         assert thread is not None
@@ -902,12 +783,11 @@ async def test_concurrent_verdict_resumes_elect_one_stable_dispatch(
             team_preset=DEFAULT_TEAM_PRESET,
         ),
     )
-    async with _worker_runtime(
-        checkpointer,
-        receipt_threads=("dedup",),
-    ) as (worker_client, worker_app, _bridge):
-        first = _make_subscriber(session_factory, checkpointer, worker_client)
-        second = _make_subscriber(session_factory, checkpointer, worker_client)
+    async with served_worker(
+        checkpointer, token=_TEST_INTERNAL_TOKEN, receipt_threads=("dedup",)
+    ) as worker:
+        first = _make_subscriber(session_factory, checkpointer, worker.client)
+        second = _make_subscriber(session_factory, checkpointer, worker.client)
         await asyncio.gather(
             first._resume_with_verdict(
                 "dedup", "request_changes", None, {"proposal:research"}
@@ -916,7 +796,7 @@ async def test_concurrent_verdict_resumes_elect_one_stable_dispatch(
                 "dedup", "request_changes", None, {"proposal:research"}
             ),
         )
-        assert len(worker_app.state.dispatch_ids) == 1
+        assert len(worker.app.state.dispatch_ids) == 1
     async with session_factory() as session:
         action = await get_control_action_by_idempotency_key(
             session,
@@ -924,7 +804,7 @@ async def test_concurrent_verdict_resumes_elect_one_stable_dispatch(
             idempotency_key=authoring_verdict_action_key("proposal:research"),
         )
         assert action is not None
-        assert action.dispatch_id in worker_app.state.dispatch_ids
+        assert action.dispatch_id in worker.app.state.dispatch_ids
 
 
 @pytest.mark.asyncio
@@ -943,12 +823,13 @@ async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
             team_preset=DEFAULT_TEAM_PRESET,
         ),
     )
-    async with _worker_runtime(
+    async with served_worker(
         checkpointer,
+        token=_TEST_INTERNAL_TOKEN,
         receipt_threads=("competing-verdicts",),
-    ) as (worker_client, worker_app, _bridge):
-        approved = _make_subscriber(session_factory, checkpointer, worker_client)
-        rejected = _make_subscriber(session_factory, checkpointer, worker_client)
+    ) as worker:
+        approved = _make_subscriber(session_factory, checkpointer, worker.client)
+        rejected = _make_subscriber(session_factory, checkpointer, worker.client)
         await asyncio.gather(
             approved._resume_with_verdict(
                 "competing-verdicts", "approved", "ship", {"proposal:research"}
@@ -957,7 +838,7 @@ async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
                 "competing-verdicts", "rejected", "revise", {"proposal:research"}
             ),
         )
-        assert len(worker_app.state.dispatch_ids) == 1
+        assert len(worker.app.state.dispatch_ids) == 1
     async with session_factory() as session:
         action = await get_control_action_by_idempotency_key(
             session,

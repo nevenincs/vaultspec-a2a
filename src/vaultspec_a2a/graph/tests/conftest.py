@@ -37,8 +37,6 @@ _IMPURE_CORE_FILES = frozenset(
         "test_research_adr_clarification.py",
         "test_research_permission_rung.py",
         "test_research_web_locators.py",
-        # Real async engine and session maker.
-        "test_task_queue.py",
         # Real .vault/ trees on disk, scanned by the index refresh.
         "test_vault_index_refresh.py",
         "test_vault_reader.py",

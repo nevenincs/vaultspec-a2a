@@ -790,7 +790,6 @@ class TestStateChannelIsFedNotBypassed:
         return _finalize_worker_response(
             response=message,
             worker_name=worker,
-            state_updates={},
             usage=_turn_token_usage(message),
         )
 

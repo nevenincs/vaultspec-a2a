@@ -403,9 +403,6 @@ Persistence
 .. py:module:: vaultspec_a2a.database.permission_repository
    :synopsis: Permission persistence operations.
 
-.. py:module:: vaultspec_a2a.database.task_queue_repository
-   :synopsis: Persisted task-queue operations.
-
 .. py:module:: vaultspec_a2a.database.thread_repository
    :synopsis: Thread persistence operations.
 

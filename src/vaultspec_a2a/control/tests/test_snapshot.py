@@ -177,7 +177,7 @@ class TestSettledSnapshotReachesTerminalToolCallStatus:
         ai_message = AIMessage(
             content="",
             tool_calls=[
-                {"id": "call_5", "name": "mark_task_complete", "args": {}},
+                {"id": "call_5", "name": "lookup_record", "args": {}},
             ],
         )
         tool_message = ToolMessage(content="done", tool_call_id="call_5")
@@ -201,7 +201,7 @@ class TestSettledSnapshotReachesTerminalToolCallStatus:
         ai_message = AIMessage(
             content="",
             tool_calls=[
-                {"id": "call_6", "name": "mark_task_complete", "args": {}},
+                {"id": "call_6", "name": "lookup_record", "args": {}},
             ],
         )
         state = _state_with_messages(ai_message)

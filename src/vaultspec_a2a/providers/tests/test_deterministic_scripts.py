@@ -15,10 +15,7 @@ from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...database import create_thread, seed_task_queue
-from ...database.models import Base
 from ...graph.enums import Provider
 from ...graph.nodes.worker import create_worker_node
 from ...graph.tests._state_graph_helpers import (
@@ -27,15 +24,12 @@ from ...graph.tests._state_graph_helpers import (
     compile_test_graph,
 )
 from ...team.team_config import AgentConfig, load_agent_config, load_team_config
-from ...tests._write_authority import make_test_write_authority
 from ...thread.state import TeamState
-from ...worker.task_queue_port import SqlTaskQueuePort
 from ..deterministic_chat_model import DeterministicResearchAdrChatModel
 from ..factory import ProviderFactory
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
-    from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
 
@@ -65,63 +59,6 @@ def _state(thread_id: str) -> TeamState:
         "thread_id": thread_id,
         "token_usage": {},
     }
-
-
-@pytest.mark.asyncio
-async def test_deterministic_tool_call_advances_real_task_queue(tmp_path: Path) -> None:
-    """The factory model's tool call is executed by the real SQLite queue port."""
-    model, agent = _scenario_model("deterministic-tool-call")
-    database_path = tmp_path / "deterministic-tool-call.db"
-    engine = create_async_engine(f"sqlite+aiosqlite:///{database_path.as_posix()}")
-    try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-        session_factory = async_sessionmaker(
-            engine, class_=AsyncSession, expire_on_commit=False
-        )
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                title="deterministic tool call",
-            )
-            await seed_task_queue(
-                session,
-                thread_id=thread.id,
-                feature_tag="deterministic-scripts",
-                entries=[
-                    {
-                        "task_key": "D-1",
-                        "description": "first",
-                        "status": "in_progress",
-                    },
-                    {"task_key": "D-2", "description": "second", "status": "pending"},
-                ],
-            )
-            await session.commit()
-
-        node = create_worker_node(
-            model=model,
-            system_prompt=agent.persona.system_prompt,
-            name=agent.id,
-            feature_tag="deterministic-scripts",
-            task_queue_port=SqlTaskQueuePort(session_factory),
-        )
-        state = _state(thread.id)
-        state["active_feature"] = "deterministic-scripts"
-        state["pipeline_phase"] = "exec"
-        state["current_task_id"] = "D-1"
-
-        result = await node(state)
-
-        assert isinstance(result, dict)
-        assert result["current_task_id"] == "D-2"
-        assert (
-            result["messages"][0].content == "Deterministic task queue update settled."
-        )
-        assert result["messages"][0].name == agent.id
-    finally:
-        await engine.dispose()
 
 
 @pytest.mark.asyncio

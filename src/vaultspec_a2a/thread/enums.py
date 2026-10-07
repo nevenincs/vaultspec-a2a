@@ -22,7 +22,6 @@ __all__ = [
     "RecoveryCondition",
     "RepairStatus",
     "ReplayStatus",
-    "TaskQueueStatus",
     "ThreadStatus",
     "TranscriptAvailability",
 ]
@@ -246,15 +245,6 @@ class ApprovalStatus(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     SUPERSEDED = "superseded"
-
-
-class TaskQueueStatus(StrEnum):
-    """Durable execution states for a worker task-queue entry."""
-
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
 
 
 class CleanupKind(StrEnum):

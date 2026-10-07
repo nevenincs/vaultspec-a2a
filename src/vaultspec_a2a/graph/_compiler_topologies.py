@@ -24,7 +24,6 @@ if TYPE_CHECKING:
         CostPort,
         ProviderFactoryProtocol,
         RuntimeIdentityPort,
-        TaskQueuePort,
     )
     from .run_context import RunContext
 
@@ -140,8 +139,6 @@ def _star_worker_context(
 class _TopologyOptional(TypedDict, total=False):
     workspace_root: Path | None
     autonomous: bool
-    feature_tag: str | None
-    task_queue_port: TaskQueuePort | None
     cost_port: CostPort | None
     runtime_identity_port: RuntimeIdentityPort | None
     authoring_binding_provider: AuthoringBindingProvider | None
@@ -211,8 +208,6 @@ def _compile_star(
             provider_factory=options["provider_factory"],
             frozen_assignment=options.get("frozen_assignment"),
             autonomous=options.get("autonomous", False),
-            feature_tag=options.get("feature_tag"),
-            task_queue_port=options.get("task_queue_port"),
             cost_port=options.get("cost_port"),
             runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),
@@ -343,8 +338,6 @@ def _compile_pipeline(
             provider_factory=options["provider_factory"],
             frozen_assignment=options.get("frozen_assignment"),
             autonomous=options.get("autonomous", False),
-            feature_tag=options.get("feature_tag"),
-            task_queue_port=options.get("task_queue_port"),
             cost_port=options.get("cost_port"),
             runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),
@@ -496,8 +489,6 @@ def _compile_pipeline_loop(
             provider_factory=options["provider_factory"],
             frozen_assignment=options.get("frozen_assignment"),
             autonomous=options.get("autonomous", False),
-            feature_tag=options.get("feature_tag"),
-            task_queue_port=options.get("task_queue_port"),
             cost_port=options.get("cost_port"),
             runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),

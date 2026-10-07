@@ -34,7 +34,6 @@ if TYPE_CHECKING:
         CostPort,
         ProviderFactoryProtocol,
         RuntimeIdentityPort,
-        TaskQueuePort,
     )
 
 from langgraph.graph import END, StateGraph
@@ -316,8 +315,6 @@ class _CompileWorkerOptions(TypedDict):
     provider_factory: ProviderFactoryProtocol
     frozen_assignment: dict[str, dict[str, Any]] | None
     autonomous: bool
-    feature_tag: str | None
-    task_queue_port: TaskQueuePort | None
     cost_port: CostPort | None
     runtime_identity_port: RuntimeIdentityPort | None
     authoring_binding_provider: AuthoringBindingProvider | None
@@ -377,8 +374,6 @@ def _compile_worker_node(
         name=agent_cfg.id,
         autonomous=options["autonomous"],
         workspace_root=workspace_root,
-        feature_tag=options["feature_tag"],
-        task_queue_port=options["task_queue_port"],
         cost_port=options["cost_port"],
         runtime_identity_port=options["runtime_identity_port"],
         authoring_binding_provider=options["authoring_binding_provider"],
@@ -391,9 +386,7 @@ def _compile_worker_node(
         harness_mcp_servers=list(harness.mcp_servers) if harness is not None else [],
         # Every worker these topologies compile sits behind a mount node that
         # refreshes the vault index; the worker expands the documents itself.
-        context_mounter=create_context_mounter(
-            workspace_root, options["task_queue_port"]
-        ),
+        context_mounter=create_context_mounter(workspace_root),
     )
     metadata = _agent_node_metadata(agent_cfg, used_provider, model_name)
     return worker_node, metadata
@@ -624,8 +617,6 @@ class _CompileTeamOptional(TypedDict, total=False):
     workspace_root: Path | None
     autonomous: bool
     step_timeout: float | None
-    feature_tag: str | None
-    task_queue_port: TaskQueuePort | None
     cost_port: CostPort | None
     runtime_identity_port: RuntimeIdentityPort | None
     proposal_submitter: DocumentProposalSubmitter | None
@@ -667,9 +658,6 @@ def compile_team_graph(
                                  ACP models auto-approve tool calls (headless
                                  MCP-launched runs).
         step_timeout:            Positive timeout from accepted graph authority.
-        feature_tag:             Optional feature tag for task-queue scoping.
-        task_queue_port:         Optional database-backed task-queue port
-                                 injected into worker and mount nodes.
         provider_factory:        Provider factory for model creation.
 
     Returns:
@@ -694,8 +682,6 @@ def compile_team_graph(
     workspace_root = options.get("workspace_root")
     autonomous = options.get("autonomous", False)
     step_timeout = options.get("step_timeout")
-    feature_tag = options.get("feature_tag")
-    task_queue_port = options.get("task_queue_port")
     cost_port = options.get("cost_port")
     runtime_identity_port = options.get("runtime_identity_port")
     proposal_submitter = options.get("proposal_submitter")
@@ -738,8 +724,6 @@ def compile_team_graph(
             provider_factory=provider_factory,
             workspace_root=workspace_root,
             autonomous=autonomous,
-            feature_tag=feature_tag,
-            task_queue_port=task_queue_port,
             cost_port=cost_port,
             runtime_identity_port=runtime_identity_port,
             authoring_binding_provider=authoring_binding_provider,
@@ -753,8 +737,6 @@ def compile_team_graph(
             provider_factory=provider_factory,
             workspace_root=workspace_root,
             autonomous=autonomous,
-            feature_tag=feature_tag,
-            task_queue_port=task_queue_port,
             cost_port=cost_port,
             runtime_identity_port=runtime_identity_port,
             authoring_binding_provider=authoring_binding_provider,
@@ -769,8 +751,6 @@ def compile_team_graph(
             provider_factory=provider_factory,
             workspace_root=workspace_root,
             autonomous=autonomous,
-            feature_tag=feature_tag,
-            task_queue_port=task_queue_port,
             cost_port=cost_port,
             runtime_identity_port=runtime_identity_port,
             authoring_binding_provider=authoring_binding_provider,

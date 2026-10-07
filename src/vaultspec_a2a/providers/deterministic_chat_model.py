@@ -30,7 +30,6 @@ from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
     BaseMessage,
-    ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
@@ -46,7 +45,6 @@ __all__ = ["DeterministicResearchAdrChatModel"]
 class _DeterministicScript(StrEnum):
     """Named in-process scenarios selected by their bundled agent identity."""
 
-    TOOL_CALL = "tool_call"
     PERMISSION_PAUSE = "permission_pause"
     FAILURE = "failure"
     CANCEL_WINDOW = "cancel_window"
@@ -58,14 +56,12 @@ class _DeterministicScript(StrEnum):
 # research_adr content. They are not mock/tape aliases: each remains entirely
 # in-process and exists only to exercise a real BaseChatModel/worker seam.
 _SCRIPT_BY_AGENT_ID: dict[str, _DeterministicScript] = {
-    "deterministic-tool-call": _DeterministicScript.TOOL_CALL,
     "deterministic-permission-pause": _DeterministicScript.PERMISSION_PAUSE,
     "deterministic-failure": _DeterministicScript.FAILURE,
     "deterministic-cancel-window": _DeterministicScript.CANCEL_WINDOW,
     "deterministic-relay-burst": _DeterministicScript.RELAY_BURST,
 }
 
-_SCRIPTED_TOOL_CALL_ID = "deterministic-mark-task-complete"
 _SCRIPTED_PERMISSION_OPTIONS: tuple[tuple[str, str], ...] = (
     ("allow_once", "Allow once"),
     ("deny_once", "Deny once"),
@@ -240,34 +236,8 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         """Wait until the cancellation scenario has entered its blocking turn."""
         await self._cancel_window_entered.wait()
 
-    async def _scripted_result(
-        self,
-        script: _DeterministicScript,
-        messages: list[BaseMessage],
-    ) -> ChatResult:
+    async def _scripted_result(self, script: _DeterministicScript) -> ChatResult:
         """Execute one bounded non-tape scenario through this real model."""
-        if script is _DeterministicScript.TOOL_CALL:
-            settled = any(
-                isinstance(message, ToolMessage)
-                and message.tool_call_id == _SCRIPTED_TOOL_CALL_ID
-                for message in messages
-            )
-            if settled:
-                response = AIMessage(content="Deterministic task queue update settled.")
-            else:
-                response = AIMessage(
-                    content="Marking the deterministic task complete.",
-                    tool_calls=[
-                        {
-                            "id": _SCRIPTED_TOOL_CALL_ID,
-                            "name": "mark_task_complete",
-                            "args": {"task_id": "D-1"},
-                            "type": "tool_call",
-                        }
-                    ],
-                )
-            return ChatResult(generations=[ChatGeneration(message=response)])
-
         if script is _DeterministicScript.PERMISSION_PAUSE:
             callback = self.permission_callback
             if callback is None:
@@ -324,10 +294,10 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         **kwargs: object,
     ) -> ChatResult:
         """Return the resolved role content as a single AIMessage."""
-        del stop, run_manager, kwargs  # interface-required, unused
+        del messages, stop, run_manager, kwargs  # interface-required, unused
         script = _script_of(self.agent_config.id if self.agent_config else None)
         if script is not None:
-            return await self._scripted_result(script, messages)
+            return await self._scripted_result(script)
         content = self._content_for_role()
         return ChatResult(
             generations=[ChatGeneration(message=AIMessage(content=content))]

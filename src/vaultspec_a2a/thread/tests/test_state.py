@@ -312,8 +312,6 @@ class TestTeamStateStructure:
             "pipeline_phase",
             "vault_index",
             "validation_errors",
-            # task queue pointer
-            "current_task_id",
             # authoring proposal references
             "authoring_session_id",
             "authoring_changeset_ids",

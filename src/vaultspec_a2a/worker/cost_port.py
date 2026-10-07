@@ -1,7 +1,7 @@
 """Database-backed adapter for the graph token-accounting port.
 
-Composition-layer bridge, the sibling of :mod:`.task_queue_port`: adapts the
-pure persistence function in ``database.artifact_repository`` to the graph
+Composition-layer bridge, the sibling of :mod:`.runtime_identity_port`: adapts
+the pure persistence function in ``database.artifact_repository`` to the graph
 layer's abstract :class:`~vaultspec_a2a.graph.protocols.CostPort`. The graph
 nodes depend only on the port; this adapter is injected at graph-compile time
 so the database layer never leaks into the domain graph.

@@ -2,14 +2,13 @@
 
 :mod:`vaultspec_a2a.database.models` defines SQLAlchemy models, and
 :mod:`vaultspec_a2a.database.session` owns asynchronous sessions. Repository
-modules manage artifacts, authoring cursors, permissions, threads, and the
-persisted task queue.
+modules manage artifacts, authoring cursors, permissions, and threads.
 
 Migration support belongs to :mod:`vaultspec_a2a.database.migrations`.
 Persistence stores :mod:`vaultspec_a2a.thread` state for
 :mod:`vaultspec_a2a.control` services.
 
-Choose the model, session, repository, or queue boundary that matches the
+Choose the model, session, or repository boundary that matches the
 operation. This package re-exports the supported persistence API.
 """
 
@@ -51,7 +50,6 @@ from .models import PermissionRequestModel as PermissionRequestModel
 from .models import ProviderRuntimeIdentityModel as ProviderRuntimeIdentityModel
 from .models import RecoveryAttemptModel as RecoveryAttemptModel
 from .models import RunEventModel as RunEventModel
-from .models import TaskQueueEntryModel as TaskQueueEntryModel
 from .models import ThreadDeletionSagaModel as ThreadDeletionSagaModel
 from .models import ThreadExecutionStateModel as ThreadExecutionStateModel
 from .models import ThreadModel as ThreadModel
@@ -140,10 +138,6 @@ from .session import inspect_sqlite_database as inspect_sqlite_database
 from .session import resolve_session_factory as resolve_session_factory
 from .session import seat_sqlite_posture as seat_sqlite_posture
 from .session import verify_wal_mode as verify_wal_mode
-from .task_queue_repository import MarkCompleteResult as MarkCompleteResult
-from .task_queue_repository import get_queue_view as get_queue_view
-from .task_queue_repository import mark_task_complete as mark_task_complete
-from .task_queue_repository import seed_task_queue as seed_task_queue
 from .thread_repository import ActiveThreadProjection as ActiveThreadProjection
 from .thread_repository import (
     ThreadStatusElectionOutcome as ThreadStatusElectionOutcome,
@@ -198,7 +192,6 @@ __all__ = [
     "ControlActionModel",
     "ControlActionReservation",
     "CostTrackingModel",
-    "MarkCompleteResult",
     "PermissionLogModel",
     "PermissionRequestModel",
     "RecoveryAttemptModel",
@@ -206,7 +199,6 @@ __all__ = [
     "RunEventRecord",
     "RunEventStore",
     "SchemaCompatibilityError",
-    "TaskQueueEntryModel",
     "ThreadDeletionSagaModel",
     "ThreadExecutionStateModel",
     "ThreadModel",
@@ -243,7 +235,6 @@ __all__ = [
     "get_pending_permission_requests",
     "get_permission_logs_by_thread",
     "get_permission_request",
-    "get_queue_view",
     "get_session_factory",
     "get_thread",
     "get_thread_execution_state",
@@ -257,7 +248,6 @@ __all__ = [
     "mark_control_action_duplicate",
     "mark_control_action_superseded",
     "mark_permission_request_applied",
-    "mark_task_complete",
     "migration_script_location",
     "normalize_workspace_identity",
     "outstanding_permission_pause",
@@ -272,7 +262,6 @@ __all__ = [
     "run_migrations",
     "save_model",
     "seat_sqlite_posture",
-    "seed_task_queue",
     "set_authoring_cursor",
     "set_thread_approval_state",
     "set_thread_repair_state",

@@ -256,7 +256,6 @@ class GraphLifecycleManager:
         from ..providers.factory import ProviderFactory
         from .cost_port import SqlCostPort
         from .runtime_identity_port import SqlRuntimeIdentityPort
-        from .task_queue_port import SqlTaskQueuePort
 
         (
             token_store,
@@ -276,7 +275,6 @@ class GraphLifecycleManager:
             if checkpoint_read_timeout_seconds is not None
             else domain_config.aget_state_timeout_seconds
         )
-        self._task_queue_port = SqlTaskQueuePort(get_session_factory())
         self._cost_port = SqlCostPort(get_session_factory())
         self._runtime_identity_port = SqlRuntimeIdentityPort(get_session_factory())
         self._state = GraphLifecycleState()
@@ -741,9 +739,6 @@ class GraphLifecycleManager:
                 workspace_root=ws_root,
                 autonomous=req.autonomous,
                 step_timeout=definition.step_timeout_seconds,
-                # Thread feature_tag so vault indexing works in worker
-                feature_tag=req.active_feature,
-                task_queue_port=self._task_queue_port,
                 cost_port=self._cost_port,
                 runtime_identity_port=self._runtime_identity_port,
                 provider_factory=self._ports.provider_factory,

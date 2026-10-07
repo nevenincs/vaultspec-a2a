@@ -295,12 +295,6 @@ class TeamState(TypedDict):
     vault_index: NotRequired[Annotated[dict[str, list[str]], merge_vault_index]]
     validation_errors: NotRequired[Annotated[list[str], append_validation_errors]]
 
-    # --- task queue pointer ---
-    # ID of the task currently assigned to the worker. None when no feature is active
-    # or no task has been assigned. Updated via
-    # Command(update={...}) from mark_task_complete.
-    current_task_id: NotRequired[str | None]
-
     # --- authoring proposal references ---
     # References (D5) to engine authoring artifacts this run produced — the
     # session id and the changeset/proposal ids, never document content. Ids

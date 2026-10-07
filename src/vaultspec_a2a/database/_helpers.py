@@ -22,7 +22,6 @@ from .models import (
     PermissionLogModel,
     PermissionRequestModel,
     RecoveryAttemptModel,
-    TaskQueueEntryModel,
     ThreadExecutionStateModel,
     ThreadModel,
 )
@@ -50,7 +49,6 @@ async def save_model[
         RecoveryAttemptModel,
         CostTrackingModel,
         ThreadExecutionStateModel,
-        TaskQueueEntryModel,
     )
 ](session: AsyncSession, model: M) -> M:
     """Persist any database model instance."""

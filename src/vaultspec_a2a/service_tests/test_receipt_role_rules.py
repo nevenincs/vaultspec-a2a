@@ -188,7 +188,6 @@ async def test_compiled_document_graph_receives_conventions_via_runtime_config(
         provider_factory=ProviderFactory(),
         checkpointer=InMemorySaver(),
         workspace_root=workspace,
-        feature_tag=feature,
         proposal_submitter=proposal_submitter,
         model_assignment=_frozen_deterministic_assignment(list(agent_configs)),
     )

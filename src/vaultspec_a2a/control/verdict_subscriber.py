@@ -209,9 +209,7 @@ class VerdictSubscriber:
     """Consume engine authoring verdicts and resume the runs they belong to."""
 
     def __init__(self, config: VerdictSubscriberConfig) -> None:
-        self._dependencies = config.dependencies
-        self._execution = config.execution
-        self._timing = config.timing
+        self._config = config
         self._last_parked_reconcile = 0.0
 
     # ------------------------------------------------------------------
@@ -225,17 +223,17 @@ class VerdictSubscriber:
         exponentially and retries rather than terminating the task, so the
         subscriber self-heals across engine restarts and transient outages.
         """
-        backoff = self._timing.reconnect_base_seconds
+        backoff = self._config.reconnect_base_seconds
         logger.info("Authoring verdict subscriber started")
         try:
             while True:
                 # ``endpoint_provider`` (``resolve_engine``) does blocking file
                 # reads and a blocking ``/health`` probe; keep it off the shared
                 # event loop so a slow probe never stalls the gateway.
-                endpoint = await asyncio.to_thread(self._dependencies.endpoint_provider)
+                endpoint = await asyncio.to_thread(self._config.endpoint_provider)
                 if endpoint is None:
                     await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, self._timing.reconnect_max_seconds)
+                    backoff = min(backoff * 2, self._config.reconnect_max_seconds)
                     continue
                 try:
                     processed = await self._consume_page(endpoint)
@@ -247,16 +245,16 @@ class VerdictSubscriber:
                         exc_info=True,
                     )
                     await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, self._timing.reconnect_max_seconds)
+                    backoff = min(backoff * 2, self._config.reconnect_max_seconds)
                     continue
-                backoff = self._timing.reconnect_base_seconds
+                backoff = self._config.reconnect_base_seconds
                 if processed == 0:
                     # Steady state: nothing new on this page. Reconcile any run
                     # left parked at a gate whose verdict was already consumed
                     # before it finished parking (the AUTO submit-time race), then
                     # poll gently.
                     await self._reconcile_parked_runs(endpoint)
-                    await asyncio.sleep(self._timing.poll_interval_seconds)
+                    await asyncio.sleep(self._config.poll_interval_seconds)
         except asyncio.CancelledError:
             logger.info("Authoring verdict subscriber cancelled")
             raise
@@ -343,11 +341,11 @@ class VerdictSubscriber:
                 await self._resume_with_verdict(thread_id, verdict, None, {pending})
 
     async def _parked_candidate_ids(self) -> list[str]:
-        async with self._dependencies.session_factory() as db:
+        async with self._config.session_factory() as db:
             parked, _ = await list_threads(
                 db,
                 status=ThreadStatus.INPUT_REQUIRED,
-                limit=self._timing.parked_thread_limit,
+                limit=self._config.parked_thread_limit,
             )
             # A checkpoint parked at a gate can be mis-statused RUNNING when a
             # prior receipt races the gate event. The gate-precise claim below
@@ -355,7 +353,7 @@ class VerdictSubscriber:
             running, _ = await list_threads(
                 db,
                 status=ThreadStatus.RUNNING,
-                limit=self._timing.parked_thread_limit,
+                limit=self._config.parked_thread_limit,
             )
         candidates = [thread.id for thread in parked]
         seen = set(candidates)
@@ -374,9 +372,9 @@ class VerdictSubscriber:
         it rather than correlating a stale earlier gate's proposal.
         """
         checkpoint = await read_latest_checkpoint(
-            self._dependencies.checkpointer,
+            self._config.checkpointer,
             thread_id,
-            timeout=self._timing.checkpoint_timeout_seconds,
+            timeout=self._config.checkpoint_timeout_seconds,
         )
         pending = checkpoint.channel_values.get(_GATE_PENDING_PROPOSAL_FIELD)
         return pending if isinstance(pending, str) and pending else None
@@ -423,7 +421,7 @@ class VerdictSubscriber:
             return
         verdict_kind, notes = verdict
         correlated_ids = event.correlation_ids()
-        async with self._dependencies.session_factory() as db:
+        async with self._config.session_factory() as db:
             thread_id = await pending_document_approval_thread(
                 db, request_ids=correlated_ids
             )
@@ -483,7 +481,7 @@ class VerdictSubscriber:
         notes: str | None,
         correlated_ids: set[str],
     ) -> _VerdictSetup | None:
-        async with self._dependencies.session_factory() as db:
+        async with self._config.session_factory() as db:
             thread = await get_thread(db, thread_id)
             if thread is None:
                 return None
@@ -512,11 +510,11 @@ class VerdictSubscriber:
 
     def _transport(self) -> DispatchTransport:
         """The worker connection one resume travels over, traced as it is sent."""
-        trace_headers_fn = self._execution.trace_headers_fn
+        trace_headers_fn = self._config.trace_headers_fn
         return DispatchTransport(
-            worker_client=self._dependencies.worker_client,
-            circuit_breaker=self._dependencies.circuit_breaker,
-            worker_spawner=self._dependencies.worker_spawner,
+            worker_client=self._config.worker_client,
+            circuit_breaker=self._config.circuit_breaker,
+            worker_spawner=self._config.worker_spawner,
             trace_headers=trace_headers_fn() if trace_headers_fn else None,
         )
 
@@ -556,7 +554,7 @@ class VerdictSubscriber:
         )
         if setup is None:
             return
-        async with self._dependencies.session_factory() as db:
+        async with self._config.session_factory() as db:
             await begin_write_transaction(db)
             dispatch = await build_followon_dispatch(
                 db,
@@ -636,11 +634,11 @@ class VerdictSubscriber:
     # ------------------------------------------------------------------
 
     async def _read_cursor(self) -> int:
-        async with self._dependencies.session_factory() as db:
+        async with self._config.session_factory() as db:
             return await get_authoring_cursor(db)
 
     async def _advance_cursor(self, last_seq: int) -> None:
-        async with self._dependencies.session_factory() as db:
+        async with self._config.session_factory() as db:
             await set_authoring_cursor(db, last_seq=last_seq)
             await db.commit()
 

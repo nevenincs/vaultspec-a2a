@@ -14,7 +14,7 @@ Token hygiene: tokens are never logged and never rendered in
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast, override
+from typing import TYPE_CHECKING, Any, cast, override
 from urllib.parse import quote
 
 import httpx
@@ -46,10 +46,7 @@ ACTOR_TOKEN_HEADER = "x-authoring-actor-token"
 # The authoring subtree is nested under /authoring in the engine router.
 _AUTHORING_PREFIX = "/authoring"
 
-
-class _ClientOptions(TypedDict, total=False):
-    timeout: float
-    bearer_resolver: Callable[[], EngineEndpoint | None] | None
+_REQUEST_TIMEOUT_SECONDS = 30.0
 
 
 async def _iter_sse_frames(response: httpx.Response) -> AsyncIterator[SseFrame]:
@@ -78,10 +75,9 @@ class AuthoringClient:
     actor_token:
         Optional default per-actor principal token. Individual calls may
         override it; the bootstrap ``mint_actor_token`` call needs none.
-    client:
-        Optional pre-built ``httpx.AsyncClient`` (tests inject a transport).
-    timeout:
-        Per-request timeout in seconds when constructing the default client.
+    bearer_resolver:
+        Optional re-resolution of the engine origin and machine bearer after a
+        connection proof failure or an outer 401.
     """
 
     def __init__(
@@ -90,34 +86,20 @@ class AuthoringClient:
         bearer_token: str,
         *,
         actor_token: str | None = None,
-        client: httpx.AsyncClient | None = None,
-        **options: Unpack[_ClientOptions],
+        bearer_resolver: Callable[[], EngineEndpoint | None] | None = None,
     ) -> None:
-        timeout = options.pop("timeout", 30.0)
-        bearer_resolver = options.pop("bearer_resolver", None)
-        if options:
-            unexpected = next(iter(options))
-            raise TypeError(
-                "AuthoringClient.__init__() got an unexpected keyword argument "
-                f"{unexpected!r}"
-            )
         self._base_url = base_url.rstrip("/")
         self._bearer_token = bearer_token
         self._actor_token = actor_token
-        self._timeout = timeout
-        self._owns_client = client is None
-        self._client = client or authenticated_client(
-            self._base_url, bearer_token, timeout
+        self._client = authenticated_client(
+            self._base_url, bearer_token, _REQUEST_TIMEOUT_SECONDS
         )
         # Optional re-resolution of the ENGINE machine bearer. A connection proof
         # failure or outer 401 after an engine restart triggers a single re-read of the
         # engine origin and one retry, so a long run outlives a bearer rotation
         # instead of dying on the stale token. None keeps the caller-supplied
-        # bearer fixed (no retry). The origin SWAP on re-resolution is effective
-        # only for a client this instance owns (rebuilt in _reresolve_machine_bearer);
-        # with a caller-injected client the retry follows a bearer rotation (same
-        # origin) but not an origin MOVE, since the injected transport's base_url is
-        # fixed - the production worker path owns its client, so this is exact there.
+        # bearer fixed (no retry). The client is rebuilt on re-resolution
+        # (_reresolve_machine_bearer), so the retry follows an origin move as well.
         self._bearer_resolver = bearer_resolver
 
     # ------------------------------------------------------------------
@@ -125,9 +107,8 @@ class AuthoringClient:
     # ------------------------------------------------------------------
 
     async def aclose(self) -> None:
-        """Close the underlying HTTP client if this instance owns it."""
-        if self._owns_client:
-            await self._client.aclose()
+        """Close the underlying HTTP client."""
+        await self._client.aclose()
 
     async def __aenter__(self) -> AuthoringClient:
         return self
@@ -193,11 +174,10 @@ class AuthoringClient:
         # in flight while this swap runs and no lock is needed. Sharing one
         # AuthoringClient across concurrent tasks would break that assumption and
         # require guarding this rebuild.
-        if self._owns_client:
-            await self._client.aclose()
-            self._client = authenticated_client(
-                self._base_url, self._bearer_token, self._timeout
-            )
+        await self._client.aclose()
+        self._client = authenticated_client(
+            self._base_url, self._bearer_token, _REQUEST_TIMEOUT_SECONDS
+        )
 
     async def _send(
         self, do_request: Callable[[], Awaitable[AuthoringResponse | Denial]]

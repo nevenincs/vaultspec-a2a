@@ -34,7 +34,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack
+from typing import TYPE_CHECKING, Any
 
 import click
 import httpx
@@ -57,6 +57,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ServiceVerbError",
+    "StartOptions",
     "migrate_service",
     "register_service_commands",
     "restart_service",
@@ -146,32 +147,20 @@ def _desktop_arm_env(app_home: Path, capsule_root: Path) -> dict[str, str]:
     }
 
 
-class _StartServiceOptions(TypedDict, total=False):
-    capsule_root: Path | None
-    host: str | None
-    port: int | None
-    log_path: str | None
-    ready_timeout: float
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StartOptions:
+    """How a started gateway is armed, bound, logged and gated on readiness."""
 
-
-class _RestartServiceOptions(_StartServiceOptions, total=False):
-    stop_timeout: float
-
-
-def _reject_unexpected_service_options(
-    function_name: str, options: _StartServiceOptions | _RestartServiceOptions
-) -> None:
-    """Keep compatibility wrappers strict about unsupported keyword options."""
-    if options:
-        unexpected = next(iter(options))
-        raise TypeError(
-            f"{function_name}() got an unexpected keyword argument {unexpected!r}"
-        )
+    capsule_root: Path | None = None
+    host: str | None = None
+    port: int | None = None
+    log_path: str | None = None
+    ready_timeout: float = _READY_TIMEOUT_SECONDS
 
 
 def start_service(
     app_home: Path | None = None,
-    **options: Unpack[_StartServiceOptions],
+    options: StartOptions | None = None,
 ) -> ServiceStatus:
     """Start the gateway detached and wait until it is discoverably healthy.
 
@@ -188,12 +177,7 @@ def start_service(
     pid: on Windows a venv launcher stub means the recorded gateway pid can
     legitimately differ from the spawned child's pid.
     """
-    capsule_root = options.pop("capsule_root", None)
-    host = options.pop("host", None)
-    port = options.pop("port", None)
-    log_path = options.pop("log_path", None)
-    ready_timeout = options.pop("ready_timeout", _READY_TIMEOUT_SECONDS)
-    _reject_unexpected_service_options("start_service", options)
+    options = options or StartOptions()
     home = _resolved_app_home(app_home)
     if another_resident_is_live(home):
         return service_status(home)
@@ -208,25 +192,30 @@ def start_service(
         setting_env("a2a_home"): str(home),
         setting_env("project_root"): str(settings.project_root),
     }
-    if capsule_root is not None:
-        env.update(_desktop_arm_env(home, capsule_root))
-    if host is not None:
-        env[setting_env("host")] = host
-    if port is not None:
-        env[setting_env("port")] = str(port)
+    if options.capsule_root is not None:
+        env.update(_desktop_arm_env(home, options.capsule_root))
+    if options.host is not None:
+        env[setting_env("host")] = options.host
+    if options.port is not None:
+        env[setting_env("port")] = str(options.port)
     # Spawn from the home's PARENT, never from inside the home: a child whose
     # working directory sits inside the application home holds an open handle
     # on it, and the Windows directory lease the discovery publication takes
     # over the home then refuses - the gateway would boot and immediately die
     # publishing its own record.
     process: subprocess.Popen[bytes] = spawn(
-        self_command("serve"), cwd=home.parent, log_path=log_path, env=env or None
+        self_command("serve"),
+        cwd=home.parent,
+        log_path=options.log_path,
+        env=env or None,
     )
-    deadline = time.monotonic() + ready_timeout
+    deadline = time.monotonic() + options.ready_timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
             capture_hint = (
-                f"see {log_path}" if log_path else "start with --log to capture output"
+                f"see {options.log_path}"
+                if options.log_path
+                else "start with --log to capture output"
             )
             raise ServiceVerbError(
                 f"gateway exited during startup "
@@ -239,7 +228,7 @@ def start_service(
     tree_kill(process.pid)
     raise ServiceVerbError(
         f"gateway pid {process.pid} did not become ready within "
-        f"{ready_timeout:g}s; process felled and no record published"
+        f"{options.ready_timeout:g}s; process felled and no record published"
     )
 
 
@@ -309,7 +298,9 @@ def stop_service(
 
 def restart_service(
     app_home: Path | None = None,
-    **options: Unpack[_RestartServiceOptions],
+    options: StartOptions | None = None,
+    *,
+    stop_timeout: float = _STOP_TIMEOUT_SECONDS,
 ) -> ServiceStatus:
     """Stop the resident (confirmed dead), then start ready-gated.
 
@@ -318,23 +309,9 @@ def restart_service(
     a surviving generation on the same port; :func:`start_service` then
     publishes exactly one ready generation or fails loudly.
     """
-    capsule_root = options.pop("capsule_root", None)
-    host = options.pop("host", None)
-    port = options.pop("port", None)
-    log_path = options.pop("log_path", None)
-    ready_timeout = options.pop("ready_timeout", _READY_TIMEOUT_SECONDS)
-    stop_timeout = options.pop("stop_timeout", _STOP_TIMEOUT_SECONDS)
-    _reject_unexpected_service_options("restart_service", options)
     home = _resolved_app_home(app_home)
     stop_service(home, timeout=stop_timeout)
-    return start_service(
-        home,
-        capsule_root=capsule_root,
-        host=host,
-        port=port,
-        log_path=log_path,
-        ready_timeout=ready_timeout,
-    )
+    return start_service(home, options)
 
 
 def setup_service(
@@ -452,10 +429,9 @@ def start_command(
     try:
         status = start_service(
             app_home,
-            capsule_root=capsule_root,
-            host=host,
-            port=port,
-            log_path=log_path,
+            StartOptions(
+                capsule_root=capsule_root, host=host, port=port, log_path=log_path
+            ),
         )
     except Exception as exc:
         raise _service_error(exc) from exc
@@ -490,10 +466,9 @@ def restart_command(
     try:
         status = restart_service(
             app_home,
-            capsule_root=capsule_root,
-            host=host,
-            port=port,
-            log_path=log_path,
+            StartOptions(
+                capsule_root=capsule_root, host=host, port=port, log_path=log_path
+            ),
         )
     except Exception as exc:
         raise _service_error(exc) from exc

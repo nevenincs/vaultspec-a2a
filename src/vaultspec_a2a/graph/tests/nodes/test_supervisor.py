@@ -15,6 +15,7 @@ from pydantic import PrivateAttr
 from ....testing import add_test_node, compile_test_graph, new_state_graph
 from ....thread.state import TeamState
 from ...nodes.supervisor import (
+    SupervisorOptions,
     _build_supervisor_messages,
     _evaluate_supervisor_response,
     _phase_for_route,
@@ -465,8 +466,10 @@ async def test_supervisor_node_clears_stale_routing_error_on_clean_route() -> No
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-coder"],
-        worker_phase_map={"vaultspec-coder": "exec"},
-        autonomous=True,
+        options=SupervisorOptions(
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=True,
+        ),
     )
     state = _make_state_for_phase_gate(
         vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
@@ -499,8 +502,10 @@ async def test_supervisor_parse_failure_clears_stale_approval_state() -> None:
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-coder"],
-        worker_phase_map={"vaultspec-coder": "exec"},
-        autonomous=True,
+        options=SupervisorOptions(
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=True,
+        ),
     )
     state = _make_state_for_phase_gate(
         vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
@@ -533,8 +538,10 @@ async def test_supervisor_resume_clears_stale_routing_error_after_approval() -> 
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-coder"],
-        worker_phase_map={"vaultspec-coder": "exec"},
-        autonomous=False,
+        options=SupervisorOptions(
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=False,
+        ),
     )
 
     graph = _build_approval_graph(
@@ -581,8 +588,10 @@ async def test_a_plan_verdict_for_another_request_asks_again() -> None:
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-coder"],
-        worker_phase_map={"vaultspec-coder": "exec"},
-        autonomous=False,
+        options=SupervisorOptions(
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=False,
+        ),
     )
     graph = _build_approval_graph(
         node, ["vaultspec-coder"], {"vaultspec-coder": "exec"}
@@ -617,8 +626,13 @@ async def test_supervisor_rejection_clears_consumed_approval_request_id() -> Non
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-plan-author", "vaultspec-coder"],
-        worker_phase_map={"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
-        autonomous=False,
+        options=SupervisorOptions(
+            worker_phase_map={
+                "vaultspec-plan-author": "plan",
+                "vaultspec-coder": "exec",
+            },
+            autonomous=False,
+        ),
     )
 
     graph = _build_approval_graph(
@@ -656,8 +670,10 @@ async def test_supervisor_clean_finish_clears_active_agent_owner() -> None:
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-coder"],
-        worker_phase_map={"vaultspec-coder": "exec"},
-        autonomous=True,
+        options=SupervisorOptions(
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=True,
+        ),
     )
     state = _make_state_for_phase_gate(
         vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
@@ -679,8 +695,13 @@ async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-plan-author", "vaultspec-coder"],
-        worker_phase_map={"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
-        autonomous=False,
+        options=SupervisorOptions(
+            worker_phase_map={
+                "vaultspec-plan-author": "plan",
+                "vaultspec-coder": "exec",
+            },
+            autonomous=False,
+        ),
     )
 
     graph = _build_approval_graph(
@@ -730,8 +751,13 @@ async def test_plan_approval_node_no_longer_accepts_retired_approved_boolean() -
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-plan-author", "vaultspec-coder"],
-        worker_phase_map={"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
-        autonomous=False,
+        options=SupervisorOptions(
+            worker_phase_map={
+                "vaultspec-plan-author": "plan",
+                "vaultspec-coder": "exec",
+            },
+            autonomous=False,
+        ),
     )
 
     graph = _build_approval_graph(

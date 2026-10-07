@@ -31,6 +31,7 @@ from ...lifecycle.discovery import (
 )
 from ...utils._process_tree import pid_is_live, wait_pid_gone
 from ..service import (
+    StartOptions,
     restart_service,
     service_status,
     setup_service,
@@ -135,7 +136,9 @@ def test_start_status_stop_restart_cycle_on_scratch_home(tmp_path: Path) -> None
     home = tmp_path / "home"
     port = free_port()
 
-    started = start_service(home, port=port, log_path=str(tmp_path / "gateway.log"))
+    started = start_service(
+        home, StartOptions(port=port, log_path=str(tmp_path / "gateway.log"))
+    )
     assert started.state == "running", started
     assert started.port == port
     assert started.pid is not None and pid_is_live(started.pid)
@@ -144,7 +147,9 @@ def test_start_status_stop_restart_cycle_on_scratch_home(tmp_path: Path) -> None
     assert observed.state == "running"
     assert observed.pid == started.pid
 
-    restarted = restart_service(home, port=port, log_path=str(tmp_path / "gateway.log"))
+    restarted = restart_service(
+        home, StartOptions(port=port, log_path=str(tmp_path / "gateway.log"))
+    )
     assert restarted.state == "running", restarted
     assert restarted.pid is not None and pid_is_live(restarted.pid)
     assert restarted.pid != started.pid
@@ -192,12 +197,14 @@ def test_start_failure_fells_the_spawn_and_raises(tmp_path: Path) -> None:
         with pytest.raises(ServiceVerbError):
             start_service(
                 home,
-                port=held_port,
-                log_path=str(tmp_path / "gateway.log"),
-                # The occupied port makes readiness impossible. Keep this a real
-                # detached-process cleanup proof without idling for the production
-                # startup budget.
-                ready_timeout=3.0,
+                StartOptions(
+                    port=held_port,
+                    log_path=str(tmp_path / "gateway.log"),
+                    # The occupied port makes readiness impossible. Keep this a
+                    # real detached-process cleanup proof without idling for the
+                    # production startup budget.
+                    ready_timeout=3.0,
+                ),
             )
         _, info = read_resident_service(home)
         assert info is None or info.pid is None or not pid_is_live(info.pid)

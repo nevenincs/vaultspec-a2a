@@ -48,7 +48,7 @@ Node dependency graph as well as the Python environment and tooling.
 
 The ``base`` profile contains runtime dependencies. The ``tooling`` profile
 supports hooks and narrower repository checks. The composed ``all`` group adds
-documentation to tooling, while CI also selects the ``server`` extra. RAG and
+documentation to tooling, while CI also selects the ``otlp`` extra. RAG and
 Torch remain isolated in the optional ``rag`` extra. ``just deps-all`` is
 the explicit profile that selects every runtime extra. The separate Node recipe
 restores the exact Claude ACP dependency graph from ``package-lock.json``.
@@ -127,7 +127,7 @@ Run the local validation sequence:
 
 The command is fail-fast and runs these stages in order:
 
-#. ``uv sync --locked --no-default-groups --extra server --group all`` prepares
+#. ``uv sync --locked --no-default-groups --extra otlp --group all`` prepares
    the exact locked environment.
 #. ``just deps-node`` restores the pinned Claude ACP runtime.
 #. ``just check-all`` runs Ruff lint, Ruff format checking, Ty, Deptry,

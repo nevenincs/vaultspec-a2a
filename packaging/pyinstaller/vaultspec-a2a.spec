@@ -87,12 +87,12 @@ hiddenimports = [
     "vaultspec_core.__main__",
 ]
 
-# The desktop binary is the pruned runtime closure. The `rag` and `server`
-# optional-dependency groups (the Torch/RAG embedding stack and the PostgreSQL
-# drivers) are never part of the dashboard-bundled desktop runtime - a2a
-# resolves them lazily only under those profiles. Exclude them explicitly so a
-# build environment that happens to have the extras installed cannot bloat the
-# binary or pull an unshippable native closure into the shipped tree.
+# The desktop binary is the pruned runtime closure. The `rag` optional
+# dependency group (the Torch/RAG embedding stack) is never part of the
+# dashboard-bundled desktop runtime - a2a reaches it only out of process under
+# that profile. Exclude it explicitly so a build environment that happens to
+# have the extra installed cannot bloat the binary or pull an unshippable native
+# closure into the shipped tree.
 # setuptools is a BUILD tool that PyInstaller drags into its own output: it is
 # PyInstaller's dependency, not the runtime's. Nothing here imports it or
 # `pkg_resources` - the shipped onedir carried `setuptools/` and no
@@ -123,9 +123,6 @@ excludes = [
     "sentence_transformers",
     "sympy",
     "vaultspec_rag",
-    "asyncpg",
-    "psycopg",
-    "langgraph.checkpoint.postgres",
 ]
 
 pkg_datas, pkg_binaries, pkg_hidden = collect_all(

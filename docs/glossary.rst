@@ -16,9 +16,10 @@ Glossary
 
    dependency profile
       An explicit dependency selection. ``base`` contains runtime dependencies;
-      ``server`` adds server integrations; ``rag`` adds semantic discovery;
-      ``tooling`` supports repository validation; ``all`` selects every runtime
-      extra plus documentation and tooling groups.
+      ``otlp`` adds the OpenTelemetry Protocol (OTLP) trace and metric
+      exporter; ``rag`` adds semantic discovery; ``tooling`` supports
+      repository validation; ``all`` selects every runtime extra plus
+      documentation and tooling groups.
 
    enrollment
       Reconciliation of repository integration artifacts for an existing

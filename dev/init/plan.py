@@ -97,7 +97,7 @@ PREFLIGHT: Final[tuple[Step, ...]] = (
 
 PYTHON = Phase(
     name="python",
-    summary="Resolve the locked tooling and server dependency profiles into .venv.",
+    summary="Resolve the locked tooling, OTLP and development profiles into .venv.",
     steps=(
         Step(
             name="uv-venv",
@@ -126,11 +126,11 @@ PYTHON = Phase(
                 "--locked",
                 "--no-default-groups",
                 "--extra",
-                "server",
+                "otlp",
                 "--group",
                 "all",
             ),
-            summary="Install the server extra and the composed development group.",
+            summary="Install the OTLP extra and the composed development group.",
         ),
     ),
     inputs=("uv.lock", "pyproject.toml", ".python-version"),

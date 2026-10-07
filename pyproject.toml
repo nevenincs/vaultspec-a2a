@@ -54,21 +54,14 @@ dependencies = [
 ]
 
   [project.optional-dependencies]
-  # The locked PostgreSQL server profile. PostgreSQL-dependent checks use a
-  # task-owned environment, then run without mutating or resolving it during pytest:
-  #   $env:UV_PROJECT_ENVIRONMENT = "$PWD/tmp/s04-server-env"
-  #   uv sync --locked --no-default-groups --extra server --group tooling
-  #   uv run --no-sync python -m pytest \
-  #     src/vaultspec_a2a/control/tests/test_sync_url_derivation.py
-  # Keep these drivers out of both the base dependencies and the `freeze` group. The
-  # dashboard binary is SQLite-only, and its PyInstaller spec separately excludes the
-  # same modules so a contaminated build environment cannot pull them into the artifact.
-  server = [
-    "asyncpg>=0.30.0",
-    "langgraph-checkpoint-postgres>=3.1.2,<4",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
-    "psycopg[binary,pool]>=3.2.9",
-  ]
+  # The OTLP gRPC trace and metric exporter. Optional by design: telemetry probes
+  # for it at startup and, when it is absent or unusable, keeps the SDK running
+  # without export, so a base install starts cleanly with no collector and no
+  # gRPC native closure. The development environment selects this extra so the
+  # exporter-gated tests run; `just test-clean-base` proves the base-only path.
+  # The desktop binary is frozen from the base dependencies plus the `freeze`
+  # group, so it ships without the exporter.
+  otlp = ["opentelemetry-exporter-otlp-proto-grpc>=1.39.1"]
   # Semantic search over the vault and the codebase. NOT a runtime dependency of
   # the gateway: no module here imports `vaultspec_rag` or `torch`, and the presets
   # that use it name `vaultspec-rag` as an out-of-process MCP SERVER rather than
@@ -409,8 +402,6 @@ known_first_party = ["vaultspec_a2a"]
   opentelemetry-exporter-otlp-proto-grpc = "opentelemetry"
   opentelemetry-instrumentation-fastapi = "opentelemetry"
   opentelemetry-sdk = "opentelemetry"
-  # The server extra's psycopg[pool] is what installs psycopg_pool.
-  psycopg = ["psycopg", "psycopg_pool"]
   pytest-asyncio = "pytest_asyncio"
 
   [tool.deptry.per_rule_ignores]
@@ -428,9 +419,6 @@ known_first_party = ["vaultspec_a2a"]
     # aiosqlite is loaded as the SQLAlchemy async driver via the URL scheme
     # "sqlite+aiosqlite://..." — never imported directly.
     "aiosqlite",
-    # The server profile loads PostgreSQL drivers through SQLAlchemy URLs.
-    "asyncpg",
-    "psycopg",
     # The RAG profile provisions its MCP service out of process.
     "vaultspec-rag",
     # langsmith is the LangGraph/LangChain tracing backend, activated at runtime

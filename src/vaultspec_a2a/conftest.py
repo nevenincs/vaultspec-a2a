@@ -501,7 +501,7 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
     ExternalPrerequisite(
         "otlp-grpc-exporter",
         what="the OTLP gRPC exporter package",
-        supply="uv sync --locked --extra server --group tooling",
+        supply="uv sync --locked --extra otlp --group tooling",
         probe=None,
     ),
     ExternalPrerequisite(

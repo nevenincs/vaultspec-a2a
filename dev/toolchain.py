@@ -211,8 +211,8 @@ DEPS = Verb(
             (Cmd(("uv", "sync", "--locked", "--no-default-groups")),),
         ),
         Target(
-            "server",
-            "Resolve the server runtime profile from the lock.",
+            "otlp",
+            "Resolve the base runtime plus the optional OTLP exporter from the lock.",
             (
                 Cmd(
                     (
@@ -221,7 +221,7 @@ DEPS = Verb(
                         "--locked",
                         "--no-default-groups",
                         "--extra",
-                        "server",
+                        "otlp",
                     )
                 ),
             ),
@@ -444,9 +444,9 @@ LINT = Verb(
         # Two questions about the same artifacts. actionlint asks whether the
         # YAML is well-formed and its expressions resolve; the contract asks
         # whether a `run:` step is calling a recipe or re-implementing one. A
-        # workflow can be perfectly valid YAML and still repeat `uv sync
-        # --locked --no-default-groups --extra server --group all` in five
-        # jobs, which is what this repository's did.
+        # workflow can be perfectly valid YAML and still repeat one locked
+        # `uv sync` invocation in five jobs, which is what this repository's
+        # did.
         Target(
             "workflow",
             "Lint the workflows, then hold them to the CI/justfile contract.",
@@ -946,7 +946,7 @@ CI = Verb(
                         "--locked",
                         "--no-default-groups",
                         "--extra",
-                        "server",
+                        "otlp",
                         "--group",
                         "all",
                     )

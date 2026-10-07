@@ -22,7 +22,7 @@ from ..control.config import settings
 from ..domain_config import domain_config
 from ..graph.enums import ServerEventType
 from ..ipc.schemas import WorkerEventBatch, WorkerEventEnvelope
-from ..streaming.fanout import PROTECTED_WIRE_TYPES
+from ..streaming.fanout import is_protected_payload, pop_oldest_droppable
 from ..telemetry import inject_trace_context
 from ..thread.snapshots import wire_event_type
 
@@ -92,7 +92,7 @@ def _entry_event_type(entry: WorkerEventEnvelope) -> str:
 
 def _is_protected_entry(entry: WorkerEventEnvelope) -> bool:
     """Report whether an entry states an outcome that nothing later restates."""
-    return _entry_event_type(entry) in PROTECTED_WIRE_TYPES
+    return is_protected_payload(entry.payload)
 
 
 def _encoded_batch(batch: list[WorkerEventEnvelope]) -> bytes:
@@ -325,7 +325,7 @@ class WorkerBridge:
         prevent.
         """
         events = self._batch.events
-        dropped = self._pop_evictable_event()
+        dropped = pop_oldest_droppable(events, _is_protected_entry)
         logger.warning(
             "Event buffer full (%d events), dropping oldest droppable event",
             settings.ipc_max_event_buffer,
@@ -339,23 +339,6 @@ class WorkerBridge:
                 "event_buffer_limit": settings.ipc_max_event_buffer,
             },
         )
-
-    def _pop_evictable_event(self) -> WorkerEventEnvelope:
-        """Remove and return the oldest buffered event that is not an outcome.
-
-        The oldest outcome goes only when every buffered event is one, so the
-        buffer's bound holds whatever it is holding.
-        """
-        events = self._batch.events
-        index = next(
-            (
-                position
-                for position, entry in enumerate(events)
-                if not _is_protected_entry(entry)
-            ),
-            0,
-        )
-        return events.pop(index)
 
     def _schedule_flush(self, delay: float) -> None:
         """Ensure exactly one pending flush, due in at most *delay* seconds.
@@ -575,7 +558,10 @@ class WorkerBridge:
         # gave up its tail first - which is where a run's terminal sits.
         self._batch.events[:0] = batch
         overflow = len(self._batch.events) - settings.ipc_max_event_buffer
-        dropped = [self._pop_evictable_event() for _ in range(max(overflow, 0))]
+        dropped = [
+            pop_oldest_droppable(self._batch.events, _is_protected_entry)
+            for _ in range(max(overflow, 0))
+        ]
         if self._batch.events:
             # A re-queued backlog used to sit until the next event arrived, which
             # for a run that has just ended is never. The redrive is delayed by a

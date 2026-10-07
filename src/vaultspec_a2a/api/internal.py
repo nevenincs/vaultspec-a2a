@@ -38,7 +38,7 @@ from ._replay_writer_seat import seated_replay_writer
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ..streaming import RelayHub
+    from ..streaming import HeldFrame, RelayHub
 
 __all__ = ["internal_router"]
 
@@ -180,9 +180,14 @@ async def _relay_single_event(
     the control plane knows whether it did: a run with a continuation waiting
     takes the next turn instead of settling, and this relay reaches the
     hub first, so it used to show that run a terminal it then kept running
-    past. The terminal is therefore handed to the control plane as a
-    publisher rather than fanned out here, and released on the far side of the
-    decision. Every other frame crosses as it always has.
+    past. The terminal is therefore NUMBERED here and handed to the control
+    plane as a publisher, then fanned out on the far side of the decision.
+    Numbering it before the decision rather than at the fan-out is what keeps
+    the settled cursor and the terminal frame's own SSE id the same number:
+    the settlement records the run's issued mark, and a frame numbered
+    afterwards is never in that mark. A decision that does not end the run
+    gives the number back, so the run's sequence space stays contiguous.
+    Every other frame crosses as it always has.
     """
     payload = normalize_wire_event_type(payload)
     if payload.get("type") == "execution_state_projection":
@@ -197,23 +202,33 @@ async def _relay_single_event(
         await relay_event(thread_id, payload, services=services)
         return
 
+    held: HeldFrame | None = None
     publish_terminal: Callable[[], None] | None = None
     # Establishes the run's durable numbering before the synchronous
     # chokepoint needs it; a no-op once seeded, and on a gateway that
     # numbers nothing.
     await relay_hub.prepare_run(thread_id)
     if is_terminal_event(payload):
-        publish_terminal = partial(relay_hub.relay_payload, thread_id, payload)
+        held = relay_hub.hold_payload(thread_id, payload)
+        publish_terminal = partial(relay_hub.publish_held, held)
     else:
         relay_hub.relay_payload(thread_id, payload)
     # Mirrors the event into the relay hub's agent, tool-call and node state
     # before the handlers below, whose settled path purges that state.
     relay_hub.sync_worker_event(thread_id, payload)
-    await relay_event(
-        thread_id,
-        payload,
-        services=replace(services, publish_terminal=publish_terminal),
-    )
+    try:
+        await relay_event(
+            thread_id,
+            payload,
+            services=replace(services, publish_terminal=publish_terminal),
+        )
+    finally:
+        if held is not None:
+            # Unconditional and idempotent: a published terminal keeps its
+            # number, and a promoted turn, a refused stale event or a handler
+            # that raised gives it back rather than leaving a hole no frame
+            # will ever fill.
+            relay_hub.release_held(held)
 
 
 @internal_router.get("/health")

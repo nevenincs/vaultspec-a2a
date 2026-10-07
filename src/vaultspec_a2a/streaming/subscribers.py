@@ -36,6 +36,7 @@ _REMEMBERED_FLOORS = 1024
 
 __all__ = [
     "AllocationSink",
+    "HeldFrame",
     "RelayHub",
     "RunSequenceAllocator",
     "RunSequenceSeedSource",
@@ -186,6 +187,23 @@ class RunSequenceAllocator:
         self._counters[thread_id] = advanced
         return advanced
 
+    def release(self, thread_id: str, sequence: int) -> None:
+        """Give back a number taken for a frame that was never published.
+
+        Only a number still at the top of the counter can be given back, and
+        giving it back is what keeps a run's sequence space contiguous: a
+        number spent on nothing leaves a hole, and the replay reader serves
+        only the newest consecutive tail, so one hole costs a resume every
+        retained frame older than it.
+
+        A number some later allocation has already overtaken is NOT retracted.
+        Lowering the counter under a number already stamped on a frame in
+        flight would hand two frames one number, which is the hazard the whole
+        numbering exists to avoid; one hole is the cheaper outcome.
+        """
+        if self._counters.get(thread_id) == sequence:
+            self._counters[thread_id] = sequence - 1
+
     def issued_high_water(self, thread_id: str) -> int | None:
         """Return the highest number issued to *thread_id*, or ``None`` if unnumbered.
 
@@ -238,6 +256,33 @@ class RunSequenceAllocator:
         self._issued.move_to_end(thread_id)
         while len(self._issued) > _REMEMBERED_FLOORS:
             self._issued.popitem(last=False)
+
+
+@dataclass(slots=True)
+class HeldFrame:
+    """One projected frame numbered before the decision that publishes it.
+
+    A terminal frame is the only one held: whether it may be shown at all is
+    the control plane's answer, and it is numbered on THIS side of that answer
+    so the cursor the settlement records names the frame the client is about
+    to receive. The alternative - number it when it is finally fanned out -
+    puts the number on the far side of the write that records it, which is
+    what left a settled run's cursor one short of its own terminal id.
+
+    *published* is the flag that makes :meth:`RelayHub.release_held`
+    idempotent, so a caller may release unconditionally after the decision
+    without first asking which way it went.
+    """
+
+    thread_id: str
+    frame: object
+    allocation: SequenceAllocation | None
+    published: bool = False
+
+    @property
+    def sequence(self) -> int | None:
+        """The number this frame will carry, or ``None`` where it has none."""
+        return None if self.allocation is None else self.allocation.sequence
 
 
 class RelayHub:
@@ -512,39 +557,38 @@ class RelayHub:
     # Relay
     # ------------------------------------------------------------------
 
-    def relay_payload(self, thread_id: str, payload: object) -> None:
-        """Fan out one relayed worker payload to every subscriber of ``thread_id``.
+    def _numbered(
+        self, thread_id: str, payload: object
+    ) -> tuple[object, SequenceAllocation | None]:
+        """Project *payload* and stamp this run's next number over its sequence.
 
         Worker run events enter the public progress edge here. Each is
-        projected through the positive progress DTO before it reaches a
-        subscriber queue, so prompts, document and artifact bodies, edit diffs,
-        and raw provider payloads are dropped at the relay seam - a first
-        enforcement the encode boundary independently repeats.
+        projected through the positive progress DTO, so prompts, document and
+        artifact bodies, edit diffs, and raw provider payloads are dropped at
+        the relay seam - a first enforcement the encode boundary independently
+        repeats.
 
         The projected frame is then numbered, where a number is available AND
-        the frame is one the recorder will keep, and that number is stamped
-        over the body's own ``sequence``. The worker's counter orders a run's
-        events within one worker lifetime and restarts with the process; the
-        number stamped here is the run's identity and survives a restart of
+        the frame is one the recorder will keep. The worker's counter orders a
+        run's events within one worker lifetime and restarts with the process;
+        the number stamped here is the run's identity and survives a restart of
         either process, so the relay overwrites rather than forwards. A payload
         that is not a mapping cannot carry the stamp and is not retained
         either, so it takes no number at all rather than leaving a hole in the
         run's sequence space.
-
-        Call :meth:`prepare_run` for the run first: this path is synchronous and
-        cannot establish a number it has never read.
         """
         projected = project_run_progress(payload)
-        delivered: object = projected
-        if self._retainable(projected) and isinstance(projected, Mapping):
-            allocation = self._allocate(thread_id)
-            if allocation is not None:
-                stamped: dict[str, object] = {
-                    **cast("Mapping[str, object]", projected),
-                    "sequence": allocation.sequence,
-                }
-                self._record(allocation, stamped)
-                delivered = stamped
+        if not (self._retainable(projected) and isinstance(projected, Mapping)):
+            return projected, None
+        body = cast("Mapping[str, object]", projected)
+        allocation = self._allocate(thread_id)
+        if allocation is None:
+            return body, None
+        stamped: dict[str, object] = {**body, "sequence": allocation.sequence}
+        return stamped, allocation
+
+    def _fan_out(self, thread_id: str, delivered: object) -> None:
+        """Enqueue one already-numbered frame for every subscriber of this run."""
         for client_id, queue in list(self._subscribers.items()):
             client_subs = self._subscriptions.get(client_id, set())
             if thread_id not in client_subs:
@@ -552,6 +596,49 @@ class RelayHub:
             outcome = deliver_bounded(queue, delivered, client_id=client_id)
             if outcome.dropped:
                 self._dropped[client_id] += outcome.dropped
+
+    def relay_payload(self, thread_id: str, payload: object) -> None:
+        """Number one relayed worker payload and fan it out to this run's viewers.
+
+        Call :meth:`prepare_run` for the run first: this path is synchronous and
+        cannot establish a number it has never read.
+        """
+        delivered, allocation = self._numbered(thread_id, payload)
+        if allocation is not None:
+            self._record(allocation, delivered)
+        self._fan_out(thread_id, delivered)
+
+    def hold_payload(self, thread_id: str, payload: object) -> HeldFrame:
+        """Number one payload now and hold it for a decision still to be taken.
+
+        The terminal frame's path. Numbering it here rather than at publication
+        is what makes the run's settled cursor and the frame's own SSE id the
+        same number: the settlement reads this run's issued mark to record it,
+        and a frame numbered afterwards is never in that mark. The caller must
+        follow with :meth:`publish_held` or :meth:`release_held`; nothing has
+        reached a subscriber or the recorder yet.
+        """
+        delivered, allocation = self._numbered(thread_id, payload)
+        return HeldFrame(thread_id=thread_id, frame=delivered, allocation=allocation)
+
+    def publish_held(self, held: HeldFrame) -> None:
+        """Record and fan out a held frame whose decision went its way."""
+        held.published = True
+        if held.allocation is not None:
+            self._record(held.allocation, held.frame)
+        self._fan_out(held.thread_id, held.frame)
+
+    def release_held(self, held: HeldFrame) -> None:
+        """Give back the number of a held frame that will never be published.
+
+        Idempotent and safe to call unconditionally after the decision: a
+        frame already published keeps its number, and one that was never
+        numbered has none to give back.
+        """
+        if held.published or held.allocation is None:
+            return
+        if self._allocator is not None:
+            self._allocator.release(held.thread_id, held.allocation.sequence)
 
     def sync_worker_event(self, thread_id: str, payload: Mapping[str, Any]) -> None:
         """Mirror one relayed worker event into the run's live state."""

@@ -27,6 +27,7 @@ from .node_metadata import (
 from .run_event_writer import FrameProjector, RunEventWriter
 from .subscribers import (
     AllocationSink,
+    HeldFrame,
     RelayHub,
     RunSequenceAllocator,
     RunSequenceSeedSource,
@@ -40,6 +41,7 @@ __all__ = [
     "AllocationSink",
     "FrameProjector",
     "GraphInvocation",
+    "HeldFrame",
     "IngestRequest",
     "RelayHub",
     "RunEventProducer",

@@ -9,11 +9,9 @@ import httpx
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from ...conftest import SqlitePosture
 from ...database import create_control_action, create_thread
-from ...database.models import Base
-from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import adopted_spawner
@@ -30,17 +28,17 @@ from ..execution_authority import resolve_execution_authority
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 
 @pytest.mark.asyncio
+@pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS)
 @pytest.mark.parametrize("complete", [True, False])
 async def test_redrive_uses_complete_accepted_input_and_refuses_retired_shape(
-    tmp_path: Path, complete: bool
+    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    complete: bool,
 ):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'run.db'}")
-    configure_sqlite_transactions(engine)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
     accepted_dispatch = DispatchRequest(
         dispatch_id="accepted",
         action="resume",
@@ -62,7 +60,7 @@ async def test_redrive_uses_complete_accepted_input_and_refuses_retired_shape(
     )
     if not complete:
         payload = {"decision": "approved"}
-    async with sessions() as db:
+    async with session_factory() as db:
         await create_thread(
             db,
             thread_id="run",
@@ -95,34 +93,31 @@ async def test_redrive_uses_complete_accepted_input_and_refuses_retired_shape(
         received.append(await request.json())
         return JSONResponse({"status": "dispatched", "thread_id": "run"})
 
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://worker",
-        ) as client:
-            summary = await redrive_direct_control_actions(
-                sessions,
-                worker_client=client,
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=3, recovery_timeout=30
-                ),
-                worker_spawner=adopted_spawner(),
-                trace_headers=None,
-            )
-        if complete:
-            assert summary.dispatched == 1
-            assert len(received) == 1
-            delivered = DispatchRequest.model_validate(received[0])
-            assert delivered.dispatch_id == "accepted"
-            assert delivered.recursion_limit == 37
-            assert delivered.team_preset == "mock-success-single"
-            delivered_option_id = cast("object", delivered.option_id)
-            assert delivered_option_id == {"decision": "approved"}
-            assert delivered.model_assignment == accepted_dispatch.model_assignment
-            assert delivered.require_graph_action_receipt() == receipt
-        else:
-            assert summary.dispatched == 0
-            assert summary.conflicted == 1
-            assert received == []
-    finally:
-        await engine.dispose()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://worker",
+    ) as client:
+        summary = await redrive_direct_control_actions(
+            session_factory,
+            worker_client=client,
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=3, recovery_timeout=30
+            ),
+            worker_spawner=adopted_spawner(),
+            trace_headers=None,
+        )
+    if complete:
+        assert summary.dispatched == 1
+        assert len(received) == 1
+        delivered = DispatchRequest.model_validate(received[0])
+        assert delivered.dispatch_id == "accepted"
+        assert delivered.recursion_limit == 37
+        assert delivered.team_preset == "mock-success-single"
+        delivered_option_id = cast("object", delivered.option_id)
+        assert delivered_option_id == {"decision": "approved"}
+        assert delivered.model_assignment == accepted_dispatch.model_assignment
+        assert delivered.require_graph_action_receipt() == receipt
+    else:
+        assert summary.dispatched == 0
+        assert summary.conflicted == 1
+        assert received == []

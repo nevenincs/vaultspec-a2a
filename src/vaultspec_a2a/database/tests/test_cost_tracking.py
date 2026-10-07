@@ -34,7 +34,6 @@ from sqlalchemy import select
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import SAWarning, StatementError
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -636,7 +635,7 @@ class TestUsageReachesAPersistedRow:
 
     @pytest.mark.asyncio
     async def test_failed_acp_usage_reaches_durable_cost_row(
-        self, engine: AsyncEngine, session: AsyncSession
+        self, session_factory: async_sessionmaker[AsyncSession], session: AsyncSession
     ) -> None:
         await _seed_thread(session, "t-failed-acp")
         await session.commit()
@@ -652,7 +651,7 @@ class TestUsageReachesAPersistedRow:
         usage = _turn_token_usage(error)
         assert usage is not None
         await _record_turn_usage(
-            cost_port=SqlCostPort(async_sessionmaker(engine, expire_on_commit=False)),
+            cost_port=SqlCostPort(session_factory),
             thread_id="t-failed-acp",
             worker_name="coder-1",
             model=AcpChatModel(command=["unused"]),
@@ -672,7 +671,7 @@ class TestUsageReachesAPersistedRow:
 
     @pytest.mark.asyncio
     async def test_codex_frame_persists_token_accounting(
-        self, engine: AsyncEngine, session: AsyncSession
+        self, session_factory: async_sessionmaker[AsyncSession], session: AsyncSession
     ) -> None:
         """Prove the whole path, not the port in isolation.
 
@@ -697,7 +696,7 @@ class TestUsageReachesAPersistedRow:
         usage = _turn_token_usage(message)
         assert usage is not None
 
-        port = SqlCostPort(async_sessionmaker(engine, expire_on_commit=False))
+        port = SqlCostPort(session_factory)
         await port.record_usage(
             thread_id="t-e2e",
             agent_id="coder-1",
@@ -735,12 +734,12 @@ class TestUsageReachesAPersistedRow:
 
     @pytest.mark.asyncio
     async def test_repeated_turns_accumulate_for_an_agent(
-        self, engine: AsyncEngine, session: AsyncSession
+        self, session_factory: async_sessionmaker[AsyncSession], session: AsyncSession
     ) -> None:
         """Repeated turns accumulate rather than overwrite."""
         await _seed_thread(session, "t-multi")
         await session.commit()
-        port = SqlCostPort(async_sessionmaker(engine, expire_on_commit=False))
+        port = SqlCostPort(session_factory)
         for _ in range(3):
             await port.record_usage(
                 thread_id="t-multi",
@@ -888,12 +887,11 @@ class TestTheWritersAreActuallyInjected:
         assert "SqlCostPort(get_session_factory())" in source
         assert "cost_port=self._cost_port" in source
 
-    def test_the_port_satisfies_the_protocol(self) -> None:
+    def test_the_port_satisfies_the_protocol(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         """The adapter must actually implement the injected interface."""
-        port = SqlCostPort(
-            async_sessionmaker(create_async_engine("sqlite+aiosqlite:///:memory:"))
-        )
-        assert isinstance(port, CostPort)
+        assert isinstance(SqlCostPort(session_factory), CostPort)
 
 
 class TestLaneIdentityIsTakenNotParsed:
@@ -940,13 +938,13 @@ class TestDegradedLaneIsStoredAsUnknown:
 
     @pytest.mark.asyncio
     async def test_a_null_lane_still_persists_the_real_token_counts(
-        self, engine: AsyncEngine, session: AsyncSession
+        self, session_factory: async_sessionmaker[AsyncSession], session: AsyncSession
     ) -> None:
         """Measured tokens are worth keeping even when identity is not known."""
         await _seed_thread(session, "t-degraded")
         await session.commit()
 
-        port = SqlCostPort(async_sessionmaker(engine, expire_on_commit=False))
+        port = SqlCostPort(session_factory)
         await port.record_usage(
             thread_id="t-degraded",
             agent_id="coder-1",

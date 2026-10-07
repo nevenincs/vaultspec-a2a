@@ -11,10 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...conftest import materialize_schema
 from ...control.tests.test_dispatch_failure_transitions import (
     _seed_accepted_initial_action,
 )
@@ -36,6 +33,8 @@ from ...thread.enums import ControlActionType
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 async def _seed_paused_thread(session: AsyncSession, tid: str) -> None:
@@ -75,47 +74,40 @@ async def _put_checkpoint(checkpointer: AsyncSqliteSaver, tid: str) -> None:
 
 @pytest.mark.asyncio
 async def test_unfinished_graph_survives_reboot_without_repair_journal_growth(
-    runtime_dir: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Repeated recovery leaves the accepted graph action unchanged."""
     tid = "thread-paused-reboot"
-    db_file = runtime_dir / "reconciliation-reboot.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    checkpoints_file = runtime_dir / "checkpoints-reboot.db"
 
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await _put_checkpoint(checkpointer, tid)
-        async with session_factory() as session:
-            await _seed_paused_thread(session, tid)
-            await session.commit()
+    await _put_checkpoint(checkpointer, tid)
+    async with session_factory() as session:
+        await _seed_paused_thread(session, tid)
+        await session.commit()
 
-        # Boot 1: first reconciliation.
-        async with session_factory() as session:
-            summary1 = await reconcile_threads_on_startup(session, checkpointer)
-            await session.commit()
-            after1 = await get_thread(session, tid)
-            started1 = await get_control_action_by_idempotency_key(
-                session, thread_id=tid, idempotency_key=f"startup-repair:{tid}:1"
-            )
-        assert summary1["paused_resumable"] == 0
-        assert after1 is not None
-        assert after1.status == "reconciling"
-        assert after1.repair_status == "needs_reconciliation"
-        assert after1.recovery_epoch == 0
-        assert started1 is None
+    # Boot 1: first reconciliation.
+    async with session_factory() as session:
+        summary1 = await reconcile_threads_on_startup(session, checkpointer)
+        await session.commit()
+        after1 = await get_thread(session, tid)
+        started1 = await get_control_action_by_idempotency_key(
+            session, thread_id=tid, idempotency_key=f"startup-repair:{tid}:1"
+        )
+    assert summary1["paused_resumable"] == 0
+    assert after1 is not None
+    assert after1.status == "reconciling"
+    assert after1.repair_status == "needs_reconciliation"
+    assert after1.recovery_epoch == 0
+    assert started1 is None
 
-        # Boot 2: the reboot that used to crash with an IntegrityError.
-        async with session_factory() as session:
-            summary2 = await reconcile_threads_on_startup(session, checkpointer)
-            await session.commit()
-            after2 = await get_thread(session, tid)
-            started2 = await get_control_action_by_idempotency_key(
-                session, thread_id=tid, idempotency_key=f"startup-repair:{tid}:2"
-            )
+    # Boot 2: the reboot that used to crash with an IntegrityError.
+    async with session_factory() as session:
+        summary2 = await reconcile_threads_on_startup(session, checkpointer)
+        await session.commit()
+        after2 = await get_thread(session, tid)
+        started2 = await get_control_action_by_idempotency_key(
+            session, thread_id=tid, idempotency_key=f"startup-repair:{tid}:2"
+        )
 
     assert summary2["paused_resumable"] == 0
     assert after2 is not None
@@ -123,55 +115,44 @@ async def test_unfinished_graph_survives_reboot_without_repair_journal_growth(
     assert after2.recovery_epoch == 0
     assert started2 is None
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_historical_repair_row_does_not_crash_graph_recovery(
-    runtime_dir: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A historical repair row does not collide with current recovery."""
     tid = "thread-historical-stuck"
-    db_file = runtime_dir / "reconciliation-historical.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    checkpoints_file = runtime_dir / "checkpoints-historical.db"
 
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await _put_checkpoint(checkpointer, tid)
-        async with session_factory() as session:
-            await _seed_paused_thread(session, tid)
-            # Simulate the pre-fix crash state: the repair action was journaled at
-            # epoch key :1 but the epoch never advanced (still 0 on the thread row).
-            await create_control_action(
-                session,
-                thread_id=tid,
-                action_type=ControlActionType.REPAIR_STARTED,
-                idempotency_key=f"startup-repair:{tid}:1",
-                payload={"status": "input_required"},
-            )
-            await session.commit()
+    await _put_checkpoint(checkpointer, tid)
+    async with session_factory() as session:
+        await _seed_paused_thread(session, tid)
+        # Simulate the pre-fix crash state: the repair action was journaled at
+        # epoch key :1 but the epoch never advanced (still 0 on the thread row).
+        await create_control_action(
+            session,
+            thread_id=tid,
+            action_type=ControlActionType.REPAIR_STARTED,
+            idempotency_key=f"startup-repair:{tid}:1",
+            payload={"status": "input_required"},
+        )
+        await session.commit()
 
-        # Boot: must not raise IntegrityError; the duplicate key replays as a no-op.
-        async with session_factory() as session:
-            summary = await reconcile_threads_on_startup(session, checkpointer)
-            await session.commit()
-            healed = await get_thread(session, tid)
+    # Boot: must not raise IntegrityError; the duplicate key replays as a no-op.
+    async with session_factory() as session:
+        summary = await reconcile_threads_on_startup(session, checkpointer)
+        await session.commit()
+        healed = await get_thread(session, tid)
 
     assert summary["paused_resumable"] == 0
     assert healed is not None
     assert healed.status == "reconciling"
     assert healed.recovery_epoch == 0
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_get_or_create_control_action_is_idempotent_across_sessions(
-    runtime_dir: Path,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Two separate sessions requesting the same key yield one row, no duplicate.
 
@@ -181,12 +162,6 @@ async def test_get_or_create_control_action_is_idempotent_across_sessions(
     """
     tid = "thread-idempotent-key"
     key = f"startup-repair:{tid}:1"
-    db_file = runtime_dir / "reconciliation-idempotent.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
 
     async with session_factory() as session:
         await create_thread(
@@ -226,5 +201,3 @@ async def test_get_or_create_control_action_is_idempotent_across_sessions(
         )
     assert found is not None
     assert found.id == row_a.id
-
-    await engine.dispose()

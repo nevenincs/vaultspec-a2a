@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from sqlalchemy import text, update
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ...database.models import ThreadModel
 from ...database.run_event_repository import RunEventRecord, RunEventStore
@@ -35,7 +34,7 @@ from ..subscribers import RunSequenceAllocator
 from ..types import SequencedEvent
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncEngine
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 _RUN = "sequence-authority-proof"
 
@@ -47,9 +46,11 @@ _IDLE_CADENCE = 30.0
 class _Backend:
     """A real migrated application store and the pieces built over it."""
 
-    def __init__(self, engine: AsyncEngine) -> None:
+    def __init__(
+        self, engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         self.engine = engine
-        self.session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        self.session_factory = session_factory
         self.store = RunEventStore(self.session_factory)
 
     async def seed_thread(self, thread_id: str = _RUN) -> None:
@@ -92,9 +93,12 @@ class _Backend:
 
 
 @pytest.fixture
-def backend(migrated_engine: AsyncEngine) -> _Backend:
+def backend(
+    migrated_engine: AsyncEngine,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
+) -> _Backend:
     """The root migrated store, behind the operations these proofs drive."""
-    return _Backend(migrated_engine)
+    return _Backend(migrated_engine, migrated_session_factory)
 
 
 def _worker_frame(sequence: int, *, thread_id: str = _RUN) -> dict[str, object]:

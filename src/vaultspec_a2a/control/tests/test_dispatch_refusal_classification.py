@@ -18,7 +18,6 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...domain_config import domain_config
 from ...ipc.schemas import DispatchRequest
@@ -45,6 +44,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from pathlib import Path
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
     from ...worker._dispatch_contract import DispatchCapacityReservation
 
 _TEST_INTERNAL_TOKEN = "dispatch-refusal-test-token"
@@ -58,26 +59,24 @@ def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @asynccontextmanager
 async def _real_worker(
-    checkpoint_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> AsyncGenerator[tuple[httpx.AsyncClient, Executor]]:
     """Serve the production worker app over real ASGI with a real executor."""
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
-        await saver.setup()
-        bridge = WorkerBridge("http://control", "dispatch-refusal-test")
-        executor = Executor(saver, bridge)
-        app = create_worker_app()
-        app.state.executor = executor
-        async with anyio.create_task_group() as tasks:
-            app.state.task_group = tasks
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="http://worker",
-                headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-            ) as client:
-                yield client, executor
-            tasks.cancel_scope.cancel()
-        await executor.shutdown()
-        await bridge.close()
+    bridge = WorkerBridge("http://control", "dispatch-refusal-test")
+    executor = Executor(checkpointer, bridge)
+    app = create_worker_app()
+    app.state.executor = executor
+    async with anyio.create_task_group() as tasks:
+        app.state.task_group = tasks
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://worker",
+            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
+        ) as client:
+            yield client, executor
+        tasks.cancel_scope.cancel()
+    await executor.shutdown()
+    await bridge.close()
 
 
 def _breaker() -> WorkerCircuitBreaker:
@@ -127,9 +126,10 @@ def _ingest(
 @pytest.mark.asyncio
 async def test_a_full_worker_is_backpressure_and_says_when_to_return(
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Capacity is about the service, and it never counts against its health."""
-    async with _real_worker(tmp_path / "capacity.db") as (client, executor):
+    async with _real_worker(checkpointer) as (client, executor):
         for index in range(domain_config.max_concurrent_threads):
             reservation, _reason = await executor.reserve_dispatch_capacity(
                 f"held-{index}"
@@ -159,9 +159,10 @@ async def test_a_full_worker_is_backpressure_and_says_when_to_return(
 @pytest.mark.asyncio
 async def test_a_worker_already_running_the_thread_refuses_it_as_busy(
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """One run's occupancy is a conflict about that run, not a service fault."""
-    async with _real_worker(tmp_path / "busy.db") as (client, executor):
+    async with _real_worker(checkpointer) as (client, executor):
         reservation, _reason = await executor.reserve_dispatch_capacity("busy-thread")
         assert reservation is not None
 
@@ -188,6 +189,7 @@ async def test_a_worker_already_running_the_thread_refuses_it_as_busy(
 @pytest.mark.asyncio
 async def test_refusals_for_one_run_never_shut_the_other_runs_out(
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The breaker is shared, so what counts against it decides who is served.
 
@@ -203,7 +205,7 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
     circuit the other runs opened.
     """
     threshold = settings.cb_failure_threshold
-    async with _real_worker(tmp_path / "shared.db") as (client, executor):
+    async with _real_worker(checkpointer) as (client, executor):
         breaker = WorkerCircuitBreaker(
             failure_threshold=threshold,
             recovery_timeout=settings.cb_recovery_timeout_seconds,
@@ -264,6 +266,7 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
 @pytest.mark.asyncio
 async def test_a_dispatch_refused_before_the_worker_leaves_the_circuit_alone(
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """An authority refusal never reaches the worker, so it proves nothing about it.
 
@@ -271,7 +274,7 @@ async def test_a_dispatch_refused_before_the_worker_leaves_the_circuit_alone(
     the half-open probe on its way out: a request that was never sent cannot be
     the one probe that decides whether the worker is back.
     """
-    async with _real_worker(tmp_path / "authority.db") as (client, _executor):
+    async with _real_worker(checkpointer) as (client, _executor):
         breaker = _breaker()
         outcome = await safe_dispatch(
             client,
@@ -341,6 +344,7 @@ async def test_a_server_fault_opens_the_circuit(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Recovery tests the worker with one request, not with the flood again.
 
@@ -349,7 +353,7 @@ async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
     probe is unsettled nothing else is admitted, and once it settles the circuit
     is open to everyone again.
     """
-    async with _real_worker(tmp_path / "probe.db") as (client, _executor):
+    async with _real_worker(checkpointer) as (client, _executor):
         breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=0.0)
         breaker.force_open()
         assert breaker.state == "half_open"

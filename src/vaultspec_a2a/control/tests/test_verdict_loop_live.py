@@ -52,12 +52,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
 from langchain_core.messages import AIMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
 from ...authoring import (
     AuthoringClient,
@@ -67,7 +61,6 @@ from ...authoring import (
     LifecycleEvent,
     mint_actor_token,
 )
-from ...conftest import materialize_schema
 from ...control.accepted_input import freeze_accepted_input
 from ...control.config import settings
 from ...control.dispatch_receipts import prepare_graph_action_receipt
@@ -109,6 +102,8 @@ from .test_verdict_subscriber_live import (
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...providers.team_selection import FrozenLaneAssignment
     from ...thread.state import TeamState
@@ -489,64 +484,49 @@ async def _run_live_verdict_worker(
 
 async def _run_live_verdict_a2a(
     client: AuthoringClient,
-    tmp_path: Path,
-    run_id: str,
-    info: dict[str, str],
-    baseline: int,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    identity: _LiveVerdictIdentity,
 ) -> None:
-    db_file = tmp_path / "vl.db"
-    materialize_schema(Path(db_file))
-    db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
+    bridge = _bridge_stub()
+    executor = Executor(checkpointer=checkpointer, bridge=bridge)
+    workspace = Path(_WORKSPACE)
+    metadata = current_execution_metadata(workspace)
+    execution_authority = resolve_execution_authority(metadata)
+    definition = freeze_graph_definition(
+        load_team_config("mock-success-single", workspace_root=workspace),
+        workspace_root=workspace,
     )
-    checkpoints = tmp_path / "vl-cp.db"
-    thread_id = f"thread-{run_id}"
-
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await checkpointer.setup()
-        bridge = _bridge_stub()
-        executor = Executor(checkpointer=checkpointer, bridge=bridge)
-        workspace = Path(_WORKSPACE)
-        metadata = current_execution_metadata(workspace)
-        execution_authority = resolve_execution_authority(metadata)
-        definition = freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=workspace),
-            workspace_root=workspace,
+    graph = _install_verdict_loop_graph(
+        executor,
+        identity.thread_id,
+        identity.info["proposal_id"],
+        definition=definition,
+        model_assignment_digest=execution_authority.model_assignment_digest,
+    )
+    await _run_live_verdict_worker(
+        _VerdictWorkerContext(
+            client=client,
+            resources=_LiveVerdictResources(
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+                executor=executor,
+                graph=graph,
+                definition=definition,
+                model_assignment=execution_authority.model_assignment,
+                metadata=metadata,
+            ),
+            identity=identity,
         )
-        graph = _install_verdict_loop_graph(
-            executor,
-            thread_id,
-            info["proposal_id"],
-            definition=definition,
-            model_assignment_digest=execution_authority.model_assignment_digest,
-        )
-        await _run_live_verdict_worker(
-            _VerdictWorkerContext(
-                client=client,
-                resources=_LiveVerdictResources(
-                    session_factory=session_factory,
-                    checkpointer=checkpointer,
-                    executor=executor,
-                    graph=graph,
-                    definition=definition,
-                    model_assignment=execution_authority.model_assignment,
-                    metadata=metadata,
-                ),
-                identity=_LiveVerdictIdentity(
-                    thread_id=thread_id,
-                    info=info,
-                    baseline=baseline,
-                ),
-            )
-        )
-    await db_engine.dispose()
+    )
 
 
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
-    client: AuthoringClient, tmp_path: Any
+    client: AuthoringClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Engine verdict -> subscriber -> real worker HTTP -> real graph resume.
 
@@ -561,4 +541,11 @@ async def test_live_engine_verdict_resumes_a_real_graph_through_the_real_worker(
     """
     run_id = f"vl-{uuid.uuid4().hex[:8]}"
     baseline, info = await _prepare_live_verdict_case(client, run_id)
-    await _run_live_verdict_a2a(client, tmp_path, run_id, info, baseline)
+    await _run_live_verdict_a2a(
+        client,
+        session_factory,
+        checkpointer,
+        _LiveVerdictIdentity(
+            thread_id=f"thread-{run_id}", info=info, baseline=baseline
+        ),
+    )

@@ -36,7 +36,6 @@ from typing import TYPE_CHECKING
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 from sqlalchemy import Connection, String, create_engine, inspect, select, text
 
@@ -61,6 +60,7 @@ from ..thread_repository import create_thread, list_active_thread_page
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession
 
 # The four partial indexes revision 0009 created descending, and the ordering it
@@ -439,7 +439,7 @@ class TestWorkspaceRootBoundIsTheColumn:
 
     @pytest.mark.asyncio
     async def test_the_discovery_edge_admits_the_width_and_refuses_past_it(
-        self, session: AsyncSession
+        self, session: AsyncSession, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Discovery refuses at the edge rather than deep in a transaction.
 
@@ -450,20 +450,18 @@ class TestWorkspaceRootBoundIsTheColumn:
         """
         width = self._column_width()
 
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-            await checkpointer.setup()
+        await discover_active_runs(
+            session,
+            checkpointer=checkpointer,
+            workspace_root=Path(self._root_of_length(width)),
+        )
+
+        with pytest.raises(ValueError, match="workspace_root must be between"):
             await discover_active_runs(
                 session,
                 checkpointer=checkpointer,
-                workspace_root=Path(self._root_of_length(width)),
+                workspace_root=Path(self._root_of_length(width + 1)),
             )
-
-            with pytest.raises(ValueError, match="workspace_root must be between"):
-                await discover_active_runs(
-                    session,
-                    checkpointer=checkpointer,
-                    workspace_root=Path(self._root_of_length(width + 1)),
-                )
 
 
 class TestFeatureTagBoundIsTheColumn:
@@ -563,21 +561,19 @@ class TestFeatureTagBoundIsTheColumn:
 
     @pytest.mark.asyncio
     async def test_the_discovery_edge_admits_the_width_and_refuses_past_it(
-        self, session: AsyncSession
+        self, session: AsyncSession, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Discovery refuses at the edge rather than deep in a transaction."""
         width = self._column_width()
 
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-            await checkpointer.setup()
-            await discover_active_runs(
-                session, checkpointer=checkpointer, feature_tag="f" * width
-            )
+        await discover_active_runs(
+            session, checkpointer=checkpointer, feature_tag="f" * width
+        )
 
-            with pytest.raises(ValueError, match="feature_tag must be between"):
-                await discover_active_runs(
-                    session, checkpointer=checkpointer, feature_tag="f" * (width + 1)
-                )
+        with pytest.raises(ValueError, match="feature_tag must be between"):
+            await discover_active_runs(
+                session, checkpointer=checkpointer, feature_tag="f" * (width + 1)
+            )
 
     def test_the_wire_records_carry_a_tag_the_column_can_hold(self) -> None:
         """Every tag the column accepts survives onto the wire records.

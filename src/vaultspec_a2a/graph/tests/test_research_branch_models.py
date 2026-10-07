@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...authoring.submitter import DocumentProposalSubmitter
 from ...team.team_config import ResearchThreadSpec, load_agent_config, load_team_config
@@ -30,6 +29,8 @@ from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 _PRESET = "vaultspec-adr-research-mock"
 _DISPATCH = "research_dispatch"
@@ -76,48 +77,46 @@ def _team() -> Any:
 @pytest.mark.asyncio
 async def test_every_parallel_research_branch_completes_its_own_turn(
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     team = _team()
     factory = _SimulatorProviderFactory(tmp_path)
     branches = {researcher_node_name(_DISPATCH, i) for i in range(len(_THREADS))}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        # The protocol declares invoke only; the drive streams to stop at the join.
-        graph: Any = compile_team_graph(
-            team_config=team,
-            agent_configs={
-                w.agent_id: load_agent_config(w.agent_id) for w in team.workers
-            },
-            checkpointer=saver,
-            provider_factory=factory,
-            autonomous=True,
+    # The protocol declares invoke only; the drive streams to stop at the join.
+    graph: Any = compile_team_graph(
+        team_config=team,
+        agent_configs={w.agent_id: load_agent_config(w.agent_id) for w in team.workers},
+        checkpointer=checkpointer,
+        provider_factory=factory,
+        autonomous=True,
+        workspace_root=tmp_path,
+        step_timeout=60.0,
+        # Never reached: the drive stops once the fan-out has joined.
+        proposal_submitter=DocumentProposalSubmitter(
+            engine_base_url="http://127.0.0.1:9",
+            token_store=RunTokenStore(),
+            phases={},
             workspace_root=tmp_path,
-            step_timeout=60.0,
-            # Never reached: the drive stops once the fan-out has joined.
-            proposal_submitter=DocumentProposalSubmitter(
-                engine_base_url="http://127.0.0.1:9",
-                token_store=RunTokenStore(),
-                phases={},
-                workspace_root=tmp_path,
-            ),
-            model_assignment=deterministic_model_assignment(team),
-        )
-        finished: set[str] = set()
-        config = {"configurable": {"thread_id": "branches"}, "recursion_limit": 20}
-        async for update in graph.astream(
-            {
-                "active_agent": "",
-                "artifacts": [],
-                "current_plan": [],
-                "messages": [HumanMessage(content="Research the cache design.")],
-                "next": "",
-                "thread_id": "branches",
-                "token_usage": {},
-            },
-            config=config,
-        ):
-            finished |= branches & update.keys()
-            if finished == branches:
-                break
+        ),
+        model_assignment=deterministic_model_assignment(team),
+    )
+    finished: set[str] = set()
+    config = {"configurable": {"thread_id": "branches"}, "recursion_limit": 20}
+    async for update in graph.astream(
+        {
+            "active_agent": "",
+            "artifacts": [],
+            "current_plan": [],
+            "messages": [HumanMessage(content="Research the cache design.")],
+            "next": "",
+            "thread_id": "branches",
+            "token_usage": {},
+        },
+        config=config,
+    ):
+        finished |= branches & update.keys()
+        if finished == branches:
+            break
 
     assert finished == branches
     researcher_models = [m for role, m in factory.created if role == "researcher"]

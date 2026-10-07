@@ -23,7 +23,6 @@ import httpx
 import pytest
 from fastapi import FastAPI, Response
 from langchain_core.messages import AIMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
@@ -32,6 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import (
         AsyncSession,
         async_sessionmaker,
@@ -289,20 +289,18 @@ async def _seed_parked_thread(
 
 @pytest.mark.asyncio
 async def test_correlates_parked_thread_by_its_pending_gate_request(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
-    checkpoints = tmp_path / "cp-proposal.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await _seed_parked_thread(
-            session_factory,
-            checkpointer,
-            _ParkedThreadSeed(
-                thread_id="thread-parked-1",
-                proposal_ids=["prop_abc"],
-                changeset_ids=["cs_abc"],
-                gate_pending="prop_abc",
-            ),
-        )
+    await _seed_parked_thread(
+        session_factory,
+        checkpointer,
+        _ParkedThreadSeed(
+            thread_id="thread-parked-1",
+            proposal_ids=["prop_abc"],
+            changeset_ids=["cs_abc"],
+            gate_pending="prop_abc",
+        ),
+    )
     async with session_factory() as session:
         matched = await pending_document_approval_thread(
             session, request_ids={"approval_abc", "prop_abc"}
@@ -312,21 +310,19 @@ async def test_correlates_parked_thread_by_its_pending_gate_request(
 
 @pytest.mark.asyncio
 async def test_only_the_gate_proposal_correlates(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """A changeset id alone reaches no run: the gate parks on its proposal."""
-    checkpoints = tmp_path / "cp-changeset.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await _seed_parked_thread(
-            session_factory,
-            checkpointer,
-            _ParkedThreadSeed(
-                thread_id="thread-parked-2",
-                proposal_ids=["prop_xyz"],
-                changeset_ids=["cs_xyz"],
-                gate_pending="prop_xyz",
-            ),
-        )
+    await _seed_parked_thread(
+        session_factory,
+        checkpointer,
+        _ParkedThreadSeed(
+            thread_id="thread-parked-2",
+            proposal_ids=["prop_xyz"],
+            changeset_ids=["cs_xyz"],
+            gate_pending="prop_xyz",
+        ),
+    )
     async with session_factory() as session:
         assert (
             await pending_document_approval_thread(
@@ -342,20 +338,18 @@ async def test_only_the_gate_proposal_correlates(
 
 @pytest.mark.asyncio
 async def test_unknown_ids_correlate_to_nothing(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
-    checkpoints = tmp_path / "cp-none.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await _seed_parked_thread(
-            session_factory,
-            checkpointer,
-            _ParkedThreadSeed(
-                thread_id="thread-parked-3",
-                proposal_ids=["prop_known"],
-                changeset_ids=["cs_known"],
-                gate_pending="prop_known",
-            ),
-        )
+    await _seed_parked_thread(
+        session_factory,
+        checkpointer,
+        _ParkedThreadSeed(
+            thread_id="thread-parked-3",
+            proposal_ids=["prop_known"],
+            changeset_ids=["cs_known"],
+            gate_pending="prop_known",
+        ),
+    )
     async with session_factory() as session:
         assert (
             await pending_document_approval_thread(
@@ -367,21 +361,19 @@ async def test_unknown_ids_correlate_to_nothing(
 
 @pytest.mark.asyncio
 async def test_non_parked_thread_is_not_correlated(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """A RUNNING thread is not a gate-parked candidate even with a pending row."""
-    checkpoints = tmp_path / "cp-running.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await _seed_parked_thread(
-            session_factory,
-            checkpointer,
-            _ParkedThreadSeed(
-                thread_id="thread-running",
-                proposal_ids=["prop_running"],
-                changeset_ids=[],
-                gate_pending="prop_running",
-            ),
-        )
+    await _seed_parked_thread(
+        session_factory,
+        checkpointer,
+        _ParkedThreadSeed(
+            thread_id="thread-running",
+            proposal_ids=["prop_running"],
+            changeset_ids=[],
+            gate_pending="prop_running",
+        ),
+    )
     async with session_factory() as session:
         await update_thread_status(session, "thread-running", ThreadStatus.RUNNING)
         await session.commit()
@@ -395,21 +387,19 @@ async def test_non_parked_thread_is_not_correlated(
 
 @pytest.mark.asyncio
 async def test_settled_gate_request_is_not_correlated(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """A replayed verdict for an applied gate finds no run to resume."""
-    checkpoints = tmp_path / "cp-settled.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await _seed_parked_thread(
-            session_factory,
-            checkpointer,
-            _ParkedThreadSeed(
-                thread_id="thread-settled",
-                proposal_ids=["prop_settled"],
-                changeset_ids=[],
-                gate_pending="prop_settled",
-            ),
-        )
+    await _seed_parked_thread(
+        session_factory,
+        checkpointer,
+        _ParkedThreadSeed(
+            thread_id="thread-settled",
+            proposal_ids=["prop_settled"],
+            changeset_ids=[],
+            gate_pending="prop_settled",
+        ),
+    )
     async with session_factory() as session:
         await mark_permission_request_applied(session, request_id="prop_settled")
         await session.commit()
@@ -423,14 +413,10 @@ async def test_settled_gate_request_is_not_correlated(
 
 @pytest.mark.asyncio
 async def test_cursor_advances_and_survives_restart(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """The durable cursor a restarted subscriber reads is the last it advanced."""
-    checkpoints = tmp_path / "cp-cursor.db"
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
-    ):
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client:
         first = _make_subscriber(session_factory, checkpointer, worker_client)
         assert await first._read_cursor() == 0
         await first._advance_cursor(17)
@@ -516,14 +502,9 @@ def test_recovery_high_water_reads_int_or_none() -> None:
 
 @pytest.mark.asyncio
 async def test_process_frame_raises_on_stream_error(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
-    checkpoints = tmp_path / "cp-frame-err.db"
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
-    ):
-        await checkpointer.setup()
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client:
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
         client = AuthoringClient("http://127.0.0.1:1", "tok")
         frame = StreamError(error_kind="authoring_store_unavailable", error="down")
@@ -534,15 +515,10 @@ async def test_process_frame_raises_on_stream_error(
 
 @pytest.mark.asyncio
 async def test_process_frame_advances_cursor_for_non_verdict_event(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """A non-verdict lifecycle frame advances the cursor without dispatching."""
-    checkpoints = tmp_path / "cp-frame-adv.db"
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
-    ):
-        await checkpointer.setup()
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client:
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
         client = AuthoringClient("http://127.0.0.1:1", "tok")
         event = LifecycleEvent(
@@ -561,13 +537,9 @@ async def test_process_frame_advances_cursor_for_non_verdict_event(
 
 @pytest.mark.asyncio
 async def test_process_event_non_verdict_is_a_noop(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
-    checkpoints = tmp_path / "cp-ev-noverdict.db"
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
-    ):
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client:
         await _seed_parked_thread(
             session_factory,
             checkpointer,
@@ -596,7 +568,7 @@ async def test_process_event_non_verdict_is_a_noop(
 
 @pytest.mark.asyncio
 async def test_process_event_verdict_with_unreachable_worker_does_not_crash(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """A real verdict correlates and dispatches; an unreachable worker is handled.
 
@@ -604,11 +576,7 @@ async def test_process_event_verdict_with_unreachable_worker_does_not_crash(
     exercises genuine ``WorkerUnreachableError`` handling (no double). The run
     stays parked because the resume never landed.
     """
-    checkpoints = tmp_path / "cp-ev-verdict.db"
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
-    ):
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client:
         await _seed_parked_thread(
             session_factory,
             checkpointer,
@@ -638,13 +606,9 @@ async def test_process_event_verdict_with_unreachable_worker_does_not_crash(
 
 @pytest.mark.asyncio
 async def test_gap_reconcile_no_verdict_status_is_a_noop(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
-    checkpoints = tmp_path / "cp-recon-noop.db"
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
-    ):
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client:
         await _seed_parked_thread(
             session_factory,
             checkpointer,
@@ -678,14 +642,10 @@ async def test_gap_reconcile_no_verdict_status_is_a_noop(
 
 @pytest.mark.asyncio
 async def test_gap_reconcile_terminal_verdict_dispatches_without_crash(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """A gate whose proposal is approved attempts its resume gracefully."""
-    checkpoints = tmp_path / "cp-recon-verdict.db"
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
-    ):
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client:
         await _seed_parked_thread(
             session_factory,
             checkpointer,
@@ -825,7 +785,7 @@ def test_proposal_reconcile_verdict_recovers_missed_request_changes() -> None:
 
 @pytest.mark.asyncio
 async def test_pending_gate_proposal_is_the_current_gate_not_a_stale_one(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """The reconcile keys on the CURRENT gate proposal, never a stale earlier one.
 
@@ -836,11 +796,7 @@ async def test_pending_gate_proposal_is_the_current_gate_not_a_stale_one(
     ``gate_pending_proposal_id`` - the ONE proposal the run is awaiting - so it
     resolves to the ADR proposal, not the stale research one.
     """
-    checkpoints = tmp_path / "cp-current-gate.db"
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
-    ):
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client:
         await _seed_parked_thread(
             session_factory,
             checkpointer,
@@ -858,7 +814,7 @@ async def test_pending_gate_proposal_is_the_current_gate_not_a_stale_one(
 
 @pytest.mark.asyncio
 async def test_reconcile_parked_runs_noops_when_none_parked_and_throttles(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """The steady-state parked-run reconcile is cheap and throttled.
 
@@ -869,11 +825,7 @@ async def test_reconcile_parked_runs_noops_when_none_parked_and_throttles(
     """
     from ...authoring import EngineEndpoint
 
-    checkpoints = tmp_path / "cp-parked-reconcile.db"
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
-    ):
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client:
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
         # An unreachable engine: reached only if the no-parked guard fails.
         endpoint = EngineEndpoint(base_url="http://127.0.0.1:1", bearer_token="tok")
@@ -891,7 +843,7 @@ async def test_reconcile_parked_runs_noops_when_none_parked_and_throttles(
 
 @pytest.mark.asyncio
 async def test_resume_skips_a_superseded_gate_verdict(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """Gate-precision: a late verdict for an EARLIER gate is not applied.
 
@@ -902,37 +854,35 @@ async def test_resume_skips_a_superseded_gate_verdict(
     applying it would consume the ADR gate's interrupt with a stale verdict and
     wedge the run at ``next_nodes=[]``. No dispatch occurs and the run stays parked.
     """
-    checkpoints = tmp_path / "cp-superseded.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await _seed_parked_thread(
-            session_factory,
-            checkpointer,
-            _ParkedThreadSeed(
-                thread_id="superseded",
-                proposal_ids=["proposal:research", "proposal:adr"],
-                changeset_ids=["cs:research", "cs:adr"],
-                gate_pending="proposal:adr",
-            ),
+    await _seed_parked_thread(
+        session_factory,
+        checkpointer,
+        _ParkedThreadSeed(
+            thread_id="superseded",
+            proposal_ids=["proposal:research", "proposal:adr"],
+            changeset_ids=["cs:research", "cs:adr"],
+            gate_pending="proposal:adr",
+        ),
+    )
+    async with _worker_runtime(checkpointer) as (
+        worker_client,
+        worker_app,
+        _bridge,
+    ):
+        subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
+        await subscriber._resume_with_verdict(
+            "superseded", "request_changes", None, {"proposal:research"}
         )
-        async with _worker_runtime(checkpointer) as (
-            worker_client,
-            worker_app,
-            _bridge,
-        ):
-            subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
-            await subscriber._resume_with_verdict(
-                "superseded", "request_changes", None, {"proposal:research"}
-            )
-            assert len(worker_app.state.dispatch_ids) == 0
-        async with session_factory() as session:
-            thread = await get_thread(session, "superseded")
-            assert thread is not None
-            assert thread.status == ThreadStatus.INPUT_REQUIRED.value
+        assert len(worker_app.state.dispatch_ids) == 0
+    async with session_factory() as session:
+        thread = await get_thread(session, "superseded")
+        assert thread is not None
+        assert thread.status == ThreadStatus.INPUT_REQUIRED.value
 
 
 @pytest.mark.asyncio
 async def test_concurrent_verdict_resumes_elect_one_stable_dispatch(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """Real concurrent sessions elect one dispatcher for the same gate verdict.
 
@@ -941,101 +891,97 @@ async def test_concurrent_verdict_resumes_elect_one_stable_dispatch(
     journal reservation and lease primitive. Exactly one dispatches, and its HTTP
     dispatch id is the stable identity persisted on the elected journal row.
     """
-    checkpoints = tmp_path / "cp-dedup.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await _seed_parked_thread(
-            session_factory,
-            checkpointer,
-            _ParkedThreadSeed(
-                thread_id="dedup",
-                proposal_ids=["proposal:research"],
-                changeset_ids=["cs:research"],
-                gate_pending="proposal:research",
-                team_preset="mock-success-single",
+    await _seed_parked_thread(
+        session_factory,
+        checkpointer,
+        _ParkedThreadSeed(
+            thread_id="dedup",
+            proposal_ids=["proposal:research"],
+            changeset_ids=["cs:research"],
+            gate_pending="proposal:research",
+            team_preset="mock-success-single",
+        ),
+    )
+    async with _worker_runtime(
+        checkpointer,
+        receipt_threads=("dedup",),
+    ) as (worker_client, worker_app, _bridge):
+        first = _make_subscriber(session_factory, checkpointer, worker_client)
+        second = _make_subscriber(session_factory, checkpointer, worker_client)
+        await asyncio.gather(
+            first._resume_with_verdict(
+                "dedup", "request_changes", None, {"proposal:research"}
+            ),
+            second._resume_with_verdict(
+                "dedup", "request_changes", None, {"proposal:research"}
             ),
         )
-        async with _worker_runtime(
-            checkpointer,
-            receipt_threads=("dedup",),
-        ) as (worker_client, worker_app, _bridge):
-            first = _make_subscriber(session_factory, checkpointer, worker_client)
-            second = _make_subscriber(session_factory, checkpointer, worker_client)
-            await asyncio.gather(
-                first._resume_with_verdict(
-                    "dedup", "request_changes", None, {"proposal:research"}
-                ),
-                second._resume_with_verdict(
-                    "dedup", "request_changes", None, {"proposal:research"}
-                ),
-            )
-            assert len(worker_app.state.dispatch_ids) == 1
-        async with session_factory() as session:
-            action = await get_control_action_by_idempotency_key(
-                session,
-                thread_id="dedup",
-                idempotency_key=authoring_verdict_action_key("proposal:research"),
-            )
-            assert action is not None
-            assert action.dispatch_id in worker_app.state.dispatch_ids
+        assert len(worker_app.state.dispatch_ids) == 1
+    async with session_factory() as session:
+        action = await get_control_action_by_idempotency_key(
+            session,
+            thread_id="dedup",
+            idempotency_key=authoring_verdict_action_key("proposal:research"),
+        )
+        assert action is not None
+        assert action.dispatch_id in worker_app.state.dispatch_ids
 
 
 @pytest.mark.asyncio
 async def test_competing_verdict_payloads_share_request_key_and_dispatch_one(
-    tmp_path: Path, session_factory: async_sessionmaker[AsyncSession]
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     """One gate request cannot be rebound to a competing verdict payload."""
-    checkpoints = tmp_path / "cp-competing-verdicts.db"
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await _seed_parked_thread(
-            session_factory,
-            checkpointer,
-            _ParkedThreadSeed(
-                thread_id="competing-verdicts",
-                proposal_ids=["proposal:research"],
-                changeset_ids=["cs:research"],
-                gate_pending="proposal:research",
-                team_preset="mock-success-single",
+    await _seed_parked_thread(
+        session_factory,
+        checkpointer,
+        _ParkedThreadSeed(
+            thread_id="competing-verdicts",
+            proposal_ids=["proposal:research"],
+            changeset_ids=["cs:research"],
+            gate_pending="proposal:research",
+            team_preset="mock-success-single",
+        ),
+    )
+    async with _worker_runtime(
+        checkpointer,
+        receipt_threads=("competing-verdicts",),
+    ) as (worker_client, worker_app, _bridge):
+        approved = _make_subscriber(session_factory, checkpointer, worker_client)
+        rejected = _make_subscriber(session_factory, checkpointer, worker_client)
+        await asyncio.gather(
+            approved._resume_with_verdict(
+                "competing-verdicts", "approved", "ship", {"proposal:research"}
+            ),
+            rejected._resume_with_verdict(
+                "competing-verdicts", "rejected", "revise", {"proposal:research"}
             ),
         )
-        async with _worker_runtime(
-            checkpointer,
-            receipt_threads=("competing-verdicts",),
-        ) as (worker_client, worker_app, _bridge):
-            approved = _make_subscriber(session_factory, checkpointer, worker_client)
-            rejected = _make_subscriber(session_factory, checkpointer, worker_client)
-            await asyncio.gather(
-                approved._resume_with_verdict(
-                    "competing-verdicts", "approved", "ship", {"proposal:research"}
-                ),
-                rejected._resume_with_verdict(
-                    "competing-verdicts", "rejected", "revise", {"proposal:research"}
-                ),
-            )
-            assert len(worker_app.state.dispatch_ids) == 1
-        async with session_factory() as session:
-            action = await get_control_action_by_idempotency_key(
-                session,
-                thread_id="competing-verdicts",
-                idempotency_key=authoring_verdict_action_key("proposal:research"),
-            )
-            assert action is not None
-            assert action.request_id == "proposal:research"
-            accepted_input = json.loads(action.payload_json or "null")
-            assert accepted_input["schema_version"] == "accepted-action-input-v2"
-            # The verdict names the gate it answers, so a resume delivered to a
-            # run that has since re-parked is recognisable there.
-            assert accepted_input["intent"] in (
-                {
-                    "verdict": "approved",
-                    "notes": "ship",
-                    "request_id": "proposal:research",
-                },
-                {
-                    "verdict": "rejected",
-                    "notes": "revise",
-                    "request_id": "proposal:research",
-                },
-            )
+        assert len(worker_app.state.dispatch_ids) == 1
+    async with session_factory() as session:
+        action = await get_control_action_by_idempotency_key(
+            session,
+            thread_id="competing-verdicts",
+            idempotency_key=authoring_verdict_action_key("proposal:research"),
+        )
+        assert action is not None
+        assert action.request_id == "proposal:research"
+        accepted_input = json.loads(action.payload_json or "null")
+        assert accepted_input["schema_version"] == "accepted-action-input-v2"
+        # The verdict names the gate it answers, so a resume delivered to a
+        # run that has since re-parked is recognisable there.
+        assert accepted_input["intent"] in (
+            {
+                "verdict": "approved",
+                "notes": "ship",
+                "request_id": "proposal:research",
+            },
+            {
+                "verdict": "rejected",
+                "notes": "revise",
+                "request_id": "proposal:research",
+            },
+        )
 
 
 # Two settlement tests were dropped when the deterministic-scenarios branch

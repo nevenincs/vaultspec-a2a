@@ -21,7 +21,6 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
@@ -75,6 +74,7 @@ from ...worker.ipc import WorkerBridge
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ...worker.graph_lifecycle import RegisteredCompiledGraph
@@ -91,44 +91,42 @@ def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @asynccontextmanager
 async def _worker_runtime(
-    checkpoint_path: Path,
+    checkpointer: AsyncSqliteSaver,
     *,
     receipt_threads: tuple[str, ...] = (),
-) -> AsyncGenerator[tuple[httpx.AsyncClient, FastAPI, WorkerBridge, AsyncSqliteSaver]]:
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
-        await saver.setup()
-        relayed_events: list[dict[str, object]] = []
-        event_sink = FastAPI()
+) -> AsyncGenerator[tuple[httpx.AsyncClient, FastAPI, WorkerBridge]]:
+    relayed_events: list[dict[str, object]] = []
+    event_sink = FastAPI()
 
-        @event_sink.post("/internal/events/batch")
-        async def accept_event_batch(request: Request) -> JSONResponse:
-            body = await request.json()
-            relayed_events.extend(cast("list[dict[str, object]]", body["events"]))
-            return JSONResponse({"status": "ok"})
+    @event_sink.post("/internal/events/batch")
+    async def accept_event_batch(request: Request) -> JSONResponse:
+        body = await request.json()
+        relayed_events.extend(cast("list[dict[str, object]]", body["events"]))
+        return JSONResponse({"status": "ok"})
 
-        bridge = WorkerBridge("http://control", "direct-control-lease-test")
-        await bridge._client.aclose()
-        bridge._client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=event_sink),
-            base_url="http://control",
-        )
-        executor = Executor(saver, bridge)
-        for thread_id in receipt_threads:
-            _install_receipt_graph(executor, saver, thread_id)
-        app = create_worker_app()
-        app.state.executor = executor
-        app.state.relayed_events = relayed_events
-        async with anyio.create_task_group() as tasks:
-            app.state.task_group = tasks
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="http://worker",
-                headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-            ) as client:
-                yield client, app, bridge, saver
-            tasks.cancel_scope.cancel()
-        await executor.shutdown()
-        await bridge.close()
+    bridge = WorkerBridge("http://control", "direct-control-lease-test")
+    await bridge._client.aclose()
+    bridge._client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=event_sink),
+        base_url="http://control",
+    )
+    executor = Executor(checkpointer, bridge)
+    for thread_id in receipt_threads:
+        _install_receipt_graph(executor, checkpointer, thread_id)
+    app = create_worker_app()
+    app.state.executor = executor
+    app.state.relayed_events = relayed_events
+    async with anyio.create_task_group() as tasks:
+        app.state.task_group = tasks
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://worker",
+            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
+        ) as client:
+            yield client, app, bridge
+        tasks.cancel_scope.cancel()
+    await executor.shutdown()
+    await bridge.close()
 
 
 def _circuit_breaker() -> WorkerCircuitBreaker:
@@ -256,8 +254,8 @@ async def _create_current_thread(
 
 @pytest.mark.asyncio
 async def test_permission_ack_without_graph_event_remains_pending_application(
-    tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Worker scheduling ACK is not permission application truth."""
     thread_id = "permission-ack-only-thread"
@@ -288,11 +286,10 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
     # The real worker accepts and schedules the dispatch, but no graph is
     # registered for this thread. Executor therefore produces no first graph
     # event and no dispatch_applied receipt.
-    async with _worker_runtime(tmp_path / "permission-ack-only.db") as (
+    async with _worker_runtime(checkpointer) as (
         worker_client,
         _worker_app,
         _bridge,
-        _checkpointer,
     ):
         async with session_factory() as db:
             pending = await get_permission_request(db, request_id)
@@ -460,8 +457,8 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
 
 @pytest.mark.asyncio
 async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
-    tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A run that is leaving refuses before the lease, so nothing is written.
 
@@ -483,11 +480,10 @@ async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
         assert before is not None
         requested_before = before.last_requested_action
 
-    async with _worker_runtime(tmp_path / f"busy-{status.value}.db") as (
+    async with _worker_runtime(checkpointer) as (
         _worker_client,
         worker_app,
         _bridge,
-        _checkpointer,
     ):
         async with session_factory() as db:
             result = await send_followup_message(
@@ -515,8 +511,8 @@ async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
 
 @pytest.mark.asyncio
 async def test_cancel_retries_sqlite_lock_before_claim(
-    tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     thread_id = "locked-cancel-thread"
@@ -536,11 +532,10 @@ async def test_cancel_retries_sqlite_lock_before_claim(
         return await original_claim(*args, **kwargs)
 
     monkeypatch.setattr(cancel_service, "prepare_control_action_claim", locked_once)
-    async with _worker_runtime(tmp_path / "locked-cancel-checkpoints.db") as (
+    async with _worker_runtime(checkpointer) as (
         worker_client,
         worker_app,
         _bridge,
-        _checkpointer,
     ):
         async with session_factory() as db:
             result = await cancel_thread(
@@ -560,17 +555,16 @@ async def test_cancel_retries_sqlite_lock_before_claim(
 
 @pytest.mark.asyncio
 async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
-    tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     thread_id = "resource-cancel-thread"
     await _running_thread(session_factory, thread_id)
 
-    async with _worker_runtime(tmp_path / "cancel-checkpoints.db") as (
+    async with _worker_runtime(checkpointer) as (
         worker_client,
         worker_app,
         _bridge,
-        _checkpointer,
     ):
 
         async def cancel(label: str) -> CancelResult:

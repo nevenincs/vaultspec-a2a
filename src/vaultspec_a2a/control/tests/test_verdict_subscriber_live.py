@@ -48,13 +48,6 @@ import httpx
 import pytest
 import pytest_asyncio
 from langchain_core.messages import AIMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
 from ...authoring import (
     AuthoringClient,
@@ -65,7 +58,6 @@ from ...authoring import (
     mint_actor_token,
     verdict_from_event,
 )
-from ...conftest import materialize_schema
 from ...control._verdict_subscriber_config import VerdictSubscriberConfig
 from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
@@ -107,6 +99,8 @@ if TYPE_CHECKING:
 
     from fastapi import FastAPI
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 _TEST_INTERNAL_TOKEN = "verdict-subscriber-live-test-token"
@@ -249,15 +243,6 @@ class _ClobberedRun:
 
     info: dict[str, str]
     thread_id: str
-
-
-@dataclass(frozen=True, slots=True)
-class _LiveDatabase:
-    """SQLite resources shared by one live subscriber test."""
-
-    engine: AsyncEngine
-    session_factory: async_sessionmaker[AsyncSession]
-    checkpoints: Path
 
 
 def _whole_document_op(run_id: str, label: str) -> dict[str, Any]:
@@ -474,7 +459,9 @@ async def _assert_verdict_round_trip(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_verdict_round_trip_parks_and_resumes(
-    client: AuthoringClient, tmp_path: Path
+    client: AuthoringClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Approve / reject / request_changes each resume the correct parked run.
 
@@ -489,19 +476,7 @@ async def test_live_verdict_round_trip_parks_and_resumes(
     round_trip = await _prepare_verdict_round_trip(client)
 
     # --- a2a side: seed a parked run per proposal on a real checkpointer ---
-    db_file = tmp_path / "rt.db"
-    materialize_schema(Path(db_file))
-    db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
-    checkpoints = tmp_path / "rt-cp.db"
-
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
-    ):
-        await checkpointer.setup()
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client:
         await _seed_verdict_round_trip(session_factory, checkpointer, round_trip.seeds)
 
         subscriber = VerdictSubscriber(
@@ -519,8 +494,6 @@ async def test_live_verdict_round_trip_parks_and_resumes(
         await _assert_verdict_round_trip(
             client, subscriber, session_factory, round_trip
         )
-
-    await db_engine.dispose()
 
 
 async def _seed_parked_gate(
@@ -741,7 +714,10 @@ async def _prepare_missed_reject(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_missed_reject_is_recovered_by_parked_reconcile(
-    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path: Path
+    client: AuthoringClient,
+    live_engine: EngineEndpoint,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A HUMAN reject consumed BEFORE the run parks is recovered by the reconcile.
 
@@ -766,84 +742,72 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
     info = await _prepare_missed_reject(client, run_id)
 
     # --- a2a side: seed the parked run, NEVER processing the reject event ---
-    db_file = tmp_path / "mr.db"
-    materialize_schema(Path(db_file))
-    db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
-    checkpoints = tmp_path / "mr-cp.db"
     thread_id = f"thread-{run_id}"
-
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await checkpointer.setup()
-        await _seed_parked_gate(
-            session_factory,
-            checkpointer,
-            _ParkedGateSeed(
-                thread_id=thread_id,
-                proposal_id=info["proposal_id"],
-                changeset_id=info["changeset_id"],
-                team_preset="mock-success-single",
-            ),
-        )
-        async with _worker_runtime(checkpointer, receipt_threads=(thread_id,)) as (
-            worker_client,
-            worker_app,
-            bridge,
-        ):
-            subscriber = VerdictSubscriber(
-                VerdictSubscriberConfig(
-                    session_factory=session_factory,
-                    checkpointer=checkpointer,
-                    worker_client=worker_client,
-                    circuit_breaker=WorkerCircuitBreaker(
-                        failure_threshold=3, recovery_timeout=30.0
-                    ),
-                    worker_spawner=adopted_spawner(),
-                    endpoint_provider=lambda: live_engine,
-                )
-            )
-
-            await subscriber._reconcile_parked_runs(live_engine)
-
-            assert len(worker_app.state.dispatch_ids) == 1
-            async with session_factory() as db:
-                action = await get_control_action_by_idempotency_key(
-                    db,
-                    thread_id=thread_id,
-                    idempotency_key=authoring_verdict_action_key(info["proposal_id"]),
-                )
-                gate_row = await get_permission_request(db, info["proposal_id"])
-                thread = await get_thread(db, thread_id)
-            assert action is not None
-            assert action.dispatch_id in worker_app.state.dispatch_ids
-            assert action.applied_at is None
-            assert gate_row is not None
-            assert gate_row.request_status == PermissionRequestStatus.PENDING.value
-            assert thread is not None
-            assert thread.status == ThreadStatus.INPUT_REQUIRED.value
-
-            # A dispatched control action always carries its dispatch id;
-            # the column is nullable for the pre-dispatch row only.
-            assert action.dispatch_id is not None
-            receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
-            await relay_event(
-                thread_id,
-                receipt,
+    await _seed_parked_gate(
+        session_factory,
+        checkpointer,
+        _ParkedGateSeed(
+            thread_id=thread_id,
+            proposal_id=info["proposal_id"],
+            changeset_id=info["changeset_id"],
+            team_preset="mock-success-single",
+        ),
+    )
+    async with _worker_runtime(checkpointer, receipt_threads=(thread_id,)) as (
+        worker_client,
+        worker_app,
+        bridge,
+    ):
+        subscriber = VerdictSubscriber(
+            VerdictSubscriberConfig(
                 session_factory=session_factory,
                 checkpointer=checkpointer,
+                worker_client=worker_client,
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=3, recovery_timeout=30.0
+                ),
+                worker_spawner=adopted_spawner(),
+                endpoint_provider=lambda: live_engine,
             )
+        )
 
-            async with session_factory() as db:
-                gate_row = await get_permission_request(db, info["proposal_id"])
-                thread = await get_thread(db, thread_id)
-            assert gate_row is not None
-            assert gate_row.request_status == PermissionRequestStatus.APPLIED.value
-            assert thread is not None
-            assert thread.status == ThreadStatus.RUNNING.value
+        await subscriber._reconcile_parked_runs(live_engine)
 
-    await db_engine.dispose()
+        assert len(worker_app.state.dispatch_ids) == 1
+        async with session_factory() as db:
+            action = await get_control_action_by_idempotency_key(
+                db,
+                thread_id=thread_id,
+                idempotency_key=authoring_verdict_action_key(info["proposal_id"]),
+            )
+            gate_row = await get_permission_request(db, info["proposal_id"])
+            thread = await get_thread(db, thread_id)
+        assert action is not None
+        assert action.dispatch_id in worker_app.state.dispatch_ids
+        assert action.applied_at is None
+        assert gate_row is not None
+        assert gate_row.request_status == PermissionRequestStatus.PENDING.value
+        assert thread is not None
+        assert thread.status == ThreadStatus.INPUT_REQUIRED.value
+
+        # A dispatched control action always carries its dispatch id;
+        # the column is nullable for the pre-dispatch row only.
+        assert action.dispatch_id is not None
+        receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
+        await relay_event(
+            thread_id,
+            receipt,
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+        )
+
+        async with session_factory() as db:
+            gate_row = await get_permission_request(db, info["proposal_id"])
+            thread = await get_thread(db, thread_id)
+        assert gate_row is not None
+        assert gate_row.request_status == PermissionRequestStatus.APPLIED.value
+        assert thread is not None
+        assert thread.status == ThreadStatus.RUNNING.value
 
 
 async def _assert_clobbered_snapshot(
@@ -890,97 +854,79 @@ async def _prepare_clobbered_run(client: AuthoringClient) -> _ClobberedRun:
     return _ClobberedRun(info=info, thread_id=f"thread-{run_id}")
 
 
-def _open_live_database(tmp_path: Path, stem: str) -> _LiveDatabase:
-    db_file = tmp_path / f"{stem}.db"
-    materialize_schema(db_file)
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    return _LiveDatabase(
-        engine=engine,
-        session_factory=session_factory,
-        checkpoints=tmp_path / f"{stem}-cp.db",
-    )
-
-
 async def _run_clobbered_reconcile(
-    database: _LiveDatabase,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
     seed: _ClobberedRun,
     live_engine: EngineEndpoint,
 ) -> None:
-    async with AsyncSqliteSaver.from_conn_string(
-        str(database.checkpoints)
-    ) as checkpointer:
-        await checkpointer.setup()
-        await _seed_parked_gate(
-            database.session_factory,
-            checkpointer,
-            _ParkedGateSeed(
-                thread_id=seed.thread_id,
-                proposal_id=seed.info["proposal_id"],
-                changeset_id=seed.info["changeset_id"],
-                status=ThreadStatus.RUNNING,
-                team_preset="mock-success-single",
-            ),
-        )
-        async with _worker_runtime(checkpointer, receipt_threads=(seed.thread_id,)) as (
-            worker_client,
-            worker_app,
-            bridge,
-        ):
-            subscriber = VerdictSubscriber(
-                VerdictSubscriberConfig(
-                    session_factory=database.session_factory,
-                    checkpointer=checkpointer,
-                    worker_client=worker_client,
-                    circuit_breaker=WorkerCircuitBreaker(
-                        failure_threshold=3, recovery_timeout=30.0
-                    ),
-                    worker_spawner=adopted_spawner(),
-                    endpoint_provider=lambda: live_engine,
-                )
-            )
-
-            await subscriber._reconcile_parked_runs(live_engine)
-
-            assert len(worker_app.state.dispatch_ids) == 1
-            async with database.session_factory() as db:
-                action = await get_control_action_by_idempotency_key(
-                    db,
-                    thread_id=seed.thread_id,
-                    idempotency_key=authoring_verdict_action_key(
-                        seed.info["proposal_id"]
-                    ),
-                )
-            assert action is not None
-            assert action.applied_at is None
-            # A dispatched control action always carries its dispatch id;
-            # the column is nullable for the pre-dispatch row only.
-            assert action.dispatch_id is not None
-            receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
-            await relay_event(
-                seed.thread_id,
-                receipt,
-                session_factory=database.session_factory,
+    await _seed_parked_gate(
+        session_factory,
+        checkpointer,
+        _ParkedGateSeed(
+            thread_id=seed.thread_id,
+            proposal_id=seed.info["proposal_id"],
+            changeset_id=seed.info["changeset_id"],
+            status=ThreadStatus.RUNNING,
+            team_preset="mock-success-single",
+        ),
+    )
+    async with _worker_runtime(checkpointer, receipt_threads=(seed.thread_id,)) as (
+        worker_client,
+        worker_app,
+        bridge,
+    ):
+        subscriber = VerdictSubscriber(
+            VerdictSubscriberConfig(
+                session_factory=session_factory,
                 checkpointer=checkpointer,
+                worker_client=worker_client,
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=3, recovery_timeout=30.0
+                ),
+                worker_spawner=adopted_spawner(),
+                endpoint_provider=lambda: live_engine,
             )
-            async with database.session_factory() as db:
-                settled = await get_control_action_by_idempotency_key(
-                    db,
-                    thread_id=seed.thread_id,
-                    idempotency_key=authoring_verdict_action_key(
-                        seed.info["proposal_id"]
-                    ),
-                )
-            assert settled is not None
-            assert settled.applied_at is not None
+        )
+
+        await subscriber._reconcile_parked_runs(live_engine)
+
+        assert len(worker_app.state.dispatch_ids) == 1
+        async with session_factory() as db:
+            action = await get_control_action_by_idempotency_key(
+                db,
+                thread_id=seed.thread_id,
+                idempotency_key=authoring_verdict_action_key(seed.info["proposal_id"]),
+            )
+        assert action is not None
+        assert action.applied_at is None
+        # A dispatched control action always carries its dispatch id;
+        # the column is nullable for the pre-dispatch row only.
+        assert action.dispatch_id is not None
+        receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
+        await relay_event(
+            seed.thread_id,
+            receipt,
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+        )
+        async with session_factory() as db:
+            settled = await get_control_action_by_idempotency_key(
+                db,
+                thread_id=seed.thread_id,
+                idempotency_key=authoring_verdict_action_key(seed.info["proposal_id"]),
+            )
+        assert settled is not None
+        assert settled.applied_at is not None
 
 
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcile(
-    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path: Path
+    client: AuthoringClient,
+    live_engine: EngineEndpoint,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A run parked at a gate but mis-statused RUNNING is still recovered.
 
@@ -1000,6 +946,4 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
     re-dispatch exactly one ``resume`` carrying the missed ``request_changes``.
     """
     seed = await _prepare_clobbered_run(client)
-    database = _open_live_database(tmp_path, "cl")
-    await _run_clobbered_reconcile(database, seed, live_engine)
-    await database.engine.dispose()
+    await _run_clobbered_reconcile(session_factory, checkpointer, seed, live_engine)

@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, text
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ...database.models import Base, ThreadModel
 from ...database.run_event_repository import RunEventStore
@@ -35,7 +34,7 @@ from ..subscribers import RunSequenceAllocator, SequenceAllocation
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
-    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 _RUN = "replay-writer-proof"
 _ARTIFACT_BODY = "# Decision record\n\nEvery word of the document body.\n"
@@ -47,9 +46,16 @@ _ACTOR_TOKEN = "role-actor-token-must-never-be-stored"
 class _Harness:
     """A real store, a real aggregator, and the writer bound between them."""
 
-    def __init__(self, engine: AsyncEngine, *, window: int, interval: float) -> None:
+    def __init__(
+        self,
+        engine: AsyncEngine,
+        session_factory: async_sessionmaker[AsyncSession],
+        *,
+        window: int,
+        interval: float,
+    ) -> None:
         self.engine = engine
-        self.session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        self.session_factory = session_factory
         self.store = RunEventStore(self.session_factory)
         self.writer = RunEventWriter(
             self.store, window=window, flush_interval_seconds=interval
@@ -107,12 +113,18 @@ _IDLE_CADENCE = 30.0
 @pytest_asyncio.fixture
 async def make_harness(
     migrated_engine: AsyncEngine,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> AsyncIterator[Callable[..., Awaitable[_Harness]]]:
     """Bind a writer, with the cadence and window a proof asks for, to the store."""
     built: list[_Harness] = []
 
     async def _make(*, window: int = 3, interval: float = _IDLE_CADENCE) -> _Harness:
-        harness = _Harness(migrated_engine, window=window, interval=interval)
+        harness = _Harness(
+            migrated_engine,
+            migrated_session_factory,
+            window=window,
+            interval=interval,
+        )
         built.append(harness)
         await harness.seed_thread()
         return harness

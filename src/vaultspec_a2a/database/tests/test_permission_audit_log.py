@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING
 import anyio
 import httpx
 import pytest
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control._permission_response_contract import PermissionInput
 from ...control.circuit_breaker import WorkerCircuitBreaker
@@ -49,6 +48,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
     from pathlib import Path
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..models import PermissionLogModel
@@ -76,24 +76,24 @@ _APPROVAL_PAUSE = _PauseSpec("plan_approval_request", None, _APPROVAL_OPTIONS)
 
 
 @asynccontextmanager
-async def _worker(checkpoint_path: Path) -> AsyncGenerator[httpx.AsyncClient]:
+async def _worker(
+    checkpointer: AsyncSqliteSaver,
+) -> AsyncGenerator[httpx.AsyncClient]:
     """Serve the production worker application over a real HTTP transport."""
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
-        await saver.setup()
-        bridge = WorkerBridge("http://127.0.0.1:1", "permission-audit-test")
-        executor = Executor(saver, bridge)
-        app = create_worker_app()
-        app.state.executor = executor
-        async with anyio.create_task_group() as tasks:
-            app.state.task_group = tasks
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="http://worker",
-            ) as client:
-                yield client
-            tasks.cancel_scope.cancel()
-        await executor.shutdown()
-        await bridge.close()
+    bridge = WorkerBridge("http://127.0.0.1:1", "permission-audit-test")
+    executor = Executor(checkpointer, bridge)
+    app = create_worker_app()
+    app.state.executor = executor
+    async with anyio.create_task_group() as tasks:
+        app.state.task_group = tasks
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://worker",
+        ) as client:
+            yield client
+        tasks.cancel_scope.cancel()
+    await executor.shutdown()
+    await bridge.close()
 
 
 async def _pause_run(
@@ -163,6 +163,7 @@ async def _audit_rows(
 async def test_approving_a_tool_call_records_a_durable_audit_row(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A real approval leaves a real row naming the tool and the option."""
     thread_id = "audit-approve-thread"
@@ -174,7 +175,7 @@ async def test_approving_a_tool_call_records_a_durable_audit_row(
     )
     assert await _audit_rows(session_factory, thread_id) == []
 
-    async with _worker(tmp_path / "audit-approve-checkpoints.db") as worker_client:
+    async with _worker(checkpointer) as worker_client:
         result = await _decide(
             session_factory,
             worker_client,
@@ -201,6 +202,7 @@ async def test_approving_a_tool_call_records_a_durable_audit_row(
 async def test_rejecting_a_tool_call_records_the_denial_not_an_approval(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The audited verdict follows the option's kind, so a denial reads as one."""
     thread_id = "audit-reject-thread"
@@ -211,7 +213,7 @@ async def test_rejecting_a_tool_call_records_the_denial_not_an_approval(
         pause=_TOOL_PAUSE,
     )
 
-    async with _worker(tmp_path / "audit-reject-checkpoints.db") as worker_client:
+    async with _worker(checkpointer) as worker_client:
         result = await _decide(
             session_factory,
             worker_client,
@@ -231,6 +233,7 @@ async def test_rejecting_a_tool_call_records_the_denial_not_an_approval(
 async def test_an_approval_pause_is_audited_under_the_plan_approval_sentinel(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A pause that gated no tool still names what was decided."""
     thread_id = "audit-plan-thread"
@@ -241,7 +244,7 @@ async def test_an_approval_pause_is_audited_under_the_plan_approval_sentinel(
         pause=_APPROVAL_PAUSE,
     )
 
-    async with _worker(tmp_path / "audit-plan-checkpoints.db") as worker_client:
+    async with _worker(checkpointer) as worker_client:
         result = await _decide(
             session_factory,
             worker_client,
@@ -264,6 +267,7 @@ async def test_an_approval_pause_is_audited_under_the_plan_approval_sentinel(
 async def test_a_guard_rejected_response_is_not_recorded_as_a_decision(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The log holds decisions, not attempts the state machine refused."""
     thread_id = "audit-refused-thread"
@@ -274,7 +278,7 @@ async def test_a_guard_rejected_response_is_not_recorded_as_a_decision(
         pause=_TOOL_PAUSE,
     )
 
-    async with _worker(tmp_path / "audit-refused-checkpoints.db") as worker_client:
+    async with _worker(checkpointer) as worker_client:
         result = await _decide(
             session_factory,
             worker_client,
@@ -292,6 +296,7 @@ async def test_a_guard_rejected_response_is_not_recorded_as_a_decision(
 async def test_a_client_retry_records_one_decision_not_two(
     tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """One decision yields one row however many times the client retries.
 
@@ -306,7 +311,7 @@ async def test_a_client_retry_records_one_decision_not_two(
         pause=_TOOL_PAUSE,
     )
 
-    async with _worker(tmp_path / "audit-retry-checkpoints.db") as worker_client:
+    async with _worker(checkpointer) as worker_client:
         first = await _decide(
             session_factory,
             worker_client,

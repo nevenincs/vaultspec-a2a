@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 import pytest
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.config import get_stream_writer
 from langgraph.graph import END, START
 from langgraph.types import interrupt
@@ -54,6 +53,8 @@ from ..aggregator import EventAggregator
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from ..types import SequencedEvent, StreamableGraph
 
@@ -117,26 +118,26 @@ async def _drain(queue: Any) -> list[SequencedEvent]:
 
 
 @pytest.mark.asyncio
-async def test_a_run_still_reports_every_family_of_frame_it_used_to() -> None:
+async def test_a_run_still_reports_every_family_of_frame_it_used_to(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """The public stream plus its callbacks carry the whole wire surface."""
     replies: list[str] = []
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        aggregator = EventAggregator()
-        queue = aggregator.add_subscriber("client-surface")
-        aggregator.subscribe("client-surface", ["thread-surface"])
-        ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    aggregator = EventAggregator()
+    queue = aggregator.add_subscriber("client-surface")
+    aggregator.subscribe("client-surface", ["thread-surface"])
+    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
 
-        outcome = await asyncio.wait_for(
-            ingest(
-                thread_id="thread-surface",
-                agent_id="supervisor",
-                graph=_full_surface_graph(saver, replies),
-                graph_input={"note": ""},
-                config={"configurable": {"thread_id": "thread-surface"}},
-            ),
-            timeout=30.0,
-        )
+    outcome = await asyncio.wait_for(
+        ingest(
+            thread_id="thread-surface",
+            agent_id="supervisor",
+            graph=_full_surface_graph(checkpointer, replies),
+            graph_input={"note": ""},
+            config={"configurable": {"thread_id": "thread-surface"}},
+        ),
+        timeout=30.0,
+    )
 
     assert outcome == "completed"
     events = [sequenced.event for sequenced in await _drain(queue)]
@@ -194,25 +195,25 @@ def _parking_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
 
 
 @pytest.mark.asyncio
-async def test_a_parked_run_is_reported_interrupted_and_asks_for_its_answer() -> None:
+async def test_a_parked_run_is_reported_interrupted_and_asks_for_its_answer(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """The stream reports the park, and the projection publishes the request."""
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        aggregator = EventAggregator()
-        queue = aggregator.add_subscriber("client-park")
-        aggregator.subscribe("client-park", ["thread-park"])
-        ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    aggregator = EventAggregator()
+    queue = aggregator.add_subscriber("client-park")
+    aggregator.subscribe("client-park", ["thread-park"])
+    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
 
-        outcome = await asyncio.wait_for(
-            ingest(
-                thread_id="thread-park",
-                agent_id="supervisor",
-                graph=_parking_graph(saver),
-                graph_input={"note": ""},
-                config={"configurable": {"thread_id": "thread-park"}},
-            ),
-            timeout=30.0,
-        )
+    outcome = await asyncio.wait_for(
+        ingest(
+            thread_id="thread-park",
+            agent_id="supervisor",
+            graph=_parking_graph(checkpointer),
+            graph_input={"note": ""},
+            config={"configurable": {"thread_id": "thread-park"}},
+        ),
+        timeout=30.0,
+    )
 
     assert outcome == "interrupted"
     events = [sequenced.event for sequenced in await _drain(queue)]

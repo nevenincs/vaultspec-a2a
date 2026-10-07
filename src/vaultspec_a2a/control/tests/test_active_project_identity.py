@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 
 from ...context.metadata import ThreadMetadata
@@ -51,6 +50,8 @@ from ..thread_service import process_metadata
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 
 def _uncanonical_spelling(workspace: Path) -> str:
@@ -927,38 +928,35 @@ class TestOneWorkspaceOneGraphEntry:
 
     @pytest.mark.asyncio
     async def test_real_checkpoint_read_timeout_cleans_all_compile_state(
-        self, workspace: Path, tmp_path: Path
+        self, workspace: Path, checkpointer: AsyncSqliteSaver
     ) -> None:
-        checkpoint_path = tmp_path / "held-checkpoint.db"
-        async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
-            await saver.setup()
-            manager = GraphLifecycleManager(
-                checkpointer=saver,
-                bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
-                aggregator=EventAggregator(),
-                token_store=RunTokenStore(),
-                catalog_store=RunCatalogStore(),
-                checkpoint_read_timeout_seconds=0.02,
-            )
-            await saver.lock.acquire()
-            try:
-                with pytest.raises(GraphCompilationError, match="read timed out"):
-                    await manager.get_or_compile_graph(
-                        DispatchRequest(
-                            action="ingest",
-                            thread_id="held-read",
-                            team_preset="mock-success-single",
-                            workspace_root=str(workspace),
-                            recursion_limit=25,
-                            model_assignment=_assignment("current"),
-                            graph_definition=_definition(workspace),
-                        )
+        manager = GraphLifecycleManager(
+            checkpointer=checkpointer,
+            bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
+            aggregator=EventAggregator(),
+            token_store=RunTokenStore(),
+            catalog_store=RunCatalogStore(),
+            checkpoint_read_timeout_seconds=0.02,
+        )
+        await checkpointer.lock.acquire()
+        try:
+            with pytest.raises(GraphCompilationError, match="read timed out"):
+                await manager.get_or_compile_graph(
+                    DispatchRequest(
+                        action="ingest",
+                        thread_id="held-read",
+                        team_preset="mock-success-single",
+                        workspace_root=str(workspace),
+                        recursion_limit=25,
+                        model_assignment=_assignment("current"),
+                        graph_definition=_definition(workspace),
                     )
-            finally:
-                saver.lock.release()
+                )
+        finally:
+            checkpointer.lock.release()
 
-            assert manager.thread_binding_count == 0
-            assert manager.compile_flight_count == 0
+        assert manager.thread_binding_count == 0
+        assert manager.compile_flight_count == 0
 
     @pytest.mark.asyncio
     async def test_fresh_worker_refuses_a_digest_that_disagrees_with_checkpoint(

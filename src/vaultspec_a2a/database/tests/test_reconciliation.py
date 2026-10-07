@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...conftest import materialize_schema
 from ...control.tests.test_dispatch_failure_transitions import (
     _seed_accepted_initial_action,
 )
@@ -25,56 +21,49 @@ from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 @pytest.mark.asyncio
 async def test_pending_permission_without_checkpoint_is_not_marked_resumable(
     runtime_dir: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Missing checkpoint truth must win over a surviving permission row."""
-    db_file = runtime_dir / "reconciliation.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-    checkpoints_file = runtime_dir / "checkpoints.db"
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-missing-checkpoint",
+            metadata=current_execution_metadata(runtime_dir),
+        )
+        await _seed_accepted_initial_action(session, thread.id, workspace=runtime_dir)
+        await record_permission_request(
+            session,
+            request_id=f"{thread.id}:perm-1",
+            thread_id=thread.id,
+            pause_reason_type="bash",
+            description="Allow action?",
+            allowed_options=[
+                {
+                    "option_id": "allow_once",
+                    "name": "Allow once",
+                    "kind": "allow_once",
+                }
+            ],
+            tool_call="bash",
+        )
+        await session.commit()
 
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-missing-checkpoint",
-                metadata=current_execution_metadata(runtime_dir),
-            )
-            await _seed_accepted_initial_action(
-                session, thread.id, workspace=runtime_dir
-            )
-            await record_permission_request(
-                session,
-                request_id=f"{thread.id}:perm-1",
-                thread_id=thread.id,
-                pause_reason_type="bash",
-                description="Allow action?",
-                allowed_options=[
-                    {
-                        "option_id": "allow_once",
-                        "name": "Allow once",
-                        "kind": "allow_once",
-                    }
-                ],
-                tool_call="bash",
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            summary = await reconcile_threads_on_startup(session, checkpointer)
-            await session.commit()
-            repaired = await get_thread(session, "thread-missing-checkpoint")
+    async with session_factory() as session:
+        summary = await reconcile_threads_on_startup(session, checkpointer)
+        await session.commit()
+        repaired = await get_thread(session, "thread-missing-checkpoint")
 
     assert summary["paused_resumable"] == 0
     assert summary["checkpoint_unavailable"] == 0
@@ -83,46 +72,33 @@ async def test_pending_permission_without_checkpoint_is_not_marked_resumable(
     assert repaired.repair_status == "needs_reconciliation"
     assert repaired.execution_readiness == "needs_reconciliation"
     assert repaired.repair_reason == "checkpoint_absent"
-
-    await engine.dispose()
 
 
 @pytest.mark.asyncio
 async def test_cancelling_without_checkpoint_is_not_marked_cancel_pending(
     runtime_dir: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Missing checkpoint truth must beat a surviving cancelling status."""
-    db_file = runtime_dir / "reconciliation-cancelling.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-    checkpoints_file = runtime_dir / "checkpoints-cancelling.db"
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-cancelling-missing-checkpoint",
+            status="cancelling",
+            metadata=current_execution_metadata(runtime_dir),
+        )
+        await _seed_accepted_initial_action(session, thread.id, workspace=runtime_dir)
+        await session.commit()
 
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-cancelling-missing-checkpoint",
-                status="cancelling",
-                metadata=current_execution_metadata(runtime_dir),
-            )
-            await _seed_accepted_initial_action(
-                session, thread.id, workspace=runtime_dir
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            summary = await reconcile_threads_on_startup(session, checkpointer)
-            await session.commit()
-            repaired = await get_thread(
-                session,
-                "thread-cancelling-missing-checkpoint",
-            )
+    async with session_factory() as session:
+        summary = await reconcile_threads_on_startup(session, checkpointer)
+        await session.commit()
+        repaired = await get_thread(
+            session,
+            "thread-cancelling-missing-checkpoint",
+        )
 
     assert summary["paused_resumable"] == 0
     assert summary["checkpoint_unavailable"] == 0
@@ -132,12 +108,11 @@ async def test_cancelling_without_checkpoint_is_not_marked_cancel_pending(
     assert repaired.execution_readiness == "needs_reconciliation"
     assert repaired.repair_reason == "checkpoint_absent"
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_deleting_thread_with_pending_permission_is_never_swept(
-    runtime_dir: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A thread mid-teardown must stay invisible to startup reconciliation.
 
@@ -149,59 +124,48 @@ async def test_deleting_thread_with_pending_permission_is_never_swept(
     ``update_thread_status`` to request ``DELETING -> input_required`` and raise
     ``InvalidTransitionError`` out of startup reconciliation.
     """
-    db_file = runtime_dir / "reconciliation-deleting.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-    checkpoints_file = runtime_dir / "checkpoints-deleting.db"
     thread_id = "thread-deleting-pending-permission"
 
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {"thread_id": thread_id, "checkpoint_ns": ""}
-        }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-deleting-pending-permission"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    config: RunnableConfig = {
+        "configurable": {"thread_id": thread_id, "checkpoint_ns": ""}
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-deleting-pending-permission"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=thread_id,
+            status="deleting",
         )
+        await record_permission_request(
+            session,
+            request_id=f"{thread_id}:perm-1",
+            thread_id=thread_id,
+            pause_reason_type="bash",
+            description="Allow action?",
+            allowed_options=[
+                {
+                    "option_id": "allow_once",
+                    "name": "Allow once",
+                    "kind": "allow_once",
+                }
+            ],
+            tool_call="bash",
+        )
+        await session.commit()
 
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id=thread_id,
-                status="deleting",
-            )
-            await record_permission_request(
-                session,
-                request_id=f"{thread_id}:perm-1",
-                thread_id=thread_id,
-                pause_reason_type="bash",
-                description="Allow action?",
-                allowed_options=[
-                    {
-                        "option_id": "allow_once",
-                        "name": "Allow once",
-                        "kind": "allow_once",
-                    }
-                ],
-                tool_call="bash",
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            summary = await reconcile_threads_on_startup(session, checkpointer)
-            await session.commit()
-            unswept = await get_thread(session, thread_id)
+    async with session_factory() as session:
+        summary = await reconcile_threads_on_startup(session, checkpointer)
+        await session.commit()
+        unswept = await get_thread(session, thread_id)
 
     assert summary["repair_backlog"] == 0
     assert summary["paused_resumable"] == 0
@@ -211,76 +175,63 @@ async def test_deleting_thread_with_pending_permission_is_never_swept(
     assert unswept.execution_readiness == "healthy"
     assert unswept.recovery_epoch == 0
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
 async def test_answered_pending_apply_with_checkpoint_is_not_marked_resumable(
     runtime_dir: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Answered-not-applied rows must not be treated as user-paused on restart."""
-    db_file = runtime_dir / "reconciliation-answered-pending-apply.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-    checkpoints_file = runtime_dir / "checkpoints-answered-pending-apply.db"
 
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
-        await checkpointer.setup()
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": "thread-answered-pending-apply-reconcile",
-                "checkpoint_ns": "",
-            }
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": "thread-answered-pending-apply-reconcile",
+            "checkpoint_ns": "",
         }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-answered-pending-apply"
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            {},
+    }
+    checkpoint = await real_checkpoint()
+    checkpoint["id"] = "cp-answered-pending-apply"
+    await checkpointer.aput(
+        config,
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-answered-pending-apply-reconcile",
+            status="running",
+            metadata=current_execution_metadata(runtime_dir),
         )
+        await _seed_accepted_initial_action(session, thread.id, workspace=runtime_dir)
+        await record_permission_request(
+            session,
+            request_id=f"{thread.id}:perm-1",
+            thread_id=thread.id,
+            pause_reason_type="plan_approval_request",
+            description="Approve plan?",
+            allowed_options=[{"option_id": "approve", "name": "Approve"}],
+            tool_call=None,
+        )
+        await record_permission_response_submission(
+            session,
+            request_id=f"{thread.id}:perm-1",
+            option_id="approve",
+            idempotency_key="idem-reconcile-answered-pending-apply",
+        )
+        await session.commit()
 
-        async with session_factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="thread-answered-pending-apply-reconcile",
-                status="running",
-                metadata=current_execution_metadata(runtime_dir),
-            )
-            await _seed_accepted_initial_action(
-                session, thread.id, workspace=runtime_dir
-            )
-            await record_permission_request(
-                session,
-                request_id=f"{thread.id}:perm-1",
-                thread_id=thread.id,
-                pause_reason_type="plan_approval_request",
-                description="Approve plan?",
-                allowed_options=[{"option_id": "approve", "name": "Approve"}],
-                tool_call=None,
-            )
-            await record_permission_response_submission(
-                session,
-                request_id=f"{thread.id}:perm-1",
-                option_id="approve",
-                idempotency_key="idem-reconcile-answered-pending-apply",
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            summary = await reconcile_threads_on_startup(session, checkpointer)
-            await session.commit()
-            repaired = await get_thread(
-                session,
-                "thread-answered-pending-apply-reconcile",
-            )
+    async with session_factory() as session:
+        summary = await reconcile_threads_on_startup(session, checkpointer)
+        await session.commit()
+        repaired = await get_thread(
+            session,
+            "thread-answered-pending-apply-reconcile",
+        )
 
     assert summary["paused_resumable"] == 0
     assert repaired is not None
@@ -289,5 +240,3 @@ async def test_answered_pending_apply_with_checkpoint_is_not_marked_resumable(
     assert repaired.execution_readiness == "needs_reconciliation"
     assert repaired.recovery_epoch == 0
     assert repaired.repair_generation == 0
-
-    await engine.dispose()

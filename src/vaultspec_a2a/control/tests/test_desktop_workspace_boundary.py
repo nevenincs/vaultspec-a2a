@@ -8,8 +8,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from ...conftest import SqlitePosture
 from ...context.metadata import ThreadMetadata
 from ...database import (
     create_control_action,
@@ -17,8 +17,6 @@ from ...database import (
     list_active_thread_page,
     normalize_workspace_identity,
 )
-from ...database.models import Base
-from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...testing import settings_override
@@ -39,6 +37,8 @@ from ..workspace import require_admitted_workspace_root
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 @pytest.mark.parametrize(
@@ -173,8 +173,10 @@ def test_frozen_dispatch_rechecks_desktop_authority_and_cancel_remains_available
 
 
 @pytest.mark.asyncio
+@pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS)
 async def test_saved_project_aliases_remain_valid_for_restart_reconciliation(
     tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     home = tmp_path / "desktop"
     project = state_layout(home).workspaces_root / "project"
@@ -182,70 +184,62 @@ async def test_saved_project_aliases_remain_valid_for_restart_reconciliation(
     aliases = [str(project / ".." / "project")]
     if os.name == "nt":
         aliases.append("\\\\?\\" + str(project))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'run.db'}")
-    configure_sqlite_transactions(engine)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
-    try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-        definition = freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=project),
-            workspace_root=project,
-        )
-        with settings_override(desktop_app_home=home):
-            async with sessions() as db:
-                for index, alias in enumerate(aliases):
-                    run_id = f"saved-alias-{index}"
-                    dispatch_id = f"saved-receipt-{index}"
-                    request = DispatchRequest(
-                        action="resume",
-                        thread_id=run_id,
-                        workspace_root=alias,
-                        team_preset="mock-success-single",
-                        graph_definition=definition,
-                        recursion_limit=25,
+    definition = freeze_graph_definition(
+        load_team_config("mock-success-single", workspace_root=project),
+        workspace_root=project,
+    )
+    with settings_override(desktop_app_home=home):
+        async with session_factory() as db:
+            for index, alias in enumerate(aliases):
+                run_id = f"saved-alias-{index}"
+                dispatch_id = f"saved-receipt-{index}"
+                request = DispatchRequest(
+                    action="resume",
+                    thread_id=run_id,
+                    workspace_root=alias,
+                    team_preset="mock-success-single",
+                    graph_definition=definition,
+                    recursion_limit=25,
+                )
+                thread = await create_thread(
+                    db,
+                    thread_id=run_id,
+                    status=ThreadStatus.RECONCILING,
+                    team_preset="mock-success-single",
+                    metadata=json.dumps({"workspace_root": alias}),
+                    write_authority=RunWriteAuthority(
+                        0, 1, ControlActionType.RESUME, dispatch_id
+                    ),
+                )
+                await create_control_action(
+                    db,
+                    thread_id=run_id,
+                    action_type=ControlActionType.RESUME,
+                    idempotency_key=dispatch_id,
+                    dispatch_id=dispatch_id,
+                    payload=freeze_accepted_input(request, intent={}),
+                    recovery_deadline_at=datetime(2100, 1, 1, tzinfo=UTC),
+                )
+                assert (
+                    await prepare_graph_action_receipt(
+                        db, thread_id=run_id, dispatch_id=dispatch_id
                     )
-                    thread = await create_thread(
-                        db,
-                        thread_id=run_id,
-                        status=ThreadStatus.RECONCILING,
-                        team_preset="mock-success-single",
-                        metadata=json.dumps({"workspace_root": alias}),
-                        write_authority=RunWriteAuthority(
-                            0, 1, ControlActionType.RESUME, dispatch_id
-                        ),
-                    )
-                    await create_control_action(
-                        db,
-                        thread_id=run_id,
-                        action_type=ControlActionType.RESUME,
-                        idempotency_key=dispatch_id,
-                        dispatch_id=dispatch_id,
-                        payload=freeze_accepted_input(request, intent={}),
-                        recovery_deadline_at=datetime(2100, 1, 1, tzinfo=UTC),
-                    )
-                    assert (
-                        await prepare_graph_action_receipt(
-                            db, thread_id=run_id, dispatch_id=dispatch_id
-                        )
-                        is not None
-                    )
-                    await db.commit()
-                    restored = await _restore_reconciling_dispatch(
-                        db, thread, {}, str(project.resolve())
-                    )
-                    assert restored is not None
-                    assert require_admitted_workspace_root(
-                        restored.workspace_root or ""
-                    ).samefile(project)
-                    assert restored.graph_action_receipt is not None
-                    discovered = await list_active_thread_page(
-                        db,
-                        limit=100,
-                        workspace_root=normalize_workspace_identity(
-                            require_admitted_workspace_root(alias)
-                        ),
-                    )
-                    assert run_id in {row.id for row in discovered}
-    finally:
-        await engine.dispose()
+                    is not None
+                )
+                await db.commit()
+                restored = await _restore_reconciling_dispatch(
+                    db, thread, {}, str(project.resolve())
+                )
+                assert restored is not None
+                assert require_admitted_workspace_root(
+                    restored.workspace_root or ""
+                ).samefile(project)
+                assert restored.graph_action_receipt is not None
+                discovered = await list_active_thread_page(
+                    db,
+                    limit=100,
+                    workspace_root=normalize_workspace_identity(
+                        require_admitted_workspace_root(alias)
+                    ),
+                )
+                assert run_id in {row.id for row in discovered}

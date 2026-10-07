@@ -294,6 +294,15 @@ class TeamState(TypedDict):
     # dropped on load and never reaches a node.
     approval_status: NotRequired[str | None]
     approval_request_id: NotRequired[str | None]
+    # Every plan approval this run has ASKED, in order, append-and-deduplicated.
+    # The gate names its next request from this lineage, which is what makes a
+    # re-ask after a rejection a DIFFERENT request from the one the human
+    # already answered: naming the request by the plan alone handed an
+    # unchanged plan the same id, and the control journal keys the answer by
+    # that id, so the re-asked approval replayed the rejection instead of
+    # taking a new verdict. Append-only and never cleared, because an id spent
+    # on a question somebody already answered can never be offered again.
+    plan_approvals_asked: NotRequired[Annotated[list[str], merge_unique_strs]]
 
     # --- tool permission gate ---
     # Every tool-permission request a human has answered this run, as

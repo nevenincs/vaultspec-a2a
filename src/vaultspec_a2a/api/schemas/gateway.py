@@ -906,9 +906,6 @@ class RunClarificationRespondRequest(BaseModel):
         if len(supplied) != 1:
             msg = "exactly one of answers, prompt, or decline is required"
             raise ValueError(msg)
-        if self.prompt is not None and not self.prompt.strip():
-            msg = "prompt must not be blank"
-            raise ValueError(msg)
         return self
 
 

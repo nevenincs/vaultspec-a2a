@@ -105,7 +105,7 @@ CLARIFICATION_DECLINE_MARKER = (
 # cannot disagree. Membership is a promise about the graph builder, not a label: a
 # topology named here mounts the request and gate nodes in ``graph.compiler``, and
 # a topology absent from it refuses a ``[team.clarification]`` declaration outright
-# at preset load and again at compile. Refusing is the point - a declaration
+# at preset load. Refusing is the point - a declaration
 # accepted by a topology that never asks is a run that silently skips its own
 # questionnaire, which is indistinguishable from a working run until a human
 # notices they were never asked.
@@ -222,8 +222,20 @@ LineSafeText = Annotated[str, AfterValidator(_refuse_control_characters)]
 OptionLabel = Annotated[LineSafeText, Field(min_length=1, max_length=MAX_OPTION_CHARS)]
 PromptText = Annotated[LineSafeText, Field(min_length=1, max_length=MAX_PROMPT_CHARS)]
 AnswerText = Annotated[LineSafeText, Field(max_length=MAX_ANSWER_CHARS)]
+
+
+def _refuse_blank_prompt(value: str) -> str:
+    """Require a submitted human turn, not an empty composer transition."""
+    if not value.strip():
+        msg = "prompt must not be blank"
+        raise ValueError(msg)
+    return value
+
+
 ContinuationPrompt = Annotated[
-    str, Field(min_length=1, max_length=MAX_RUN_MESSAGE_CHARS)
+    str,
+    Field(min_length=1, max_length=MAX_RUN_MESSAGE_CHARS),
+    AfterValidator(_refuse_blank_prompt),
 ]
 
 
@@ -372,14 +384,6 @@ class ClarificationContinuation(BaseModel):
     type: Literal["clarification_continuation"] = CLARIFICATION_CONTINUATION_TYPE
     request_id: ClarificationRequestId
     prompt: ContinuationPrompt
-
-    @model_validator(mode="after")
-    def _prompt_has_content(self) -> Self:
-        """Require a submitted human turn, not an empty composer transition."""
-        if not self.prompt.strip():
-            msg = "clarification continuation prompt must not be blank"
-            raise ValueError(msg)
-        return self
 
     def as_resume_value(self) -> dict[str, Any]:
         """Render the continuation as the value handed to ``Command(resume=)``."""

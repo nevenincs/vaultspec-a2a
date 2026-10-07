@@ -1,10 +1,9 @@
 """Run discovery, state, history, and lifecycle read endpoints."""
 
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from typing import Annotated, Any, Literal
 
-import httpx
 from fastapi import (
     Depends,
     Header,
@@ -19,11 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata
 from ...control._worker_health import worker_liveness
-from ...control.cancel_service import (
-    CancelRuntime,
-    cancel_thread,
-    raise_for_cancel_failure,
-)
 from ...control.execution_authority import read_frozen_team_selection
 from ...control.run_discovery_service import discover_active_runs
 from ...control.team_service import build_team_status
@@ -45,7 +39,6 @@ from ...database import (
     resolve_session_factory,
 )
 from ...database.checkpoints import Checkpointer
-from ...domain_config import domain_config
 from ...providers import ProviderCondition
 from ...streaming.aggregator import EventAggregator
 from ...thread.clarification import (
@@ -57,7 +50,6 @@ from ...thread.constants import (
     MAX_WORKSPACE_ROOT_LENGTH,
 )
 from ...thread.enums import (
-    TERMINAL_STATUSES,
     ApprovalStatus,
     PermissionRequestStatus,
     RepairStatus,
@@ -66,13 +58,9 @@ from ...thread.enums import (
 )
 from .._replay_writer_seat import replay_writer_seat
 from .._stream_replay import run_stream_resumability
-from .._utils import trace_headers
 from ..dependencies import (
     get_aggregator,
     get_checkpointer,
-    get_circuit_breaker,
-    get_worker_client,
-    get_worker_spawner,
 )
 from ..schemas.gateway import (
     ActiveRunRecord,
@@ -81,7 +69,6 @@ from ..schemas.gateway import (
     RoleState,
     RunAgentSummary,
     RunArchiveResponse,
-    RunCancelResponse,
     RunDeleteResponse,
     RunHistoryResponse,
     RunPendingPermission,
@@ -104,7 +91,6 @@ from .gateway import (
     _optional_enum,
     _persisted_lease_binding,
     _persisted_lease_id,
-    admission_gate,
     router,
 )
 
@@ -124,33 +110,6 @@ class _ActiveRunsOptions(BaseModel):
     status: ThreadStatus | None = Query(default=None)
     limit: int = Query(default=50, ge=1, le=MAX_DISCOVERY_RESULTS)
     offset: int = Query(default=0, ge=0)
-
-
-@dataclass(frozen=True, slots=True)
-class _CancelEndpointDependencies:
-    """Injected resources needed by the cancel service."""
-
-    db: AsyncSession
-    runtime: CancelRuntime
-
-
-def _get_cancel_endpoint_dependencies(
-    db: AsyncSession = Depends(get_db),
-    worker_client: httpx.AsyncClient = Depends(get_worker_client),
-    circuit_breaker: Any = Depends(get_circuit_breaker),
-    worker_spawner: Any = Depends(get_worker_spawner),
-) -> _CancelEndpointDependencies:
-    """Group cancel's service dependencies without changing their providers."""
-    return _CancelEndpointDependencies(
-        db=db,
-        runtime=CancelRuntime(
-            circuit_breaker,
-            worker_spawner,
-            worker_client,
-            domain_config.graph_recursion_limit,
-            trace_headers(),
-        ),
-    )
 
 
 __all__ = ["_active_role", "snapshot_to_wire"]
@@ -469,55 +428,6 @@ async def run_stream_endpoint(
             not_found_detail="Run not found",
         ),
         db=db,
-    )
-
-
-# ---------------------------------------------------------------------------
-# run-cancel
-# ---------------------------------------------------------------------------
-
-
-@router.post("/runs/{run_id}/cancel", response_model=RunCancelResponse)
-async def run_cancel_endpoint(
-    run_id: PathSafeRunId,
-    request: Request,
-    dependencies: _CancelEndpointDependencies = Depends(
-        _get_cancel_endpoint_dependencies
-    ),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-) -> RunCancelResponse:
-    """Cancel a run idempotently."""
-    result = await cancel_thread(
-        db=dependencies.db,
-        thread_id=run_id,
-        idempotency_key=idempotency_key,
-        runtime=dependencies.runtime,
-    )
-
-    raise_for_cancel_failure(result, resource_noun="Run")
-
-    if result.cancelled:
-        worker_liveness(request.app.state).record_contact()
-
-    # Cancellation is the drain's tool and is never itself admission-gated. When
-    # a cancel settles the run terminally here (e.g. a submitted-but-undispatched
-    # run), release it from the admission gate so a concurrent drain can quiesce;
-    # a run that only reaches CANCELLING is deliberately left for the worker's
-    # terminal event, which releases it in
-    # ``control.event_handlers._handle_terminal_event``. Both sites can fire for
-    # one run - the gate's release is an idempotent discard, so they cannot
-    # corrupt the active set.
-    if result.thread_status in TERMINAL_STATUSES:
-        await admission_gate(request.app).release(result.thread_id)
-
-    return RunCancelResponse(
-        run_id=result.thread_id,
-        status=result.thread_status,
-        cancelled=result.cancelled,
-        accepted=result.accepted,
-        applied=result.applied,
-        action_status=result.action_status,
-        idempotency_key=result.idempotency_key,
     )
 
 

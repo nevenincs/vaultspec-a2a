@@ -66,7 +66,6 @@ from ...providers.team_selection import (
     normalize_replay_selection,
 )
 from ...thread.constants import RUN_ID_PATTERN
-from ...thread.dispatch_policy import FailureType
 from ...utils.coercion import coerce_object_mapping
 from ..auth import authenticate_request
 from ..run_admission import (
@@ -113,7 +112,6 @@ __all__ = [
     "_prepare_workspace_root",
     "_probe_admission_readiness",
     "_probe_harness",
-    "_raise_for_dispatch_failure",
     "_release_binding_digest",
     "_release_ineligible_reservation",
     "_replay_identity_or_conflict",
@@ -681,28 +679,6 @@ def _modern_frozen_disclosure(
     if not isinstance(frozen, FrozenTeamSelection):
         return None
     return FrozenTeamAssignmentSummary.model_validate(frozen.disclosure())
-
-
-def _raise_for_dispatch_failure(
-    failure_type: FailureType | None, detail: str | None
-) -> None:
-    """Map a dispatch failure to the same HTTP status the internal route uses."""
-    if failure_type is None:
-        return
-    if failure_type == FailureType.CIRCUIT_OPEN:
-        raise HTTPException(status_code=503, detail=detail or "Circuit breaker open")
-    if failure_type == FailureType.AT_CAPACITY:
-        raise HTTPException(status_code=503, detail="Worker at capacity — try again")
-    if failure_type == FailureType.UNREACHABLE:
-        raise HTTPException(status_code=502, detail="Worker unreachable")
-    if failure_type == FailureType.REJECTED:
-        raise HTTPException(
-            status_code=502, detail=detail or "Worker dispatch rejected"
-        )
-    if failure_type == FailureType.INCOMPATIBLE_STATE:
-        raise HTTPException(
-            status_code=409, detail=detail or "Run execution state is incompatible"
-        )
 
 
 # Import after the shared helpers are defined; decorators register on this router.

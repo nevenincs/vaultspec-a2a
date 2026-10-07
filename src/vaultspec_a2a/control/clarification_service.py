@@ -268,7 +268,9 @@ class _ClaimContext:
 @dataclass(frozen=True, slots=True)
 class _ResultError:
     detail: str
-    status_code: int
+    # Named only by a guard about this request; a dispatch outcome carries its
+    # typed failure alone and the protocol mapping chooses its status.
+    status_code: int | None = None
     failure_type: FailureType | None = None
 
 
@@ -710,14 +712,10 @@ async def _dispatch_claimed(
                 reason=f"Clarification resume not delivered: {detail}",
             )
         await db.commit()
-        return _result(
-            action,
-            error=_ResultError(
-                detail,
-                503 if failure_type is FailureType.CIRCUIT_OPEN else 502,
-                failure_type,
-            ),
-        )
+        # No status is chosen here. A dispatch outcome carries its typed failure
+        # and nothing else, so the one protocol mapping decides what every verb
+        # that met the same outcome serves for it.
+        return _result(action, error=_ResultError(detail, failure_type=failure_type))
 
     # A very fast worker may already have checkpointed the receipt before its HTTP
     # acknowledgement reaches us. Settle opportunistically, but never infer
@@ -839,7 +837,7 @@ async def redrive_clarification_actions(
             applied += 1
         elif result.dispatched:
             dispatched += 1
-        elif result.error_status_code is not None:
+        elif result.error_status_code is not None or result.failure_type is not None:
             conflicted += 1
         else:
             deferred += 1

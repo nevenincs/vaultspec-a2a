@@ -140,10 +140,10 @@ class PermissionResult:  # pylint: disable=too-many-instance-attributes
     idempotency_key: str | None = None
     approval_status: str | None = None
     dispatched: bool = False
-    # Error signalling — the route maps these to HTTPException codes.
+    # Error signalling. A guard about this request names its own status; a
+    # dispatch outcome carries only ``failure_type``, which the route maps.
     error_detail: str | None = None
     error_status_code: int | None = None
-    circuit_open: bool = False
     failure_type: FailureType | None = None
 
 

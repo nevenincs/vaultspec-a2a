@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from .enums import VERDICT_APPROVED, VERDICT_REJECTED
-from .snapshots import LOCALLY_RESPONDABLE_PAUSE_CAUSES
+from .snapshots import LOCALLY_RESPONDABLE_PAUSE_CAUSES, named_request_id
 
 __all__ = [
     "ApprovalVerdict",
@@ -29,14 +29,6 @@ __all__ = [
     "parse_approval_verdict",
     "permission_resume_value",
 ]
-
-
-def _named_request(resume_value: object) -> str | None:
-    """The non-empty request id a resume value names, or ``None``."""
-    if not isinstance(resume_value, dict):
-        return None
-    named = cast("dict[str, object]", resume_value).get("request_id")
-    return named if isinstance(named, str) and named else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +56,7 @@ class PermissionAnswer:
         verdict, or a bare option id from a caller that never named its
         request. Nothing can be keyed from those, so nothing is.
         """
-        request_id = _named_request(resume_value)
+        request_id = named_request_id(resume_value)
         if request_id is None:
             return None
         option_id = cast("dict[str, object]", resume_value).get("option_id")
@@ -109,7 +101,7 @@ def parse_approval_verdict(payload: object, *, request_id: str) -> ApprovalVerdi
     Raises:
         ValueError: *payload* does not name *request_id*.
     """
-    if not request_id or _named_request(payload) != request_id:
+    if not request_id or named_request_id(payload) != request_id:
         msg = "approval verdict does not name the request the gate is parked on"
         raise ValueError(msg)
     resume_dict = cast("dict[str, object]", payload)

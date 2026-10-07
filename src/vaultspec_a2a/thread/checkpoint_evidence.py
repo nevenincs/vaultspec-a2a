@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
-from langgraph.checkpoint.serde.types import ERROR, INTERRUPT
+from langgraph.checkpoint.serde.types import ERROR
 from pydantic import ValidationError
 
 from .action_receipts import (
@@ -16,11 +16,18 @@ from .action_receipts import (
     merge_active_graph_action_receipt,
     merge_graph_action_receipts,
 )
+from .snapshots import unanswered_interrupt_values
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from ..database.checkpoints import Checkpointer
+
+__all__ = [
+    "CheckpointEvidence",
+    "CheckpointEvidenceKind",
+    "read_checkpoint_evidence",
+]
 
 # The channels a dispatch's receipt is written to, each with the reducer its
 # state field declares. Folding a pending write with the channel's own reducer
@@ -194,14 +201,18 @@ def _staged_input_receipts(values: dict[str, object]) -> list[tuple[str, object]
 
 
 def _pending_evidence(
-    writes: Sequence[tuple[str, object]], checkpoint_id: str, incorporated: bool
+    writes: Sequence[tuple[str, object]],
+    checkpoint_id: str,
+    incorporated: bool,
+    *,
+    parked: bool,
 ) -> CheckpointEvidence:
     channels = {channel for channel, _ in writes}
     if ERROR in channels:
         return CheckpointEvidence(
             CheckpointEvidenceKind.FAILED, checkpoint_id, incorporated
         )
-    if INTERRUPT in channels:
+    if parked:
         return CheckpointEvidence(
             CheckpointEvidenceKind.INTERRUPTED, checkpoint_id, incorporated
         )
@@ -286,4 +297,12 @@ def _classify_checkpoint(
     completion_evidence = _completion_evidence(values, receipt, current_checkpoint_id)
     if completion_evidence is not None:
         return completion_evidence
-    return _pending_evidence(writes, current_checkpoint_id, source == "loop")
+    # Parked means a task is still asking: an answered fan-out branch's
+    # interrupt write outlives its answer until the superstep commits, and on
+    # its own it is work part-way, not a question waiting on anyone.
+    return _pending_evidence(
+        writes,
+        current_checkpoint_id,
+        source == "loop",
+        parked=bool(unanswered_interrupt_values(checkpoint.pending_writes)),
+    )

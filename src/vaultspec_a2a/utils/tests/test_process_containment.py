@@ -13,8 +13,12 @@ import psutil
 import pytest
 
 from ...utils import process as process_module
-from ...utils._process_tree import _win_parent_map, kill_pid_tree_async, pid_is_live
-from ...utils._process_tree import win_kernel32 as _win_kernel32
+from ...utils._process_tree import (
+    _win_parent_map,
+    kill_pid_tree_async,
+    pid_is_live,
+    win_kernel32,
+)
 from ...utils.process import (
     ProcessContainment,
     ProcessContainmentError,
@@ -247,7 +251,7 @@ if sys.platform == "win32":
     async def test_closed_job_accounting_is_unknown() -> None:
         containment = ProcessContainment.create()
         containment.close()
-        assert containment._win_active_processes(_win_kernel32()) is None
+        assert containment._win_active_processes(win_kernel32()) is None
         assert not await containment._terminate_win_job(kill_timeout=0.2)
 
 else:

@@ -14,7 +14,6 @@ import json
 import socket
 import subprocess
 import sys
-import time
 from typing import TYPE_CHECKING
 
 import pytest
@@ -30,7 +29,7 @@ from ...lifecycle.discovery import (
     service_json_path,
     write_service_json,
 )
-from ...utils._process_tree import pid_is_live
+from ...utils._process_tree import pid_is_live, wait_pid_gone
 from ..service import (
     restart_service,
     service_status,
@@ -154,10 +153,7 @@ def test_start_status_stop_restart_cycle_on_scratch_home(tmp_path: Path) -> None
     stopped = stop_service(home)
     assert stopped.state == "stopped", stopped
     assert restarted.pid is not None
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and pid_is_live(restarted.pid):
-        time.sleep(0.1)
-    assert not pid_is_live(restarted.pid)
+    assert wait_pid_gone(restarted.pid, timeout=10)
 
 
 @pytest.mark.timeout(120)

@@ -12,14 +12,14 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import TypeAdapter, ValidationError
-
 from ..lifecycle.pairing import (
     WorkerPairingVerdict,
     classify_worker_pairing,
     eviction_is_authorized,
 )
 from ..utils import redact_text
+from ..utils._process_tree import port_has_listener_async
+from ..utils.coercion import coerce_object_mapping
 from .config import settings
 from .worker_status import WorkerConnectionStatus
 
@@ -50,7 +50,7 @@ __all__ = [
 
 logger = logging.getLogger("vaultspec_a2a.control.worker_management")
 _WORKER_STDERR_TAIL_BYTES = 4096
-_JSON_OBJECT = TypeAdapter(dict[str, object])
+_PORT_PROBE_TIMEOUT_SECONDS = 0.5
 
 # ---------------------------------------------------------------------------
 # WorkerState dataclass — decouples watchdog from app.state
@@ -417,11 +417,7 @@ async def probe_worker_health(
             decoded: object = resp.json()
         except ValueError:
             return WorkerHealthProbe(healthy=True, body=None)
-        try:
-            body = _JSON_OBJECT.validate_python(decoded)
-        except ValidationError:
-            return WorkerHealthProbe(healthy=True, body=None)
-        return WorkerHealthProbe(healthy=True, body=body)
+        return WorkerHealthProbe(healthy=True, body=coerce_object_mapping(decoded))
 
     try:
         if client is not None:
@@ -562,12 +558,16 @@ async def _evict_stale_worker(
     deadline = asyncio.get_event_loop().time() + timeout
     freed = False
     while asyncio.get_event_loop().time() < deadline:
-        if not await _tcp_port_ready("127.0.0.1", worker_port):
+        if not await port_has_listener_async(
+            worker_port, timeout=_PORT_PROBE_TIMEOUT_SECONDS
+        ):
             freed = True
             break
         await asyncio.sleep(0.25)
     else:
-        freed = not await _tcp_port_ready("127.0.0.1", worker_port)
+        freed = not await port_has_listener_async(
+            worker_port, timeout=_PORT_PROBE_TIMEOUT_SECONDS
+        )
     if freed:
         # The evicted worker's own stderr log is a dead end from this point:
         # nothing will append to it unless OUR spawn reuses the same port (which

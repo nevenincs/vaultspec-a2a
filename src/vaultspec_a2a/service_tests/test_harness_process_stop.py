@@ -12,10 +12,9 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-import time
 
 from ..lifecycle.manager import tree_kill
-from ..utils._process_tree import pid_is_live
+from ..utils._process_tree import pid_is_live, wait_pid_gone
 from .harness import ServiceStack
 
 # A parent that spawns a long-lived grandchild, prints the grandchild pid, then
@@ -44,10 +43,7 @@ def test_stop_process_tree_kills_grandchildren() -> None:
 
         # Parent reaped, and the grandchild felled with it (the tree-kill win).
         assert parent.poll() is not None
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and pid_is_live(grandchild_pid):
-            time.sleep(0.05)
-        assert not pid_is_live(grandchild_pid)
+        assert wait_pid_gone(grandchild_pid, timeout=10.0)
     finally:
         if parent.poll() is None:
             parent.kill()

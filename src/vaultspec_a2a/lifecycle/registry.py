@@ -25,9 +25,8 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
-from ..utils._process_tree import pid_is_live
+from ..utils._process_tree import pid_is_live, port_has_listener
 from ..utils.atomic_write import atomic_write_text
-from .discovery import port_has_listener
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -351,8 +350,9 @@ def _port_is_free(port: int) -> bool:
       bind cleanly. Windows never sets it, because there it lets the probe bind
       over a live holder.
 
-    The connect probe is the shared ``discovery.port_has_listener`` primitive; the
-    connect-FIRST-then-bind order is load-bearing and must not change.
+    The connect probe is the shared ``utils._process_tree.port_has_listener``
+    primitive; the connect-FIRST-then-bind order is load-bearing and must not
+    change.
     """
     if port_has_listener(port, timeout=0.5):
         return False

@@ -26,14 +26,13 @@ from __future__ import annotations
 import json
 import os
 import secrets
-import socket
 import stat
 import subprocess
 import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import BinaryIO, TypedDict, Unpack, cast, override
+from typing import TYPE_CHECKING, BinaryIO, Literal, TypedDict, Unpack, cast, override
 
 import httpx
 
@@ -62,7 +61,7 @@ from ..desktop._platform_acl import (
 from ..desktop.credentials import MAX_CREDENTIAL_BYTES
 from ..utils._process_tree import pid_is_live
 from ..utils.atomic_write import atomic_write_text
-from ..utils.coercion import coerce_int
+from ..utils.coercion import coerce_int, coerce_object_mapping
 from ._desktop_discovery_record_parts import (
     DesktopDiscoveryRecordOptions,
     DesktopRecordEndpoint,
@@ -74,6 +73,9 @@ from ._desktop_discovery_record_parts import (
     required_desktop_record_field,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 __all__ = [
     "DESKTOP_DISCOVERY_VERSION",
     "DESKTOP_PROTOCOL_MAX",
@@ -82,7 +84,7 @@ __all__ = [
     "another_resident_is_live",
     "classify_desktop_discovery",
     "classify_discovery",
-    "port_has_listener",
+    "health_payload_ready",
     "probe_health",
     "read_resident_service",
     "remove_service_json_if_owned",
@@ -318,23 +320,6 @@ def read_resident_service(a2a_home: Path) -> tuple[DiscoveryState, ServiceInfo |
     return classify_discovery(service_json_path(a2a_home))
 
 
-def port_has_listener(port: int, *, timeout: float) -> bool:
-    """Return ``True`` when a loopback ``connect`` to *port* is accepted.
-
-    The single connect-probe primitive for the lifecycle package: a successful
-    ``connect_ex`` to ``127.0.0.1:port`` proves a live listener is accepting there.
-    It is the ONLY reliable "is this port taken" signal on Windows, where a plain
-    ``bind`` succeeds even when another process already serves the port (no
-    ``SO_EXCLUSIVEADDRUSE``); a caller that must also catch a bound-but-not-yet-
-    listening port pairs this with a bind-probe. *timeout* is required rather than
-    defaulted because a readiness poll (fast) and a liveness check (patient) want
-    different budgets.
-    """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(timeout)
-        return sock.connect_ex(("127.0.0.1", port)) == 0
-
-
 def _harden_record_parent(parent: Path) -> None:
     """Create *parent* and restrict it to its owner, on every platform.
 
@@ -422,23 +407,48 @@ def write_service_json(path: Path, **kwargs: Unpack[_ServiceWriteArgs]) -> None:
     atomic_write_text(path, json.dumps(record))
 
 
-def probe_health(base_url: str, *, timeout: float = 2.0) -> dict[str, object] | None:
-    """Probe ``GET /health`` on a resident gateway (lifecycle-only, R8).
+def probe_health(
+    base_url: str,
+    *,
+    timeout: float = 2.0,
+    headers: Mapping[str, str] | None = None,
+) -> dict[str, object] | None:
+    """Probe ``GET /health`` on a gateway or worker (lifecycle-only, R8).
 
-    Returns the parsed health body on a real ``200``, else ``None``. Reserved for
-    lifecycle/ops callers; never used on the filesystem-only discovery hot path.
+    Returns the parsed health body on a real ``200``, else ``None``. *headers*
+    carries a credential only for a caller that already established who owns the
+    listener. Reserved for lifecycle/ops callers; never used on the
+    filesystem-only discovery hot path.
     """
     try:
-        resp = httpx.get(f"{base_url.rstrip('/')}/health", timeout=timeout)
+        resp = httpx.get(
+            f"{base_url.rstrip('/')}/health", headers=headers, timeout=timeout
+        )
     except httpx.HTTPError:
         return None
     if resp.status_code != 200:
         return None
     try:
-        body = resp.json()
+        body: object = resp.json()
     except ValueError:
         return None
-    return cast("dict[str, object]", body) if isinstance(body, dict) else None
+    return coerce_object_mapping(body)
+
+
+def health_payload_ready(
+    body: Mapping[str, object] | None, role: Literal["gateway", "worker"]
+) -> bool:
+    """Whether a decoded ``/health`` *body* proves the *role* server is ready.
+
+    The body must name the role it came from, so one server's answer never reads
+    as the other's readiness. Gateway readiness is its public ``ready`` fact;
+    worker readiness is its private ``status`` fact.
+    """
+    if body is None or body.get("service") != role:
+        return False
+    if role == "gateway":
+        return body.get("ready") is True
+    return body.get("status") == "ok"
 
 
 def another_resident_is_live(a2a_home: Path, *, health_timeout: float = 2.0) -> bool:

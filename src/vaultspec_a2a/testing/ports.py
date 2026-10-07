@@ -48,7 +48,7 @@ from ..lifecycle import (
     release_reservation,
     reserve_port,
 )
-from ..lifecycle.discovery import port_has_listener
+from ..utils._process_tree import port_has_listener
 
 if TYPE_CHECKING:
     from ..lifecycle import PortReservation
@@ -138,7 +138,7 @@ def allocate_free_ports(count: int) -> list[int]:
     Bind-to-port-zero ALONE is not a free-port test on Windows: without
     ``SO_EXCLUSIVEADDRUSE`` a plain ``bind`` to a port another process already
     serves on ``0.0.0.0`` SUCCEEDS, so each kernel choice is confirmed with
-    ``lifecycle.discovery.port_has_listener`` - the same connect probe
+    ``utils._process_tree.port_has_listener`` - the same connect probe
     production trusts - while the binding is still held (this socket never
     listens, so an ACCEPTED connect can only be a foreign listener). The
     result is still a candidate that nothing reserves, which is why the

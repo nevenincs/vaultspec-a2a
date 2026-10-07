@@ -26,8 +26,11 @@ from ...utils._process_tree import (
     kill_pid_tree_async,
     parse_netstat_listener_pid,
     pid_is_live,
+    port_has_listener,
+    port_has_listener_async,
     port_listener_pid,
     posix_descendant_pids,
+    wait_pid_gone,
 )
 
 # A parent that spawns a long-lived grandchild, prints its pid, then sleeps.
@@ -59,10 +62,7 @@ async def test_kill_pid_tree_fells_the_whole_tree() -> None:
         assert killed is True
         assert parent.poll() is not None
         # The grandchild is felled with the parent — no orphan.
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and pid_is_live(grandchild_pid):
-            time.sleep(0.05)
-        assert not pid_is_live(grandchild_pid)
+        assert wait_pid_gone(grandchild_pid, timeout=10.0)
     finally:
         if parent.poll() is None:
             parent.kill()
@@ -89,9 +89,7 @@ def test_pid_is_live_reports_a_killed_but_unreaped_child_as_dead() -> None:
     try:
         assert pid_is_live(child.pid)
         child.kill()
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and pid_is_live(child.pid):
-            time.sleep(0.05)
+        wait_pid_gone(child.pid, timeout=10.0)
         # Still unreaped at this point: no wait()/poll() has run, and the probe
         # itself must not reap (``poll()`` here would consume the exit status and
         # hide the very state under test).
@@ -165,10 +163,7 @@ async def test_the_taskkill_wait_is_bounded_by_the_callers_kill_budget() -> None
         assert elapsed <= 3.0
     finally:
         await kill_pid_tree_async(child.pid)
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and pid_is_live(child.pid):
-            time.sleep(0.05)
-        assert not pid_is_live(child.pid)
+        assert wait_pid_gone(child.pid, timeout=10.0)
 
 
 # A process that binds a fresh loopback port, prints it, then holds it open.
@@ -197,6 +192,37 @@ def _reap(*procs: subprocess.Popen[Any]) -> None:
         if proc.poll() is None:
             proc.kill()
             proc.wait(timeout=10)
+
+
+def test_wait_pid_gone_reports_a_live_and_then_a_dead_pid() -> None:
+    """The termination gate is ``True`` only once the pid is actually gone."""
+    child = subprocess.Popen([sys.executable, "-c", _SLEEP])
+    try:
+        # A live pid is not confirmed gone within a short window.
+        assert wait_pid_gone(child.pid, timeout=0.3) is False
+        child.kill()
+        assert wait_pid_gone(child.pid, timeout=10.0) is True
+    finally:
+        _reap(child)
+
+
+@pytest.mark.asyncio
+async def test_port_has_listener_true_on_a_real_listener_false_on_a_free_port() -> None:
+    """Both connect-probe forms: a real listener answers, a free port does not."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    # Room for both probes' connections, which nothing here accepts.
+    sock.listen(8)
+    bound_port = sock.getsockname()[1]
+    try:
+        assert port_has_listener(bound_port, timeout=1.0) is True
+        assert await port_has_listener_async(bound_port, timeout=1.0) is True
+    finally:
+        sock.close()
+    # Once closed, the same port no longer accepts a connect.
+    assert port_has_listener(bound_port, timeout=0.5) is False
+    assert await port_has_listener_async(bound_port, timeout=0.5) is False
 
 
 def test_port_listener_pid_resolves_a_real_listener() -> None:

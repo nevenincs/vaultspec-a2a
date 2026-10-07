@@ -13,7 +13,12 @@ from langchain_core.messages import AIMessage, HumanMessage
 from ...control.thread_service import successor_seed_transcript
 from ...database.checkpoints import open_checkpointer
 from ...ipc.schemas import DispatchRequest
-from ...testing import async_catalog_run_fields, serve_on_loopback, settings_override
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    async_catalog_run_fields,
+    serve_on_loopback,
+    settings_override,
+)
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...worker.graph_lifecycle import GraphLifecycleManager
 from .conftest import make_app
@@ -42,7 +47,7 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
             "/v1/runs",
             json={
                 "run_id": "lineage-parent",
-                "team_preset": "mock-success-single",
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "first turn",
                 **fields,
             },
@@ -51,7 +56,7 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
         successor = {
             "run_id": "lineage-successor",
             "continues_run_id": "lineage-parent",
-            "team_preset": "mock-success-single",
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "second turn",
             **fields,
         }
@@ -113,7 +118,7 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
             "/v1/runs",
             json={
                 "run_id": "lineage-other-workspace",
-                "team_preset": "mock-success-single",
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "another project",
                 **await async_catalog_run_fields(client, workspace_root=str(tmp_path)),
             },

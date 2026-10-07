@@ -16,44 +16,37 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import shlex
-import shutil
 import socket
 import socketserver
 import sqlite3
-import subprocess
 import threading
 import time
 from contextlib import contextmanager, suppress
 from http import HTTPStatus
-from importlib.resources import files
 from typing import TYPE_CHECKING, TextIO, TypedDict, Unpack, override
 
 import httpx
 import pytest
-from pydantic import TypeAdapter, ValidationError
 
 from ..desktop.profile import derive_state_paths
-from ..lifecycle.discovery import write_service_json
 from ..service_tests._live_desktop_gateway import armed_gateway
 from ..testing import (
-    DEFAULT_ATTACH_CREDENTIAL,
     LIVE_PROVIDER_PREREQUISITES,
     free_port,
-    reap_contained,
+    json_object,
     selection_from_served_catalog,
 )
-from ..utils import ProcessContainment, spawn_contained
+from ..utils.coercion import coerce_object_mapping
+from ._dashboard_engine import dashboard_engine, provision_workspace
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Mapping
     from pathlib import Path
 
+    from ..providers._json_contract import JsonObject
+
 _RUN_ID = "run-cross-repo-lost-ack"
-_ENGINE_COMMAND_ENV = "VAULTSPEC_A2A_ENGINE_SERVE_CMD"
 _MAX_RELAY_MESSAGE_BYTES = 4 * 1024 * 1024
-_JSON_OBJECT = TypeAdapter(dict[str, object])
 
 
 class _WorkerLogScanOptions(TypedDict):
@@ -66,19 +59,6 @@ class _WorkerLogScanOptions(TypedDict):
     hard_deadline: float
 
 
-class _LostAckEngineOptions(TypedDict):
-    """Inputs for one production lost-ack engine run."""
-
-    workspace: Path
-    app_home: Path
-    engine_port: int
-    engine_base: str
-    engine_log: Path
-    gateway_base: str
-    auth: str
-    relay: _RelayServer
-
-
 class _LostAckFlowOptions(TypedDict):
     """Resources needed for the HTTP side of the lost-ack proof."""
 
@@ -89,23 +69,6 @@ class _LostAckFlowOptions(TypedDict):
     auth: str
     relay: _RelayServer
     token: str
-
-
-def _json_object(raw: str | bytes, *, source: str) -> dict[str, object]:
-    """Decode a relay payload as an object before inspecting its fields."""
-    try:
-        decoded: object = json.loads(raw)
-        return _JSON_OBJECT.validate_python(decoded)
-    except (json.JSONDecodeError, ValidationError) as exc:
-        raise ValueError(f"{source} is not a JSON object: {exc}") from exc
-
-
-def _optional_json_object(value: object) -> dict[str, object] | None:
-    """Return an object-shaped nested payload without accepting malformed data."""
-    try:
-        return _JSON_OBJECT.validate_python(value)
-    except ValidationError:
-        return None
 
 
 def _read_http_request(stream: socket.socket) -> bytes:
@@ -158,10 +121,10 @@ class _RelayServer(socketserver.ThreadingTCPServer):
         return token
 
 
-def _actor_token_from_body(parsed_body: dict[str, object]) -> str | None:
-    actor_tokens = _optional_json_object(parsed_body.get("actor_tokens"))
+def _actor_token_from_body(parsed_body: Mapping[str, object]) -> str | None:
+    actor_tokens = coerce_object_mapping(parsed_body.get("actor_tokens"))
     tokens = (
-        _optional_json_object(actor_tokens.get("tokens"))
+        coerce_object_mapping(actor_tokens.get("tokens"))
         if actor_tokens is not None
         else None
     )
@@ -173,7 +136,7 @@ def _record_relay_stage(
     relay: _RelayServer,
     stage: str | None,
     request_body: bytes,
-    parsed_body: dict[str, object],
+    parsed_body: Mapping[str, object],
 ) -> bool:
     if stage not in {"prepare", "commit"}:
         return False
@@ -206,8 +169,8 @@ class _RelayHandler(socketserver.BaseRequestHandler):
             request_line = request.split(b"\r\n", 1)[0]
             is_run_start = request_line == b"POST /v1/runs HTTP/1.1"
             request_body = request.split(b"\r\n\r\n", 1)[1]
-            parsed_body = (
-                _json_object(request_body, source="run-start request")
+            parsed_body: JsonObject = (
+                json_object(json.loads(request_body), at="run-start request")
                 if is_run_start
                 else {}
             )
@@ -254,135 +217,6 @@ def _ack_dropping_relay(upstream_base: str) -> Generator[_RelayServer]:
         server.server_close()
         thread.join(timeout=5)
         assert not thread.is_alive(), "relay thread did not stop"
-
-
-def _provision_workspace(workspace: Path) -> None:
-    workspace.mkdir()
-    core = shutil.which("vaultspec-core")
-    assert core is not None, "vaultspec-core executable is required"
-    install = subprocess.run(
-        [core, "install", "--target", str(workspace)],
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    assert install.returncode == 0, install.stderr
-    plan = workspace / ".vault" / "plan" / "cross-repo-proof.md"
-    plan.parent.mkdir(parents=True, exist_ok=True)
-    plan.write_text(
-        "---\ntags:\n  - '#plan'\ndate: '2026-07-20'\n---\n\n# proof\n",
-        encoding="utf-8",
-    )
-    teams = workspace / ".vaultspec" / "teams"
-    teams.mkdir(parents=True, exist_ok=True)
-    bundled_solo = (
-        files("vaultspec_a2a.team.presets.teams")
-        .joinpath("vaultspec-solo-coder.toml")
-        .read_text(encoding="utf-8")
-    )
-    (teams / "vaultspec-solo-coder.toml").write_text(
-        bundled_solo,
-        encoding="utf-8",
-    )
-    git = shutil.which("git")
-    assert git is not None, "git executable is required"
-    env = {
-        **os.environ,
-        "GIT_AUTHOR_NAME": "cross-repo-proof",
-        "GIT_AUTHOR_EMAIL": "proof@vaultspec.test",
-        "GIT_COMMITTER_NAME": "cross-repo-proof",
-        "GIT_COMMITTER_EMAIL": "proof@vaultspec.test",
-    }
-    for args in (
-        ["init", "-q", "-b", "main"],
-        ["add", "-A"],
-        ["commit", "-qm", "cross-repo fixture"],
-    ):
-        result = subprocess.run(
-            [git, *args],
-            cwd=workspace,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        assert result.returncode == 0, result.stderr
-
-
-def _engine_command(port: int, workspace: Path) -> list[str]:
-    """Render the declared dashboard serve command.
-
-    Only reached once the ``dashboard-engine`` prerequisite has been asserted
-    present, so a blank template is impossible here and every remaining check is
-    a real defect in a command the caller did supply.
-    """
-    template = os.environ[_ENGINE_COMMAND_ENV].strip()
-    rendered = template.format(port=port, workspace=str(workspace))
-    command = shlex.split(rendered, posix=os.name != "nt")
-    assert command and os.path.isabs(command[0]), (
-        "engine command must use an absolute binary"
-    )
-    assert os.path.isfile(command[0]), f"engine binary is missing: {command[0]}"
-    assert "serve" in command and "--no-seat" in command, (
-        "engine command must be a non-seating serve invocation"
-    )
-    return command
-
-
-def _wait_for_engine(
-    workspace: Path, base_url: str, process: subprocess.Popen[bytes]
-) -> str:
-    discovery = workspace / ".vault" / "data" / "engine-data" / "service.json"
-    deadline = time.monotonic() + 40
-    last_error = "not started"
-    while time.monotonic() < deadline:
-        assert process.poll() is None, "dashboard engine exited during startup"
-        try:
-            record = _json_object(
-                discovery.read_text(encoding="utf-8"), source="engine discovery record"
-            )
-            token = record.get("service_token")
-            if not isinstance(token, str):
-                raise KeyError("service_token")
-            response = httpx.get(
-                f"{base_url}/status",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=2,
-            )
-            if response.status_code == HTTPStatus.OK:
-                return str(token)
-            last_error = response.text
-        except (OSError, KeyError, json.JSONDecodeError, httpx.HTTPError) as exc:
-            last_error = repr(exc)
-        time.sleep(0.1)
-    raise AssertionError(f"dashboard engine did not become ready: {last_error}")
-
-
-def _shutdown_engine(
-    process: subprocess.Popen[bytes],
-    containment: ProcessContainment,
-    base_url: str,
-    token: str,
-) -> None:
-    try:
-        response = httpx.post(
-            f"{base_url}/shutdown",
-            headers={"Authorization": f"Bearer {token}"},
-            json={},
-            timeout=5,
-        )
-        assert response.status_code == HTTPStatus.OK, response.text
-        process.wait(timeout=15)
-    finally:
-        _force_engine_tree_exit(process, containment)
-
-
-def _force_engine_tree_exit(
-    process: subprocess.Popen[bytes], containment: ProcessContainment
-) -> None:
-    """Boundedly terminate the OS-owned engine containment and reap its root."""
-    if not reap_contained(process, containment, term_timeout=5.0, kill_timeout=5.0):
-        raise AssertionError(f"engine process containment {process.pid} did not empty")
 
 
 def _one_durable_a2a_run(app_home: Path) -> None:
@@ -444,7 +278,7 @@ def _scan_worker_log(
         for line in complete:
             if not line.strip():
                 continue
-            record = _json_object(line, source="worker log record")
+            record = json_object(json.loads(line), at="worker log record")
             if (
                 record.get("thread_id") == _RUN_ID
                 and record.get("action") == "dispatch_accepted"
@@ -514,11 +348,12 @@ def _exercise_lost_ack_flow(**options: Unpack[_LostAckFlowOptions]) -> None:
         timeout=30,
     )
     assert catalog_response.status_code == HTTPStatus.OK, catalog_response.text
-    catalog_body = _json_object(
-        catalog_response.content, source="engine provider-catalog response"
+    catalog_body = json_object(
+        catalog_response.json(), at="engine provider-catalog response"
     )
-    catalog_data = _optional_json_object(catalog_body.get("data"))
-    assert catalog_data is not None, catalog_body
+    catalog_data = json_object(
+        catalog_body.get("data"), at="engine provider-catalog response.data"
+    )
     selection = selection_from_served_catalog(catalog_data.get("envelope"))
     started = httpx.post(
         f"{options['engine_base']}/ops/a2a/run-start",
@@ -575,72 +410,16 @@ def _exercise_lost_ack_flow(**options: Unpack[_LostAckFlowOptions]) -> None:
     _await_exactly_one_worker_dispatch(options["app_home"])
 
 
-def _run_lost_ack_engine(
-    tmp_path: Path,
-    **options: Unpack[_LostAckEngineOptions],
-) -> None:
-    """Boot the engine, run the lost-ack flow, and always tear it down."""
-    discovery_home = tmp_path / "a2a-discovery"
-    write_service_json(
-        discovery_home / "service.json",
-        port=int(options["relay"].server_address[1]),
-        pid=os.getpid(),
-        service_token=DEFAULT_ATTACH_CREDENTIAL,
-    )
-    environment = {
-        **{
-            key: value
-            for key, value in os.environ.items()
-            if key not in {"VAULTSPEC_APP_HOME", "VAULTSPEC_A2A_DESKTOP_APP_HOME"}
-        },
-        "VAULTSPEC_A2A_HOME": str(discovery_home),
-        "VAULTSPEC_APP_HOME": str(tmp_path / "dashboard-product-home"),
-    }
-    with options["engine_log"].open("wb") as output:
-        containment = ProcessContainment.create()
-        process: subprocess.Popen[bytes] | None = None
-        token: str | None = None
-        try:
-            process = spawn_contained(
-                _engine_command(options["engine_port"], options["workspace"]),
-                containment,
-                cwd=options["workspace"],
-                env=environment,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-            )
-            token = _wait_for_engine(
-                options["workspace"], options["engine_base"], process
-            )
-            _exercise_lost_ack_flow(
-                app_home=options["app_home"],
-                workspace=options["workspace"],
-                engine_base=options["engine_base"],
-                gateway_base=options["gateway_base"],
-                auth=options["auth"],
-                relay=options["relay"],
-                token=token,
-            )
-        finally:
-            if process is None:
-                containment.close()
-            elif token is not None:
-                _shutdown_engine(process, containment, options["engine_base"], token)
-            else:
-                _force_engine_tree_exit(process, containment)
-
-
 @pytest.mark.requires_prerequisites(*LIVE_PROVIDER_PREREQUISITES)
 def test_production_engine_recovers_lost_run_start_ack_exactly_once(
     tmp_path: Path,
 ) -> None:
     """One accepted start survives response loss without duplicate dispatch."""
     workspace = tmp_path / "dashboard-workspace"
-    _provision_workspace(workspace)
+    provision_workspace(workspace)
     app_home = tmp_path / "app-home"
     engine_port = free_port()
     engine_base = f"http://127.0.0.1:{engine_port}"
-    engine_log = tmp_path / "engine.log"
 
     with (
         armed_gateway(
@@ -653,15 +432,22 @@ def test_production_engine_recovers_lost_run_start_ack_exactly_once(
             auth,
         ),
         _ack_dropping_relay(gateway_base) as relay,
-    ):
-        _run_lost_ack_engine(
+        # The engine discovers the relay, not the gateway, so every run-start
+        # it sends crosses the relay that drops the first acknowledgement.
+        dashboard_engine(
             tmp_path,
             workspace=workspace,
-            app_home=app_home,
             engine_port=engine_port,
+            engine_log=tmp_path / "engine.log",
+            a2a_port=int(relay.server_address[1]),
+        ) as token,
+    ):
+        _exercise_lost_ack_flow(
+            app_home=app_home,
+            workspace=workspace,
             engine_base=engine_base,
-            engine_log=engine_log,
             gateway_base=gateway_base,
             auth=auth,
             relay=relay,
+            token=token,
         )

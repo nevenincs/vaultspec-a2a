@@ -9,9 +9,6 @@ the default profile.
 
 from __future__ import annotations
 
-import json
-import os
-import time
 from typing import TYPE_CHECKING
 
 import httpx
@@ -34,13 +31,9 @@ from ..acceptance import (
     _retry_transient,
     runtime_budget_for,
 )
-from ..environment import settings_override
-from ..http import health_listener
 from ..payloads import json_object
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from ...authoring import AuthoringClient, AuthoringResponse
     from ...providers._json_contract import JsonObject
 
@@ -181,55 +174,6 @@ async def test_engine_client_fails_loud_on_transient_exhaustion() -> None:
             )
     assert calls == _ENGINE_RETRY_MAX_ATTEMPTS
     assert "transient class exhausted" in str(excinfo.value)
-
-
-@pytest.mark.asyncio
-async def test_engine_client_reresolves_bearer_once_on_401(
-    tmp_path: Path,
-) -> None:
-    """A 401 re-resolves the bearer from discovery once, then the call succeeds.
-
-    Uses a REAL loopback /health listener plus a real service.json so
-    ``resolve_engine`` genuinely resolves the fresh bearer - no doubles. This
-    is the one retry path the other tests cannot reach (it needs a resolvable
-    engine), pinning that the ``before_retry`` hook actually rotates the
-    credential and retries immediately.
-    """
-    with health_listener() as port:
-        service_json = tmp_path / "service.json"
-        service_json.write_text(
-            json.dumps(
-                {
-                    "port": port,
-                    "service_token": "rotated-tok",
-                    "pid": os.getpid(),
-                    "last_heartbeat": int(time.time() * 1000),
-                }
-            ),
-            encoding="utf-8",
-        )
-        calls = 0
-
-        async def denied_once(_self: AuthoringClient) -> str:
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                raise AuthoringTransportError(
-                    status_code=401,
-                    message="machine bearer expired",
-                    error_kind="authoring_unauthorized",
-                )
-            return "ok"
-
-        client = ResilientAuthoringClient("http://127.0.0.1:1", "stale-tok")
-        with settings_override(engine_service_json=service_json):
-            async with client:
-                result = await client._call_resilient(
-                    lambda: denied_once(client), operation="denied_once"
-                )
-        assert result == "ok"
-        assert calls == 2  # 401 consumed one attempt, immediate retry
-        assert client._bearer_token == "rotated-tok"  # rotation really ran
 
 
 # The gateway status poll rides the same shared retry loop; these pin its

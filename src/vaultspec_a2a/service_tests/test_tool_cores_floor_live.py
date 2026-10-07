@@ -61,6 +61,7 @@ from ..control.run_start_policy import required_role_ids
 from ..streaming.sse_frames import iter_sse_events
 from ..team.team_config import load_team_config
 from ..testing import (
+    GATEWAY_AUTH_HEADERS,
     OBSERVE_DEADLINE_SECONDS,
     PRESET_LIVE,
     AcceptanceCase,
@@ -332,13 +333,10 @@ async def _run_named_adr_floor(
     async with ResilientAuthoringClient(
         context.harness.engine_base_url, context.harness.engine_bearer
     ) as ec:
-        run_tokens = {
-            role: await context.harness.mint(
-                ec, f"agent:{context.harness.run_id}:{role}", "agent"
-            )
-            for role in context.harness.case.roles
-        }
-        async with httpx.AsyncClient() as hc:
+        run_tokens = await context.harness.mint_role_tokens(
+            ec, context.harness.run_id, context.harness.case.roles
+        )
+        async with httpx.AsyncClient(headers=GATEWAY_AUTH_HEADERS) as hc:
             await context.harness.run_start(
                 hc,
                 run_id=context.harness.run_id,
@@ -485,13 +483,10 @@ async def _run_rag_floor(
     async with ResilientAuthoringClient(
         context.harness.engine_base_url, context.harness.engine_bearer
     ) as ec:
-        run_tokens = {
-            role: await context.harness.mint(
-                ec, f"agent:{context.harness.run_id}:{role}", "agent"
-            )
-            for role in context.harness.case.roles
-        }
-        async with httpx.AsyncClient() as hc:
+        run_tokens = await context.harness.mint_role_tokens(
+            ec, context.harness.run_id, context.harness.case.roles
+        )
+        async with httpx.AsyncClient(headers=GATEWAY_AUTH_HEADERS) as hc:
             await context.harness.run_start(
                 hc,
                 run_id=context.harness.run_id,

@@ -21,24 +21,29 @@ import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from ...authoring import AuthoringClient, AuthoringResponse, Denial, mint_actor_token
+from ...authoring import AuthoringClient, Denial
 from ...control.config import setting_env, settings
 from ...control.run_start_policy import required_role_ids
 from ...team.team_config import load_team_config
 from ...testing import (
+    AcceptanceHarness,
     ProgressDeadline,
     ProgressStalledError,
     actor_tokens_body,
+    json_object,
+    json_object_list,
+    required_text,
     wait_for_async,
 )
 from ._harness import certified_gateway
 
 if TYPE_CHECKING:
     from ...authoring.discovery import EngineEndpoint
+    from ...providers._json_contract import JsonObject
     from ._harness import CertifiedGateway
 
 _SCENARIO_PATH = (
@@ -48,20 +53,12 @@ _SCENARIO_PATH = (
 )
 
 
-def _required_object(value: object, *, at: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise AssertionError(f"{at} must be a JSON object")
-    return cast("dict[str, object]", value)
+def _read_scenario() -> JsonObject:
+    """Load the committed scenario contract or fail before any run is started.
 
-
-def _required_text(value: object, *, at: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise AssertionError(f"{at} must be non-empty text")
-    return value
-
-
-def _read_scenario() -> dict[str, object]:
-    """Load the committed scenario contract or fail before any run is started."""
+    Every field the run reads must be non-blank text: a blank one would still
+    read as text at its point of use, and the run would then prove nothing.
+    """
     try:
         raw = json.loads(_SCENARIO_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -70,18 +67,19 @@ def _read_scenario() -> dict[str, object]:
             f"{_SCENARIO_PATH}"
         ) from exc
 
-    scenario = _required_object(raw, at=f"scenario {_SCENARIO_PATH}")
-    for key in ("scenario_id", "team_preset", "feature_tag", "message"):
-        _required_text(scenario.get(key), at=f"scenario {_SCENARIO_PATH}.{key}")
-
-    authored_output = _required_object(
-        scenario.get("authored_output"), at=f"scenario {_SCENARIO_PATH}.authored_output"
+    at = f"scenario {_SCENARIO_PATH}"
+    scenario = json_object(raw, at=at)
+    authored_output = json_object(
+        scenario.get("authored_output"), at=f"{at}.authored_output"
     )
-    for key in ("agent_id", "content"):
-        _required_text(
-            authored_output.get(key),
-            at=f"scenario {_SCENARIO_PATH}.authored_output.{key}",
-        )
+    for body, fields, body_at in (
+        (scenario, ("scenario_id", "team_preset", "feature_tag", "message"), at),
+        (authored_output, ("agent_id", "content"), f"{at}.authored_output"),
+    ):
+        for field in fields:
+            assert required_text(body, field, at=body_at).strip(), (
+                f"{body_at}.{field} must be non-empty text"
+            )
     return scenario
 
 
@@ -98,12 +96,12 @@ def _write_json(path: Path, value: object) -> None:
 
 @dataclass(frozen=True, slots=True)
 class _ReviewBundleInput:
-    scenario: dict[str, object]
+    scenario: JsonObject
     run_id: str
     authored_output: str
     materialized: dict[str, Path]
     status: dict[str, Any]
-    history: dict[str, Any]
+    history: JsonObject
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,18 +173,17 @@ def _verify_bundle_manifest(
     run_id: str,
     authored_output: str,
 ) -> None:
-    manifest = _required_object(
+    manifest = json_object(
         json.loads(files.manifest.read_text(encoding="utf-8")),
         at=f"review bundle manifest {files.manifest}",
     )
-    assert _required_text(manifest.get("bundle_id"), at="manifest.bundle_id") == (
+    assert required_text(manifest, "bundle_id", at="manifest") == (
         f"{scenario_id}:{run_id}"
     )
-    review = _required_object(manifest.get("review"), at="manifest.review")
+    review = json_object(manifest.get("review"), at="manifest.review")
     assert review == {"status": "pending"}
-    artifacts = _required_object(manifest.get("artifacts"), at="manifest.artifacts")
+    artifacts = json_object(manifest.get("artifacts"), at="manifest.artifacts")
     for name, identity in artifacts.items():
-        assert isinstance(name, str)
         assert isinstance(identity, str)
         artifact = bundle / name
         assert artifact.is_file(), f"required review artifact is absent: {artifact}"
@@ -218,14 +215,6 @@ def _emit_review_bundle(bundle_root: Path, evidence: _ReviewBundleInput) -> Path
         authored_output=evidence.authored_output,
     )
     return bundle
-
-
-async def _mint_token(client: AuthoringClient, *, actor_id: str, kind: str) -> str:
-    minted = await mint_actor_token(client, actor_id=actor_id, kind=kind)
-    assert isinstance(minted, AuthoringResponse), f"actor-token mint denied: {minted}"
-    token = minted.data.get("raw_token")
-    assert isinstance(token, str) and token, "actor-token receipt carried no token"
-    return token
 
 
 async def _set_autonomous_mode(client: AuthoringClient, reviewer_token: str) -> None:
@@ -271,7 +260,7 @@ async def _await_materialized_documents(
 class _CompletionPlan:
     """Validated inputs shared by the deterministic completion run."""
 
-    scenario: dict[str, object]
+    scenario: JsonObject
     preset: str
     run_id: str
     feature_tag: str
@@ -283,7 +272,7 @@ class _CompletionPlan:
 def _build_completion_plan(live_engine: EngineEndpoint) -> _CompletionPlan:
     """Resolve and validate the external inputs required by the completion proof."""
     scenario = _read_scenario()
-    preset = _required_text(scenario.get("team_preset"), at="scenario.team_preset")
+    preset = required_text(scenario, "team_preset", at="scenario")
     run_id = f"deterministic-completion-{uuid.uuid4().hex}"
     feature_tag = f"deterministic-{run_id.rsplit('-', 1)[-1]}"
     team_config = load_team_config(preset)
@@ -313,23 +302,12 @@ def _build_completion_plan(live_engine: EngineEndpoint) -> _CompletionPlan:
     )
 
 
-async def _mint_role_tokens(
-    client: AuthoringClient, plan: _CompletionPlan
-) -> dict[str, str]:
-    return {
-        role: await _mint_token(
-            client, actor_id=f"agent:{plan.run_id}:{role}", kind="agent"
-        )
-        for role in plan.roles
-    }
-
-
 def _start_completion_run(
     gateway: CertifiedGateway,
     plan: _CompletionPlan,
     tokens: dict[str, str],
 ) -> None:
-    message = _required_text(plan.scenario.get("message"), at="scenario.message")
+    message = required_text(plan.scenario, "message", at="scenario")
     with gateway.client(timeout=90.0) as client:
         started = client.post(
             "/v1/runs",
@@ -353,48 +331,40 @@ def _start_completion_run(
     assert started.status_code == 201, started.text
 
 
-def _read_completion_history(gateway: CertifiedGateway, run_id: str) -> dict[str, Any]:
+def _read_completion_history(gateway: CertifiedGateway, run_id: str) -> JsonObject:
     history_response = gateway.thread_state(run_id)
     assert history_response.status_code == 200, history_response.text
-    return _required_object(history_response.json(), at="run history")
+    return json_object(history_response.json(), at="run history")
 
 
-def _healthy_history_messages(history: dict[str, Any]) -> list[object]:
-    state = _required_object(history.get("state"), at=f"run history state: {history}")
+def _healthy_history_messages(history: JsonObject) -> list[JsonObject]:
+    state = json_object(history.get("state"), at=f"run history state: {history}")
     assert state.get("snapshot_complete") is True, state
     assert state.get("repair_status") == "healthy", state
     assert state.get("execution_readiness") == "healthy", state
     assert state.get("degraded_reasons") == [], state
-    messages = state.get("messages")
-    assert isinstance(messages, list), f"run history has no messages: {history}"
-    return cast("list[object]", messages)
+    return json_object_list(
+        state.get("messages"), at=f"run history messages: {history}"
+    )
 
 
-def _authored_output(
-    history: dict[str, Any], scenario: dict[str, object], run_id: str
-) -> str:
-    typed_messages = _healthy_history_messages(history)
-    expected = _required_object(
+def _authored_output(history: JsonObject, scenario: JsonObject, run_id: str) -> str:
+    expected = json_object(
         scenario.get("authored_output"), at="scenario.authored_output"
     )
-    expected_agent = _required_text(
-        expected.get("agent_id"), at="authored_output.agent_id"
-    )
-    expected_content = _required_text(
-        expected.get("content"), at="authored_output.content"
-    )
-    turns: list[dict[str, object]] = []
-    for message in typed_messages:
-        if not isinstance(message, dict):
-            continue
-        turn = cast("dict[str, object]", message)
-        if turn.get("role") == "assistant" and turn.get("agent_id") == expected_agent:
-            turns.append(turn)
+    expected_agent = required_text(expected, "agent_id", at="authored_output")
+    expected_content = required_text(expected, "content", at="authored_output")
+    turns = [
+        message
+        for message in _healthy_history_messages(history)
+        if message.get("role") == "assistant"
+        and message.get("agent_id") == expected_agent
+    ]
     assert turns, (
         f"completed run {run_id} has no authored output from {expected_agent!r}; "
         f"history={history}"
     )
-    content = _required_text(turns[-1].get("content"), at="authored output content")
+    content = required_text(turns[-1], "content", at="authored output")
     assert content == expected_content, (
         f"run {run_id} authored unexpected scripted content: {content!r}"
     )
@@ -406,9 +376,11 @@ async def _run_completion(tmp_path: Path, plan: _CompletionPlan) -> _ReviewBundl
     async with AuthoringClient(
         plan.endpoint.base_url, plan.endpoint.bearer_token
     ) as authoring:
-        tokens = await _mint_role_tokens(authoring, plan)
-        reviewer_token = await _mint_token(
-            authoring, actor_id=f"reviewer:{plan.run_id}", kind="human"
+        tokens = await AcceptanceHarness.mint_role_tokens(
+            authoring, plan.run_id, plan.roles
+        )
+        reviewer_token = await AcceptanceHarness.mint(
+            authoring, f"reviewer:{plan.run_id}", "human"
         )
         await _set_autonomous_mode(authoring, reviewer_token)
 

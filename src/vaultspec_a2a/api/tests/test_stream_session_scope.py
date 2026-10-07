@@ -17,6 +17,7 @@ import pytest
 
 from ...streaming.aggregator import EventAggregator
 from ...testing import serve_on_loopback
+from ._relay_events import progress_event, relay_events
 from .conftest import make_app
 from .test_gateway_live import _seed_live_thread
 
@@ -146,27 +147,7 @@ async def test_a_resuming_viewer_hands_its_replay_connection_back(
         serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        relayed = await client.post(
-            "/internal/events/batch",
-            json={
-                "events": [
-                    {
-                        "thread_id": run_id,
-                        "ts": float(index),
-                        "payload": {
-                            "type": "agent_status",
-                            "event_type": "agent_status",
-                            "thread_id": run_id,
-                            "agent_id": "coder",
-                            "state": "working",
-                            "sequence": index,
-                        },
-                    }
-                    for index in (1, 2)
-                ]
-            },
-        )
-        assert relayed.status_code == 200, relayed.text
+        await relay_events(client, [progress_event(run_id, index) for index in (1, 2)])
 
         async with client.stream(
             "GET", f"/v1/runs/{run_id}/stream", headers={"Last-Event-ID": "-"}

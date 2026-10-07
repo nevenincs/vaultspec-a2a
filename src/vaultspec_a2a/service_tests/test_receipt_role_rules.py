@@ -16,19 +16,17 @@ import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
-from pydantic import TypeAdapter
 
 from ..authoring import (
     AuthoringClient,
-    AuthoringResponse,
     DocumentProposalSubmitter,
     PhaseAuthoringSpec,
-    mint_actor_token,
 )
 from ..graph.compiler import compile_team_graph
 from ..providers.factory import ProviderFactory
 from ..providers.team_selection import FrozenLaneAssignment
 from ..team import load_agent_config, load_team_config
+from ..testing import AcceptanceHarness
 from ..thread.actor_tokens import ActorTokenBundle
 from ..worker.token_store import RunTokenStore
 
@@ -60,14 +58,6 @@ class _PromptReceipt(BaseCallbackHandler):
     ) -> None:
         del serialized, kwargs
         self.calls.extend(list(call) for call in messages)
-
-
-def _raw_actor_token(response: AuthoringResponse) -> str:
-    """Read the engine's untyped envelope without propagating unknown data."""
-    payload = TypeAdapter(dict[str, object]).validate_python(response.data)
-    raw_token = payload.get("raw_token")
-    assert isinstance(raw_token, str) and raw_token
-    return raw_token
 
 
 def _production_phase_specs() -> dict[str, PhaseAuthoringSpec]:
@@ -104,13 +94,9 @@ async def _live_token_store(
     tokens: dict[str, str] = {}
     async with AuthoringClient(base_url, bearer) as client:
         for spec in phase_specs.values():
-            minted = await mint_actor_token(
-                client,
-                actor_id=f"agent:{spec.document_role}-{thread_id}",
-                kind="agent",
+            tokens[spec.document_role] = await AcceptanceHarness.mint(
+                client, f"agent:{spec.document_role}-{thread_id}", "agent"
             )
-            assert isinstance(minted, AuthoringResponse)
-            tokens[spec.document_role] = _raw_actor_token(minted)
     store = RunTokenStore()
     store.register(thread_id, ActorTokenBundle(tokens=tokens, engine_bearer=bearer))
     return store

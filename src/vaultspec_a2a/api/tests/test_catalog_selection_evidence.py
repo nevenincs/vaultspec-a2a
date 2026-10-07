@@ -27,9 +27,13 @@ import httpx
 import pytest
 
 from ...database import get_thread
-from ...testing import async_catalog_run_fields, async_run_start_body, serve_on_loopback
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    async_catalog_run_fields,
+    async_run_start_body,
+    serve_on_loopback,
+)
 from .conftest import SessionFactory, make_app
-from .test_gateway_live import _PRESET
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -59,7 +63,7 @@ async def test_frozen_selection_survives_real_gateway_restart(
             "/v1/runs",
             json={
                 "run_id": "evidence-restart",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "go",
                 "autonomous": True,
                 **await async_catalog_run_fields(client1),
@@ -130,7 +134,7 @@ async def test_launch_freezes_the_served_catalog_entry(
             "/v1/runs",
             json={
                 "run_id": "evidence-catalog-binding",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "go",
                 "autonomous": True,
                 **fields,
@@ -249,7 +253,7 @@ async def test_run_start_refuses_every_retired_selection_surface_before_dispatch
                 "/v1/runs",
                 json={
                     "run_id": f"retired-selection-{label}",
-                    "team_preset": _PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "go",
                     "autonomous": True,
                     **fields,
@@ -291,7 +295,7 @@ async def test_validation_errors_remain_actionable_without_reflecting_input(
             "/v1/runs",
             json={
                 "run_id": "invalid-current-schema",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "go",
                 **fields,
             },
@@ -336,7 +340,7 @@ async def test_run_start_persists_no_secrets_in_db_row(
             json=await async_run_start_body(
                 client,
                 "evidence-no-secrets",
-                team_preset=_PRESET,
+                team_preset=DEFAULT_TEAM_PRESET,
                 tokens={"coder": token_value},
                 message="go",
                 engine_bearer=bearer_value,

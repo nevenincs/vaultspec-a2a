@@ -97,7 +97,7 @@ from .progress import ProgressDeadline, ProgressStalledError, wait_for_async
 from .sse import SseFrame
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping
+    from collections.abc import Awaitable, Callable, Iterable, Mapping
 
     from ..conftest import ExternalPrerequisiteRule
     from ..providers._json_contract import JsonObject
@@ -475,16 +475,13 @@ async def _retry_transient[T](
     *,
     name: str,
     is_transient: Callable[[BaseException], bool],
-    before_retry: Callable[[BaseException], Awaitable[bool]] | None = None,
 ) -> T:
     """Run ``op`` under the harness's bounded transient-retry policy.
 
-    The single home of the retry loop for both harness clients. A failure that
-    ``before_retry`` consumes (returns ``True``) retries immediately with no
-    backoff and no attempt-classification - the credential-rotation hook. A
-    failure ``is_transient`` accepts is retried with exponential backoff +
-    jitter up to ``_ENGINE_RETRY_MAX_ATTEMPTS``; anything else re-raises
-    immediately as terminal. Exhaustion fails loud rather than hanging.
+    The single home of the retry loop for both harness clients. A failure
+    ``is_transient`` accepts is retried with exponential backoff + jitter up to
+    ``_ENGINE_RETRY_MAX_ATTEMPTS``; anything else re-raises immediately as
+    terminal. Exhaustion fails loud rather than hanging.
     """
     interval = _ENGINE_RETRY_INITIAL_INTERVAL
     last_exc: BaseException | None = None
@@ -492,8 +489,6 @@ async def _retry_transient[T](
         try:
             return await asyncio.wait_for(op(), _ENGINE_RETRY_PER_ATTEMPT_TIMEOUT)
         except Exception as exc:
-            if before_retry is not None and await before_retry(exc):
-                continue  # consumed (e.g. one-shot bearer refresh) - retry now
             if not is_transient(exc):
                 raise  # terminal class - never retried
             last_exc = exc
@@ -530,11 +525,11 @@ class ResilientAuthoringClient(AuthoringClient):
     * **Machine-bearer re-resolution on an outer-gate 401.** A shared engine can
       restart mid-run - a real observed failure: a long real-provider run
       outlives one engine process, so the bearer cached at start goes stale and
-      the next call 401s (outer bearer-gate: status 401, no ``error_kind``). On
-      that 401 the endpoint is re-resolved from the workspace ``service.json``
-      (the engine mints a fresh bearer at each boot and republishes it there),
-      the new bearer + transport are swapped in, and the call retried. This is
-      the standard credential-refresh-then-retry token-rotation pattern.
+      the next call 401s. This is the production client's own rotation, armed
+      with the production :func:`resolve_engine` as its ``bearer_resolver``: the
+      endpoint is re-resolved from the workspace ``service.json`` (the engine
+      mints a fresh bearer at each boot and republishes it there), the new
+      bearer and proven transport are swapped in, and the call retried once.
     * **Bounded transient retry with backoff + per-attempt timeout.** A read
       timeout / connect error / 5xx on the harness's own poll of a shared,
       concurrently-loaded engine is a textbook transient failure, not a defect;
@@ -547,47 +542,23 @@ class ResilientAuthoringClient(AuthoringClient):
     Being a subclass, it is a drop-in wherever an ``AuthoringClient`` is expected.
     """
 
-    async def _reresolve_bearer(self) -> None:
-        endpoint = resolve_engine()
-        if endpoint is None:
-            raise AssertionError(
-                "engine unreachable while re-resolving the bearer after a 401 "
-                "(engine likely restarted and its service.json is not fresh)"
-            )
-        self._base_url = endpoint.base_url.rstrip("/")
-        self._bearer_token = endpoint.bearer_token
-        await self._client.aclose()
-        self._client = httpx.AsyncClient(
-            base_url=self._base_url, timeout=httpx.Timeout(30.0, connect=5.0)
-        )
+    def __init__(self, base_url: str, bearer_token: str) -> None:
+        super().__init__(base_url, bearer_token, bearer_resolver=resolve_engine)
 
     async def _call_resilient[T](
         self, op: Callable[[], Awaitable[T]], *, operation: str
     ) -> T:
-        """Invoke a base-class call under bearer-refresh + bounded transient retry.
+        """Invoke a base-class call under bounded transient retry.
 
-        A 401 triggers a single bearer re-resolve then an immediate retry (no
-        backoff - a credential rotation, not congestion). A transient transport
-        failure (``httpx.TransportError`` - read/connect timeouts and network
-        errors - or the per-attempt ``TimeoutError``) or a 5xx is retried with
-        exponential backoff + jitter up to ``max_attempts``. Any other 4xx is a
-        terminal identity/denial error, re-raised immediately. Exhaustion fails
-        loud rather than returning a partial or hanging. The loop itself is the
-        shared :func:`_retry_transient`; only the classification is engine-side.
+        A transient transport failure (``httpx.TransportError`` - read/connect
+        timeouts and network errors - or the per-attempt ``TimeoutError``) or a
+        5xx is retried with exponential backoff + jitter up to ``max_attempts``.
+        Any 4xx is a terminal identity/denial error, re-raised immediately; a
+        bearer rotation's outer-gate 401 has already been re-resolved and retried
+        once inside the base call. Exhaustion fails loud rather than returning a
+        partial or hanging. The loop itself is the shared
+        :func:`_retry_transient`; only the classification is engine-side.
         """
-        reresolved = False
-
-        async def before_retry(exc: BaseException) -> bool:
-            nonlocal reresolved
-            if (
-                isinstance(exc, AuthoringTransportError)
-                and exc.status_code == 401
-                and not reresolved
-            ):
-                await self._reresolve_bearer()
-                reresolved = True
-                return True  # immediate retry on the fresh bearer, no backoff
-            return False
 
         def is_transient(exc: BaseException) -> bool:
             if isinstance(exc, AuthoringTransportError):
@@ -598,7 +569,6 @@ class ResilientAuthoringClient(AuthoringClient):
             op,
             name=f"engine call {operation!r}",
             is_transient=is_transient,
-            before_retry=before_retry,
         )
 
     @override
@@ -714,13 +684,29 @@ class AcceptanceHarness:
     # Token + run-start
     # ------------------------------------------------------------------
 
-    async def mint(self, ec: AuthoringClient, actor_id: str, kind: str) -> str:
+    @staticmethod
+    async def mint(ec: AuthoringClient, actor_id: str, kind: str) -> str:
         """Mint one actor token of *kind* for *actor_id*; a denial fails the case."""
         minted = await mint_actor_token(ec, actor_id=actor_id, kind=kind)
         assert isinstance(minted, AuthoringResponse), f"mint denied: {minted}"
         token = json_object(minted.data, at="actor-token response").get("raw_token")
         assert isinstance(token, str) and token
         return token
+
+    @staticmethod
+    async def mint_role_tokens(
+        ec: AuthoringClient, run_id: str, roles: Iterable[str]
+    ) -> dict[str, str]:
+        """Mint one Agent-kind actor token per role in *roles*, keyed by role.
+
+        Each actor id is scoped to *run_id* (``agent:<run_id>:<role>``), so a
+        run-start bundle built from the result covers every required role with
+        a principal no other run holds.
+        """
+        return {
+            role: await AcceptanceHarness.mint(ec, f"agent:{run_id}:{role}", "agent")
+            for role in roles
+        }
 
     async def run_start(
         self,
@@ -1247,10 +1233,7 @@ class AcceptanceHarness:
         async with ResilientAuthoringClient(
             self.engine_base_url, self.engine_bearer
         ) as ec:
-            tokens = {
-                role: await self.mint(ec, f"agent:{self.run_id}:{role}", "agent")
-                for role in self.case.roles
-            }
+            tokens = await self.mint_role_tokens(ec, self.run_id, self.case.roles)
             # One human principal is both the reviewer AND the operation-mode
             # policy setter (mode-set requires a human/system actor; a human
             # reviewer distinct from the agent author clears the self-approval ban).

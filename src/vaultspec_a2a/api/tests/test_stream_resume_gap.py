@@ -26,9 +26,9 @@ from ...testing import SseReader, serve_on_loopback, settings_override
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
 from .._stream_replay import ResumePosition, replay_window
+from ._relay_events import progress_event, relay_events, terminal_event
 from .conftest import make_app, seed_run_with_status
 from .test_internal import _record_completed_checkpoint, _seed_accepted_thread
-from .test_stream_resume_replay import _progress_event, _relay, _terminal_event
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -70,9 +70,9 @@ async def test_a_cursor_behind_the_trimmed_window_is_told_where_the_replay_start
             serve_on_loopback(producer) as producer_base,
             httpx.AsyncClient(base_url=producer_base, timeout=10.0) as relay_client,
         ):
-            await _relay(
+            await relay_events(
                 relay_client,
-                [_progress_event(_RUN, index) for index in (1, 2, 3, 4, 5)],
+                [progress_event(_RUN, index) for index in (1, 2, 3, 4, 5)],
             )
         assert replay_writer_seat(viewer) is None, (
             "the viewer gateway must serve the table, not another app's ring"
@@ -218,7 +218,7 @@ async def test_a_cursor_past_the_runs_mark_is_answered_and_still_goes_live(
         serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        await _relay(client, [_progress_event(_RUN, index) for index in (1, 2, 3)])
+        await relay_events(client, [progress_event(_RUN, index) for index in (1, 2, 3)])
         async with client.stream(
             "GET",
             f"/v1/runs/{_RUN}/stream",
@@ -229,9 +229,9 @@ async def test_a_cursor_past_the_runs_mark_is_answered_and_still_goes_live(
             assert (await reader.next_frame()).type == "stream_snapshot"
             notice = await reader.next_frame()
 
-            await _relay(client, [_progress_event(_RUN, 4)])
+            await relay_events(client, [progress_event(_RUN, 4)])
             live = await reader.next_frame()
-            await _relay(client, [_terminal_event(_RUN, 5)])
+            await relay_events(client, [terminal_event(_RUN, 5)])
             closing = await reader.next_frame()
 
     assert notice.type == "progress_dropped"
@@ -260,14 +260,14 @@ async def test_a_caught_up_resume_is_given_no_notice_at_all(
         serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        await _relay(client, [_progress_event(_RUN, index) for index in (1, 2)])
+        await relay_events(client, [progress_event(_RUN, index) for index in (1, 2)])
         async with client.stream(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": f"{_RUN}:2"}
         ) as response:
             assert response.status_code == 200
             reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
-            await _relay(client, [_progress_event(_RUN, 3)])
+            await relay_events(client, [progress_event(_RUN, 3)])
             following = await reader.next_frame()
 
     assert following.type == "agent_status"

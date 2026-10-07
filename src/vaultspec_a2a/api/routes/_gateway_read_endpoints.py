@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...control._thread_metadata import run_lease_binding, run_lease_id
 from ...control._worker_health import worker_liveness
 from ...control.action_lease import RUN_NOT_FOUND
-from ...control.execution_authority import read_frozen_team_selection_from_fields
 from ...control.run_discovery_service import discover_active_runs
 from ...control.team_service import build_team_status
 from ...control.thread_listing import list_threads_service
@@ -254,7 +253,6 @@ async def run_status_endpoint(
         next_nodes=snapshot.next_nodes,
         repair_status=snapshot.repair_status,
     )
-    modern_frozen = read_frozen_team_selection_from_fields(capture.metadata.fields)
     provenance = capture.metadata.provenance
     lease_binding = run_lease_binding(capture.metadata.fields)
 
@@ -312,7 +310,11 @@ async def run_status_endpoint(
         # the run survives, so without this line their account is durable and
         # unreadable - recorded for nobody.
         repair_reason=snapshot.repair_reason,
-        frozen_assignment=_modern_frozen_disclosure(modern_frozen),
+        # From the capture, like every other field: the stored selection is
+        # digest-protected, so validating it a second time here raised over a
+        # record the capture had already judged and degraded for - and that
+        # exception cost the caller the whole response for one field.
+        frozen_assignment=_modern_frozen_disclosure(capture.frozen_selection),
         lease_id=run_lease_id(capture.metadata.fields),
         reservation_id=(
             lease_binding.reservation_id if lease_binding is not None else None

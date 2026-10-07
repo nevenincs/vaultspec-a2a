@@ -55,6 +55,11 @@ from ...thread.enums import (
     ThreadStatus,
 )
 from ...thread.errors import NicknameConflictError
+from .._dispatch_refusals import (
+    DISPATCH_FAILURES,
+    refusal_responses,
+    refused_dispatch,
+)
 from .._utils import trace_headers
 from ..dependencies import (
     get_circuit_breaker,
@@ -88,7 +93,6 @@ from .gateway import (
     _prepare_workspace_root,
     _probe_admission_readiness,
     _probe_harness,
-    _raise_for_dispatch_failure,
     _release_binding_digest,
     _release_ineligible_reservation,
     _replay_identity_or_conflict,
@@ -121,6 +125,33 @@ def _require_profile_execution() -> None:
         RunStartResponse | RunPrepareResponse | RunCommitResponse | RunReleaseResponse
     ),
     status_code=201,
+    responses=refusal_responses(
+        DISPATCH_FAILURES,
+        {
+            404: {
+                "description": (
+                    "The run was gone by the time its first dispatch settled."
+                ),
+            },
+            409: {
+                "description": (
+                    "The run was not started as asked: its id already belongs to "
+                    "a different request, its nickname is taken, its predecessor "
+                    "cannot be continued, the commit does not match its prepared "
+                    "reservation, or the worker refused the first dispatch with "
+                    "the typed code every run action shares."
+                ),
+            },
+            503: {
+                "description": (
+                    "Gateway service token is not configured, the gateway is "
+                    "draining or out of admission capacity, execution or the "
+                    "provider catalog is not ready, or the worker is saturated "
+                    "or shut out by the failure breaker; retry later."
+                ),
+            },
+        },
+    ),
 )
 async def run_start_endpoint(
     request: Request,
@@ -501,7 +532,8 @@ async def _create_run_core(
         ):
             await gate.release(run_id)
 
-        _raise_for_dispatch_failure(result.failure_type, result.error_detail)
+        if result.failure_type is not None:
+            raise refused_dispatch(result.failure_type, result.error_detail)
 
         return _RunDispatchResult(
             thread_id=result.thread_id,

@@ -917,7 +917,6 @@ async def _failed_permission_dispatch(
         action_id=claim.action_id,
         idempotency_key=resolved_idempotency_key,
         approval_status=transition.approval_status,
-        circuit_open=policy.is_circuit_open,
         # No status is chosen here. A dispatch outcome carries its typed failure
         # and nothing else, so the one protocol mapping decides what every verb
         # that met the same outcome serves for it.

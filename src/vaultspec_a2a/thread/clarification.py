@@ -47,7 +47,11 @@ from pydantic import (
 )
 
 from .action_receipts import canonical_json, sha256_fingerprint
-from .constants import MAX_REQUEST_ID_CHARS, MAX_RUN_MESSAGE_CHARS
+from .constants import (
+    MAX_REQUEST_ID_CHARS,
+    MAX_RUN_MESSAGE_CHARS,
+    REQUEST_ID_PATTERN,
+)
 from .enums import InterruptType
 
 if TYPE_CHECKING:
@@ -139,18 +143,16 @@ MAX_PROMPT_CHARS = 512
 MAX_OPTION_CHARS = 128
 MAX_ANSWER_CHARS = 2048
 
-# Question and request identifiers are correlation handles that travel in a URL
-# path and in JSON object keys, so they are restricted to a path- and key-safe
-# alphabet rather than merely capped.
-_IDENTIFIER_PATTERN = r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$"
-
+# Question and request identifiers are correlation handles with one shared
+# grammar, declared beside the length that bounds them so the respond route
+# refusing a malformed handle and the model refusing it compile one text.
 QuestionId = Annotated[
     str,
-    Field(min_length=1, max_length=_MAX_IDENTIFIER_CHARS, pattern=_IDENTIFIER_PATTERN),
+    Field(min_length=1, max_length=_MAX_IDENTIFIER_CHARS, pattern=REQUEST_ID_PATTERN),
 ]
 ClarificationRequestId = Annotated[
     str,
-    Field(min_length=1, max_length=MAX_REQUEST_ID_CHARS, pattern=_IDENTIFIER_PATTERN),
+    Field(min_length=1, max_length=MAX_REQUEST_ID_CHARS, pattern=REQUEST_ID_PATTERN),
 ]
 
 

@@ -426,15 +426,6 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         probe=None,
     ),
     ExternalPrerequisite(
-        "dashboard-source",
-        what="a dashboard repository checkout whose engine sources are readable",
-        supply=(
-            "check out the dashboard repository and export "
-            "VAULTSPEC_A2A_ENGINE_SOURCE as its root"
-        ),
-        probe=None,
-    ),
-    ExternalPrerequisite(
         "engine-vault-adr",
         what="an engine vault holding an ADR the read-a-named-ADR proof can use",
         supply=(

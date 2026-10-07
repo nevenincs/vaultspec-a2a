@@ -37,6 +37,7 @@ __all__ = [
     "MAX_TEAM_PRESET_CHARS",
     "MAX_TOOL_CALL_CHARS",
     "MAX_WORKSPACE_ROOT_LENGTH",
+    "REQUEST_ID_PATTERN",
     "ROLE_ID_PATTERN",
     "RUN_ID_PATTERN",
 ]
@@ -119,6 +120,22 @@ MAX_REQUEST_ID_CHARS: int = 128
 Clarification and permission requests are answered by the handle the run
 minted, so every frame and model carrying one must admit the full minted
 length: a truncated handle names a request that does not exist.
+"""
+
+REQUEST_ID_PATTERN: str = r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$"
+"""The grammar of a correlation handle this service MINTS, anchored at both ends.
+
+A request id and the question ids keyed beneath one travel in a URL path and
+as JSON object keys, so they are confined to a path- and key-safe alphabet
+rather than merely capped. Two layers now compile this text: the resolution
+model that refuses a malformed handle, and the respond route that refuses it
+first, so a caller's malformed path is answered as a bad request instead of
+reaching the model and surfacing as a server fault.
+
+It governs the handles this service mints and not the ones it transports. An
+approval handle minted by the authoring engine is opaque here, carries no
+grammar this side may assert, and is bounded by
+:data:`MAX_APPROVAL_REQUEST_ID_CHARS` alone.
 """
 
 MAX_APPROVAL_REQUEST_ID_CHARS: int = 256

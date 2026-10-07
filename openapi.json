@@ -752,6 +752,8 @@
             "required": true,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
               "title": "Request Id"
             }
           },
@@ -762,7 +764,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 255
                 },
                 {
                   "type": "null"
@@ -857,6 +860,9 @@
             "required": true,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.\\-]*$",
               "title": "Request Id"
             }
           }
@@ -940,7 +946,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 255
                 },
                 {
                   "type": "null"

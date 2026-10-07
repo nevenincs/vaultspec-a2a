@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol
 
 if TYPE_CHECKING:
@@ -13,6 +14,15 @@ if TYPE_CHECKING:
 __all__ = ["BoundedHttpBodyMiddleware", "gateway_body_limit", "worker_body_limit"]
 
 _MAX_V1_WRITE_BODY_BYTES: Final = 1024 * 1024
+
+#: What a request whose declared length cannot be read is told.
+#:
+#: Deliberately not a size refusal. The request is not too large - it is
+#: unreadable, and the two are different facts for a client: one says "send
+#: less", the other says "send a well-formed request".
+_UNREADABLE_LENGTH_DETAIL: Final = (
+    "Content-Length must be a single non-negative decimal integer"
+)
 
 #: The allowance for one write, with the detail its refusal carries.
 type _BodyLimit = Callable[[Scope], tuple[int, str]]
@@ -59,6 +69,22 @@ def gateway_body_limit(settings: _BodyLimitSettings) -> _BodyLimit:
     return limit
 
 
+@dataclass(frozen=True, slots=True)
+class _DeclaredLength:
+    """What a request's ``Content-Length`` header or headers say, if anything.
+
+    ``readable`` is the distinction this type exists for. A request that
+    declares nothing and a request whose declaration cannot be read were both
+    reported as ``None`` and both treated as "no declaration", so a value that
+    is not a length at all was silently discarded and the request admitted on
+    its streamed bytes alone. The two must part company: the first is normal
+    and the second is a request this middleware cannot reason about.
+    """
+
+    value: int | None
+    readable: bool = True
+
+
 class BoundedHttpBodyMiddleware:
     """Count received bytes on every HTTP write before handing its body onward."""
 
@@ -73,7 +99,14 @@ class BoundedHttpBodyMiddleware:
 
         max_bytes, detail = self.limit(scope)
         declared = self._content_length(scope)
-        if declared is not None and declared > max_bytes:
+        if not declared.readable:
+            # Refused before a byte is received. A declaration this layer
+            # cannot read is one it cannot enforce against, and admitting the
+            # request anyway left the bound resting on the stream counter
+            # alone - which is the path a caller controls.
+            await self._reject(send, _UNREADABLE_LENGTH_DETAIL, status=400)
+            return
+        if declared.value is not None and declared.value > max_bytes:
             await self._reject(send, detail)
             return
 
@@ -108,14 +141,29 @@ class BoundedHttpBodyMiddleware:
         }
 
     @staticmethod
-    def _content_length(scope: Scope) -> int | None:
+    def _content_length(scope: Scope) -> _DeclaredLength:
+        """Read the declared body length, or report that it cannot be read.
+
+        ``isdigit`` rather than ``int``, because ``int`` accepts more than the
+        HTTP grammar does: a sign, surrounding whitespace, and Python's own
+        digit separators all parse, so ``1_2`` read as twelve and ``-1`` read
+        as a negative length that no comparison against a cap could refuse.
+
+        Every header is read rather than the first, because two that disagree
+        are two different claims about one body and neither can be trusted.
+        Repeats that agree are one value and are admitted.
+        """
+        declared: int | None = None
         for name, value in scope.get("headers", ()):
-            if name.lower() == b"content-length":
-                try:
-                    return int(value)
-                except ValueError:
-                    return None
-        return None
+            if name.lower() != b"content-length":
+                continue
+            if not value.isdigit():
+                return _DeclaredLength(None, readable=False)
+            length = int(value)
+            if declared is not None and length != declared:
+                return _DeclaredLength(None, readable=False)
+            declared = length
+        return _DeclaredLength(declared)
 
     @staticmethod
     def _replay(message: Message, upstream: Receive) -> Receive:
@@ -131,12 +179,12 @@ class BoundedHttpBodyMiddleware:
         return receive
 
     @staticmethod
-    async def _reject(send: Send, detail: str) -> None:
+    async def _reject(send: Send, detail: str, *, status: int = 413) -> None:
         body = json.dumps({"detail": detail}).encode("utf-8")
         await send(
             {
                 "type": "http.response.start",
-                "status": 413,
+                "status": status,
                 "headers": (
                     (b"content-type", b"application/json"),
                     (b"content-length", str(len(body)).encode("ascii")),

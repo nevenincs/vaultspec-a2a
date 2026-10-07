@@ -19,6 +19,7 @@ from typing import Any, Protocol, cast
 from ..domain_config import domain_config
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from ..thread.errors import StreamSubscriptionError
+from ..utils import active_trace_ids
 from ._run_state import RunLiveStateMirror
 from .fanout import deliver_bounded
 from .transformer import project_run_progress
@@ -52,11 +53,20 @@ class SequenceAllocation:
     written, so the durable row records when the frame was PRODUCED. The write
     sits behind the fan-out and may land much later; dating a row by its write
     would misreport the age bound that expires it.
+
+    ``trace_id`` and ``span_id`` are stamped in the same act and for the same
+    reason: the trace that produced this frame is in scope HERE, inside the
+    relay request, and nowhere near the batched write. Reading the context at
+    the write would stamp every frame of a flush with the flush's own trace,
+    which correlates each frame to the wrong request. ``None`` on both where
+    no valid span context is in scope.
     """
 
     thread_id: str
     sequence: int
     allocated_at: datetime
+    trace_id: str | None = None
+    span_id: str | None = None
 
 
 class RunSequenceSeedSource(Protocol):
@@ -386,14 +396,24 @@ class RelayHub:
         return sink is None or sink.retains(frame)
 
     def _allocate(self, thread_id: str) -> SequenceAllocation | None:
-        """Take this run's next number, or ``None`` where it has none."""
+        """Take this run's next number, or ``None`` where it has none.
+
+        The production time and the producing trace are read together, here,
+        because this is the one moment both are true of the frame rather than
+        of the batch that later writes it.
+        """
         if self._allocator is None:
             return None
         sequence = self._allocator.allocate(thread_id)
         if sequence is None:
             return None
+        trace_id, span_id = active_trace_ids()
         return SequenceAllocation(
-            thread_id=thread_id, sequence=sequence, allocated_at=datetime.now(UTC)
+            thread_id=thread_id,
+            sequence=sequence,
+            allocated_at=datetime.now(UTC),
+            trace_id=trace_id,
+            span_id=span_id,
         )
 
     def _record(self, allocation: SequenceAllocation, frame: object) -> None:

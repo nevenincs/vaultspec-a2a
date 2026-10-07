@@ -136,6 +136,12 @@ class RunEventWriter:
                 event_type=str(body.get("type") or body.get("event_type") or ""),
                 payload_json=json.dumps(body, separators=(",", ":")),
                 created_at=allocation.allocated_at,
+                # Carried from the allocation, never read here: this method
+                # runs in front of the fan-out and the flush does not, so the
+                # allocation is the only place the frame's own trace was in
+                # scope.
+                trace_id=allocation.trace_id,
+                span_id=allocation.span_id,
             )
         )
         self._ensure_ticker()

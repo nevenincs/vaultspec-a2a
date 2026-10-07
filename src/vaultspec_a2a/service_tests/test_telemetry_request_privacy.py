@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 import pytest
 
-from ..testing.ports import free_port
+from ..testing import free_port
 from .harness import COMPOSE_FILE, REPO_ROOT, resolve_docker_executable
 
 if TYPE_CHECKING:

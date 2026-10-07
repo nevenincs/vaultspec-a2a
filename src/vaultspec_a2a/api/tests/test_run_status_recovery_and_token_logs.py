@@ -34,14 +34,14 @@ from ...ipc.schemas import DispatchRequest
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...team.team_config import load_team_config
 from ...testing import (
+    actor_tokens_body,
     add_test_node,
     async_catalog_run_fields,
     compile_test_graph,
+    current_execution_metadata,
     new_state_graph,
     serve_on_loopback,
 )
-from ...testing.catalog_authority import current_execution_metadata
-from ...testing.gateway_verbs import actor_tokens_body
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import (
     GraphActionReceipt,

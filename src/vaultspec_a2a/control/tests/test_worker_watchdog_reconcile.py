@@ -20,8 +20,7 @@ from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.health import assemble_health_status
 from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
-from ...testing import adopted_spawner, health_listener
-from ...testing.ports import free_port
+from ...testing import adopted_spawner, free_port, health_listener
 from ...utils import ProcessContainment, spawn_contained
 
 

@@ -35,10 +35,10 @@ from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     booted_gateway,
     broker_gateway_env,
+    gateway_run_verbs,
     gateway_script,
     seat_app_home,
 )
-from ..testing.gateway_verbs import gateway_run_verbs
 from ..utils._process_tree import port_has_listener
 
 if TYPE_CHECKING:

@@ -35,8 +35,7 @@ from ...control.config import settings
 from ...control.health import assemble_health_status
 from ...control.worker_management import WorkerWatchdog
 from ...graph.enums import ServerEventType, StreamFrameKind
-from ...testing import adopted_spawner
-from ...testing.ports import free_port
+from ...testing import adopted_spawner, free_port
 from ...worker.ipc import WorkerBridge
 from ..circuit_breaker import WorkerCircuitBreaker
 

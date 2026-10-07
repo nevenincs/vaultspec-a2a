@@ -34,10 +34,10 @@ from ..service_tests._live_desktop_gateway import armed_gateway
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     LIVE_PROVIDER_PREREQUISITES,
+    free_port,
     selection_from_served_catalog,
     wait_for_run_status,
 )
-from ..testing.ports import free_port
 from ..utils.process import ProcessContainment
 from .test_engine_broker_lost_ack_live import (
     _engine_command,

@@ -65,14 +65,14 @@ from ..testing import (
     armed_gateway_env,
     booted_gateway,
     broker_gateway_env,
+    free_port,
+    gateway_run_verbs,
     reap_process,
     run_cli,
     seat_app_home,
     spawn_logged,
     status_and_json,
 )
-from ..testing.gateway_verbs import gateway_run_verbs
-from ..testing.ports import free_port
 
 if TYPE_CHECKING:
     import subprocess

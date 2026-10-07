@@ -257,7 +257,7 @@ def _antigravity_installed() -> bool:
 def _antigravity_credentialed() -> bool:
     """The CLI's persisted OAuth login, at the path the lane resolves."""
     from .control.config import settings
-    from .testing.antigravity import antigravity_credential_path
+    from .testing import antigravity_credential_path
 
     return antigravity_credential_path(home=settings.antigravity_cli_home).is_file()
 
@@ -925,7 +925,7 @@ def schema_template() -> Path:
         from sqlalchemy import create_engine
 
         from .database.models import Base
-        from .testing.session_root import session_scratch_dir
+        from .testing import session_scratch_dir
 
         target = session_scratch_dir("vaultspec-schema-") / "template.db"
         # Built through the SYNCHRONOUS driver deliberately: callers are async
@@ -963,7 +963,7 @@ def migrated_schema_template() -> Path:
         from concurrent.futures import ThreadPoolExecutor
 
         from .database.migrate import run_migrations
-        from .testing.session_root import session_scratch_dir
+        from .testing import session_scratch_dir
 
         target = session_scratch_dir("vaultspec-migrated-") / "migrated.db"
         with ThreadPoolExecutor(max_workers=1) as executor:

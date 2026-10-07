@@ -23,7 +23,7 @@ from packaging.requirements import Requirement
 from pydantic import ValidationError
 
 from ...testing import armed_environment as _environment
-from ...testing.factories import build_settings
+from ...testing import build_settings
 
 _ENV_EXAMPLE = pathlib.Path(__file__).resolve().parents[3].parent / ".env.example"
 _PROJECT_ROOT = _ENV_EXAMPLE.parent

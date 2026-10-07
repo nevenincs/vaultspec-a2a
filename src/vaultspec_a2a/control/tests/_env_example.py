@@ -15,7 +15,7 @@ from ...control.config import Settings
 from ...control.env_registry import ENV_FILE_VARIABLE, FOREIGN_PROVIDER_ENV_NAMES
 from ...control.settings_base import field_env_names
 from ...protocols.mcp.authoring_stdio import AuthoringBridgeSettings
-from ...testing.session_root import TestSessionSettings
+from ...testing import TestSessionSettings
 
 __all__ = [
     "DOCUMENTED_BUT_NOT_READ",

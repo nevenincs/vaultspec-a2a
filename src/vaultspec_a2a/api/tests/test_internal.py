@@ -36,7 +36,7 @@ from ...ipc.schemas import DispatchRequest
 from ...providers import ProviderCondition
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
-from ...testing.catalog_authority import current_execution_metadata
+from ...testing import current_execution_metadata
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.action_receipts import GraphCompletionReceipt

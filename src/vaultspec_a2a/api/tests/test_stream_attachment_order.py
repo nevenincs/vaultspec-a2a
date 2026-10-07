@@ -28,8 +28,7 @@ import pytest
 from ...database.thread_repository import update_thread_status
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
-from ...testing import decode_frame
-from ...testing.environment import settings_override
+from ...testing import decode_frame, settings_override
 from ...thread.enums import ThreadStatus
 from ..thread_stream import ThreadStreamRequest, _stream_thread_events
 from .conftest import seed_run_with_status

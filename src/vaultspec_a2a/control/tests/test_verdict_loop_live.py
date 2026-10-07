@@ -87,9 +87,9 @@ from ...testing import (
     add_test_node,
     adopted_spawner,
     compile_test_graph,
+    current_execution_metadata,
     new_state_graph,
 )
-from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import PermissionRequestStatus, ThreadStatus

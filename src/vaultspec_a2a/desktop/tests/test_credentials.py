@@ -25,7 +25,7 @@ from ...desktop.credentials import (
     load_attach_credential,
     load_ownership_capability,
 )
-from ...testing.links import plant_link_to_file
+from ...testing import plant_link_to_file
 
 _VALID_TOKEN = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
 

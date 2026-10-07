@@ -37,7 +37,7 @@ import pytest
 
 from ..control._worker_health import WorkerHealthProbe, probe_worker_health
 from ..control.worker_management import LazyWorkerSpawner
-from ..testing.ports import free_port
+from ..testing import free_port
 
 if TYPE_CHECKING:
     from collections.abc import Generator

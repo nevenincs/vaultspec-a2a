@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from ..testing import foreign_worker
-from ..testing.ports import free_port
+from ..testing import foreign_worker, free_port
 
 if TYPE_CHECKING:
     from pathlib import Path

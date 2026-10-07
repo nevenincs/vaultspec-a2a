@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 from ...lifecycle.manager import _await_listener
-from ...testing.ports import free_port
+from ...testing import free_port
 from ...utils._process_tree import (
     ListenerOwnership,
     _win_tree_kill,

@@ -24,8 +24,7 @@ from pydantic import SecretStr
 from ...authoring import AgentTool, CatalogSnapshot
 from ...control.config import Settings
 from ...graph.enums import Provider
-from ...testing import settings_override
-from ...testing.children import run_child
+from ...testing import run_child, settings_override
 from ...utils.enums import CodexWebSearchMode
 from .._acp_authoring import AuthoringToolBinding, attach_authoring_tools
 from .._acp_mcp import codex_mcp_server_specs

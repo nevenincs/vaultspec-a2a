@@ -23,8 +23,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from ...domain_config import domain_config
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import adopted_spawner
-from ...testing.catalog_authority import current_execution_metadata
+from ...testing import adopted_spawner, current_execution_metadata
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,

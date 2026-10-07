@@ -23,7 +23,7 @@ import pytest
 
 from ...control.config import setting_env
 from ...control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
-from ...testing.ports import free_port
+from ...testing import free_port
 from ...utils._process_tree import pid_is_live, wait_pid_gone
 from ..boot import (
     build_cwd_for,

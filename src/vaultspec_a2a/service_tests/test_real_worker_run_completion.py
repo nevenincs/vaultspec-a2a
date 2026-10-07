@@ -53,8 +53,7 @@ from typing import TYPE_CHECKING
 
 from ..acceptance.tests._harness import certified_gateway
 from ..team import load_team_config
-from ..testing.lanes import UNATTENDED_REPLY
-from ..testing.payloads import json_object, json_object_list
+from ..testing import UNATTENDED_REPLY, json_object, json_object_list
 
 if TYPE_CHECKING:
     from pathlib import Path

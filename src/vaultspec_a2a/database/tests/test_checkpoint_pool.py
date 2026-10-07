@@ -24,7 +24,7 @@ import pytest
 import pytest_asyncio
 
 from ...domain_config import domain_config
-from ...testing.environment import settings_override
+from ...testing import settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
 from ..checkpoints import concurrent_checkpointer, open_checkpointer
 

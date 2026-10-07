@@ -50,7 +50,7 @@ from typing import Any
 
 from ..acceptance.tests._harness import certified_gateway
 from ..graph.enums import Provider
-from ..testing.gateway_verbs import role_tokens
+from ..testing import role_tokens
 
 # A star preset, so the run crosses the supervisor's routing turns as well as its
 # worker's; agreement is asserted for every role the freeze discloses.

@@ -31,8 +31,7 @@ from ...control.tests.test_dispatch_failure_transitions import (
     _seed_accepted_initial_action,
 )
 from ...graph.enums import PermissionType
-from ...testing import adopted_spawner
-from ...testing.catalog_authority import current_execution_metadata
+from ...testing import adopted_spawner, current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ApprovalStatus, ThreadStatus
 from ...worker.app import create_worker_app

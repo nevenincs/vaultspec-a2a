@@ -47,7 +47,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ..testing.acceptance import (
+from ..testing import (
     CODER_ROLE,
     MODE_AUTONOMOUS,
     OBSERVE_DEADLINE_SECONDS,
@@ -55,13 +55,13 @@ from ..testing.acceptance import (
     AcceptanceCase,
     AcceptanceHarness,
     ResilientAuthoringClient,
-    _extract_bridge_tools,
     observe_bridged_authoring_run,
     reachable_stack,
     resolve_selection,
     snapshot_vault,
     vault_write_delta,
 )
+from ..testing.acceptance import _extract_bridge_tools
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule

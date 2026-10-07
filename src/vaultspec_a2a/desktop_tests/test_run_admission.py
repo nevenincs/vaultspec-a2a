@@ -39,18 +39,17 @@ import httpx
 
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_REQUIRED_ROLE,
+    GatewayVerbs,
+    ProgressDeadline,
     booted_gateway,
     broker_gateway_env,
+    gateway_run_verbs,
     gateway_script,
     seat_app_home,
     status_and_json,
+    wait_for,
 )
-from ..testing.gateway_verbs import (
-    DEFAULT_REQUIRED_ROLE,
-    GatewayVerbs,
-    gateway_run_verbs,
-)
-from ..testing.progress import ProgressDeadline, wait_for
 
 if TYPE_CHECKING:
     from collections.abc import Generator

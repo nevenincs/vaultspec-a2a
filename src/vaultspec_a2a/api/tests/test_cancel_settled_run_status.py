@@ -39,11 +39,11 @@ from ...graph.nodes.action_completion import (
 from ...providers import ProviderCondition
 from ...testing import (
     add_test_node,
+    async_run_start_body,
     compile_test_graph,
     new_state_graph,
     serve_on_loopback,
 )
-from ...testing.gateway_verbs import async_run_start_body
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import ThreadStatus

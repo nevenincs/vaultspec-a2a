@@ -23,8 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from ...testing import settings_override
-from ...testing.lanes import LANES
+from ...testing import LANES, settings_override
 from ..execution_modes import EXTERNAL_EXECUTION_MODES
 from ..in_process_catalog import BUILT_IN_LANES
 from ..provider_catalog_service import _DISPLAY_NAMES, ProviderCatalogService

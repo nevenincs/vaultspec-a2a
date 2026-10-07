@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..testing.payloads import json_object, json_object_list
+from ..testing import json_object, json_object_list
 
 if TYPE_CHECKING:
     from ..providers._json_contract import JsonObject

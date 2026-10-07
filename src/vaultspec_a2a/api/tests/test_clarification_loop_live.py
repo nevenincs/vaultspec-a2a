@@ -70,10 +70,10 @@ from ...team.team_config import load_team_config
 from ...testing import (
     adopted_spawner,
     async_catalog_run_fields,
+    current_execution_metadata,
     loopback_callback_bridge,
     wait_for_run_status_async,
 )
-from ...testing.catalog_authority import current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,

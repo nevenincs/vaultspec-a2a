@@ -39,6 +39,10 @@ from ...conftest import ExternalPrerequisiteRule
 from ...testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     DEFAULT_OWNERSHIP_CAPABILITY,
+    DEFAULT_PRESET_LANE,
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    GatewayVerbs,
     NoSelectableLaneError,
     RunVerbs,
     booted_gateway,
@@ -46,12 +50,6 @@ from ...testing import (
     fetch_in_process_selection,
     gateway_script,
     seat_app_home,
-)
-from ...testing.gateway_verbs import (
-    DEFAULT_PRESET_LANE,
-    DEFAULT_REQUIRED_ROLE,
-    DEFAULT_TEAM_PRESET,
-    GatewayVerbs,
 )
 
 if TYPE_CHECKING:

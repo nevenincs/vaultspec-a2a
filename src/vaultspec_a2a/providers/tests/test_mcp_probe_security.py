@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing.children import run_child
+from ...testing import run_child
 
 if TYPE_CHECKING:
     from pathlib import Path

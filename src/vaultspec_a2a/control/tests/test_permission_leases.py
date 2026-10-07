@@ -18,8 +18,7 @@ from ...database import (
     get_permission_request,
     record_permission_request,
 )
-from ...testing import adopted_spawner
-from ...testing.catalog_authority import current_execution_metadata
+from ...testing import adopted_spawner, current_execution_metadata
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus

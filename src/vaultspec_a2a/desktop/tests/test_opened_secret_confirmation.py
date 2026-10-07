@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing.links import plant_link_to_file
+from ...testing import plant_link_to_file
 from .._platform_acl import (
     confirm_opened_secret,
     harden_credential_path,

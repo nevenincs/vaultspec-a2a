@@ -21,7 +21,7 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from ...testing.ports import free_port
+from ...testing import free_port
 from ..procs_config import PortBand, ProcsConfig, RoleConfig
 from ..registry import (
     ProcRecord,

@@ -8,7 +8,6 @@ response formatting.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -44,7 +43,6 @@ from ..ipc.schemas import (
     SeedTranscriptMessage,
     to_dispatch_action,
 )
-from ..team.team_config import load_team_config
 from ..thread import RunWriteAuthority
 from ..thread.creation import resolve_autonomous
 from ..thread.dispatch_policy import FailureType
@@ -53,7 +51,6 @@ from ..thread.enums import (
     ControlActionType,
     ThreadStatus,
 )
-from ..thread.errors import ConfigError, TeamConfigNotFoundError
 from ..thread.executable_graph import freeze_graph_definition
 from ..thread.idempotency import thread_create_action_key
 from ..thread.lifecycle_guards import can_archive, can_delete
@@ -75,6 +72,7 @@ if TYPE_CHECKING:
 
     from ..database.checkpoints import Checkpointer
     from ..providers.team_selection import FrozenLaneAssignment
+    from ..team import TeamConfig
     from ..thread.actor_tokens import ActorTokenBundle
     from .leased_dispatch import DispatchTransport, SettledDispatchFailure
 
@@ -108,6 +106,9 @@ class ThreadCreationRequest:  # pylint: disable=too-many-instance-attributes
     # optional: admission is where the project becomes real, so a creation
     # request that names none is not a run this service can site.
     workspace_root: Path
+    # The preset admission loaded and validated the run against; the initial
+    # dispatch freezes this same configuration rather than reading it again.
+    team_config: TeamConfig
     actor_tokens: ActorTokenBundle | None = None
     # The exact served selection frozen at admission and threaded to the worker.
     model_assignment: dict[str, FrozenLaneAssignment] = field(default_factory=dict)
@@ -136,11 +137,12 @@ class _CreationDispatchContext:
 def process_metadata(
     metadata: ThreadMetadata | None,
     thread_id: str,
-    team_preset: str | None,
+    team_config: TeamConfig | None,
 ) -> tuple[Path, str, str]:
     """Validate and enrich thread metadata.
 
-    Returns ``(workspace_root, nickname, metadata_json)``.
+    Returns ``(workspace_root, nickname, metadata_json)``. A generated nickname
+    names *team_config*'s topology, or ``default`` when no preset is supplied.
 
     This is the admission seam for the active project. Every run that becomes
     durable passes through here, so the requirement is enforced once, at the
@@ -181,11 +183,7 @@ def process_metadata(
     if metadata.feature_tag and not metadata.context_refs:
         metadata.context_refs = discover_context_refs(ws_root, metadata.feature_tag)
 
-    topology = "default"
-    if team_preset:
-        with contextlib.suppress(ConfigError, TeamConfigNotFoundError):
-            tc = load_team_config(team_preset, workspace_root=ws_root)
-            topology = tc.topology.type
+    topology = team_config.topology.type if team_config is not None else "default"
     nickname = metadata.nickname or generate_nickname(
         metadata.feature_tag, topology, thread_id
     )
@@ -222,7 +220,7 @@ def _initial_dispatch(
             if isinstance(preamble_msg.content, str)
             else str(preamble_msg.content)
         )
-    team_config = load_team_config(req.team_preset, workspace_root=req.workspace_root)
+    team_config = req.team_config
     graph_definition = freeze_graph_definition(
         team_config, workspace_root=req.workspace_root
     )

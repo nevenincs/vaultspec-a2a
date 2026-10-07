@@ -26,6 +26,7 @@ __all__ = [
 
 _VERSION = re.compile(r"(?<![\w.])(\d+)\.(\d+)\.(\d+)(?![\w.+-])")
 _PROBE_TIMEOUT_SECONDS = 5
+_AUTHORITY_UNAVAILABLE = "provider execution authority is unavailable"
 
 
 class BinaryVersionProbeError(RuntimeError):
@@ -111,10 +112,10 @@ def probe_binary_version(
     The path and file stat are the launch identity. A Scoop shim also includes
     its sidecar and current target, since the EXE itself stays unchanged across
     package updates. A changed identity is probed again.
+
+    The launch boundary is consulted on every call, so a cached version never
+    outlives a later refusal; its profile refusal keeps its own safe reason.
     """
-    reason = native_execution_refusal_reason()
-    if reason is not None:
-        raise BinaryVersionProbeError(reason)
     path = Path(executable)
     if not path.is_absolute():
         raise BinaryVersionProbeError("provider binary path is not absolute")
@@ -129,10 +130,15 @@ def probe_binary_version(
             cwd=None,
             native_authority=native_authority,
         )
-    except (OSError, ValueError, ProcessContainmentError) as exc:
+    except ProcessContainmentError as exc:
+        # Other containment refusals can name configured launcher paths, so only
+        # the profile refusal's own sentence is carried through.
+        refusal = native_execution_refusal_reason()
         raise BinaryVersionProbeError(
-            "provider execution authority is unavailable"
+            refusal if exc.args == (refusal,) else _AUTHORITY_UNAVAILABLE
         ) from exc
+    except (OSError, ValueError) as exc:
+        raise BinaryVersionProbeError(_AUTHORITY_UNAVAILABLE) from exc
     result = _reported_version(str(path), identity, native_authority)
     if result is None:
         raise BinaryVersionProbeError("provider binary version is unavailable")

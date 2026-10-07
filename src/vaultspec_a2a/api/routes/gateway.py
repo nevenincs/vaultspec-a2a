@@ -36,6 +36,8 @@ if TYPE_CHECKING:
 
     import httpx
 
+    from ...team import TeamConfig
+
 from ...control.admission import AdmissionBroker, AdmissionReadiness
 from ...control.config import settings
 from ...control.drain import DrainGate
@@ -95,7 +97,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "_DEGRADED_CHECK_STATUSES",
-    "_admission_readiness",
     "_body_with_frozen_selection",
     "_bool_field",
     "_canonical_replay_body",
@@ -216,9 +217,9 @@ def _admission_readiness(
     """Project the seated desktop readiness facts into an admission-readiness view.
 
     Reads the single readiness authority (``assemble_desktop_readiness``) over the
-    seated worker and database state - the cheap, non-blocking surface - so a
-    prepare reports the same worker, provider, and admission facts the readiness
-    model and service-state verb serve, never a second computation.
+    seated worker and database state - the cheap, non-blocking surface - so
+    prepare and commit gate on the same run-admission verdict the readiness model
+    and service-state verb serve, never a second computation.
     """
     readiness = assemble_desktop_readiness(
         app_state=app_state,
@@ -274,12 +275,13 @@ async def _probe_admission_readiness(
 
 
 def _prepare_workspace_root(body: RunStartRequest) -> Path | None:
-    """Resolve the preset-loading workspace for a prepare, or ``None``.
+    """Resolve the preset-loading workspace for a run-start request, or ``None``.
 
-    A prepare carries no run id, so it never mints a workspace; it only needs a
-    workspace context to resolve a workspace-local preset. When the request
-    metadata names an absolute workspace root it is used, otherwise the bundled
-    preset set is resolved (``None``).
+    Resolving it mints nothing: a prepare never mints a workspace, and a new run
+    mints its project afterwards, in the same canonical spelling. It only gives
+    the request a workspace context to resolve a workspace-local preset. When the
+    request metadata names an absolute workspace root it is used, otherwise the
+    bundled preset set is resolved (``None``).
     """
     metadata = body.metadata
     workspace_root = getattr(metadata, "workspace_root", None) if metadata else None
@@ -444,7 +446,7 @@ def _log_detached_catalog_build(task: asyncio.Future[Any]) -> None:
 async def _validate_and_freeze_selection_or_refuse(
     app: FastAPI,
     body: RunStartRequest,
-    team_config: Any,
+    team_config: TeamConfig,
     workspace_root: Path | None,
 ) -> FrozenTeamSelection:
     """Revalidate the complete new-run selection in its canonical workspace."""
@@ -611,12 +613,13 @@ def _persisted_lease_binding(metadata_json: str | None) -> _RunLeaseBinding | No
     )
 
 
-def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> Any:
+def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> TeamConfig:
     """Load the preset with the run's workspace context or refuse with a 422.
 
     The v1 verb never silently drafts a run for a missing or unparseable preset:
     a load or validation failure is a client error, returned as a 422 with a safe
-    reason rather than a non-running draft.
+    reason rather than a non-running draft. Each run-start request loads its
+    preset here exactly once; everything downstream reuses that configuration.
     """
 
     from ...team.team_config import load_team_config
@@ -635,7 +638,7 @@ def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> Any:
         ) from exc
 
 
-def _probe_harness(team_config: Any, ws_root: Path | None) -> Any:
+def _probe_harness(team_config: TeamConfig, ws_root: Path | None) -> Any:
     """Probe the agent harness for a document-authoring preset, else ``None``.
 
     A non-authoring preset carries no harness requirement, so it returns ``None``

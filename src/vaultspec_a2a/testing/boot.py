@@ -71,7 +71,6 @@ from ..desktop.credentials import (
 from ..desktop.profile import derive_state_paths
 from ..utils import ProcessContainment, spawn_contained
 from ..utils.runtime_exec import self_command
-from .children import reap_contained
 from .cli import run_cli
 from .http import serve_on_loopback
 from .lanes import armed_lane_environment
@@ -80,6 +79,7 @@ from .ports import (
     hold_for_process_lifetime,
     reserve_scratch_ports,
 )
+from .reap import reap_contained
 
 if TYPE_CHECKING:
     from collections.abc import (

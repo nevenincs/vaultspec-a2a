@@ -21,10 +21,10 @@ from ..children import (
     await_child,
     child_tree_progress,
     measured_child_startup_s,
-    reap_contained,
 )
 from ..cli import combined_output
 from ..ports import free_port
+from ..reap import reap_contained
 from ..sessions import SESSION_LEASE_KEY, effective_worker_count
 
 if TYPE_CHECKING:

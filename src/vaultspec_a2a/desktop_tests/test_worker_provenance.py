@@ -268,7 +268,7 @@ from vaultspec_a2a.control.worker_management import (
     _spawn_worker_owned,
     _worker_stderr_log_path,
 )
-from vaultspec_a2a.testing.children import reap_contained
+from vaultspec_a2a.testing.reap import reap_contained
 
 squatter_file, worker_port_s, squatter_log, result_file = sys.argv[1:5]
 worker_port = int(worker_port_s)

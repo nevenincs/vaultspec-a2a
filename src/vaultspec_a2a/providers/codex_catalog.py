@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from ._cleanup import CleanupStep
     from ._json_contract import JsonObject, JsonValue
 
-from ..thread import canonical_json, sha256_hex
+from ..thread import canonical_digest
 from ..utils import package_version
 from ._acp_request import encode_frame
 from ._catalog_discovery import (
@@ -215,7 +215,7 @@ def _revision(
             for control in controls
         ],
     }
-    return sha256_hex(canonical_json(payload).encode())
+    return canonical_digest(payload)
 
 
 @dataclass(slots=True)

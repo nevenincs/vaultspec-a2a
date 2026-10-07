@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
-from ..thread.action_receipts import canonical_json, sha256_hex
+from ..thread.action_receipts import canonical_digest
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -168,7 +168,7 @@ def _digest(body: RunStartRequest, excluded: frozenset[str]) -> str:
     if body.continues_run_id is None:
         omitted.add("continues_run_id")
     payload = body.model_dump(mode="json", exclude=omitted)
-    return sha256_hex(canonical_json(payload).encode("utf-8"))
+    return canonical_digest(payload)
 
 
 def request_digest(body: RunStartRequest, *, prepared: bool) -> str:

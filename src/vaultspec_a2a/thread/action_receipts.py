@@ -27,6 +27,7 @@ __all__ = [
     "Fingerprint",
     "GraphActionReceipt",
     "GraphCompletionReceipt",
+    "canonical_digest",
     "canonical_json",
     "control_action_payload_fingerprint",
     "merge_active_graph_action_receipt",
@@ -102,6 +103,25 @@ def canonical_json(
         ensure_ascii=ensure_ascii,
         allow_nan=allow_nan,
         default=default,
+    )
+
+
+def canonical_digest(
+    value: object,
+    *,
+    ensure_ascii: bool = True,
+    allow_nan: bool = True,
+    default: Callable[[Any], Any] | None = None,
+) -> str:
+    """Return the bare hex SHA-256 of ``value`` in its :func:`canonical_json` form.
+
+    The encoding flags are :func:`canonical_json`'s and are the caller's to
+    state, since each one changes the hashed bytes. The text is hashed as UTF-8.
+    """
+    return sha256_hex(
+        canonical_json(
+            value, ensure_ascii=ensure_ascii, allow_nan=allow_nan, default=default
+        ).encode("utf-8")
     )
 
 

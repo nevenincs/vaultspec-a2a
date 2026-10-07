@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from ..thread import canonical_json, sha256_hex
+from ..thread import canonical_digest, sha256_hex
 from .provider_catalog import MAX_DISPLAY_LENGTH, MAX_TEXT_LENGTH
 
 if TYPE_CHECKING:
@@ -125,7 +125,7 @@ def model_list_revision(
         "execution_mode": key.execution_mode,
         "models": [model.provider_value for model in models],
     }
-    return sha256_hex(canonical_json(payload).encode())
+    return canonical_digest(payload)
 
 
 @dataclass(frozen=True, slots=True)

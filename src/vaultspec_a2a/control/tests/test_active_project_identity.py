@@ -16,7 +16,6 @@ the worker's own cache-key former and registration seam.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast, override
@@ -39,6 +38,7 @@ from ...testing import (
     deterministic_model_assignment,
     new_state_graph,
     settings_override,
+    stand_in_definition_digest,
 )
 from ...thread.errors import ConfigError
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
@@ -452,16 +452,6 @@ class TestAuthoringSubmitterIsBoundToTheProject:
             await manager._build_proposal_submitter(None)
 
 
-def _test_graph_definition_digest(team_preset: str) -> str:
-    """Deterministic stand-in for a frozen graph definition's digest.
-
-    These cache-key and registration-seam tests never compile or freeze a real
-    graph definition, so they need a digest-shaped value that still binds
-    consistently to the preset it stands in for.
-    """
-    return hashlib.sha256(team_preset.encode()).hexdigest()
-
-
 class TestOneWorkspaceOneGraphEntry:
     """A run's graph cache entry is keyed on its canonical workspace.
 
@@ -511,7 +501,7 @@ class TestOneWorkspaceOneGraphEntry:
     def test_a_project_less_key_is_still_a_key(self) -> None:
         """A run with no project still keys, so the mint cannot break cancel."""
         digest = model_assignment_digest({})
-        definition_digest = _test_graph_definition_digest("preset")
+        definition_digest = stand_in_definition_digest("preset")
         assert graph_cache_key(
             ("preset", None, True, digest, definition_digest), thread_id="r"
         ) == ("preset", None, True, digest, definition_digest, "r")
@@ -520,7 +510,7 @@ class TestOneWorkspaceOneGraphEntry:
         first = model_assignment_digest(_assignment("first"))
         same = model_assignment_digest(_assignment("first"))
         other = model_assignment_digest(_assignment("second"))
-        definition_digest = _test_graph_definition_digest("preset")
+        definition_digest = stand_in_definition_digest("preset")
 
         assert graph_cache_key(
             ("preset", None, False, first, definition_digest), thread_id="r"
@@ -535,7 +525,7 @@ class TestOneWorkspaceOneGraphEntry:
 
     def test_two_runs_never_share_a_graph_entry(self) -> None:
         digest = model_assignment_digest({})
-        definition_digest = _test_graph_definition_digest("preset")
+        definition_digest = stand_in_definition_digest("preset")
         assert graph_cache_key(
             ("preset", None, False, digest, definition_digest), thread_id="run-1"
         ) != graph_cache_key(
@@ -554,7 +544,7 @@ class TestOneWorkspaceOneGraphEntry:
         """
         manager = self._manager()
 
-        definition_digest = _test_graph_definition_digest("preset")
+        definition_digest = stand_in_definition_digest("preset")
         for thread_id, spelling in (
             ("run-1", str(workspace)),
             ("run-2", _uncanonical_spelling(workspace)),

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     from ..desktop.native_isolation import NativeLaunchAuthority
     from ._cleanup import CleanupStep
-from ..thread import canonical_json, sha256_hex
+from ..thread import canonical_digest
 from ._acp_auth import is_auth_required_error
 from ._acp_request import encode_frame, jsonrpc_request
 from ._catalog_discovery import (
@@ -307,7 +307,7 @@ def _revision(
         ],
         "provider_id": key.provider_id,
     }
-    return sha256_hex(canonical_json(payload).encode())
+    return canonical_digest(payload)
 
 
 def catalog_from_session_result(

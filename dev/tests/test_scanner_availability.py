@@ -15,13 +15,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from dev.audit.dead_code import (
-    DeadCodeOutcome,
-    DeadCodeResult,
-    offered_module_population,
-    parse_vulture_output,
-    run_dead_code_scan,
-)
 from dev.audit.duplication import (
     DuplicationOutcome,
     DuplicationResult,
@@ -36,51 +29,6 @@ from dev.quality.types import CheckerUnavailableError, require_report
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-# --- dead code -------------------------------------------------------------
-
-
-def test_an_empty_tree_is_an_error_not_a_clean_scan(tmp_path: Path) -> None:
-    """vulture exits 0 over nothing; a floor is what tells that from clean."""
-    result = run_dead_code_scan(tmp_path)
-    assert result.outcome is DeadCodeOutcome.ERROR
-    assert "prove nothing" in result.reason
-    assert not result.is_green
-
-
-def test_a_clean_result_cannot_be_built_without_a_denominator() -> None:
-    """The invariant holds by construction, not by a caller remembering it."""
-    with pytest.raises(ValueError, match="demonstrably inspected"):
-        DeadCodeResult.clean(modules_offered=0)
-
-
-def test_the_real_tree_clears_the_floor() -> None:
-    """A floor nobody can clear would make the scan permanently unavailable."""
-    assert offered_module_population(REPO_ROOT) > 0
-
-
-def test_vulture_output_parses_into_findings() -> None:
-    """The line shape is the contract between vulture and the confidence split."""
-    findings = parse_vulture_output(
-        "src/pkg/thing.py:12: unused import 'Cursor' (90% confidence)\n"
-        "not a finding line\n"
-        "src/pkg/other.py:3: unused variable 'x' (60% confidence, 2 lines)\n",
-    )
-    assert [(f.path, f.line, f.confidence) for f in findings] == [
-        ("src/pkg/other.py", 3, 60),
-        ("src/pkg/thing.py", 12, 90),
-    ]
-
-
-def test_confidence_buckets_split_at_the_declared_threshold() -> None:
-    """A bare percentage is not a severity; this is the closest honest analogue."""
-    findings = parse_vulture_output(
-        "a.py:1: unused import 'A' (90% confidence)\n"
-        "b.py:2: unused variable 'b' (60% confidence)\n",
-    )
-    result = DeadCodeResult.from_findings(findings, modules_offered=10)
-    assert result.count_by_confidence == {"high (>=80%)": 1, "moderate (<80%)": 1}
 
 
 # --- duplication -----------------------------------------------------------
@@ -103,7 +51,7 @@ def test_a_report_showing_sources_and_no_clones_is_an_observed_zero() -> None:
 
 
 def test_an_observed_result_cannot_be_built_without_a_denominator() -> None:
-    """Same invariant as the dead-code scan, enforced the same way."""
+    """The invariant holds by construction, not by a caller remembering it."""
     with pytest.raises(ValueError, match="demonstrably inspected"):
         DuplicationResult.observed(files_analysed=0, duplicated_pct=0.0, groups=())
 

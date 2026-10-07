@@ -16,8 +16,7 @@ The verbs split by CONSEQUENCE, not by tool:
 ``test``
     GATES. See :data:`TEST` for what each lane proves.
 ``health``
-    MEASURES. Always exits 0; composes the gates rather than restating any
-    threshold, so the report and the gate cannot disagree.
+    MEASURES. Always exits 0.
 
 THRESHOLDS ARE INDUSTRY DEFAULTS, NOT THIS TREE'S CURRENT WORST. Every numeric
 limit backing these targets - in ``pyproject.toml`` under ``[tool.ruff.lint]``,
@@ -135,7 +134,7 @@ class Target:
             something". Only these are suppressed when `advisory` is set;
             every other non-zero status is the tool failing to RUN, and
             propagates. Defaults to `FINDINGS_CODES` ({1}), which is right for
-            every scanner here but vulture, which reports dead code with 3.
+            every scanner here.
         keep_going: When true a failing step does not stop the remaining steps.
             Aggregate dashboards set this so one red dimension does not hide
             every dimension after it.
@@ -323,7 +322,7 @@ LINT = Verb(
     summary="Run gating static analysis; a finding fails the build.",
     note=(
         "'all' chains only the dimensions that hold the line today. complexity, "
-        "cyclomatic, shape, limits, and size are REAL GATES at "
+        "limits, and size are REAL GATES at "
         "industry thresholds whose burndown is unfinished - run each by name, or "
         "'just health' for the ranked backlog. Chaining a permanently-red gate "
         "would hide every dimension behind it and teach people to ignore red. A "
@@ -401,16 +400,6 @@ LINT = Verb(
             "complexity",
             "Cognitive complexity over production code (Sonar limit 15).",
             (uv_run_env(UTF8, "complexipy", PACKAGE, *COMPLEXIPY_EXCLUDES),),
-        ),
-        Target(
-            "cyclomatic",
-            "Cyclomatic complexity over production code (ceiling 10).",
-            (dev_module("health", "--gate", "cyclomatic"),),
-        ),
-        Target(
-            "shape",
-            "Module length, function length, parameter count, and nesting.",
-            (dev_module("health", "--gate"),),
         ),
         Target(
             "limits",
@@ -541,8 +530,6 @@ LINT = Verb(
                     "type-strict",
                     "type-guards",
                     "complexity",
-                    "cyclomatic",
-                    "shape",
                     "limits",
                     "nesting",
                     "size",
@@ -614,13 +601,12 @@ AUDIT = Verb(
     note=(
         "Only 'deps' gates - a published advisory against a pinned version is a "
         "verdict, not a lead. Every other target reports findings and still exits "
-        "0, because each yields something to confirm: vulture infers reachability "
-        "it cannot see, bandit reports this project's deliberate subprocess design "
-        "alongside anything real, and a duplication clone may be two things that "
-        "merely look alike. What none of them may do is report a scan that did not "
-        "happen as a scan that found nothing - 'dead-code', 'duplication' and "
-        "'reachability' each own that distinction themselves and exit 7 when the "
-        "measurement was unavailable."
+        "0, because each yields something to confirm: bandit reports this "
+        "project's deliberate subprocess design alongside anything real, and a "
+        "duplication clone may be two things that merely look alike. What none of "
+        "them may do is report a scan that did not happen as a scan that found "
+        "nothing - 'duplication' and 'reachability' each own that distinction "
+        "themselves and exit 7 when the measurement was unavailable."
     ),
     targets=(
         # `uv audit` exits 0 even when it prints advisories, so this target -
@@ -664,7 +650,7 @@ AUDIT = Verb(
             ),
             advisory=True,
         ),
-        # These three do NOT carry `advisory=True`, and that is not an
+        # These two do NOT carry `advisory=True`, and that is not an
         # oversight. Each runner owns its tool's whole measurement and
         # therefore its own exit contract: it returns OK when the scan RAN,
         # findings and all, and ADVISORY_BROKEN when it could not. Layering
@@ -674,20 +660,13 @@ AUDIT = Verb(
         # resolve a package, so on a machine with no Node the old duplication
         # target reported exactly like a clean tree.
         Target(
-            "dead-code",
-            "Vulture dead-code scan, with the denominator it was found in.",
-            (dev_module("audit.dead_code"),),
-        ),
-        Target(
             "duplication",
             "Copy-paste clone detection over production Python.",
             (dev_module("audit.duplication"),),
         ),
-        # The reachability audit is what makes the dead-code dimension mean
-        # something over this tree: vulture has no model of framework
-        # registration, so it reports every FastAPI handler and every typer
-        # command as unused. This walks the import graph from the shipped
-        # entry points instead.
+        # The reachability audit walks the import graph from the shipped
+        # entry points, so a framework-registered FastAPI handler or typer
+        # command is not reported as unused.
         Target(
             "reachability",
             "Shipped code no shipped entry point reaches.",
@@ -718,8 +697,6 @@ AUDIT = Verb(
                 Ref("deps"),
                 Echo("=== security ==="),
                 Ref("security"),
-                Echo("=== dead code ==="),
-                Ref("dead-code"),
                 Echo("=== reachability ==="),
                 Ref("reachability"),
                 Echo("=== duplication ==="),
@@ -950,10 +927,7 @@ BUILD = Verb(
 HEALTH = Verb(
     name="health",
     summary="Rank the worst offenders across every code-health dimension.",
-    note=(
-        "MEASUREMENT ONLY - always exits 0. Composes the same tools the gates "
-        "run, so the report and the gate cannot disagree about a number."
-    ),
+    note="MEASUREMENT ONLY - always exits 0.",
     targets=(
         Target(
             "report",

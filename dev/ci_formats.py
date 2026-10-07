@@ -1,10 +1,10 @@
 """Machine-readable gate output, opt-in through one environment variable.
 
 Every gate here reports as human-readable console text: ruff's rendered
-diagnostics, ty's and basedpyright's annotated source excerpts. That is right
-at a terminal and wrong in CI, where a job gets an exit code and a wall of
-scrollback nobody parses - a failing lint annotates nothing on the pull request
-that caused it, even though every one of these tools can emit exactly that.
+diagnostics and annotated source excerpts. That is right at a terminal and
+wrong in CI, where a job gets an exit code and a wall of scrollback nobody
+parses - a failing lint annotates nothing on the pull request that caused it,
+even though ruff can emit exactly that.
 
 Two switches, deliberately separate:
 
@@ -60,17 +60,11 @@ def augment(argv: Sequence[str], env: Mapping[str, str] | None = None) -> list[s
         return list(argv)
 
     flags = " ".join(argv)
-    if "--output-format" in flags or "--outputjson" in flags:
+    if "--output-format" in flags:
         return list(argv)
 
     # `ruff format --check` reports drift as a file list, not diagnostics, and
     # has no annotation format; only `ruff check` does.
     if "ruff" in argv and "check" in argv:
         return [*argv, "--output-format=github"]
-    if "ty" in argv and "check" in argv:
-        return [*argv, "--output-format=github"]
-    if "basedpyright" in argv:
-        # basedpyright has no GitHub format; its JSON is what a downstream step
-        # turns into annotations.
-        return [*argv, "--outputjson"]
     return list(argv)

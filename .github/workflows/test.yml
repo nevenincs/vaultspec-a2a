@@ -114,16 +114,6 @@ jobs:
         continue-on-error: true
         run: just check-complexity
 
-      - name: Run cyclomatic sentinel
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        run: just check-cyclomatic
-
-      - name: Run shape sentinel
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        run: just check-shape
-
       - name: Run limits sentinel
         if: ${{ !cancelled() }}
         continue-on-error: true

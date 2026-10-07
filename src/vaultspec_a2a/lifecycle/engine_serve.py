@@ -3,9 +3,9 @@
 The engine binary itself is never modified, so its
 adoption is wrapper-based: this core registers a registry record for the band
 port, launches the ``vaultspec serve --no-seat`` engine on that port, heartbeats
-the record while the engine runs, and deregisters on owned shutdown. ``scripts/
-engine_serve.py`` is the thin ``procs.toml`` entrypoint that delegates here; the
-logic lives in the package so the data-safety boundary below is unit tested.
+the record while the engine runs, and deregisters on owned shutdown. ``procs.toml``
+launches it as ``python -m vaultspec_a2a.lifecycle.engine_serve``; the logic lives
+in the package so the data-safety boundary below is unit tested.
 
 Data-safety boundary: the engine opens its data store RELATIVE TO ITS PROCESS
 CWD. An unset or wrong workspace would seat that store in the wrapper's inherited
@@ -270,3 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     return serve(port=args.port, name=args.name, workspace=args.workspace)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

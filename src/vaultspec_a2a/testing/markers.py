@@ -84,15 +84,11 @@ _DIRECTORY_RULES: Final[Mapping[str, LayerRule]] = {
     "control/cleanup/tests": _INFRASTRUCTURE,
     "control/repositories/tests": _INFRASTRUCTURE,
     "control/tests": _INFRASTRUCTURE,
+    "database/tests": _INFRASTRUCTURE,
     "protocols/mcp/tests": _INFRASTRUCTURE,
     "telemetry/tests": _INFRASTRUCTURE,
     "worker/tests": _INFRASTRUCTURE,
     "workspace/tests": _INFRASTRUCTURE,
-    # Most database tests drive a real SQLite engine and are impure; this one
-    # tests pure logic only (path validation).
-    "database/tests": LayerRule(
-        "middleware", pure_files=frozenset({"test_artifact_repository.py"})
-    ),
     # Pure schema validation, no I/O.
     "api/schemas/tests": LayerRule("middleware"),
     # Pure decoders and header/URL assembly earn ``unit``; the live engine tests

@@ -1,20 +1,19 @@
 """Every reader of a thread's stored project answers the same for the same bytes.
 
-Four control paths pull ``workspace_root`` out of a thread's stored metadata and
-mint it into the run's canonical spelling: a resume, a recovery redrive, the
-reconciling-thread sweep, and the deletion cleanup pass. They had each grown
-their own copy of that reading, and the copies had already drifted in
-production - one accepted the empty string where another refused it, and they
-caught different decode failures, so one stored value could be a usable project
-to one path and no project at all to another.
+Control paths pull ``workspace_root`` out of a thread's stored metadata and mint
+it into the run's canonical spelling: a resume, a recovery redrive, and the
+reconciling-thread sweep. They had each grown their own copy of that reading,
+and the copies had already drifted in production - one accepted the empty
+string where another refused it, and they caught different decode failures, so
+one stored value could be a usable project to one path and no project at all to
+another.
 
 The drift was possible because agreement was a habit rather than a thing
 asserted. These tests assert it: the two shapes of the shared reader answer
-identically across the values that separated them, and the cleanup pass - the
-one reader with a genuinely larger contract - agrees on everything except the
-existence check it adds on purpose.
+identically across the values that separated them, including a root that no
+longer exists.
 
-They run against real ORM rows and real directories.
+They run against real directories.
 """
 
 from __future__ import annotations
@@ -28,9 +27,6 @@ from ...control._thread_metadata import (
     dispatchable_workspace_root,
     workspace_root_from_metadata,
 )
-from ...control.cleanup.executor import _workspace_root_from_thread
-from ...database.models import ThreadModel
-from ...tests._write_authority import make_test_thread_authority_columns
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -92,45 +88,10 @@ def test_metadata_that_never_decodes_is_only_the_encoded_reader_s_problem() -> N
         assert dispatchable_workspace_root(metadata) is None
 
 
-@pytest.mark.parametrize(("label", "stored"), _UNUSABLE_ROOTS)
-def test_the_cleanup_pass_refuses_every_root_the_others_refuse(
-    label: str, stored: object
-) -> None:
-    """Cleanup deletes files, so it must never admit a root a resume would not."""
-    thread = ThreadModel(
-        **make_test_thread_authority_columns(),
-        id="t-agree",
-        thread_metadata=_stored(stored),
-    )
-
-    assert _workspace_root_from_thread(thread) is None, label
-
-
-def test_the_cleanup_pass_admits_a_real_root_and_agrees_on_its_spelling(
-    workspace: Path,
-) -> None:
-    """Its extra return type is a wrapper, not a second answer."""
-    thread = ThreadModel(
-        **make_test_thread_authority_columns(),
-        id="t-agree",
-        thread_metadata=_stored(str(workspace)),
-    )
-
-    resolved = _workspace_root_from_thread(thread)
-
-    assert resolved is not None
-    assert str(resolved) == dispatchable_workspace_root(_stored(str(workspace)))
-
-
-def test_cleanup_and_resume_refuse_a_root_that_no_longer_exists(
-    tmp_path: Path,
-) -> None:
-    """A vanished root cannot ground either cleanup or a new dispatch."""
+def test_both_shapes_refuse_a_root_that_no_longer_exists(tmp_path: Path) -> None:
+    """A vanished root cannot ground a new dispatch through either shape."""
     gone = tmp_path / "deleted-checkout"
     encoded = _stored(str(gone))
-    thread = ThreadModel(
-        **make_test_thread_authority_columns(), id="t-agree", thread_metadata=encoded
-    )
 
-    assert _workspace_root_from_thread(thread) is None
     assert dispatchable_workspace_root(encoded) is None
+    assert workspace_root_from_metadata(json.loads(encoded)) is None

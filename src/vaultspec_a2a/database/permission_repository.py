@@ -74,9 +74,6 @@ class ControlActionReservation:
     payload_matches: bool
 
 
-_IN_CLAUSE_CHUNK = 500
-"""Bound on identifiers per ``IN`` clause, under every backend's parameter cap."""
-
 _OUTSTANDING_PERMISSION_STATUSES: tuple[str, str] = (
     PermissionRequestStatus.PENDING.value,
     PermissionRequestStatus.ANSWERED_PENDING_APPLY.value,
@@ -418,10 +415,9 @@ async def get_or_create_control_action(
 
     Idempotency-key inserts must replay as a no-op, never crash: a duplicate key is
     the SUCCESS signal of an already-applied action, so racing a UNIQUE violation on
-    it contradicts the key's whole purpose. Startup reconciliation re-derives the
-    same key across boots for a thread that has not advanced its epoch (e.g. rows
-    written before the epoch-increment fix), and the app must not die on the second
-    boot. Returns ``(action, created)`` where ``created`` is ``False`` for a replay.
+    it contradicts the key's whole purpose. A retry or a restart re-derives the same
+    key for an action already journaled, and the app must not die on the replay.
+    Returns ``(action, created)`` where ``created`` is ``False`` for a replay.
     """
     thread_id = kwargs["thread_id"]
     idempotency_key = kwargs["idempotency_key"]

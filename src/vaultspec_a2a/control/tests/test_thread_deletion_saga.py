@@ -326,40 +326,34 @@ async def test_a_delete_racing_a_live_pass_does_not_run_a_second_teardown(
 
 @pytest.mark.asyncio
 async def test_a_permanently_failing_item_stops_wedging_the_thread(
-    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    tmp_path: Path,
 ) -> None:
     """Retries of an unremovable item end in a finalized delete, not a wedge.
 
-    The cleanup item here can never succeed: it was recorded against a
-    workspace root the target no longer sits under, so every pass refuses it as
-    an escaping path. Without a bound the thread would stay hidden from every
-    product read for the life of the deployment. Each retry drives the real
-    service against the real stores.
+    The replay item the production manifest captures here can never succeed:
+    its store root is a regular file rather than a directory, so every pass
+    refuses to retire it. Without a bound the thread would stay hidden from
+    every product read for the life of the deployment. Each retry drives the
+    real service against the real stores.
     """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".vaultspec-authoring-calls").write_text("file", encoding="utf-8")
     async with session_factory() as session:
         await _create_terminal_thread(session, "t-wedge")
-        await create_deletion_saga(
-            session,
-            thread_id="t-wedge",
-            manifest=[
-                CleanupItem(
-                    kind=CleanupKind.ARTIFACT_FILE,
-                    key="artifact:gone",
-                    target="/elsewhere/out/report.md",
-                    root="/ws",
-                )
-            ],
-        )
         await session.commit()
 
     outcomes: list[DeleteResult] = []
-    for _ in range(3):
-        async with session_factory() as session:
-            outcomes.append(
-                await delete_thread_service(
-                    session, "t-wedge", checkpointer=checkpointer
+    with settings_override(a2a_home=tmp_path / "state", workspace_root=workspace):
+        for _ in range(3):
+            async with session_factory() as session:
+                outcomes.append(
+                    await delete_thread_service(
+                        session, "t-wedge", checkpointer=checkpointer
+                    )
                 )
-            )
 
     assert [outcome.deleted for outcome in outcomes] == [False, False, True]
     assert [outcome.cleanup_incomplete for outcome in outcomes] == [True, True, False]

@@ -25,9 +25,10 @@ from ...graph.events import PermissionRequest
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from .._interrupt_projection import emit_interrupt_events
 from ..aggregator import RunEventProducer
+from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
-    from ..types import SequencedEvent, StreamableGraph
+    from ..types import StreamableGraph
 
 
 class _GateState(TypedDict):
@@ -71,21 +72,15 @@ async def _project(
 ) -> list[dict[str, str]]:
     """Return the option list a client receives for the given ACP options."""
     producer = RunEventProducer()
-    relayed: list[PermissionRequest] = []
-
-    async def _capture(sequenced: SequencedEvent) -> None:
-        if isinstance(sequenced.event, PermissionRequest):
-            relayed.append(sequenced.event)
-
-    # The broadcast hook is the seam the worker relays every event through.
-    producer.add_broadcast_hook(_capture)
+    relayed = relayed_events(producer)
     graph, config = await _suspend_on_permission(thread_id, acp_options)
 
     emitted = await emit_interrupt_events(thread_id, graph, config, producer._emitters)
     assert emitted
 
-    assert len(relayed) == 1
-    return relayed[0].options
+    requests = [s.event for s in relayed if isinstance(s.event, PermissionRequest)]
+    assert len(requests) == 1
+    return requests[0].options
 
 
 @pytest.mark.asyncio

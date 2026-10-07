@@ -41,6 +41,7 @@ from ...thread.constants import MAX_REQUEST_ID_CHARS
 from .._interrupt_projection import emit_interrupt_events
 from ..aggregator import RunEventProducer
 from ..sse_frames import enforce_progress_allowlist
+from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
     from ...thread.state import TeamState
@@ -123,23 +124,12 @@ async def _park_on_clarification(
     return cast("StreamableGraph", graph), cast("dict[str, Any]", config)
 
 
-def _relayed(producer: RunEventProducer) -> list[SequencedEvent]:
-    """Collect every event *producer* hands its relay, in order."""
-    received: list[SequencedEvent] = []
-
-    async def _capture(sequenced: SequencedEvent) -> None:
-        received.append(sequenced)
-
-    producer.add_broadcast_hook(_capture)
-    return received
-
-
 async def _relay(
     thread_id: str, request_id: str = _REQUEST_ID
 ) -> tuple[RunEventProducer, list[SequencedEvent]]:
     """Park a real run, project it, and return everything its relay received."""
     producer = RunEventProducer()
-    received = _relayed(producer)
+    received = relayed_events(producer)
 
     graph, config = await _park_on_clarification(thread_id, request_id)
     emitted = await emit_interrupt_events(thread_id, graph, config, producer._emitters)
@@ -238,7 +228,7 @@ async def test_a_run_parked_on_nothing_emits_no_nudge() -> None:
     graph = compile_test_graph(builder, checkpointer=InMemorySaver())
 
     producer = RunEventProducer()
-    received = _relayed(producer)
+    received = relayed_events(producer)
 
     config = RunnableConfig(configurable={"thread_id": "relay-unparked"})
     await graph.ainvoke(

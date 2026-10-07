@@ -45,12 +45,13 @@ from ...graph.events import (
 )
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import RunEventProducer
+from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 
     from ...graph.events import DomainEvent
-    from ..types import SequencedEvent, StreamableGraph
+    from ..types import StreamableGraph
 
 _MODEL_TOOL_CALL_ID = "call_FROM_THE_MODEL"
 
@@ -169,12 +170,7 @@ async def _run_identity_graph() -> list[DomainEvent]:
     async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
         await saver.setup()
         producer = RunEventProducer()
-        events: list[DomainEvent] = []
-
-        async def _relay(sequenced: SequencedEvent) -> None:
-            events.append(sequenced.event)
-
-        producer.add_broadcast_hook(_relay)
+        relayed = relayed_events(producer)
         ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
         outcome = await asyncio.wait_for(
             ingest(
@@ -187,7 +183,7 @@ async def _run_identity_graph() -> list[DomainEvent]:
             timeout=30.0,
         )
     assert outcome == "completed"
-    return events
+    return [sequenced.event for sequenced in relayed]
 
 
 @pytest.fixture(scope="module")

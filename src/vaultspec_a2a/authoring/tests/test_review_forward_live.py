@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from ...testing import AcceptanceHarness
+from ...testing import mint_raw_token
 from .. import (
     REVIEW_DECISION_APPROVE,
     AuthoringClient,
@@ -184,8 +184,8 @@ async def _create_review_proposal(
     scope: str,
 ) -> _ReviewProposal:
     """Mint actors, create a session, and submit one review proposal."""
-    author_token = await AcceptanceHarness.mint(client, f"agent:{run_id}", "agent")
-    reviewer_token = await AcceptanceHarness.mint(client, f"reviewer:{run_id}", "human")
+    author_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
+    reviewer_token = await mint_raw_token(client, f"reviewer:{run_id}", "human")
     client._actor_token = author_token
 
     session = AuthoringSession(client, run_id, project_scope=scope)
@@ -336,7 +336,7 @@ async def test_self_approval_is_a_denial_not_a_silent_success(
 
     endpoint = live_engine.base_url, live_engine.bearer_token
     async with AuthoringClient(*endpoint) as client:
-        author_token = await AcceptanceHarness.mint(client, f"agent:{run_id}", "agent")
+        author_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
         client._actor_token = author_token
 
         session = AuthoringSession(client, run_id, project_scope=scope)
@@ -393,10 +393,8 @@ async def test_stale_reviewed_revision_is_a_typed_409_not_silently_decided(
 
     endpoint = live_engine.base_url, live_engine.bearer_token
     async with AuthoringClient(*endpoint) as client:
-        author_token = await AcceptanceHarness.mint(client, f"agent:{run_id}", "agent")
-        reviewer_token = await AcceptanceHarness.mint(
-            client, f"reviewer:{run_id}", "human"
-        )
+        author_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
+        reviewer_token = await mint_raw_token(client, f"reviewer:{run_id}", "human")
         client._actor_token = author_token
 
         session = AuthoringSession(client, run_id, project_scope=scope)

@@ -36,6 +36,7 @@ from ...testing import (
     actor_tokens_body,
     json_object,
     json_object_list,
+    mint_raw_token,
     required_text,
     wait_for_async,
 )
@@ -379,7 +380,7 @@ async def _run_completion(tmp_path: Path, plan: _CompletionPlan) -> _ReviewBundl
         tokens = await AcceptanceHarness.mint_role_tokens(
             authoring, plan.run_id, plan.roles
         )
-        reviewer_token = await AcceptanceHarness.mint(
+        reviewer_token = await mint_raw_token(
             authoring, f"reviewer:{plan.run_id}", "human"
         )
         await _set_autonomous_mode(authoring, reviewer_token)

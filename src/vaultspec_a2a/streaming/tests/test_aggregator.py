@@ -61,6 +61,7 @@ from ._error_injecting_graph import (
     InjectedSignal,
     build_error_injecting_graph,
 )
+from ._relay_capture import relayed_queue
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -77,22 +78,6 @@ def producer() -> RunEventProducer:
 def hub() -> RelayHub:
     """Return a fresh gateway relay hub for each test."""
     return RelayHub()
-
-
-def _relayed(producer: RunEventProducer, *thread_ids: str) -> asyncio.Queue[Any]:
-    """Queue what *producer* hands its relay for *thread_ids*, in order.
-
-    The broadcast hook is the seam the worker relays every event through, so
-    the queue holds exactly what the gateway would receive for those runs.
-    """
-    queue: asyncio.Queue[Any] = asyncio.Queue()
-
-    async def _capture(sequenced: SequencedEvent) -> None:
-        if sequenced.event.thread_id in thread_ids:
-            queue.put_nowait(sequenced)
-
-    producer.add_broadcast_hook(_capture)
-    return queue
 
 
 def _relayed_chunk(thread_id: str, content: str) -> dict[str, object]:
@@ -175,7 +160,7 @@ async def test_cancel_during_post_read_callback_drops_event(
     builder.add_edge("finish", END)
     graph = compile_test_graph(builder, checkpointer=InMemorySaver())
     thread_id = "cancel-post-read-callback"
-    queue = _relayed(producer, thread_id)
+    queue = relayed_queue(producer, thread_id)
 
     async def cancel_after_read() -> None:
         producer.cancel_thread(thread_id)
@@ -302,7 +287,7 @@ class TestEventEmission:
     @pytest.mark.asyncio
     async def test_emit_agent_status(self, producer: RunEventProducer) -> None:
         """emit_agent_status delivers an AgentStatusEvent with correct fields."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer.emit_agent_status(
             thread_id="thread-1",
@@ -387,7 +372,7 @@ class TestEventEmission:
     @pytest.mark.asyncio
     async def test_emit_message_chunk(self, producer: RunEventProducer) -> None:
         """emit_message_chunk delivers a MessageChunkEvent with correct content."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._emitters.emit_message_chunk(
             thread_id="thread-1",
@@ -405,7 +390,7 @@ class TestEventEmission:
     @pytest.mark.asyncio
     async def test_emit_thought_chunk(self, producer: RunEventProducer) -> None:
         """emit_thought_chunk delivers a ThoughtChunkEvent."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._emitters.emit_thought_chunk(
             thread_id="thread-1",
@@ -422,7 +407,7 @@ class TestEventEmission:
     @pytest.mark.asyncio
     async def test_emit_tool_call_start(self, producer: RunEventProducer) -> None:
         """emit_tool_call_start delivers a ToolCallStartEvent with PENDING status."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._emitters.emit_tool_call_start(
             thread_id="thread-1",
@@ -443,7 +428,7 @@ class TestEventEmission:
     @pytest.mark.asyncio
     async def test_emit_permission_request(self, producer: RunEventProducer) -> None:
         """emit_permission_request delivers a PermissionRequestEvent."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._emitters.emit_permission_request(
             thread_id="thread-1",
@@ -532,7 +517,7 @@ class TestEventEmission:
     @pytest.mark.asyncio
     async def test_emit_error(self, producer: RunEventProducer) -> None:
         """emit_error delivers an ErrorEvent with the supplied code."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer.emit_error(
             thread_id="thread-1",
@@ -550,7 +535,7 @@ class TestEventEmission:
     @pytest.mark.asyncio
     async def test_emit_team_status(self, producer: RunEventProducer) -> None:
         """emit_team_status delivers a TeamStatusEvent with agent summaries."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._emitters.emit_team_status(
             thread_id="thread-1",
@@ -579,7 +564,7 @@ class TestEventEmission:
         producer: RunEventProducer,
     ) -> None:
         """register_graph populates metadata; emit_team_status reads it."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         # Policy exception: register_graph() uses duck typing via getattr(graph,
         # "nodes") and getattr(node, "metadata"). Constructing a real compiled
@@ -666,7 +651,7 @@ class TestSequenceOnEvents:
         self, producer: RunEventProducer
     ) -> None:
         """Consecutive events on the same thread get sequences 1, 2."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._emitters.emit_message_chunk(
             thread_id="thread-1",
@@ -693,7 +678,7 @@ class TestSequenceOnEvents:
         self, producer: RunEventProducer
     ) -> None:
         """Sequence counters restart from 1 for each distinct thread."""
-        queue = _relayed(producer, "thread-a", "thread-b")
+        queue = relayed_queue(producer, "thread-a", "thread-b")
 
         await producer._emitters.emit_message_chunk(
             thread_id="thread-a",
@@ -775,7 +760,7 @@ class TestLangGraphStreamProcessing:
         self, producer: RunEventProducer
     ) -> None:
         """Model tokens are batched and flushed after the buffer interval."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             _messages_frame(AIMessageChunk(content="Hello world", id="msg-123")),
@@ -800,7 +785,7 @@ class TestLangGraphStreamProcessing:
         self, producer: RunEventProducer
     ) -> None:
         """Token chunks flush immediately when the buffer exceeds its cap."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         large_content = "x" * (domain_config.chunk_buffer_max_bytes + 100)
 
@@ -819,7 +804,7 @@ class TestLangGraphStreamProcessing:
     async def test_a_model_frame_is_attributed_to_the_node_that_ran_it(
         self, producer: RunEventProducer
     ) -> None:
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             _messages_frame(AIMessageChunk(content="from the coder"), node="coder"),
@@ -837,7 +822,7 @@ class TestLangGraphStreamProcessing:
         self, producer: RunEventProducer
     ) -> None:
         """A tool's lifecycle arrives on the callback surface, not the stream."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
         callbacks = producer._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
 
         await callbacks.on_tool_start(
@@ -865,7 +850,7 @@ class TestLangGraphStreamProcessing:
         registered and PENDING for the life of the run, beside a second,
         completed entry no client could join to it.
         """
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
         callbacks = producer._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
         run_id = uuid4()
 
@@ -909,7 +894,7 @@ class TestLangGraphStreamProcessing:
     async def test_a_failed_tool_call_is_reported_failed(
         self, producer: RunEventProducer
     ) -> None:
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
         callbacks = producer._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
         run_id = uuid4()
 
@@ -940,7 +925,7 @@ class TestLangGraphStreamProcessing:
         self, producer: RunEventProducer
     ) -> None:
         """Artifact updates must not expose hostile absolute file paths."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
         callbacks = producer._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
         run_id = uuid4()
 
@@ -973,7 +958,7 @@ class TestLangGraphStreamProcessing:
     async def test_a_model_turn_closes_on_its_finish_reason(
         self, producer: RunEventProducer
     ) -> None:
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
         callbacks = producer._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
 
         await callbacks.on_llm_end(
@@ -1010,7 +995,7 @@ class TestLangGraphStreamProcessing:
         fires for it, so a final chunk sent from there would put the routing
         turn back on a client's screen with nothing before it.
         """
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
         callbacks = producer._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
 
         await callbacks.on_llm_end(
@@ -1037,7 +1022,7 @@ class TestLangGraphStreamProcessing:
     async def test_a_node_start_frame_emits_working(
         self, producer: RunEventProducer
     ) -> None:
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             _task_start("coder"), thread_id="thread-1", agent_id="agent-1"
@@ -1052,7 +1037,7 @@ class TestLangGraphStreamProcessing:
     async def test_a_node_result_frame_emits_idle(
         self, producer: RunEventProducer
     ) -> None:
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             _task_result("coder", result={}),
@@ -1069,7 +1054,7 @@ class TestLangGraphStreamProcessing:
     async def test_a_failed_node_result_frame_emits_failed(
         self, producer: RunEventProducer
     ) -> None:
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             _task_result("coder", error=RuntimeError("node blew up")),
@@ -1093,7 +1078,7 @@ class TestLangGraphStreamProcessing:
         state update published plan entries as though the parent had written
         them.
         """
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             _task_start("inner", namespace=("team:abc",)),
@@ -1116,7 +1101,7 @@ class TestLangGraphStreamProcessing:
     async def test_a_node_result_publishes_the_plan_that_node_wrote(
         self, producer: RunEventProducer
     ) -> None:
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             _task_result(
@@ -1141,7 +1126,7 @@ class TestLangGraphStreamProcessing:
         self, producer: RunEventProducer
     ) -> None:
         """A mode this projection does not consume is silently filtered."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             StreamFrame(namespace=(), mode="debug", payload={"anything": True}),
@@ -1156,7 +1141,7 @@ class TestLangGraphStreamProcessing:
         self, producer: RunEventProducer
     ) -> None:
         """Empty-string content chunks are not buffered or emitted."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             _messages_frame(AIMessageChunk(content="", id="msg-empty")),
@@ -1219,7 +1204,7 @@ class TestProviderActionToolCallChunks:
         The chunk's ``tool_call_chunks`` must be read: otherwise neither event
         below is emitted and the queue stays empty.
         """
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             _action_chunk_frame(
@@ -1268,7 +1253,7 @@ class TestProviderActionToolCallChunks:
         this repo does not recognise as a success is FAILED, never a silent
         COMPLETED.
         """
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             _action_chunk_frame(
@@ -1306,7 +1291,7 @@ class TestProviderActionToolCallChunks:
         unfamiliar spelling (a future "declined", "aborted", ...) must not
         be misread as success just because it is unrecognised.
         """
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             _action_chunk_frame(
@@ -1336,7 +1321,7 @@ class TestProviderActionToolCallChunks:
 
         Without ``locations`` a consumer could never show what a call touched.
         """
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._ingest.project_frame(
             _action_chunk_frame(
@@ -1371,7 +1356,7 @@ class TestProviderActionToolCallChunks:
         """A tool call with no status (ACP's own registration shape) starts
         pending and is registered only once, even across repeated chunks for
         the same id (e.g. partial-arg-streaming deltas)."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         raw_input_frame = _messages_frame(
             AIMessageChunk(
@@ -1415,7 +1400,7 @@ class TestTokenChunkBatching:
         self, producer: RunEventProducer
     ) -> None:
         """Multiple small token chunks are combined into one event."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         for token in ["Hello", " ", "world"]:
             await producer._ingest.project_frame(
@@ -1438,7 +1423,7 @@ class TestTokenChunkBatching:
     @pytest.mark.asyncio
     async def test_flush_on_shutdown(self, producer: RunEventProducer) -> None:
         """Remaining chunk buffer is flushed via flush_chunk_buffer."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         # Buffer a chunk through the buffering manager
         await producer._buffering.buffer_message_chunk(
@@ -1472,7 +1457,7 @@ class TestToolCallUpdateDebouncing:
         self, producer: RunEventProducer
     ) -> None:
         """The first tool call update for a given key is emitted without delay."""
-        queue = _relayed(producer, "thread-1")
+        queue = relayed_queue(producer, "thread-1")
 
         await producer._emitters.emit_tool_call_update(
             thread_id="thread-1",
@@ -1621,7 +1606,7 @@ class TestEmitInterruptEvents:
         """When graph suspends with a permission_request interrupt, events are
         emitted.
         """
-        queue = _relayed(producer, "thread-interrupt")
+        queue = relayed_queue(producer, "thread-interrupt")
 
         interrupt_payload = {
             "type": "permission_request",
@@ -1677,7 +1662,7 @@ class TestEmitInterruptEvents:
     ) -> None:
         """When graph completes normally (empty tasks), no PermissionRequestEvent
         is emitted."""
-        queue = _relayed(producer, "thread-normal")
+        queue = relayed_queue(producer, "thread-normal")
 
         graph = build_error_injecting_graph()
 
@@ -1704,7 +1689,7 @@ class TestEmitInterruptEvents:
         self, producer: RunEventProducer
     ) -> None:
         """Interrupts with type != 'permission_request' are silently skipped."""
-        queue = _relayed(producer, "thread-other-interrupt")
+        queue = relayed_queue(producer, "thread-other-interrupt")
 
         interrupt_payload = {"type": "some_other_type", "data": "irrelevant"}
         graph = build_error_injecting_graph()
@@ -1732,7 +1717,7 @@ class TestEmitInterruptEvents:
         self, producer: RunEventProducer
     ) -> None:
         """When ACP provides no options, allow_once/deny_once defaults are used."""
-        queue = _relayed(producer, "thread-default-opts")
+        queue = relayed_queue(producer, "thread-default-opts")
 
         interrupt_payload: dict[str, object] = {
             "type": "permission_request",
@@ -1801,7 +1786,7 @@ class TestEmitInterruptEvents:
 
         assert issubclass(_DisagreeingGraph, StreamableGraph)  # protocol drift guard
 
-        queue = _relayed(producer, "thread-empty-interrupts")
+        queue = relayed_queue(producer, "thread-empty-interrupts")
 
         config = {"configurable": {"thread_id": "thread-empty-interrupts"}}
         await _ingest(
@@ -1841,7 +1826,7 @@ class TestRecursionLimitDetection:
         ``recursion_limit``, so LangGraph's own Pregel loop raises the error
         rather than this fixture manufacturing it.
         """
-        queue = _relayed(producer, "thread-recurse")
+        queue = relayed_queue(producer, "thread-recurse")
 
         graph = build_error_injecting_graph()
         config = {
@@ -1885,7 +1870,7 @@ class TestGenericIngestExceptionDetection:
         through a real node raising the real exception, not a stub simulating
         one.
         """
-        queue = _relayed(producer, "thread-generic-fail")
+        queue = relayed_queue(producer, "thread-generic-fail")
 
         failure_message = (
             "authoring transport error (401 authoring_actor_token_unknown): "
@@ -1923,7 +1908,7 @@ async def test_provider_cancelled_prompt_settles_as_cancelled(
     producer: RunEventProducer,
 ) -> None:
     """A real node raising the real cancellation exception settles as CANCELLED."""
-    queue = _relayed(producer, "provider-cancel-thread")
+    queue = relayed_queue(producer, "provider-cancel-thread")
     outcome = await _ingest(
         producer,
         thread_id="provider-cancel-thread",
@@ -1952,7 +1937,7 @@ async def test_a_signal_raised_by_a_node_is_reported_and_still_propagates(
     but the signal reaches whoever is running the ingest: absorbing it into a
     settled outcome would let a request to stop look like a run that ended.
     """
-    queue = _relayed(producer, "signal-thread")
+    queue = relayed_queue(producer, "signal-thread")
     with pytest.raises(InjectedSignal):
         await _ingest(
             producer,
@@ -2113,7 +2098,7 @@ class TestProviderFailureReachesTheReason:
         self, producer: RunEventProducer, tmp_path: Path
     ) -> None:
         """The reason names the provider's type, code, message and lane."""
-        queue = _relayed(producer, "thread-provider-fail")
+        queue = relayed_queue(producer, "thread-provider-fail")
         config = {"configurable": {"thread_id": "thread-provider-fail"}}
 
         outcome = await _ingest(
@@ -2166,7 +2151,7 @@ class TestProviderFailureReachesTheReason:
         The relay is droppable, so the reason the executor persists must be the
         one the frame carried - not a second, poorer summary derived elsewhere.
         """
-        queue = _relayed(producer, "thread-provider-durable")
+        queue = relayed_queue(producer, "thread-provider-durable")
         config = {"configurable": {"thread_id": "thread-provider-durable"}}
 
         await _ingest(
@@ -2233,7 +2218,7 @@ class TestRecoverabilityFollowsTheCondition:
         workspace_root: str,
     ) -> ErrorOccurred:
         """Drive one real provider refusal and return the error frame it emitted."""
-        queue = _relayed(producer, thread_id)
+        queue = relayed_queue(producer, thread_id)
 
         await _ingest(
             producer,
@@ -2370,7 +2355,7 @@ class TestIngestStallWatchdog:
         self, producer: RunEventProducer
     ) -> None:
         """A graph that goes quiet past the stall budget fails fast, not forever."""
-        queue = _relayed(producer, "thread-stall")
+        queue = relayed_queue(producer, "thread-stall")
 
         graph = build_error_injecting_graph()
         config = {"configurable": {"thread_id": "thread-stall"}}
@@ -2410,7 +2395,7 @@ class TestIngestStallWatchdog:
     ) -> None:
         """Cancellation wins before the watchdog and does not leak the generator."""
         thread_id = "thread-cancel-blocked"
-        queue = _relayed(producer, thread_id)
+        queue = relayed_queue(producer, thread_id)
         entered, closed = asyncio.Event(), asyncio.Event()
         graph = _cancellable_stalling_graph(entered, closed)
         task = asyncio.create_task(
@@ -2445,7 +2430,7 @@ class TestIngestStallWatchdog:
     ) -> None:
         """An accepted cancel must survive the dispatch-to-ingest startup race."""
         thread_id = "thread-cancel-before-ingest"
-        queue = _relayed(producer, thread_id)
+        queue = relayed_queue(producer, thread_id)
         producer.cancel_thread(thread_id)
 
         outcome = await asyncio.wait_for(

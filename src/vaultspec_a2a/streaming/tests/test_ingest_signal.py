@@ -22,30 +22,24 @@ from ...graph.events import ClarificationPending, ErrorOccurred
 from ..aggregator import RunEventProducer
 from ._error_injecting_graph import InjectedSignal
 from ._parked_signal_graph import build_parked_then_signalled_graph
+from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
-    from ...graph.events import DomainEvent
     from ..types import SequencedEvent
     from ._parked_signal_graph import ParkedSignalInput
 
 
 async def _ingest_parked_run(
-    thread_id: str, *, raise_signal: bool, broadcast: list[DomainEvent]
+    producer: RunEventProducer, thread_id: str, *, raise_signal: bool
 ) -> str:
-    """Run the parked graph, collecting every event its relay was handed.
+    """Run the parked graph through *producer*, whose relay the caller captures.
 
-    The events are collected as they are broadcast, so they are kept even when
+    The events are captured as they are broadcast, so they are kept even when
     the ingest raises: what the viewer was told before the signal surfaced is
     the thing under test.
     """
-    producer = RunEventProducer()
-
-    async def _relay(sequenced: SequencedEvent) -> None:
-        broadcast.append(sequenced.event)
-
-    producer.add_broadcast_hook(_relay)
     graph_input: ParkedSignalInput = {
         "request_id": f"{thread_id}-question",
         "raise_signal": raise_signal,
@@ -60,20 +54,21 @@ async def _ingest_parked_run(
     )
 
 
-def _questions(events: list[DomainEvent]) -> list[str]:
+def _questions(broadcast: list[SequencedEvent]) -> list[str]:
     return [
-        event.request_id for event in events if isinstance(event, ClarificationPending)
+        sequenced.event.request_id
+        for sequenced in broadcast
+        if isinstance(sequenced.event, ClarificationPending)
     ]
 
 
 @pytest.mark.asyncio
 async def test_a_run_that_parks_projects_its_question() -> None:
     """The control: the same park, left to settle, is projected to its viewer."""
-    broadcast: list[DomainEvent] = []
+    producer = RunEventProducer()
+    broadcast = relayed_events(producer)
 
-    outcome = await _ingest_parked_run(
-        "parked-run", raise_signal=False, broadcast=broadcast
-    )
+    outcome = await _ingest_parked_run(producer, "parked-run", raise_signal=False)
 
     assert outcome == "interrupted"
     assert _questions(broadcast) == ["parked-run-question"]
@@ -87,14 +82,17 @@ async def test_a_signal_after_a_park_is_delivered_without_settling_the_run() -> 
     waiting on a question, because no read of the parked state was made on the
     way out.
     """
-    broadcast: list[DomainEvent] = []
+    producer = RunEventProducer()
+    broadcast = relayed_events(producer)
 
     with pytest.raises(InjectedSignal):
-        await _ingest_parked_run(
-            "signalled-run", raise_signal=True, broadcast=broadcast
-        )
+        await _ingest_parked_run(producer, "signalled-run", raise_signal=True)
 
     assert _questions(broadcast) == []
-    errors = [event for event in broadcast if isinstance(event, ErrorOccurred)]
+    errors = [
+        sequenced.event
+        for sequenced in broadcast
+        if isinstance(sequenced.event, ErrorOccurred)
+    ]
     assert errors
     assert "InjectedSignal" in errors[-1].message

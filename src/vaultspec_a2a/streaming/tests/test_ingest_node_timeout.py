@@ -17,11 +17,12 @@ from langgraph.types import TimeoutPolicy
 from ...graph.events import ErrorOccurred
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import RunEventProducer
+from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
-    from ..types import SequencedEvent, StreamableGraph
+    from ..types import StreamableGraph
 
 
 class _State(TypedDict):
@@ -50,13 +51,7 @@ def _graph_with_node_budget(run_timeout: float) -> StreamableGraph:
 @pytest.mark.asyncio
 async def test_a_node_timeout_fails_the_run_naming_the_node_and_limit() -> None:
     producer = RunEventProducer()
-    events: list[SequencedEvent] = []
-
-    async def _relay(sequenced: SequencedEvent) -> None:
-        events.append(sequenced)
-
-    # The broadcast hook is the seam the worker relays every event through.
-    producer.add_broadcast_hook(_relay)
+    events = relayed_events(producer)
     ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     outcome = await asyncio.wait_for(

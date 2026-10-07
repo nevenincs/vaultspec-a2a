@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 import pytest_asyncio
 
+from ...testing import mint_raw_token
 from .. import AuthoringClient, AuthoringSession, mint_actor_token
 from .._envelope import AuthoringResponse
 from .._errors import AuthoringError, AuthoringTransportError
@@ -63,11 +64,7 @@ async def _authenticated_session(
     client: AuthoringClient, run_id: str
 ) -> AuthoringSession:
     """Mint an actor token, bind it, open a session, and return it."""
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    raw_token = _data(minted).get("raw_token")
-    assert isinstance(raw_token, str) and raw_token
-    client._actor_token = raw_token
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
     session = AuthoringSession(client, run_id)
     created = await session.create_session(scope="repo", title=f"s17 {run_id}")
     assert isinstance(created, AuthoringResponse)

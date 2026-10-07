@@ -27,6 +27,7 @@ from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
 from ...testing import ProgressDeadline, read_frame, serve_on_loopback, wait_for_async
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
+from ...utils import bearer_header
 from .conftest import (
     SEATED_ATTACH_TOKEN,
     AppFixture,
@@ -102,7 +103,7 @@ async def test_authenticated_stream_excludes_artifact_body_keeps_identity(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -149,7 +150,7 @@ async def test_authenticated_stream_excludes_edit_diff_keeps_tool_metadata(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -203,7 +204,7 @@ async def test_authenticated_stream_bounds_the_token_delta(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -253,7 +254,7 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -339,7 +340,7 @@ async def test_authenticated_stream_degrades_an_uncatalogued_frame(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -384,7 +385,7 @@ async def test_authenticated_stream_drops_plan_prose_and_keeps_classification(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -434,7 +435,7 @@ async def test_global_stream_quota_refuses_an_authenticated_caller_at_capacity(
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
     ):
         refused = await client.get(f"/v1/runs/{run_id}/stream")
@@ -465,7 +466,7 @@ async def test_global_stream_quota_admits_the_authenticated_caller_below_capacit
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {SEATED_ATTACH_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
@@ -22,9 +22,7 @@ from langchain_core.outputs import ChatGeneration, LLMResult
 
 from ...streaming import RunEventProducer
 from ...streaming.transformer import StreamFrame
-
-if TYPE_CHECKING:
-    from ...streaming import SequencedEvent
+from ._relay_capture import relayed_events
 
 _THREAD = "t-char"
 _AGENT = "a-char"
@@ -39,12 +37,7 @@ async def _drive(
 ) -> _Drained:
     """Feed frames and callbacks through the real producer and collect its relay."""
     producer = RunEventProducer()
-    relayed: list[SequencedEvent] = []
-
-    async def _capture(sequenced: SequencedEvent) -> None:
-        relayed.append(sequenced)
-
-    producer.add_broadcast_hook(_capture)
+    relayed = relayed_events(producer)
     handler = producer._ingest.run_lifecycle_callbacks(_THREAD, _AGENT)
 
     for namespace, mode, payload in frames:

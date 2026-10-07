@@ -685,11 +685,6 @@ class AcceptanceHarness:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def mint(ec: AuthoringClient, actor_id: str, kind: str) -> str:
-        """Mint one actor token of *kind* for *actor_id*; a denial fails the case."""
-        return await mint_raw_token(ec, actor_id, kind)
-
-    @staticmethod
     async def mint_role_tokens(
         ec: AuthoringClient, run_id: str, roles: Iterable[str]
     ) -> dict[str, str]:

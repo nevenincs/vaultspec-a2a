@@ -9,7 +9,7 @@ being retained, and the two are seated together on the first relayed batch.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
@@ -19,6 +19,7 @@ from ...control.config import settings
 from ...streaming import RelayHub
 from ...testing import SseReader, serve_on_loopback, settings_override
 from ...thread.enums import ThreadStatus
+from ._relay_events import progress_event, relay_events
 from .conftest import make_app, seed_run_with_status
 
 if TYPE_CHECKING:
@@ -27,42 +28,6 @@ if TYPE_CHECKING:
     from .conftest import SessionFactory
 
 _RUN = "resume-id-run"
-
-
-def relay_batch(run_id: str, count: int, *, first: int = 1) -> dict[str, Any]:
-    """One worker batch of progress frames, numbered as the WORKER numbers them.
-
-    The worker's own counter is deliberately preserved in the bodies: the
-    gateway must stamp its own number over it, so a batch that already agreed
-    with the gateway would prove nothing.
-    """
-    return {
-        "events": [
-            {
-                "thread_id": run_id,
-                "ts": float(index),
-                "payload": {
-                    "type": "agent_status",
-                    "event_type": "agent_status",
-                    "thread_id": run_id,
-                    "agent_id": "coder",
-                    "state": "working",
-                    "sequence": first + index,
-                },
-            }
-            for index in range(count)
-        ]
-    }
-
-
-async def post_relay_batch(
-    client: httpx.AsyncClient, run_id: str, count: int, *, first: int = 1
-) -> None:
-    """Relay *count* frames through the route the worker posts to."""
-    response = await client.post(
-        "/internal/events/batch", json=relay_batch(run_id, count, first=first)
-    )
-    assert response.status_code == 200, response.text
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -87,7 +52,7 @@ async def test_a_served_frame_carries_its_run_and_sequence_as_the_sse_id(
         # chokepoint, so there is no retained row it could point at.
         assert snapshot.event_id is None
 
-        await post_relay_batch(client, _RUN, 3)
+        await relay_events(client, [progress_event(_RUN, index) for index in (1, 2, 3)])
 
         frames = [await reader.next_frame() for _ in range(3)]
 
@@ -124,7 +89,9 @@ async def test_no_frame_carries_an_id_while_replay_is_switched_off(
             reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
 
-            await post_relay_batch(client, _RUN, 2)
+            await relay_events(
+                client, [progress_event(_RUN, index) for index in (1, 2)]
+            )
 
             frames = [await reader.next_frame() for _ in range(2)]
 
@@ -167,7 +134,7 @@ async def test_an_unnumbered_run_carries_no_id_although_replay_is_switched_on(
         reader = SseReader(response.aiter_lines())
         assert (await reader.next_frame()).type == "stream_snapshot"
 
-        await post_relay_batch(client, _RUN, 2)
+        await relay_events(client, [progress_event(_RUN, index) for index in (1, 2)])
 
         frames = [await reader.next_frame() for _ in range(2)]
 

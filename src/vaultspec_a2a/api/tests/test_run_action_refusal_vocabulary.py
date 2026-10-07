@@ -26,7 +26,7 @@ from ...testing import (
     DEFAULT_TEAM_PRESET,
     async_catalog_run_fields,
     capacity_holders,
-    park_permission,
+    park_journaled_permission,
     served_worker,
 )
 from .conftest import make_app
@@ -54,38 +54,6 @@ async def _start_run(client: httpx.AsyncClient) -> str:
     return str(response.json()["run_id"])
 
 
-async def _seed_permission(
-    session_factory: SessionFactory,
-    checkpointer: AsyncSqliteSaver,
-    *,
-    thread_id: str,
-) -> str:
-    """Park a real run on a permission request, journal it, and name it."""
-    from ...database.permission_repository import record_permission_request
-
-    request_id = await park_permission(
-        checkpointer, thread_id=thread_id, tool_name="bash"
-    )
-    async with session_factory() as session:
-        await record_permission_request(
-            session,
-            request_id=request_id,
-            thread_id=thread_id,
-            pause_reason_type="bash",
-            description="Allow action?",
-            allowed_options=[
-                {
-                    "option_id": "allow_once",
-                    "name": "Allow once",
-                    "kind": "allow_once",
-                }
-            ],
-            tool_call="bash",
-        )
-        await session.commit()
-    return request_id
-
-
 @pytest.mark.asyncio
 async def test_a_permission_answer_to_a_busy_run_is_a_conflict_not_a_server_fault(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -102,8 +70,8 @@ async def test_a_permission_answer_to_a_busy_run_is_a_conflict_not_a_server_faul
         transport=ASGITransport(app=app), base_url="http://gateway", timeout=30.0
     ) as client:
         run_id = await _start_run(client)
-        request_id = await _seed_permission(
-            session_factory, checkpointer, thread_id=run_id
+        request_id = await park_journaled_permission(
+            checkpointer, session_factory, thread_id=run_id
         )
 
         async with served_worker(checkpointer, gateway=app, held_threads=[run_id]):
@@ -133,8 +101,8 @@ async def test_a_permission_answer_to_a_full_worker_asks_the_caller_to_retry(
         transport=ASGITransport(app=app), base_url="http://gateway", timeout=30.0
     ) as client:
         run_id = await _start_run(client)
-        request_id = await _seed_permission(
-            session_factory, checkpointer, thread_id=run_id
+        request_id = await park_journaled_permission(
+            checkpointer, session_factory, thread_id=run_id
         )
 
         async with served_worker(

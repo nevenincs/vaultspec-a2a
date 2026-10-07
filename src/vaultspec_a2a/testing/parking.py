@@ -8,6 +8,9 @@ by the supervisor's own approval node, a document approval raised by a phase gat
 and a clarification raised by the clarification nodes. The request id is the one
 its producer named it, read back from the checkpoint rather than chosen by the
 test.
+
+A tool permission is also journaled the way the relay journals it, beside the
+checkpoint that makes it answerable, for a test whose gateway reads both.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START
 
+from ..database import record_permission_request
 from ..graph.nodes._worker_permissions import (
     permission_callback_for,
     recorded_permission_answers,
@@ -41,6 +45,7 @@ from .graph import add_test_node, compile_test_graph, new_state_graph
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..thread import CheckpointProjection
     from ..thread.state import TeamState
@@ -51,6 +56,8 @@ __all__ = [
     "clarification_graph",
     "park_clarification",
     "park_document_approval",
+    "park_journaled_permission",
+    "park_journaled_permissions",
     "park_permission",
     "park_permissions",
     "park_plan_approval",
@@ -124,6 +131,28 @@ def _asking(
     return ask
 
 
+def _permission_graph(
+    checkpointer: AsyncSqliteSaver,
+    calls: list[tuple[str, dict[str, Any]]],
+    offered: list[dict[str, Any]],
+) -> Any:
+    """A graph whose parallel branches each ask for one of the tool *calls*."""
+    builder = new_state_graph()
+    for index, (tool_name, tool_input) in enumerate(calls):
+        branch = f"ask_{index}"
+        add_test_node(builder, branch, _asking(tool_name, tool_input, offered))
+        builder.add_edge(START, branch)
+        builder.add_edge(branch, END)
+    return compile_test_graph(builder, checkpointer=checkpointer)
+
+
+def _one_call(
+    tool_name: str, tool_input: dict[str, Any] | None
+) -> list[tuple[str, dict[str, Any]]]:
+    """The single tool call a one-permission park asks for."""
+    return [(tool_name, {"command": "ls"} if tool_input is None else tool_input)]
+
+
 async def park_permissions(
     checkpointer: AsyncSqliteSaver,
     *,
@@ -138,13 +167,7 @@ async def park_permissions(
     and refusal; an empty list parks requests that offer nothing.
     """
     offered = _TOOL_OPTIONS if options is None else options
-    builder = new_state_graph()
-    for index, (tool_name, tool_input) in enumerate(calls):
-        branch = f"ask_{index}"
-        add_test_node(builder, branch, _asking(tool_name, tool_input, offered))
-        builder.add_edge(START, branch)
-        builder.add_edge(branch, END)
-    graph = compile_test_graph(builder, checkpointer=checkpointer)
+    graph = _permission_graph(checkpointer, calls, offered)
     return await _park_request_ids(
         checkpointer, graph, _team_state(thread_id), thread_id
     )
@@ -159,12 +182,66 @@ async def park_permission(
     tool_input: dict[str, Any] | None = None,
 ) -> str:
     """Park *thread_id* on a tool permission offering *options*, and name it."""
-    call_input = {"command": "ls"} if tool_input is None else tool_input
     return _only(
         await park_permissions(
             checkpointer,
             thread_id=thread_id,
-            calls=[(tool_name, call_input)],
+            calls=_one_call(tool_name, tool_input),
+            options=options,
+        )
+    )
+
+
+async def park_journaled_permissions(
+    checkpointer: AsyncSqliteSaver,
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    thread_id: str,
+    calls: list[tuple[str, dict[str, Any]]],
+    options: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    """Park *thread_id* on one permission per call, journal each, and name them.
+
+    The run's checkpoint is what makes a request answerable; the journal row is
+    the copy the relay writes beside it, carrying the tool the request asked for
+    and the *options* the provider offered. Both are parked and journaled as
+    :func:`park_permissions` parks them, so *options* defaults the same way.
+    """
+    offered = _TOOL_OPTIONS if options is None else options
+    graph = _permission_graph(checkpointer, calls, offered)
+    parked = await _park(checkpointer, graph, _team_state(thread_id), thread_id)
+    async with session_factory() as session:
+        for interrupt in parked.pending_interrupts:
+            tool_name = str(interrupt.payload["tool_name"])
+            await record_permission_request(
+                session,
+                request_id=interrupt.interrupt_id,
+                thread_id=thread_id,
+                pause_reason_type=tool_name,
+                description="Allow action?",
+                allowed_options=offered,
+                tool_call=tool_name,
+            )
+        await session.commit()
+    return [interrupt.interrupt_id for interrupt in parked.pending_interrupts]
+
+
+async def park_journaled_permission(
+    checkpointer: AsyncSqliteSaver,
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    thread_id: str,
+    options: list[dict[str, Any]] | None = None,
+    tool_name: str = "bash",
+    tool_input: dict[str, Any] | None = None,
+) -> str:
+    """Park *thread_id* on a tool permission offering *options*, journal it, name it."""
+    return _only(
+        await park_journaled_permissions(
+            checkpointer,
+            session_factory,
+            thread_id=thread_id,
+            calls=_one_call(tool_name, tool_input),
             options=options,
         )
     )

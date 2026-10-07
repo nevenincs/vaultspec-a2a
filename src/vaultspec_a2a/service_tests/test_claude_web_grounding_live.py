@@ -88,6 +88,7 @@ from ..testing import (
     ResilientAuthoringClient,
     json_object,
     json_object_list,
+    mint_raw_token,
     reachable_stack,
     resolve_selection,
     snapshot_vault,
@@ -400,7 +401,9 @@ async def _observe_web_grounding_run(
         harness.engine_base_url, harness.engine_bearer
     ) as ec:
         run_tokens = await harness.mint_role_tokens(ec, harness.run_id, case.roles)
-        reviewer_human = await harness.mint(ec, f"rev-human:{harness.run_id}", "human")
+        reviewer_human = await mint_raw_token(
+            ec, f"rev-human:{harness.run_id}", "human"
+        )
         # Manual mode is the zero-writes guarantee at its source: a queued proposal
         # waits for a human verdict this test never gives, so nothing can apply even
         # if the observation loop were to overrun its deadline.

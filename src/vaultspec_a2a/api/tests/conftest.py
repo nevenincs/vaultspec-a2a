@@ -32,6 +32,7 @@ from ...providers.lane_registry import registered_lanes
 from ...streaming import RelayHub
 from ...testing import LaneInventoryFactory, adopted_spawner
 from ...tests._write_authority import make_test_write_authority
+from ...utils import bearer_header
 from ...worker._dispatch_contract import CAPACITY_FULL
 from ...worker.app import capacity_refusal, verify_dispatch_token
 from ..app import create_app
@@ -214,7 +215,9 @@ class _SeatedCredentials:
         credentialed = list(headers)
         token = getattr(self._owner.state, "v1_service_token", None)
         if isinstance(token, str) and token and _AUTHORIZATION not in presented:
-            credentialed.append((_AUTHORIZATION, f"Bearer {token}".encode()))
+            credentialed.append(
+                (_AUTHORIZATION, bearer_header(token)["Authorization"].encode())
+            )
         capability = getattr(self._owner.state, "lifecycle_capability", None)
         if isinstance(capability, str) and capability and _CAPABILITY not in presented:
             credentialed.append((_CAPABILITY, capability.encode()))

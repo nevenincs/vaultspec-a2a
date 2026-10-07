@@ -9,11 +9,12 @@ accepted create action with its frozen input and graph receipt - and imported th
 copies from one another's test modules.
 
 :func:`seed_journaled_thread` seats the bare row for a test that only needs the
-election to succeed. :func:`seed_accepted_thread` and :func:`seed_create_action`
-seat the accepted create action a recovered or settled run carries, and return
-the graph receipt it names. :func:`elect_status` and
-:func:`record_completed_checkpoint` then move such a run the way the action that
-owns it does.
+election to succeed, and :func:`seed_thread_expectation` commits it under a
+chosen writer receipt and returns the witness an election is made against.
+:func:`seed_accepted_thread` and :func:`seed_create_action` seat the accepted
+create action a recovered or settled run carries, and return the graph receipt
+it names. :func:`elect_status` and :func:`record_completed_checkpoint` then move
+such a run the way the action that owns it does.
 """
 
 from __future__ import annotations
@@ -37,8 +38,9 @@ from ..ipc.schemas import DispatchRequest
 from ..team.team_config import load_team_config
 from ..tests._checkpoint_seeding import real_checkpoint
 from ..tests._write_authority import make_test_write_authority
+from ..thread import RunWriteAuthority
 from ..thread.action_receipts import GraphCompletionReceipt
-from ..thread.enums import ThreadStatus
+from ..thread.enums import ControlActionType, ThreadStatus
 from ..thread.executable_graph import freeze_graph_definition
 from ..thread.idempotency import thread_create_action_key
 from .catalog_authority import current_execution_metadata
@@ -50,6 +52,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..database.models import ThreadModel
+    from ..thread import ThreadWriteExpectation
     from ..thread.action_receipts import GraphActionReceipt
 
 __all__ = [
@@ -60,6 +63,7 @@ __all__ = [
     "seed_create_action",
     "seed_journaled_thread",
     "seed_live_thread",
+    "seed_thread_expectation",
 ]
 
 _RECOVERY_WINDOW = timedelta(minutes=5)
@@ -78,14 +82,16 @@ async def seed_journaled_thread(
     title: str | None = None,
     metadata: str | None = None,
     recovery_deadline_at: datetime | None = None,
+    write_authority: RunWriteAuthority | None = None,
 ) -> ThreadModel:
     """Seat a thread and journal the create action its write authority names.
 
     The journal row carries no accepted input: it is the minimum a status
     election, a deletion or a desktop boot requires of a thread, for a test that
-    does not dispatch the run again.
+    does not dispatch the run again. The authority is a fresh one unless
+    *write_authority* names the writer the test elects against.
     """
-    authority = make_test_write_authority()
+    authority = write_authority or make_test_write_authority()
     thread = await create_thread(
         session,
         write_authority=authority,
@@ -103,6 +109,35 @@ async def seed_journaled_thread(
         recovery_deadline_at=_recovery_deadline(recovery_deadline_at),
     )
     return thread
+
+
+async def seed_thread_expectation(
+    session_factory: async_sessionmaker[AsyncSession],
+    thread_id: str,
+    status: ThreadStatus,
+    receipt: str,
+) -> ThreadWriteExpectation:
+    """Commit a journaled thread whose writer is the ingest *receipt* names.
+
+    The returned witness is what a status election is made against as that
+    writer, so a test that asserts on the winner and the losers of an election
+    holds the receipt it chose rather than one the seed invented.
+    """
+    async with session_factory() as session:
+        thread = await seed_journaled_thread(
+            session,
+            status=status,
+            thread_id=thread_id,
+            write_authority=RunWriteAuthority(
+                run_revision=0,
+                writer_generation=1,
+                action_type=ControlActionType.INGEST,
+                action_receipt_id=receipt,
+            ),
+        )
+        expectation = thread_write_expectation(thread)
+        await session.commit()
+    return expectation
 
 
 async def seed_create_action(

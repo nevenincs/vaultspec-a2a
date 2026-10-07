@@ -21,7 +21,7 @@ opening a second code path:
   dashboard-spawnable upgrade step of the dashboard-owned update transaction
   (the dashboard drains, snapshots, and rolls back itself - a2a only executes
   the schema work), and ``migrate --compact`` is the operator's way to return
-  the primary store's freed pages to the operating system.
+  every store's freed pages to the operating system.
 
 Every verb is idempotent from the dashboard's perspective: starting a running
 service, stopping a stopped one, and re-running setup against an initialised
@@ -400,8 +400,8 @@ def migrate_service(
     (its snapshot); this verb only executes a2a's schema work through the
     desktop migration authority, refusing live or locked stores and failing
     closed on an ``expect_from``/``expect_head`` assertion mismatch. *compact*
-    then truncates the primary store's write-ahead log and vacuums it, refusing
-    while a service listens on a configured port. Returns the bounded JSON-ready
+    then truncates every store's write-ahead log and vacuums it, refusing while
+    a service listens on a configured port. Returns the bounded JSON-ready
     result.
     """
     import asyncio
@@ -553,7 +553,7 @@ def setup_command(app_home: Path | None, capsule_root: Path | None) -> None:
     is_flag=True,
     default=False,
     help=(
-        "After migrating, truncate the primary store's write-ahead log and run "
+        "After migrating, truncate every store's write-ahead log and run "
         "VACUUM; refused while a service listens on a configured port."
     ),
 )

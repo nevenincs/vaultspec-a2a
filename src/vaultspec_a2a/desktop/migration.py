@@ -8,9 +8,9 @@ schema mutations ordinary desktop boot refuses - the Alembic upgrade to the
 packaged head, the checkpointer schema setup, and the state-driven-development
 (SDD) backfill - against the application home's own stores, refusing any
 store that is live or locked, and returns a bounded, machine-readable result.
-Asked to compact, it then truncates the primary store's write-ahead log and
-vacuums it - the one path that returns freed pages to the operating system -
-after first refusing while any service listens on a configured port. That
+Asked to compact, it then truncates each store's write-ahead log and vacuums it
+- the one path that returns freed pages to the operating system - after first
+refusing while any service listens on a configured port. That
 loopback probe is its only network access, and it never touches a store the
 caller did not quiesce; rollback belongs to the dashboard's own snapshot, never
 to this module.
@@ -258,10 +258,18 @@ def _compact_store(db_path: Path) -> None:
         conn.close()
 
 
-async def _compact_primary(database_path: Path) -> None:
-    """Compact the quiesced primary store, binding any failure to its stage."""
+async def _compact_stores(state: StateLayout) -> None:
+    """Compact every quiesced store, binding any failure to the compact stage.
+
+    Both stores, not just the primary: the checkpoint store is the one that grows,
+    holding a row per graph step per run, so pruning a finished run frees pages
+    the file keeps until a VACUUM rewrites it. An operator who runs compaction to
+    reclaim disk and gets back only the much smaller run store has not had their
+    disk returned.
+    """
     try:
-        await asyncio.to_thread(_compact_store, database_path)
+        for path in (state.database_path, state.checkpoint_path):
+            await asyncio.to_thread(_compact_store, path)
     except CompactionBlockedError:
         raise
     except Exception as exc:
@@ -369,7 +377,7 @@ async def _run_mutations_bounded(
     """Run the mutation core and fold every expected failure into the result.
 
     With *compact*, a listening service refuses the whole run before any store
-    is touched, and the primary store is compacted once the mutations succeed.
+    is touched, and every store is compacted once the mutations succeed.
     """
     try:
         if compact:
@@ -378,7 +386,7 @@ async def _run_mutations_bounded(
             state.database_path, state.checkpoint_path, target_head
         )
         if compact:
-            await _compact_primary(state.database_path)
+            await _compact_stores(state)
         ensure_private_state(state)
     except DesktopProfileError as exc:
         return _failed_result(
@@ -436,7 +444,7 @@ async def migrate_stores(
     assertions of the observed current revision and the packaged head, so an
     updater that computed a base→head plan can refuse a store or a package
     that is not the one it planned against. *compact* additionally truncates
-    the primary store's write-ahead log and vacuums it after the mutations; it
+    each store's write-ahead log and vacuums it after the mutations; it
     refuses at the ``lock`` stage while a service listens on a configured port,
     and a checkpoint an open reader blocks fails the ``compact`` stage. Rollback
     is the caller's snapshot; this function only refuses (live/locked or failed

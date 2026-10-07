@@ -30,7 +30,6 @@ __all__ = [
     "ProviderCommand",
     "_build_kimi_env",
     "_classify_acp_command",
-    "_kimi_home_env",
     "acp_launch_options",
     "capsule_acp_entry",
     "capsule_claude_executable",
@@ -42,17 +41,12 @@ __all__ = [
 ]
 
 
-_FALLBACK_CLI_NAME = "fallback_cli_name"
-
-
 @dataclass(frozen=True, slots=True)
 class ProviderCommand:
     """One provider launch command and the runtime facts its resolution found.
 
     The command is resolved once and every consumer reads these facts rather
-    than re-testing the argv. ``resolved`` is false only for the bare-name
-    fallback that no trusted search path answered; every other origin carries
-    an absolute launcher.
+    than re-testing the argv.
 
     The chat models hold one as a pydantic field, so this module keeps its
     annotations evaluated rather than deferred.
@@ -66,9 +60,25 @@ class ProviderCommand:
     command_target: str
     acp_backend: AcpBackend | None = None
 
-    @property
-    def resolved(self) -> bool:
-        return self.command_origin != _FALLBACK_CLI_NAME
+    def __post_init__(self) -> None:
+        """Refuse a launcher the child would get to resolve for itself.
+
+        Every lane's command is built here, so the absolute-launcher rule is
+        stated once at this constructor rather than re-checked per origin or at
+        spawn. A bare or relative program name is resolved by whoever launches
+        it: POSIX ``execvp`` walks the child's own ``PATH``, and the Windows
+        ``cmd.exe`` shim this project takes for ``.cmd`` launchers reads the
+        working directory first - which for every provider child is the agent's
+        own workspace. A lane that could not be resolved has no command at all;
+        it does not get a name to look up later.
+        """
+        if not self.argv:
+            raise ValueError("a provider command needs at least one argument")
+        launcher = self.argv[0]
+        if not Path(launcher).is_absolute():
+            raise ValueError(
+                f"a provider launcher must be an absolute path: {launcher!r}"
+            )
 
     def metadata(self) -> dict[str, str]:
         """Return the bounded runtime metadata attached to launches and probes."""
@@ -180,12 +190,17 @@ def _build_kimi_env(
     kimi_temporary_model_name: str | None = None,
     kimi_temporary_model_max_context_size: int | None = None,
     kimi_temporary_model_capabilities: str | None = None,
+    kimi_thinking_effort: str | None = None,
 ) -> dict[str, str]:
-    """Return the explicit Kimi Code home and temporary-provider definition.
+    """Return the Kimi temporary-provider definition and its model controls.
 
     Kimi Code 0.28.1 treats ``KIMI_MODEL_*`` as one temporary provider, not as
     independent launch overrides. The tuple is injected only when complete;
     exact configured-alias selection is a separate ``-m`` argument.
+
+    *kimi_thinking_effort* is the run's selected native control and rides
+    independently of the tuple's completeness, which is how the launch path has
+    always emitted it.
     """
     reason = kimi_temporary_model_configuration_reason(
         kimi_api_key=kimi_api_key,
@@ -209,13 +224,9 @@ def _build_kimi_env(
             env_vars["KIMI_MODEL_CAPABILITIES"] = (
                 kimi_temporary_model_capabilities.strip()
             )
+    if kimi_thinking_effort and kimi_thinking_effort.strip():
+        env_vars["KIMI_MODEL_THINKING_EFFORT"] = kimi_thinking_effort.strip()
     return env_vars
-
-
-def _kimi_home_env(kimi_code_home: str | None) -> dict[str, str]:
-    if kimi_code_home and kimi_code_home.strip():
-        return {"KIMI_CODE_HOME": kimi_code_home.strip()}
-    return {}
 
 
 def kimi_temporary_model_configuration_reason(
@@ -480,46 +491,56 @@ COMMAND_LANES: frozenset[Provider] = ACP_BACKEND_LANES | frozenset(
 )
 
 
-def _classify_system_cli_command(provider: Provider) -> ProviderCommand:
+def _classify_system_cli_command(
+    provider: Provider, *, search_path: str | None = None
+) -> ProviderCommand:
     """Return a system-CLI lane's command, resolved from this service's PATH.
 
-    An unresolved CLI keeps its bare name under the ``fallback_cli_name``
-    origin, which :attr:`ProviderCommand.resolved` reports as unresolved.
+    Raises:
+        ConfigError: No trusted search location holds the lane's CLI. The lane
+            is then unavailable, which is the honest answer: a command naming
+            the CLI by bare name would be resolved by the child rather than
+            here, from the agent's own workspace outwards.
     """
     subcommand = _SYSTEM_CLI_SUBCOMMANDS[provider]
-    kind = f"{provider.value}_cli"
-    executable = resolve_provider_cli_executable(provider)
-    if executable:
-        return ProviderCommand(
-            argv=(executable, subcommand),
-            runtime_authority="system_cli",
-            command_origin="system_path_executable",
-            command_kind=kind,
-            command_executable=Path(executable).name,
-            command_target=executable,
+    executable = resolve_provider_cli_executable(provider, search_path=search_path)
+    if not executable:
+        raise ConfigError(
+            f"The {provider.value} CLI is not installed where this service can "
+            f"resolve it, so the {provider.value} lane cannot be launched. "
+            f"Install it and make it reachable from the service environment."
         )
     return ProviderCommand(
-        argv=(provider.value, subcommand),
+        argv=(executable, subcommand),
         runtime_authority="system_cli",
-        command_origin=_FALLBACK_CLI_NAME,
-        command_kind=kind,
-        command_executable=provider.value,
-        command_target=provider.value,
+        command_origin="system_path_executable",
+        command_kind=f"{provider.value}_cli",
+        command_executable=Path(executable).name,
+        command_target=executable,
     )
 
 
 def classify_provider_command(
-    provider: Provider, *, backend: AcpBackend | None = None
+    provider: Provider,
+    *,
+    backend: AcpBackend | None = None,
+    search_path: str | None = None,
 ) -> ProviderCommand:
     """Resolve a subprocess provider's launch command without instantiating it.
 
     The one classification of a lane's launch: the returned command carries
-    what resolution established, including whether a system CLI resolved at
-    all, so no caller looks the binary up a second time.
+    what resolution established, so no caller looks the binary up a second
+    time, and its launcher is always an absolute path.
+
+    *search_path* names the trusted search locations explicitly for a system-CLI
+    lane instead of reading this service's own, so a caller can state which
+    machine locations are trusted rather than arranging an ambient environment
+    to imply it. It has no effect on the ACP lanes, whose assets are owned.
 
     Raises:
         ValueError: The provider has no subprocess command.
-        ConfigError: The Claude ACP entry point/binary does not exist.
+        ConfigError: The lane's launcher does not exist - a missing Claude ACP
+            entry point or packaged binary, or an unresolvable system CLI.
     """
     if provider in ACP_BACKEND_LANES:
         # Z.ai launches the same claude-agent-acp wrapper as Claude; only the
@@ -528,5 +549,5 @@ def classify_provider_command(
             backend if backend is not None else settings.acp_backend
         )
     if provider in _SYSTEM_CLI_SUBCOMMANDS:
-        return _classify_system_cli_command(provider)
+        return _classify_system_cli_command(provider, search_path=search_path)
     raise ValueError(f"provider {provider.value} has no subprocess command to classify")

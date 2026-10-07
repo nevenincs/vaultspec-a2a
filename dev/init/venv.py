@@ -11,15 +11,19 @@ a healthy one in use.
 So the existence check happens here, before `uv` is invoked at all, and an
 environment that already has an interpreter is left strictly alone.
 
-Stdlib-only, by the constraint stated in :mod:`dev.init`.
+Stdlib-only, by the constraint stated in :mod:`dev.init`; ``uv venv`` runs
+through :func:`dev.runner.run`, which is stdlib-only as well.
 """
 
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
+
+from dev.runner import run
+
+__all__ = ["ensure", "interpreter", "main"]
 
 
 def interpreter(venv: Path) -> Path:
@@ -45,15 +49,13 @@ def ensure(venv: Path) -> int:
         venv: The environment root.
 
     Returns:
-        0 when the environment exists or was created, otherwise ``uv venv``'s
-        exit code.
+        0 when the environment exists or was created, otherwise the exit code
+        :func:`dev.runner.run` reports for ``uv venv``.
     """
     if interpreter(venv).is_file():
         print(f"{venv.name} already exists - leaving it in place.", flush=True)
         return 0
-    argv = ["uv", "venv", str(venv)]
-    print(f"$ {' '.join(argv)}", flush=True)
-    return subprocess.run(argv, check=False).returncode
+    return run(["uv", "venv", str(venv)])
 
 
 def main(argv: list[str] | None = None) -> int:

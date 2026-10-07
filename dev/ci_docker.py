@@ -5,9 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
 import urllib.request
 from pathlib import Path
+
+from dev.exit_codes import OK
+from dev.process import run_captured
+from dev.runner import run
+
+__all__ = ["main"]
 
 _PLUGINS = {
     "docker-compose": (
@@ -26,14 +31,12 @@ _PLUGINS = {
 def main() -> None:
     """Require a rootless daemon and install plugins in this job's config home."""
     config = Path(os.environ["RUNNER_TEMP"]) / "a2a-docker"
-    env = {**os.environ, "DOCKER_CONFIG": str(config)}
-    result = subprocess.run(
+    env = {"DOCKER_CONFIG": str(config)}
+    result = run_captured(
         ["docker", "info", "--format", "{{json .SecurityOptions}}"],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=30,
         env=env,
+        timeout=30,
+        check=True,
     )
     if "name=rootless" not in json.loads(result.stdout):
         raise RuntimeError(
@@ -50,7 +53,8 @@ def main() -> None:
         target.write_bytes(payload)
         target.chmod(0o755)
     for plugin in ("compose", "buildx"):
-        subprocess.run(["docker", plugin, "version"], check=True, env=env, timeout=30)
+        if run(["docker", plugin, "version"], env, timeout=30) != OK:
+            raise RuntimeError(f"the installed docker {plugin} plugin did not run")
     with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as output:
         output.write(f"DOCKER_CONFIG={config}\n")
 

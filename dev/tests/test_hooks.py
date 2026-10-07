@@ -3,23 +3,18 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from typing import TYPE_CHECKING
 
+from dev.process import run_captured
 from dev.repo import hooks
 
 if TYPE_CHECKING:
+    import subprocess
     from pathlib import Path
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    return run_captured(["git", *args], cwd=cwd, timeout=None, check=True)
 
 
 def test_install_hook_writes_portable_shim_into_common_hooks_dir(

@@ -15,13 +15,12 @@ routine, it is invisible in the tool's own error text unless you know the
 phrasing to look for, and treating it as a build failure sends people hunting
 for a defect that does not exist.
 
-Stdlib-only, by the constraint stated in :mod:`dev.init`.
+Stdlib-only, by the constraint stated in :mod:`dev.init`; the step itself runs
+through :func:`dev.process.run_captured`, which is stdlib-only as well.
 """
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 import sys
 import time
 from typing import TYPE_CHECKING, Final
@@ -34,11 +33,14 @@ from dev.exit_codes import (
     OK,
 )
 from dev.init.contract import DONE, FAILED, StepResult
+from dev.process import ToolMissingError, ToolUnavailableError, run_captured
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from dev.init.contract import Step
+
+__all__ = ["TAIL_LINES", "classify", "run", "tail"]
 
 #: How many trailing lines of a failed step's output the report carries. Enough
 #: to hold a Python traceback's final frames or a resolver's conflict summary,
@@ -80,28 +82,6 @@ _MISSING_MARKERS: Final[tuple[str, ...]] = (
     "no such file or directory",
     "cannot find the path specified",
 )
-
-
-def resolve(command: str) -> str | None:
-    """Return the absolute path of an executable, or ``None``.
-
-    This exists because of Windows. `npm`, `npx` and `mise` ship as `.cmd`
-    shims there, and ``CreateProcess`` - which is what a shell-less
-    :func:`subprocess.run` uses - will not find them from a bare name the way a
-    shell would. The failure is a bare ``FileNotFoundError`` that reads exactly
-    like "npm is not installed" on a machine where npm is plainly installed.
-
-    Resolving through :func:`shutil.which` first, which honours ``PATHEXT``,
-    is what keeps one shell-less implementation working identically on
-    `cmd.exe`, `pwsh` and `sh`.
-
-    Args:
-        command: The executable name.
-
-    Returns:
-        The resolved path, or ``None`` when it is genuinely not on ``PATH``.
-    """
-    return shutil.which(command)
 
 
 def tail(text: str, lines: int = TAIL_LINES) -> str:
@@ -159,8 +139,11 @@ def run(step: Step, *, cwd: Path, echo: bool = True) -> tuple[StepResult, int]:
         it succeeded or when it failed and was advisory).
     """
     started = time.monotonic()
-    executable = resolve(step.argv[0])
-    if executable is None:
+    try:
+        completed = run_captured(step.argv, cwd=cwd, timeout=step.timeout)
+        output = completed.stdout + completed.stderr
+        code = completed.returncode
+    except ToolMissingError as exc:
         return (
             StepResult(
                 name=step.name,
@@ -168,33 +151,13 @@ def run(step: Step, *, cwd: Path, echo: bool = True) -> tuple[StepResult, int]:
                 status=DONE if step.advisory else FAILED,
                 exit_code=INIT_HOST_TOOL_MISSING,
                 duration_ms=0,
-                output_tail=f"{step.argv[0]}: not found on PATH",
+                output_tail=str(exc),
                 advisory=step.advisory,
             ),
             OK if step.advisory else INIT_HOST_TOOL_MISSING,
         )
-    argv = [executable, *step.argv[1:]]
-    try:
-        completed = subprocess.run(
-            argv,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=step.timeout,
-            check=False,
-        )
-        output = (completed.stdout or "") + (completed.stderr or "")
-        code = completed.returncode
-    except FileNotFoundError:
-        output = f"{step.argv[0]}: command not found"
-        code = INIT_HOST_TOOL_MISSING
-    except subprocess.TimeoutExpired:
-        output = f"timed out after {step.timeout} seconds"
-        code = INIT_STEP_FAILED
-    except OSError as exc:  # pragma: no cover - platform-specific spawn failure
-        output = f"{step.argv[0]}: {exc}"
+    except ToolUnavailableError as exc:
+        output = str(exc)
         code = INIT_STEP_FAILED
 
     duration = int((time.monotonic() - started) * 1000)

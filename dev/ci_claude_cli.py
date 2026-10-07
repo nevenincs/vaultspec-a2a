@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from pathlib import Path
+
+from dev.process import run_captured
+
+__all__ = ["CLAUDE_CLI_VERSION", "main"]
 
 CLAUDE_CLI_VERSION = "2.1.286"
 
@@ -24,9 +27,7 @@ def main() -> None:
             f"expected one lock-vendored Claude CLI, found {len(candidates)}"
         )
     cli = candidates[0]
-    result = subprocess.run(
-        [str(cli), "--version"], check=True, capture_output=True, text=True
-    )
+    result = run_captured([str(cli), "--version"], timeout=None, check=True)
     if result.stdout.strip().partition(" ")[0] != CLAUDE_CLI_VERSION:
         raise RuntimeError(
             f"the installed Claude CLI reported {result.stdout.strip()!r}, "

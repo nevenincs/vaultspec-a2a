@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from dev.process import run_captured
+
+if TYPE_CHECKING:
+    import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -94,7 +99,7 @@ def _snapshot_files(root: Path) -> dict[Path, bytes]:
 
 def _run_gate(target: Path) -> subprocess.CompletedProcess[str]:
     """Run the repository hook wrapper against an isolated workspace."""
-    return subprocess.run(
+    return run_captured(
         [
             sys.executable,
             str(ROOT / "dev" / "vault_annotations_gate.py"),
@@ -102,9 +107,6 @@ def _run_gate(target: Path) -> subprocess.CompletedProcess[str]:
             str(target),
         ],
         cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
         timeout=60,
     )
 

@@ -7,12 +7,13 @@ so a broken invocation shape fails here instead of in a developer's checkout.
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
+from dev.process import run_captured
 from dev.vault import enroll
 from dev.vault.enroll import (
     _assert_tracked_projection,
@@ -20,14 +21,15 @@ from dev.vault.enroll import (
     _seed_runtime_without_overwrite,
 )
 
+if TYPE_CHECKING:
+    import subprocess
+
 #: The script path the harness recipe invokes.
 ENROLL_SCRIPT = Path(enroll.__file__).resolve()
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ("git", *args), cwd=root, check=True, capture_output=True, text=True
-    )
+    return run_captured(("git", *args), cwd=root, timeout=None, check=True)
 
 
 def _repository(root: Path) -> None:
@@ -105,7 +107,7 @@ dev = ["vaultspec-core>=0.1.48,<0.2"]
     vault_record.write_text("# Acceptance decision\n", encoding="utf-8")
     prek = source / "prek.toml"
     prek.write_text("repos = []\n", encoding="utf-8")
-    subprocess.run(
+    run_captured(
         (
             sys.executable,
             "-m",
@@ -119,16 +121,11 @@ dev = ["vaultspec-core>=0.1.48,<0.2"]
             "--force",
             "--no-hints",
         ),
+        timeout=None,
         check=True,
-        capture_output=True,
-        text=True,
     )
-    subprocess.run(
-        (sys.executable, str(ENROLL_SCRIPT)),
-        cwd=source,
-        check=True,
-        capture_output=True,
-        text=True,
+    run_captured(
+        (sys.executable, str(ENROLL_SCRIPT)), cwd=source, timeout=None, check=True
     )
     for relative in (
         ".vaultspec/providers.json",
@@ -150,12 +147,11 @@ dev = ["vaultspec-core>=0.1.48,<0.2"]
     expected_prek = (consumer / "prek.toml").read_bytes()
 
     for _ in range(2):
-        subprocess.run(
+        run_captured(
             (sys.executable, str(ENROLL_SCRIPT)),
             cwd=consumer,
+            timeout=None,
             check=True,
-            capture_output=True,
-            text=True,
         )
         assert _git(consumer, "diff", "--exit-code").returncode == 0
         assert (consumer / "prek.toml").read_bytes() == expected_prek

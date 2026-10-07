@@ -23,6 +23,8 @@ import importlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .action_receipts import canonical_json as canonical_json
+    from .action_receipts import sha256_hex as sha256_hex
     from .actor_tokens import ActorTokenBundle as ActorTokenBundle
     from .clarification import ClarificationAnswers as ClarificationAnswers
     from .clarification import ClarificationKind as ClarificationKind
@@ -93,6 +95,8 @@ if TYPE_CHECKING:
     from .write_authority import ThreadWriteExpectation as ThreadWriteExpectation
 
 _LAZY_IMPORTS = {
+    "canonical_json": ".action_receipts",
+    "sha256_hex": ".action_receipts",
     "ActorTokenBundle": ".actor_tokens",
     "ClarificationAnswers": ".clarification",
     "ClarificationKind": ".clarification",
@@ -213,6 +217,7 @@ __all__ = [
     "TokenUsageEntry",
     "VaultspecError",
     "WorkerExecutionError",
+    "canonical_json",
     "classify_message_role",
     "derive_message_id",
     "extract_message_timestamp",
@@ -224,6 +229,7 @@ __all__ = [
     "pending_clarification",
     "permission_resume_value",
     "project_checkpoint_tuple",
+    "sha256_hex",
     "stamp_message_created_at",
     "unanswered_interrupt_values",
     "validate_clarification_answers",

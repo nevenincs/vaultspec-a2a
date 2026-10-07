@@ -1,5 +1,7 @@
 """Node definitions for LangGraph agent orchestration."""
 
+from .clarification import CLARIFICATION_GATE_NODE as CLARIFICATION_GATE_NODE
+from .clarification import CLARIFICATION_REQUEST_NODE as CLARIFICATION_REQUEST_NODE
 from .clarification import (
     ClarificationQuestionProducer as ClarificationQuestionProducer,
 )
@@ -18,6 +20,8 @@ from .supervisor import create_supervisor_node as create_supervisor_node
 from .worker import create_worker_node as create_worker_node
 
 __all__ = [
+    "CLARIFICATION_GATE_NODE",
+    "CLARIFICATION_REQUEST_NODE",
     "ClarificationQuestionProducer",
     "ResearchFindingProducer",
     "SupervisorOptions",

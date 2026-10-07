@@ -9,8 +9,6 @@ returns environment values.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 from dataclasses import replace
 from typing import TYPE_CHECKING, Final, TypedDict, Unpack, cast
 
@@ -20,6 +18,7 @@ if TYPE_CHECKING:
 
     from ..desktop.native_isolation import NativeLaunchAuthority
     from ._cleanup import CleanupStep
+from ..thread import canonical_json, sha256_hex
 from ._acp_auth import is_auth_required_error
 from ._acp_request import encode_frame, jsonrpc_request
 from ._catalog_discovery import (
@@ -308,8 +307,7 @@ def _revision(
         ],
         "provider_id": key.provider_id,
     }
-    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return sha256_hex(canonical_json(payload).encode())
 
 
 def catalog_from_session_result(

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import hashlib
-import json
 import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -20,7 +18,7 @@ from ...context.stage import infer_phase_from_vault_index
 from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
-from ...thread import parse_approval_verdict
+from ...thread import canonical_json, parse_approval_verdict, sha256_hex
 from ...thread.enums import VERDICT_APPROVED, ApprovalStatus, InterruptType
 from ...thread.errors import SupervisorRoutingError
 from ...thread.state import merge_vault_index
@@ -98,13 +96,10 @@ def _plan_approval_request_id(
     verdict for a superseded plan recognisable after the plan was revised - a
     run-scoped handle alone would let an old approval release a new plan.
     """
-    canonical = json.dumps(
-        [state.get("thread_id") or "", exec_worker, sorted(plan_paths)],
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
+    canonical = canonical_json(
+        [state.get("thread_id") or "", exec_worker, sorted(plan_paths)], default=str
     )
-    digest = hashlib.sha256(canonical.encode()).hexdigest()[:32]
+    digest = sha256_hex(canonical.encode())[:32]
     return f"{_PLAN_APPROVAL_ID_PREFIX}{digest}"
 
 

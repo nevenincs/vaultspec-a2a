@@ -10,8 +10,6 @@ this decides what the turn is allowed to do.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NoReturn, cast
@@ -20,7 +18,7 @@ from langgraph.config import get_config
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Interrupt, interrupt
 
-from ...thread import InterruptType, PermissionAnswer
+from ...thread import InterruptType, PermissionAnswer, canonical_json, sha256_hex
 from ...thread.state import read_untrusted_state_value
 from ..acp_options import is_remembering, valid_option_ids
 
@@ -46,13 +44,8 @@ def _permission_request_id(tool_name: str, tool_input: dict[str, Any]) -> str:
     another tool, or the same tool with other arguments - names a different one.
     """
     namespace = get_config().get("configurable", {}).get("checkpoint_ns", "")
-    canonical = json.dumps(
-        [namespace, tool_name, tool_input],
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return f"perm-{hashlib.sha256(canonical.encode()).hexdigest()[:32]}"
+    canonical = canonical_json([namespace, tool_name, tool_input], default=str)
+    return f"perm-{sha256_hex(canonical.encode())[:32]}"
 
 
 def _offered_options(options: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -10,8 +10,9 @@ replay produces the byte-identical key the engine dedupes on.
 
 from __future__ import annotations
 
-import hashlib
 import re
+
+from ..thread import sha256_hex
 
 __all__ = [
     "MAX_ID_BYTES",
@@ -68,5 +69,5 @@ def derive_idempotency_key(*material: str) -> str:
     """
     if not material or any(not part for part in material):
         raise ValueError("idempotency material must be one or more non-empty parts")
-    digest = hashlib.sha256("\x1f".join(material).encode("utf-8")).hexdigest()
+    digest = sha256_hex("\x1f".join(material).encode("utf-8"))
     return f"idk:{digest}"

@@ -8,7 +8,6 @@ budget across stdout and stderr, and always reaps the contained process tree.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, TypedDict, Unpack
@@ -21,6 +20,7 @@ if TYPE_CHECKING:
     from ._cleanup import CleanupStep
     from ._json_contract import JsonObject, JsonValue
 
+from ..thread import canonical_json, sha256_hex
 from ..utils import package_version
 from ._catalog_discovery import (
     ProviderCatalogDiscovery,
@@ -215,8 +215,7 @@ def _revision(
             for control in controls
         ],
     }
-    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return sha256_hex(canonical_json(payload).encode())
 
 
 @dataclass(slots=True)

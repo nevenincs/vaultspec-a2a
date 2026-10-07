@@ -93,17 +93,20 @@ def _record() -> ProviderRecord:
     )
 
 
-def _selection(**changes: object) -> SelectionReference:
-    values: dict[str, object] = {
-        "schema_version": 1,
-        "provider_id": "codex",
-        "execution_mode": "codex-app-server",
-        "catalog_revision": "rev-1",
-        "entry_id": "entry-1",
-        "controls": (),
-    }
-    values.update(changes)
-    return SelectionReference(**values)  # type: ignore[arg-type]
+def _selection(
+    *,
+    catalog_revision: str = "rev-1",
+    entry_id: str = "entry-1",
+    controls: tuple[ControlSelection, ...] = (),
+) -> SelectionReference:
+    return SelectionReference(
+        schema_version=1,
+        provider_id="codex",
+        execution_mode="codex-app-server",
+        catalog_revision=catalog_revision,
+        entry_id=entry_id,
+        controls=controls,
+    )
 
 
 def test_freeze_normalizes_authoritative_defaults_and_exact_model_value() -> None:

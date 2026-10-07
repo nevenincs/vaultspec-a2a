@@ -25,11 +25,15 @@ class FrozenGraphDefinition(BaseModel):
     agents: dict[str, dict[str, object]]
     supervisor: dict[str, object] | None
 
-    # The parsed configs, kept from the one validation that admits the
-    # definition, so no read of a field below parses the persisted dicts again.
+    # The parsed configs and the digest, kept from the one validation that
+    # admits the definition, so no read below parses or re-encodes the persisted
+    # dicts again. Computed there rather than on first use because pydantic
+    # compares private attributes in ``==``: a lazily filled cache would make two
+    # equal definitions unequal until both had been digested.
     _team_config: TeamConfig = PrivateAttr()
     _agent_configs: dict[str, AgentConfig] = PrivateAttr()
     _supervisor_config: AgentConfig | None = PrivateAttr()
+    _digest: str = PrivateAttr()
 
     @model_validator(mode="after")
     def validate_complete_definition(self) -> Self:
@@ -37,6 +41,7 @@ class FrozenGraphDefinition(BaseModel):
         self._team_config = team
         self._agent_configs = self._validated_agents(team)
         self._supervisor_config = self._validated_supervisor(team)
+        self._digest = sha256_hex(canonical_json(self.model_dump(mode="json")).encode())
         return self
 
     def _validated_team(self) -> TeamConfig:
@@ -85,7 +90,7 @@ class FrozenGraphDefinition(BaseModel):
         return supervisor
 
     def digest(self) -> str:
-        return sha256_hex(canonical_json(self.model_dump(mode="json")).encode())
+        return self._digest
 
     @property
     def team_id(self) -> str:

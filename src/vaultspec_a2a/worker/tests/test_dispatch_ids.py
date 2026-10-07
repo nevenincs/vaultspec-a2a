@@ -21,6 +21,7 @@ from ...testing import (
     DEFAULT_TEAM_PRESET,
     ProgressDeadline,
     current_execution_metadata,
+    loopback_callback_bridge,
     wait_for,
     wait_until,
 )
@@ -173,9 +174,13 @@ def test_concurrent_identical_capacity_dispatches_replay_one_acceptance(
 
     @asynccontextmanager
     async def worker_lifespan(app: FastAPI):
-        async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
+        # A real callback sink: the run's settle flushes and returns, so the
+        # settled ingest is measured, not the bridge retrying a refused port.
+        async with (
+            AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver,
+            loopback_callback_bridge() as bridge,
+        ):
             await saver.setup()
-            bridge = WorkerBridge("http://127.0.0.1:1", f"concurrent-{action}")
             executor = Executor(saver, bridge)
             app.state.executor = executor
             app.state.bridge = bridge
@@ -184,7 +189,6 @@ def test_concurrent_identical_capacity_dispatches_replay_one_acceptance(
                 yield
                 tasks.cancel_scope.cancel()
             await executor.shutdown()
-            await bridge.close()
 
     app = create_worker_app(lifespan=worker_lifespan)
     authority = resolve_execution_authority(

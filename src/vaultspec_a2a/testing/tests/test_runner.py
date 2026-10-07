@@ -15,6 +15,7 @@ from ..children import (
     measured_child_startup_s,
     run_child,
 )
+from ..cli import combined_output
 from ..completion import send_completion_receipt
 from ..harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
 from ..reap import reap_contained
@@ -181,7 +182,7 @@ def test_runner_child_declares_test_environment_before_settings_import(
         cwd=Path.cwd(),
         env=child_environment,
     )
-    assert child.returncode == 0, child.stdout + child.stderr
+    assert child.returncode == 0, combined_output(child)
     assert "1 passed" in child.stdout
 
     # `just init` provisions the checkout `.env` from `.env.example`, which
@@ -204,7 +205,7 @@ def test_runner_child_declares_test_environment_before_settings_import(
         cwd=Path.cwd(),
         env=child_environment,
     )
-    assert production.returncode == 0, production.stdout + production.stderr
+    assert production.returncode == 0, combined_output(production)
     assert production.stdout.strip() == "production-fail-closed"
 
 
@@ -252,7 +253,7 @@ def test_pytest_is_the_first_to_import_the_harness_plugin(tmp_path: Path) -> Non
     completed = _run_runner(probe, tmp_path, confine=False)
 
     assert completed.returncode == 0, completed.stderr
-    assert "PytestAssertRewriteWarning" not in completed.stdout + completed.stderr
+    assert "PytestAssertRewriteWarning" not in combined_output(completed)
 
 
 def test_nested_pytest_process_cannot_complete_its_parent_receipt() -> None:
@@ -384,7 +385,7 @@ def test_runner_rejects_a_rebound_nested_xdist_receipt(tmp_path: Path) -> None:
 
     completed = _run_runner(outer, tmp_path)
 
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.returncode == 0, combined_output(completed)
     assert (
         "pytest completion hello accepted: designated_runner_child_pid="
         in completed.stderr

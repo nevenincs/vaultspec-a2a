@@ -26,32 +26,37 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from ..desktop.credentials import ATTACH_CREDENTIAL_NAME, credential_paths
+from ..desktop.credentials import ATTACH_CREDENTIAL_NAME
 from ..testing import (
+    DEFAULT_ATTACH_AUTHORIZATION,
     DEFAULT_ATTACH_CREDENTIAL,
     DEFAULT_OWNERSHIP_CAPABILITY,
     LOOPBACK_TIMEOUT,
+    GatewayVerbs,
     armed_gateway_env,
     booted_gateway,
     gateway_script,
+    read_worker_ipc_secret,
     seat_app_home,
 )
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from ..control.state_layout import StateLayout
+
 _LIFECYCLE_HEADER = "X-Vaultspec-Lifecycle-Capability"
 
 
 def _assert_credential_planes(
     client: httpx.Client,
-    app_home: Path,
+    state: StateLayout,
     worker_ipc: str,
 ) -> None:
     """Assert the attach, worker IPC, and lifecycle credentials stay isolated."""
     secrets = (DEFAULT_ATTACH_CREDENTIAL, DEFAULT_OWNERSHIP_CAPABILITY, worker_ipc)
     # --- Discovery record carries no secret, only the ACL-protected ref ---
-    discovery_text = (app_home / "service.json").read_text(encoding="utf-8")
+    discovery_text = state.discovery_path.read_text(encoding="utf-8")
     for secret in secrets:
         assert secret not in discovery_text
     assert ATTACH_CREDENTIAL_NAME in discovery_text  # the reference path
@@ -77,9 +82,7 @@ def _assert_credential_planes(
         ).status_code
         == 401
     )
-    attach_ok = client.get(
-        "/v1/service", headers={"Authorization": f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"}
-    )
+    attach_ok = GatewayVerbs(str(client.base_url)).service()
     assert attach_ok.status_code == 200, attach_ok.text
     for secret in secrets:
         assert secret not in attach_ok.text
@@ -88,7 +91,7 @@ def _assert_credential_planes(
     assert (
         client.get(
             "/internal/health",
-            headers={"Authorization": f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"},
+            headers={"Authorization": DEFAULT_ATTACH_AUTHORIZATION},
         ).status_code
         == 401
     )
@@ -101,13 +104,13 @@ def _assert_credential_planes(
     # --- Lifecycle plane: admin shutdown needs the ownership capability ---
     attach_only = client.post(
         "/admin/shutdown",
-        headers={"Authorization": f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"},
+        headers={"Authorization": DEFAULT_ATTACH_AUTHORIZATION},
     )
     assert attach_only.status_code == 403
     wrong_cap = client.post(
         "/admin/shutdown",
         headers={
-            "Authorization": f"Bearer {DEFAULT_ATTACH_CREDENTIAL}",
+            "Authorization": DEFAULT_ATTACH_AUTHORIZATION,
             _LIFECYCLE_HEADER: "not-the-capability",
         },
     )
@@ -117,7 +120,7 @@ def _assert_credential_planes(
 def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
     """The three planes are non-interchangeable and no secret ever leaks."""
     app_home = tmp_path / "app-home"
-    credentials_dir = seat_app_home(app_home).credentials_dir
+    state = seat_app_home(app_home)
     log_path = tmp_path / "gateway.log"
     # A real armed desktop gateway booting the *production* lifespan: create_app
     # runs the armed credential loading, and the lifespan validates the seated
@@ -133,9 +136,7 @@ def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
     ) as gateway:
         base = gateway.base_url
         # The gateway minted the worker IPC secret; read it to scan for its leak.
-        worker_ipc = credential_paths(credentials_dir).worker_ipc_path.read_text(
-            encoding="utf-8"
-        )
+        worker_ipc = read_worker_ipc_secret(app_home)
         assert worker_ipc and worker_ipc not in (
             DEFAULT_ATTACH_CREDENTIAL,
             DEFAULT_OWNERSHIP_CAPABILITY,
@@ -147,7 +148,7 @@ def test_credential_planes_are_isolated_and_secret_free(tmp_path: Path) -> None:
         # the gateway answer these authenticated reads more slowly, and the
         # isolation proof failed on a read timeout that proved nothing.
         with httpx.Client(base_url=base, timeout=LOOPBACK_TIMEOUT) as client:
-            _assert_credential_planes(client, app_home, worker_ipc)
+            _assert_credential_planes(client, state, worker_ipc)
 
         # --- The process logs never printed a secret ---
         log_bytes = log_path.read_bytes()

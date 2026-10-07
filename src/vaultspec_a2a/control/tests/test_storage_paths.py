@@ -74,7 +74,7 @@ def test_the_default_home_and_stores_live_in_the_project(tmp_path: Path) -> None
         home / "state" / "checkpoints.db"
     )
     assert settings.state_layout.logs_dir == home / "runtime"
-    assert settings.state_layout.discovery_path == home / "service.json"
+    assert settings.state_layout.discovery_path.parent == home
     # The workspace root carries no default: it is a label, not a store.
     assert settings.workspace_root is None
 

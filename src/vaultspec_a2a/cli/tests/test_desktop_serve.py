@@ -21,7 +21,7 @@ from ...providers._factory_commands import (
     capsule_claude_executable,
     capsule_node_executable,
 )
-from ...testing import armed_environment, run_cli
+from ...testing import armed_environment, combined_output, run_cli
 from ..main import _DesktopServePlan, _prepare_desktop_serve
 
 
@@ -98,7 +98,7 @@ def test_cli_desktop_serve_rejects_relative_app_home(tmp_path: Path) -> None:
         str(capsule),
     )
     assert result.returncode != 0
-    assert "absolute" in (result.stdout + result.stderr)
+    assert "absolute" in (combined_output(result))
 
 
 def test_cli_desktop_serve_rejects_incomplete_capsule(tmp_path: Path) -> None:
@@ -113,4 +113,4 @@ def test_cli_desktop_serve_rejects_incomplete_capsule(tmp_path: Path) -> None:
         str(empty_capsule),
     )
     assert result.returncode != 0
-    assert "Node.js runtime executable" in (result.stdout + result.stderr)
+    assert "Node.js runtime executable" in (combined_output(result))

@@ -1,8 +1,8 @@
 """The gateway verbs a test drives, shaped once for every tier.
 
 The run-start stages are :class:`~vaultspec_a2a.testing.verbs.RunVerbs`. Around
-them sit the pieces each tier used to retype for itself: the actor-token bundle
-a start or commit binds, the complete run-start body an in-process gateway test
+them sit the pieces each tier used to retype for itself: the actor tokens a
+start or commit binds, the complete run-start body an in-process gateway test
 posts, the run-start verbs bound to a gateway :func:`booted_gateway` brought up,
 and the authenticated reads, cancel and deletion of a run, with the wait on its
 served status built on those reads.
@@ -16,20 +16,21 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from ..graph.enums import Provider
-from .boot import DEFAULT_ATTACH_CREDENTIAL, desktop_workspace
+from ..utils import bearer_header
+from .boot import DEFAULT_ATTACH_CREDENTIAL, LOOPBACK_TIMEOUT, desktop_workspace
 from .catalog import async_catalog_run_fields, fetch_in_process_selection_at
 from .polling import is_terminal, ok_body, wait_for_run_status
-from .verbs import RunVerbs
+from .verbs import RunVerbs, actor_tokens_body
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
 __all__ = [
+    "DEFAULT_ATTACH_AUTHORIZATION",
     "DEFAULT_PRESET_LANE",
     "DEFAULT_REQUIRED_ROLE",
     "DEFAULT_TEAM_PRESET",
     "GatewayVerbs",
-    "actor_tokens_body",
     "async_run_start_body",
     "gateway_run_verbs",
     "role_tokens",
@@ -46,19 +47,14 @@ DEFAULT_REQUIRED_ROLE = "deterministic-coder-success"
 # selection, so the preference is that preset's lane, which never bills.
 DEFAULT_PRESET_LANE = Provider.DETERMINISTIC.value
 
-_DEFAULT_AUTHORIZATION = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
+# The whole ``Authorization`` header value a seated home's attach credential
+# presents.
+DEFAULT_ATTACH_AUTHORIZATION = bearer_header(DEFAULT_ATTACH_CREDENTIAL)["Authorization"]
 
 
 def role_tokens(roles: Iterable[str]) -> dict[str, str]:
     """A distinct placeholder actor token, ``tok-<role>``, for each of *roles*."""
     return {role: f"tok-{role}" for role in roles}
-
-
-def actor_tokens_body(
-    tokens: Mapping[str, str], *, engine_bearer: str = "bearer"
-) -> dict[str, object]:
-    """The wire ``actor_tokens`` bundle: per-role *tokens* plus the engine bearer."""
-    return {"tokens": dict(tokens), "engine_bearer": engine_bearer}
 
 
 async def async_run_start_body(
@@ -88,7 +84,7 @@ async def async_run_start_body(
 def gateway_run_verbs(
     base_url: str,
     *,
-    authorization: str = _DEFAULT_AUTHORIZATION,
+    authorization: str = DEFAULT_ATTACH_AUTHORIZATION,
     team_preset: str = DEFAULT_TEAM_PRESET,
     tokens: Mapping[str, str] | None = None,
     selection: Callable[[str], Mapping[str, object]] | None = None,
@@ -125,11 +121,12 @@ class GatewayVerbs:
     """An authenticated handle to one gateway's versioned run reads and controls.
 
     *authorization* is the whole ``Authorization`` header every request
-    presents; none uses a test-only authentication bypass.
+    presents, the seated home's attach credential unless named; none uses a
+    test-only authentication bypass.
     """
 
     base_url: str
-    authorization: str
+    authorization: str = DEFAULT_ATTACH_AUTHORIZATION
 
     def client(self, *, timeout: float = 30.0) -> httpx.Client:
         """A synchronous authenticated client bound to the gateway base URL."""
@@ -150,6 +147,15 @@ class GatewayVerbs:
     def stream_path(self, run_id: str) -> str:
         """The versioned public progress-stream path for *run_id*."""
         return f"/v1/runs/{run_id}/stream"
+
+    def service(self, *, timeout: float = LOOPBACK_TIMEOUT) -> httpx.Response:
+        """Read the service-state body the readiness surface serves.
+
+        The default budget is for a REPLY: the read may wait on a worker probe
+        that has not settled, and none of its callers asserts on latency.
+        """
+        with self.client(timeout=timeout) as client:
+            return client.get("/v1/service")
 
     def status(self, run_id: str) -> httpx.Response:
         """Read the authoritative run-status snapshot for *run_id*.

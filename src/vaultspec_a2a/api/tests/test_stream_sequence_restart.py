@@ -31,14 +31,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...database import create_control_action
 from ...database.thread_repository import create_thread
-from ...desktop.credentials import WORKER_IPC_CREDENTIAL_NAME
-from ...desktop.profile import derive_state_paths
 from ...testing import (
     LOOPBACK_TIMEOUT,
     armed_gateway_env,
     booted_gateway,
     gateway_script,
     log_tail,
+    read_worker_ipc_secret,
     seat_app_home,
 )
 from ...tests._write_authority import make_test_write_authority
@@ -126,11 +125,6 @@ def _retained(database_path: Path) -> list[tuple[int, int]]:
     return [(int(row[0]), int(json.loads(row[1])["sequence"])) for row in rows]
 
 
-def _worker_secret(app_home: Path) -> str:
-    path = derive_state_paths(app_home).credentials_dir / WORKER_IPC_CREDENTIAL_NAME
-    return path.read_text(encoding="utf-8").strip()
-
-
 def _post_worker_batch(base_url: str, secret: str, sequences: list[int]) -> None:
     with httpx.Client(base_url=base_url, timeout=LOOPBACK_TIMEOUT) as client:
         response = client.post(
@@ -155,7 +149,7 @@ def test_a_restarted_gateway_continues_the_run_sequence(tmp_path: Path) -> None:
     script = gateway_script(log_level="warning")
 
     with booted_gateway(env, log_path=log_path, script=script, detached=True) as first:
-        _post_worker_batch(first.base_url, _worker_secret(app_home), [1, 2, 3])
+        _post_worker_batch(first.base_url, read_worker_ipc_secret(app_home), [1, 2, 3])
         after_first = _retained(database_path)
 
     assert [sequence for sequence, _ in after_first] == [1, 2, 3], (
@@ -168,7 +162,9 @@ def test_a_restarted_gateway_continues_the_run_sequence(tmp_path: Path) -> None:
             env, log_path=log_path, script=script, detached=True
         ) as second:
             # A respawned worker numbers from one again; the gateway must not.
-            _post_worker_batch(second.base_url, _worker_secret(app_home), [1, 2])
+            _post_worker_batch(
+                second.base_url, read_worker_ipc_secret(app_home), [1, 2]
+            )
             after_second = _retained(database_path)
     finally:
         with suppress(OSError):
@@ -203,5 +199,7 @@ def test_a_gateway_serving_no_replay_retains_nothing(tmp_path: Path) -> None:
         script=gateway_script(log_level="warning"),
         detached=True,
     ) as gateway:
-        _post_worker_batch(gateway.base_url, _worker_secret(app_home), [1, 2, 3])
+        _post_worker_batch(
+            gateway.base_url, read_worker_ipc_secret(app_home), [1, 2, 3]
+        )
         assert _retained(database_path) == []

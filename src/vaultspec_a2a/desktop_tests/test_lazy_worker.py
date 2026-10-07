@@ -29,15 +29,16 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
-import httpx
-
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
+    GatewayVerbs,
+    ProgressDeadline,
     booted_gateway,
     broker_gateway_env,
     gateway_run_verbs,
     gateway_script,
     seat_app_home,
+    wait_for,
 )
 from ..utils._process_tree import port_has_listener
 
@@ -47,11 +48,9 @@ if TYPE_CHECKING:
 _SPAWN_LINE = "Auto-spawning worker on port"
 
 
-def _worker_state(base: str, headers: dict[str, str]) -> str:
+def _worker_state(base: str) -> str:
     """Read the authenticated worker lifecycle state from desktop readiness."""
-    with httpx.Client(base_url=base, timeout=5.0) as client:
-        body = client.get("/v1/service", headers=headers).json()
-    return body["readiness"]["worker_state"]
+    return GatewayVerbs(base).service().json()["readiness"]["worker_state"]
 
 
 _RUN_SEQ = itertools.count(1)
@@ -64,7 +63,6 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
     app_home = tmp_path / "app-home"
     seat_app_home(app_home)
     log_path = tmp_path / "gateway.log"
-    auth = {"Authorization": f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"}
 
     # A real broker gateway booting the production lifespan with auto-spawn
     # enabled and separate gateway/worker credentials: the gateway owns and
@@ -85,19 +83,15 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
         assert not port_has_listener(gateway.worker_port, timeout=0.5), (
             "idle boot must not bind the worker"
         )
-        assert _worker_state(base, auth) == "cold"
+        assert _worker_state(base) == "cold"
         assert _SPAWN_LINE not in log_path.read_text(encoding="utf-8", errors="replace")
 
         # --- Concurrent first demand: exactly one real worker. ---
         # Resolve the catalog once before the race. Parallel catalog refreshes
         # would add an unrelated cold-start load to this worker-spawn proof.
-        verbs = gateway_run_verbs(
-            base,
-            authorization=auth["Authorization"],
-            tokens={"coder": "tok-coder"},
-        )
+        verbs = gateway_run_verbs(base, tokens={"coder": "tok-coder"})
         verbs.selection(verbs.workspace_root)
-        assert _worker_state(base, auth) == "cold"
+        assert _worker_state(base) == "cold"
         assert _SPAWN_LINE not in log_path.read_text(encoding="utf-8", errors="replace")
 
         # Four real, parallel, authenticated run-starts race into the single-flight
@@ -137,9 +131,11 @@ def test_idle_boot_starts_no_worker_and_concurrent_demand_starts_exactly_one(
         # Gateway-owned: readiness left the cold rung, which the gateway can only
         # observe by reaching the worker through its own private worker-IPC
         # credential - proving the worker it spawned answers to it.
-        deadline = time.monotonic() + 30.0
-        state = _worker_state(base, auth)
-        while state == "cold" and time.monotonic() < deadline:
-            time.sleep(0.25)
-            state = _worker_state(base, auth)
+        def _left_cold() -> str | None:
+            state = _worker_state(base)
+            return None if state == "cold" else state
+
+        state = wait_for(
+            _left_cold, deadline=ProgressDeadline(idle_window_s=30.0), interval_s=0.25
+        )
         assert state in {"starting", "ready"}, state

@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from ..cli import combined_output
+
 
 def _run_collect(directory: Path) -> subprocess.CompletedProcess[str]:
     """Collect *directory* in a real pytest subprocess with the plugin loaded.
@@ -74,7 +76,7 @@ def test_a_lone_exclusive_resource_collects(tmp_path: Path) -> None:
 
     result = _run_collect(tmp_path)
 
-    assert "INTERNALERROR" not in result.stdout + result.stderr, (
+    assert "INTERNALERROR" not in combined_output(result), (
         f"collection crashed:\n{result.stdout}\n{result.stderr}"
     )
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
@@ -105,7 +107,7 @@ def test_merged_exclusive_resources_collect(tmp_path: Path) -> None:
 
     result = _run_collect(tmp_path)
 
-    assert "INTERNALERROR" not in result.stdout + result.stderr, (
+    assert "INTERNALERROR" not in combined_output(result), (
         f"collection crashed:\n{result.stdout}\n{result.stderr}"
     )
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
@@ -131,7 +133,7 @@ def test_collection_survives_with_and_without_claims(
 
     result = _run_collect(tmp_path)
 
-    assert "INTERNALERROR" not in result.stdout + result.stderr, (
+    assert "INTERNALERROR" not in combined_output(result), (
         f"collection crashed:\n{result.stdout}\n{result.stderr}"
     )
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
@@ -184,4 +186,4 @@ def test_plugin_survives_a_wholesale_addopts_override() -> None:
         )
     finally:
         shutil.rmtree(guard_dir, ignore_errors=True)
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.returncode == 0, combined_output(completed)

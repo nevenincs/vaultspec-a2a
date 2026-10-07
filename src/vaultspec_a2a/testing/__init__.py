@@ -90,13 +90,13 @@ if TYPE_CHECKING:
         await_ready,
         booted_gateway,
         broker_gateway_env,
-        clean_subprocess_environment,
         desktop_workspace,
         foreign_worker,
         gateway_process_env,
         gateway_script,
         log_tail,
         loopback_callback_bridge,
+        read_worker_ipc_secret,
         reap_process,
         seat_app_home,
         spawn_gateway,
@@ -138,7 +138,12 @@ if TYPE_CHECKING:
         measured_child_startup_s,
         run_child,
     )
-    from .cli import run_cli
+    from .cli import (
+        clean_subprocess_environment,
+        combined_output,
+        inherited_environment,
+        run_cli,
+    )
     from .endpoints import ResolvedService, resolve_gateway_url, resolve_service
     from .environment import (
         armed_desktop_app_home,
@@ -147,11 +152,11 @@ if TYPE_CHECKING:
     )
     from .factories import LaneInventoryFactory, build_settings
     from .gateway_verbs import (
+        DEFAULT_ATTACH_AUTHORIZATION,
         DEFAULT_PRESET_LANE,
         DEFAULT_REQUIRED_ROLE,
         DEFAULT_TEAM_PRESET,
         GatewayVerbs,
-        actor_tokens_body,
         async_run_start_body,
         gateway_run_verbs,
         role_tokens,
@@ -264,6 +269,7 @@ if TYPE_CHECKING:
     from .sse import SseFrame, SseReader, decode_frame, read_frame, read_frames_until
     from .verbs import (
         RunVerbs,
+        actor_tokens_body,
         status_and_json,
     )
 
@@ -360,10 +366,6 @@ _LAZY_EXPORTS = {
     "await_ready": ("vaultspec_a2a.testing.boot", "await_ready"),
     "booted_gateway": ("vaultspec_a2a.testing.boot", "booted_gateway"),
     "broker_gateway_env": ("vaultspec_a2a.testing.boot", "broker_gateway_env"),
-    "clean_subprocess_environment": (
-        "vaultspec_a2a.testing.boot",
-        "clean_subprocess_environment",
-    ),
     "desktop_workspace": ("vaultspec_a2a.testing.boot", "desktop_workspace"),
     "foreign_worker": ("vaultspec_a2a.testing.boot", "foreign_worker"),
     "gateway_process_env": ("vaultspec_a2a.testing.boot", "gateway_process_env"),
@@ -372,6 +374,10 @@ _LAZY_EXPORTS = {
     "loopback_callback_bridge": (
         "vaultspec_a2a.testing.boot",
         "loopback_callback_bridge",
+    ),
+    "read_worker_ipc_secret": (
+        "vaultspec_a2a.testing.boot",
+        "read_worker_ipc_secret",
     ),
     "reap_process": ("vaultspec_a2a.testing.boot", "reap_process"),
     "seat_app_home": ("vaultspec_a2a.testing.boot", "seat_app_home"),
@@ -475,6 +481,12 @@ _LAZY_EXPORTS = {
         "measured_child_startup_s",
     ),
     "run_child": ("vaultspec_a2a.testing.children", "run_child"),
+    "clean_subprocess_environment": (
+        "vaultspec_a2a.testing.cli",
+        "clean_subprocess_environment",
+    ),
+    "combined_output": ("vaultspec_a2a.testing.cli", "combined_output"),
+    "inherited_environment": ("vaultspec_a2a.testing.cli", "inherited_environment"),
     "run_cli": ("vaultspec_a2a.testing.cli", "run_cli"),
     "ResolvedService": ("vaultspec_a2a.testing.endpoints", "ResolvedService"),
     "resolve_gateway_url": (
@@ -501,6 +513,10 @@ _LAZY_EXPORTS = {
     "settings_override": ("vaultspec_a2a.testing.environment", "settings_override"),
     "LaneInventoryFactory": ("vaultspec_a2a.testing.factories", "LaneInventoryFactory"),
     "build_settings": ("vaultspec_a2a.testing.factories", "build_settings"),
+    "DEFAULT_ATTACH_AUTHORIZATION": (
+        "vaultspec_a2a.testing.gateway_verbs",
+        "DEFAULT_ATTACH_AUTHORIZATION",
+    ),
     "DEFAULT_PRESET_LANE": (
         "vaultspec_a2a.testing.gateway_verbs",
         "DEFAULT_PRESET_LANE",
@@ -514,7 +530,6 @@ _LAZY_EXPORTS = {
         "DEFAULT_TEAM_PRESET",
     ),
     "GatewayVerbs": ("vaultspec_a2a.testing.gateway_verbs", "GatewayVerbs"),
-    "actor_tokens_body": ("vaultspec_a2a.testing.gateway_verbs", "actor_tokens_body"),
     "async_run_start_body": (
         "vaultspec_a2a.testing.gateway_verbs",
         "async_run_start_body",
@@ -645,6 +660,7 @@ _LAZY_EXPORTS = {
     ),
     "uvicorn_started": ("vaultspec_a2a.testing.http", "uvicorn_started"),
     "RunVerbs": ("vaultspec_a2a.testing.verbs", "RunVerbs"),
+    "actor_tokens_body": ("vaultspec_a2a.testing.verbs", "actor_tokens_body"),
     "status_and_json": ("vaultspec_a2a.testing.verbs", "status_and_json"),
 }
 
@@ -672,6 +688,7 @@ __all__ = [
     "COMPLETION_ENDPOINT_ENV",
     "COMPLETION_OWNER_PID_ENV",
     "CPU_BUDGET_ENV",
+    "DEFAULT_ATTACH_AUTHORIZATION",
     "DEFAULT_ATTACH_CREDENTIAL",
     "DEFAULT_IDLE_WINDOW_S",
     "DEFAULT_OWNERSHIP_CAPABILITY",
@@ -762,6 +779,7 @@ __all__ = [
     "catalog_run_fields",
     "child_tree_progress",
     "clean_subprocess_environment",
+    "combined_output",
     "compile_test_graph",
     "current_execution_metadata",
     "declared_claims",
@@ -789,6 +807,7 @@ __all__ = [
     "in_process_lane_required",
     "in_process_lane_selection",
     "in_process_selection",
+    "inherited_environment",
     "initialize_request",
     "initialize_result",
     "is_live_lane",
@@ -820,6 +839,7 @@ __all__ = [
     "read_acp_frame",
     "read_frame",
     "read_frames_until",
+    "read_worker_ipc_secret",
     "reap_contained",
     "reap_process",
     "register_lanes",

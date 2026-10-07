@@ -36,15 +36,11 @@ expected failure is used; every child is reaped in a ``finally``.
 
 from __future__ import annotations
 
-import sys
-import time
-from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import httpx
 
 from ..control._worker_health import GATEWAY_LIFETIME_ID
-from ..control.config import setting_env
 from ..desktop._platform_acl import credential_file_is_owner_restricted
 from ..desktop.credentials import credential_paths
 from ..desktop.profile import derive_state_paths
@@ -63,118 +59,18 @@ from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     DEFAULT_OWNERSHIP_CAPABILITY,
     armed_gateway_env,
-    booted_gateway,
-    broker_gateway_env,
     free_port,
-    gateway_run_verbs,
+    read_worker_ipc_secret,
     reap_process,
     run_cli,
-    seat_app_home,
-    spawn_logged,
-    status_and_json,
 )
+from ._ownership import prepare_run, serve_gateway, spawn_stray_worker, worker_health
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
     from pathlib import Path
-
-    from ..testing import WatchedProcess
 
 # Raised by the runtime singleton when a second gateway contends one home.
 _CONFLICT_REFUSAL = "refusing to start a second gateway on one application home"
-
-
-@contextmanager
-def _serve(
-    tmp_path: Path, *, auto_spawn: bool, desktop: bool = True
-) -> Generator[tuple[Path, int, int, str]]:
-    """Boot a real gateway through ``serve`` with an explicit execution profile.
-
-    Yields ``(app_home, gateway_port, worker_port, base)``. The gateway process
-    handle is deliberately not yielded: on Windows the virtual-environment
-    interpreter is a launcher stub, so the spawned handle's pid is the launcher
-    and not the gateway, and every ownership assertion here reads the published
-    records instead.
-    """
-    app_home = tmp_path / "app-home"
-    seat_app_home(app_home)
-    env = (
-        armed_gateway_env(app_home, auto_spawn_worker=auto_spawn)
-        if desktop
-        else broker_gateway_env(
-            app_home,
-            gateway_token=DEFAULT_ATTACH_CREDENTIAL,
-            auto_spawn_worker=auto_spawn,
-        )
-    )
-    with booted_gateway(env, log_path=tmp_path / "gateway.log", script=None) as gateway:
-        yield app_home, gateway.gateway_port, gateway.worker_port, gateway.base_url
-
-
-def _worker_ipc_secret(app_home: Path) -> str:
-    """Return the current worker IPC secret from its real owner-restricted file."""
-    credentials_dir = derive_state_paths(app_home).credentials_dir
-    return (
-        credential_paths(credentials_dir)
-        .worker_ipc_path.read_text(encoding="utf-8")
-        .strip()
-    )
-
-
-def _prepare(base: str, run_id: str) -> tuple[int, dict[str, Any]]:
-    """Drive one authenticated prepare, which spawns the gateway-owned worker."""
-    return status_and_json(gateway_run_verbs(base).prepare(run_id))
-
-
-def _spawn_stray_worker(
-    app_home: Path,
-    *,
-    gateway_port: int,
-    worker_port: int,
-    secret: str,
-    log_path: Path,
-) -> WatchedProcess:
-    """Start a real production worker that no gateway spawned.
-
-    It holds the gateway-minted IPC *secret* over the same application home and
-    derives the same gateway URL, so it matches the gateway's own worker on every
-    credential and addressing fact. The two pairing variables are cleared so an
-    inherited value from the test host cannot forge the evidence at issue.
-    """
-    env = armed_gateway_env(app_home, auto_spawn_worker=False)(
-        gateway_port, worker_port
-    )
-    env["VAULTSPEC_A2A_INTERNAL_TOKEN"] = secret
-    env.pop(setting_env("gateway_lifetime_id"), None)
-    env.pop(setting_env("worker_generation"), None)
-    return spawn_logged(
-        [sys.executable, "-m", "vaultspec_a2a.worker"],
-        name="stray worker",
-        env=env,
-        log_path=log_path,
-    )
-
-
-def _worker_health(port: int, secret: str, *, timeout: float = 60.0) -> dict[str, Any]:
-    """Await one real worker's authenticated health body on *port*."""
-    deadline = time.monotonic() + timeout
-    last: object = None
-    while time.monotonic() < deadline:
-        try:
-            with httpx.Client(timeout=5.0) as client:
-                resp = client.get(
-                    f"http://127.0.0.1:{port}/health",
-                    headers={"Authorization": f"Bearer {secret}"},
-                )
-            if resp.status_code == 200:
-                body = resp.json()
-                assert isinstance(body, dict), body
-                return cast("dict[str, Any]", body)
-            last = resp.status_code
-        except httpx.HTTPError as exc:
-            last = repr(exc)
-        time.sleep(0.25)
-    raise AssertionError(f"worker on port {port} never served health (last: {last})")
 
 
 def test_armed_serve_holds_the_singleton_and_hardens_every_credential(
@@ -198,7 +94,7 @@ def test_armed_serve_holds_the_singleton_and_hardens_every_credential(
       desktop certification still passes (the gateway boots, the planes stay
       isolated, the secret is still distinct) while this assertion fails.
     """
-    with _serve(tmp_path, auto_spawn=False) as (app_home, _port, _wport, base):
+    with serve_gateway(tmp_path, auto_spawn=False) as (app_home, _port, _wport, base):
         owner = default_owner()
         state, record = classify_app_home(app_home, owner=owner)
         assert state is SingletonState.HELD, (state, record)
@@ -237,7 +133,7 @@ def test_armed_serve_holds_the_singleton_and_hardens_every_credential(
                 f"{plane} credential at {path} is not owner-restricted"
             )
 
-        minted = _worker_ipc_secret(app_home)
+        minted = read_worker_ipc_secret(app_home)
         assert minted, "the gateway minted no worker IPC secret"
         assert minted not in (
             DEFAULT_ATTACH_CREDENTIAL,
@@ -271,23 +167,23 @@ def test_ownership_prerequisites_never_identify_a_worker(tmp_path: Path) -> None
       its pairing evidence to anything non-blank, and the first of those two
       flips to an adoptable verdict.
     """
-    with _serve(tmp_path, auto_spawn=True, desktop=False) as (
+    with serve_gateway(tmp_path, auto_spawn=True, desktop=False) as (
         app_home,
         port,
         worker_port,
         base,
     ):
-        secret = _worker_ipc_secret(app_home)
+        secret = read_worker_ipc_secret(app_home)
         ipc_path = credential_paths(
             derive_state_paths(app_home).credentials_dir
         ).worker_ipc_path
         assert credential_file_is_owner_restricted(ipc_path)
 
         # First demand spawns the worker this gateway owns.
-        status, prepared = _prepare(base, "run-ownership-prerequisites")
+        status, prepared = prepare_run(base, "run-ownership-prerequisites")
         assert status == 201, prepared
 
-        owned = _worker_health(worker_port, secret)
+        owned = worker_health(worker_port, secret)
         with httpx.Client(timeout=10.0) as client:
             owned_unauth = client.get(f"http://127.0.0.1:{worker_port}/health")
         assert owned_unauth.status_code == 401, owned_unauth.text
@@ -296,7 +192,7 @@ def test_ownership_prerequisites_never_identify_a_worker(tmp_path: Path) -> None
         # gateway-minted credential. The two pairing variables are cleared so an
         # inherited value from the test host cannot forge the evidence at issue.
         stray_port = free_port()
-        stray = _spawn_stray_worker(
+        stray = spawn_stray_worker(
             app_home,
             gateway_port=port,
             worker_port=stray_port,
@@ -304,7 +200,7 @@ def test_ownership_prerequisites_never_identify_a_worker(tmp_path: Path) -> None
             log_path=tmp_path / "stray-worker.log",
         )
         try:
-            stranger = _worker_health(stray_port, secret)
+            stranger = worker_health(stray_port, secret)
             with httpx.Client(timeout=10.0) as client:
                 stray_unauth = client.get(f"http://127.0.0.1:{stray_port}/health")
 

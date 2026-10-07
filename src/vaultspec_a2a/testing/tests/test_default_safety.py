@@ -23,6 +23,7 @@ from ..children import (
     measured_child_startup_s,
     reap_contained,
 )
+from ..cli import combined_output
 from ..ports import free_port
 from ..sessions import SESSION_LEASE_KEY, effective_worker_count
 
@@ -280,7 +281,7 @@ def test_second_session_is_admitted_degraded(tmp_path: Path) -> None:
         finally:
             reap_contained(holder, holder_containment)
     assert holder_exit == 0, "the holding session did not end cleanly once released"
-    assert second.returncode == 0, second.stdout + second.stderr
+    assert second.returncode == 0, combined_output(second)
     assert "1 live peer test session(s); workers 4 -> 2" in second.stdout, second.stdout
 
 

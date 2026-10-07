@@ -29,18 +29,16 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from ..testing import (
-    DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_ATTACH_AUTHORIZATION,
     FOREIGN_WORKER_PROGRAM,
+    GatewayVerbs,
     armed_gateway_env,
-    await_gateway_ready,
     booted_gateway,
     foreign_worker,
     free_port,
     gateway_run_verbs,
     reap_contained,
-    reap_process,
     seat_app_home,
-    spawn_gateway,
     status_and_json,
     unvalidated_selection,
     worker_lifecycle_gateway_script,
@@ -51,7 +49,6 @@ from ..utils._process_tree import pid_is_live
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-_AUTH = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
 _GATEWAY = worker_lifecycle_gateway_script()
 # This module admits runs against the in-process deterministic lane (see
 # ``testing/catalog.py``); the gateway must serve one to select.
@@ -75,12 +72,11 @@ def _armed_gateway_on_worker_port(
         log_path=tmp_path / f"{home_name}-gateway.log",
         script=_GATEWAY,
     ) as gateway:
-        yield gateway.base_url, _AUTH, gateway.log_path
+        yield gateway.base_url, DEFAULT_ATTACH_AUTHORIZATION, gateway.log_path
 
 
 def _worker_ready(base: str, auth: str) -> bool:
-    with httpx.Client(base_url=base, timeout=60.0) as client:
-        response = client.get("/v1/service", headers={"Authorization": auth})
+    response = GatewayVerbs(base, auth).service()
     assert response.status_code == 200, response.text
     ready = response.json()["worker_ready"]
     assert isinstance(ready, bool)
@@ -172,27 +168,24 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
     seat_app_home(app_home)
     log_path = tmp_path / "gateway.log"
     request_log = tmp_path / f"squatter-{worker_port}.log"
-    with foreign_worker(worker_port, body, request_log=request_log) as squatter:
-        gateway = spawn_gateway(
-            script=_GATEWAY,
-            gateway_port=gateway_port,
-            env=armed_gateway_env(app_home)(gateway_port, worker_port),
+    with (
+        foreign_worker(worker_port, body, request_log=request_log) as squatter,
+        booted_gateway(
+            armed_gateway_env(app_home),
             log_path=log_path,
+            script=_GATEWAY,
+            ports=(gateway_port, worker_port),
+        ) as gateway,
+    ):
+        status, prepared = _prepare(
+            gateway.base_url, DEFAULT_ATTACH_AUTHORIZATION, "run-provenance-url-echo"
         )
-        try:
-            base = f"http://127.0.0.1:{gateway_port}"
-            await_gateway_ready(base, gateway)
-            status, prepared = _prepare(base, _AUTH, "run-provenance-url-echo")
-            assert status == 503, prepared
-            assert "OS isolation backend" in prepared["detail"]
-            assert "lifecycle worker spawned: False" in log_path.read_text(
-                encoding="utf-8"
-            )
-            assert squatter.poll() is None, "squatter must not be evicted"
-            requests = request_log.read_text(encoding="utf-8").splitlines()
-            assert all(line.startswith("GET /health") for line in requests), requests
-        finally:
-            reap_process(gateway)
+        assert status == 503, prepared
+        assert "OS isolation backend" in prepared["detail"]
+        assert "lifecycle worker spawned: False" in log_path.read_text(encoding="utf-8")
+        assert squatter.poll() is None, "squatter must not be evicted"
+        requests = request_log.read_text(encoding="utf-8").splitlines()
+        assert all(line.startswith("GET /health") for line in requests), requests
 
 
 def test_two_gateways_one_worker_authenticated_pairing(tmp_path: Path) -> None:

@@ -91,10 +91,10 @@ from .catalog import (
     selection_from_served_catalog,
 )
 from .endpoints import resolve_gateway_url
-from .gateway_verbs import actor_tokens_body
 from .payloads import json_object, json_object_list
 from .progress import ProgressDeadline, ProgressStalledError, wait_for_async
 from .sse import SseFrame
+from .verbs import actor_tokens_body
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable, Mapping

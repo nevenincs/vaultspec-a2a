@@ -25,9 +25,11 @@ import httpx
 
 from ..control.health import SERVICE_WORKER_PROBE_TIMEOUT_SECONDS
 from ..testing import (
-    DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_ATTACH_AUTHORIZATION,
     DEFAULT_REQUIRED_ROLE,
     DEFAULT_TEAM_PRESET,
+    LOOPBACK_TIMEOUT,
+    GatewayVerbs,
     RunVerbs,
     armed_gateway_env,
     booted_gateway,
@@ -42,13 +44,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ..testing import BootedGateway
-
-_AUTH = f"Bearer {DEFAULT_ATTACH_CREDENTIAL}"
-# A read budget for a RESPONSE, not a latency assertion: the bounded-probe
-# property is proven from the gateway's own probe measurement, and this only
-# keeps a wedged gateway from hanging the session. The per-item pytest-timeout
-# backstop remains the last-resort guard.
-_SERVICE_READ_BUDGET_SECONDS = 60.0
 
 
 def _gateway_failure_diagnostics(gateway: BootedGateway) -> str:
@@ -97,7 +92,7 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
     assert client.get("/v1/service").status_code == 401
 
     # --- Authenticated readiness carries identity and the cold ladder. ---
-    auth = {"Authorization": _AUTH}
+    auth = {"Authorization": DEFAULT_ATTACH_AUTHORIZATION}
     ready = client.get("/health", headers=auth)
     assert ready.status_code == 200
     body = ready.json()
@@ -129,7 +124,7 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
     # arrangement - a three-second client timeout in front of a server whose own
     # per-dependency deadline is also three seconds - made a busy host fail the
     # request by a read timeout, which proves nothing about the worker probe.
-    svc = client.get("/v1/service", headers=auth, timeout=_SERVICE_READ_BUDGET_SECONDS)
+    svc = GatewayVerbs(str(client.base_url)).service()
     assert svc.status_code == 200
     service = svc.json()
     # The cold worker did not consume the caller's budget: the probe phase ended
@@ -158,7 +153,7 @@ def _assert_readiness_surfaces(client: httpx.Client) -> None:
     selection = unvalidated_selection()
     verbs = RunVerbs(
         base_url=str(client.base_url),
-        authorization=_AUTH,
+        authorization=DEFAULT_ATTACH_AUTHORIZATION,
         team_preset=DEFAULT_TEAM_PRESET,
         workspace_root=workspace,
         selection=lambda _workspace: selection,
@@ -205,9 +200,7 @@ def test_desktop_readiness_liveness_minimal_and_readiness_authenticated(
             log_path=tmp_path / "gateway.log",
             script=gateway_script(log_level="info"),
         ) as gateway,
-        httpx.Client(
-            base_url=gateway.base_url, timeout=_SERVICE_READ_BUDGET_SECONDS
-        ) as client,
+        httpx.Client(base_url=gateway.base_url, timeout=LOOPBACK_TIMEOUT) as client,
     ):
         try:
             _assert_readiness_surfaces(client)

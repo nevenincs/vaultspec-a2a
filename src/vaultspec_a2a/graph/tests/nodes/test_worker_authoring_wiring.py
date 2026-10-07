@@ -26,7 +26,7 @@ from ....providers._acp_authoring import (
     AuthoringToolBinding,
     authoring_allowed_tool_names,
 )
-from ....testing import simulator_command
+from ....testing import combined_output, simulator_command
 from ....thread.actor_tokens import ActorTokenBundle
 from ....worker.authoring_binding import AuthoringBindingProvider
 from ....worker.catalog_store import RunCatalogStore
@@ -376,4 +376,4 @@ def test_worker_import_does_not_load_the_authoring_provider_module() -> None:
         check=True,
         timeout=300,
     )
-    assert proc.stdout.strip() == "False", proc.stdout + proc.stderr
+    assert proc.stdout.strip() == "False", combined_output(proc)

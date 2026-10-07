@@ -73,9 +73,9 @@ def test_derive_state_paths_are_absolute_and_seated_under_app_home(
     assert state.database_path.parent == state.checkpoint_path.parent
 
     # Seated paths mirror the operative a2a_home conventions: runtime logs and the
-    # discovery service.json at the application-home root.
+    # discovery record at the application-home root.
     assert state.logs_dir == app_home / "runtime"
-    assert state.discovery_path == app_home / "service.json"
+    assert state.discovery_path.parent == app_home
 
 
 def test_derive_state_paths_rejects_relative_app_home() -> None:

@@ -25,6 +25,7 @@ from ...api.tests.conftest import SEATED_ATTACH_TOKEN, make_app
 from ...lifecycle.discovery import service_json_path, write_service_json
 from ...testing import (
     DEFAULT_TEAM_PRESET,
+    combined_output,
     fetch_in_process_selection_at,
     run_cli,
     serve_on_loopback_in_thread,
@@ -97,7 +98,7 @@ def test_cli_uses_matching_loopback_discovery_token(
             env={**_NO_WORKER_CREDENTIAL, "VAULTSPEC_A2A_HOME": str(a2a_home)},
         )
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 0, combined_output(result)
     assert json.loads(result.stdout)["api_version"] == "v1"
 
 
@@ -130,7 +131,7 @@ def test_configured_cli_token_precedes_matching_discovery_token(
             },
         )
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 0, combined_output(result)
     assert json.loads(result.stdout)["api_version"] == "v1"
 
 
@@ -144,14 +145,14 @@ def test_cli_verbs_against_live_gateway(
     with serve_on_loopback_in_thread(app) as base:
         # presets-list
         presets = run_cli("presets", "--url", base, env=_SEATED_TOKEN_ENV)
-        assert presets.returncode == 0, presets.stdout + presets.stderr
+        assert presets.returncode == 0, combined_output(presets)
         pbody = json.loads(presets.stdout)
         assert pbody["api_version"] == "v1"
         assert any(p["id"] == DEFAULT_TEAM_PRESET for p in pbody["presets"])
 
         # doctor (service-state)
         doctor = run_cli("doctor", "--url", base, env=_SEATED_TOKEN_ENV)
-        assert doctor.returncode == 0, doctor.stdout + doctor.stderr
+        assert doctor.returncode == 0, combined_output(doctor)
         assert json.loads(doctor.stdout)["api_version"] == "v1"
 
         # run start -> status -> cancel
@@ -159,7 +160,7 @@ def test_cli_verbs_against_live_gateway(
         # catalog revision. Read here from the same served catalog rather than
         # hardcoded, so this proves the real end-to-end path.
         catalog = run_cli("presets", "--url", base, env=_SEATED_TOKEN_ENV)
-        assert catalog.returncode == 0, catalog.stdout + catalog.stderr
+        assert catalog.returncode == 0, combined_output(catalog)
         lane = _in_process_lane_arguments(base)
         start = run_cli(
             "run",
@@ -179,17 +180,17 @@ def test_cli_verbs_against_live_gateway(
             base,
             env=_SEATED_TOKEN_ENV,
         )
-        assert start.returncode == 0, start.stdout + start.stderr
+        assert start.returncode == 0, combined_output(start)
         run_id = json.loads(start.stdout)["run_id"]
         assert run_id
         assert worker.dispatches, "run start must dispatch to the worker"
 
         status = run_cli("run", "status", run_id, "--url", base, env=_SEATED_TOKEN_ENV)
-        assert status.returncode == 0, status.stdout + status.stderr
+        assert status.returncode == 0, combined_output(status)
         assert json.loads(status.stdout)["run_id"] == run_id
 
         cancel = run_cli("run", "cancel", run_id, "--url", base, env=_SEATED_TOKEN_ENV)
-        assert cancel.returncode == 0, cancel.stdout + cancel.stderr
+        assert cancel.returncode == 0, combined_output(cancel)
         assert json.loads(cancel.stdout)["api_version"] == "v1"
 
         # unknown run -> non-zero exit with the error body printed
@@ -243,7 +244,7 @@ def test_cli_reports_unreachable_gateway_cleanly() -> None:
     # Port 1 is not listening; the transport error must be handled, not raised.
     result = run_cli("presets", "--url", "http://127.0.0.1:1", env=_SEATED_TOKEN_ENV)
     assert result.returncode != 0
-    assert "could not reach the gateway" in (result.stdout + result.stderr)
+    assert "could not reach the gateway" in (combined_output(result))
 
 
 def test_cli_reports_installed_package_version() -> None:
@@ -256,5 +257,5 @@ def test_cli_reports_installed_package_version() -> None:
     from ...utils import package_version
 
     result = run_cli("--version")
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 0, combined_output(result)
     assert package_version() in result.stdout

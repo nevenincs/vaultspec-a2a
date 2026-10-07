@@ -15,7 +15,7 @@ from ...control.run_start_policy import (
     required_role_ids,
 )
 from ...team.team_config import load_team_config
-from ...testing import DEFAULT_TEAM_PRESET
+from ...testing import DEFAULT_TEAM_PRESET, role_tokens
 from ...thread.actor_tokens import ActorTokenBundle
 
 _AUTHORING = "vaultspec-adr-research"
@@ -35,7 +35,7 @@ def _authoring_roles() -> tuple[str, ...]:
 
 def _full_bundle() -> ActorTokenBundle:
     return ActorTokenBundle(
-        tokens={role: f"tok-{role}" for role in _authoring_roles()},
+        tokens=role_tokens(_authoring_roles()),
         engine_bearer="bearer",
     )
 

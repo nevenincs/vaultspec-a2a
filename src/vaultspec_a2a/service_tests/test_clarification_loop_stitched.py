@@ -62,7 +62,6 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -77,6 +76,8 @@ from ..authoring.discovery import resolve_engine_with_retry
 from ..graph.enums import Provider
 from ..team.team_config import load_team_config
 from ..testing import (
+    ProgressDeadline,
+    ProgressStalledError,
     fetch_provider_catalog,
     is_terminal,
     json_object,
@@ -87,6 +88,7 @@ from ..testing import (
     role_tokens,
     selection_from_served_catalog,
     text_list,
+    wait_for,
 )
 
 if TYPE_CHECKING:
@@ -524,9 +526,10 @@ def _replay_codex_continuation(
     winning_key: str,
 ) -> JsonObject:
     """Poll the idempotent continuation until durable application is visible."""
-    replay_body: JsonObject = {}
-    replay_deadline = time.monotonic() + 90.0
-    while time.monotonic() < replay_deadline:
+    last: JsonObject = {}
+
+    def _applied() -> JsonObject | None:
+        nonlocal last
         with gateway.client(timeout=60.0) as client:
             replay = client.post(
                 f"/v1/runs/{run_id}/clarifications/{request_id}/respond",
@@ -534,11 +537,15 @@ def _replay_codex_continuation(
                 headers={"Idempotency-Key": winning_key},
             )
         assert replay.status_code == 200, replay.text
-        replay_body = _response_object(replay, at="replayed Codex continuation")
-        if replay_body.get("applied") is True:
-            break
-        time.sleep(0.5)
-    assert replay_body.get("applied") is True, replay_body
+        last = _response_object(replay, at="replayed Codex continuation")
+        return last if last.get("applied") is True else None
+
+    try:
+        replay_body = wait_for(
+            _applied, deadline=ProgressDeadline(idle_window_s=90.0), interval_s=0.5
+        )
+    except ProgressStalledError as stalled:
+        raise AssertionError(f"continuation never applied: {last}") from stalled
     assert replay_body.get("action_status") == "applied"
     return replay_body
 

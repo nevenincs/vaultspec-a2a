@@ -25,6 +25,11 @@ name to exercise the product's OWN citation-checking behaviour (an agent
 grounding its output in a document), which needs a real, realistic document
 name as fixture data. That is product functionality under test, not a code
 module depending on its own development record.
+
+Tier classification mirrors :mod:`dev.paths` (restated, not imported: a
+module inside the distribution root may never import the development
+harness - see ``test_dev_harness_import_boundary.py`` - and this file sits
+inside it).
 """
 
 from __future__ import annotations
@@ -33,9 +38,29 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Final
 
-from dev.paths import REPO_ROOT, is_test_code
-
 _SOURCE_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
+_REPO_ROOT: Final[Path] = _SOURCE_ROOT.parents[1]
+
+#: Mirrors dev.paths.TEST_TIERS / TEST_SUPPORT.
+_TEST_TIERS: Final[tuple[str, ...]] = (
+    "tests",
+    "service_tests",
+    "desktop_tests",
+    "acceptance",
+)
+_TEST_SUPPORT: Final = "testing"
+
+
+def _is_test_code(relative: Path) -> bool:
+    """Whether *relative* is test code or the support code tests share.
+
+    The same rule :func:`dev.paths.is_test_code` states, restated locally.
+    """
+    parts = relative.parts
+    if any(part in _TEST_TIERS for part in parts) or _TEST_SUPPORT in parts:
+        return True
+    return relative.name.startswith("test_") or relative.name == "conftest.py"
+
 
 #: Below this many documents, the vault glob is treated as mis-rooted rather
 #: than as a corpus that genuinely shrank to nothing worth checking against.
@@ -48,7 +73,7 @@ _MINIMUM_PRODUCTION_MODULES: Final = 300
 
 def _vault_document_stems() -> frozenset[str]:
     """Return every ``.vault/`` document's filename stem, with no extension."""
-    vault = REPO_ROOT / ".vault"
+    vault = _REPO_ROOT / ".vault"
     stems = frozenset(path.stem for path in vault.rglob("*.md"))
     assert len(stems) >= _MINIMUM_VAULT_DOCUMENTS, (
         f"only {len(stems)} vault document(s) were found under {vault} - a "
@@ -62,7 +87,7 @@ def _production_modules() -> list[Path]:
     modules = [
         path
         for path in _SOURCE_ROOT.rglob("*.py")
-        if not is_test_code(path.relative_to(_SOURCE_ROOT))
+        if not _is_test_code(path.relative_to(_SOURCE_ROOT))
     ]
     assert len(modules) >= _MINIMUM_PRODUCTION_MODULES, (
         f"only {len(modules)} production module(s) were scanned under "

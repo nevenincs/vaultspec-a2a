@@ -19,9 +19,10 @@ repository's own tooling - ``dev/``, ``packaging/``, ``scripts/`` and the root
 ``conftest.py`` - because a copy-pasted fixture or guard is exactly as much
 debt as one in the shipped package, and the tooling trees are large enough
 (dev/ alone carries dozens of modules) to have grown their own clones unseen.
-Tier classification for every discovered module, wherever it sits, comes from
-:mod:`dev.paths` (``TEST_TIERS`` plus the ``testing`` support package), so one
-module answers "is this test code" for every check in the repository.
+Tier classification mirrors :mod:`dev.paths` (``TEST_TIERS`` plus the
+``testing`` support package) rather than importing it: a module inside the
+distribution root may never import the development harness (see
+``test_dev_harness_import_boundary.py``), and this file sits inside it.
 
 Two limits are deliberate and worth knowing before reading a failure:
 
@@ -54,21 +55,47 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Final, override
 
-from dev.paths import REPO_ROOT, SKIPPED_DIRS, is_test_code
-
 _SOURCE_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT: Final[Path] = _SOURCE_ROOT.parents[1]
+
+#: Mirrors dev.paths.TEST_TIERS / TEST_SUPPORT, restated rather than imported
+#: (see the module docstring's note on the harness import boundary).
+_TEST_TIERS: Final[tuple[str, ...]] = (
+    "tests",
+    "service_tests",
+    "desktop_tests",
+    "acceptance",
+)
+_TEST_SUPPORT: Final = "testing"
+
+#: Mirrors dev.paths.SKIPPED_DIRS, restated for the same reason.
+_SKIPPED_DIRS: Final[frozenset[str]] = frozenset(
+    {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", "node_modules"}
+)
 
 #: Repository tooling scanned alongside the shipped package. Each is rglob'd
 #: in full - their own test tiers (``dev/tests``, ``packaging/tests``) fall
-#: out of :func:`dev.paths.is_test_code` exactly like ``src``'s do.
+#: out of :func:`_is_test_code` exactly like ``src``'s do.
 _EXTRA_ROOTS: Final[tuple[Path, ...]] = (
-    REPO_ROOT / "dev",
-    REPO_ROOT / "packaging",
-    REPO_ROOT / "scripts",
+    _REPO_ROOT / "dev",
+    _REPO_ROOT / "packaging",
+    _REPO_ROOT / "scripts",
 )
 
 #: Standalone files outside every rglob'd root.
-_EXTRA_FILES: Final[tuple[Path, ...]] = (REPO_ROOT / "conftest.py",)
+_EXTRA_FILES: Final[tuple[Path, ...]] = (_REPO_ROOT / "conftest.py",)
+
+
+def _is_test_code(relative: Path) -> bool:
+    """Whether *relative* is test code or the support code tests share.
+
+    The same rule :func:`dev.paths.is_test_code` states, restated locally.
+    """
+    parts = relative.parts
+    if any(part in _TEST_TIERS for part in parts) or _TEST_SUPPORT in parts:
+        return True
+    return relative.name.startswith("test_") or relative.name == "conftest.py"
+
 
 #: Below this many files visited, the scan is treated as mis-rooted rather
 #: than as a tree that genuinely holds few duplicates - a floor that fails
@@ -274,7 +301,7 @@ def _relative(path: Path) -> Path:
     ``packaging/``, ``scripts/`` or ``conftest.py`` names a top-level member
     of ``src/vaultspec_a2a``.
     """
-    for root in (_SOURCE_ROOT, REPO_ROOT):
+    for root in (_SOURCE_ROOT, _REPO_ROOT):
         try:
             return path.relative_to(root)
         except ValueError:
@@ -288,7 +315,7 @@ def _discovered_files() -> list[Path]:
         path
         for root in (_SOURCE_ROOT, *_EXTRA_ROOTS)
         for path in root.rglob("*.py")
-        if not any(part in SKIPPED_DIRS for part in path.parts)
+        if not any(part in _SKIPPED_DIRS for part in path.parts)
     ]
     found.extend(path for path in _EXTRA_FILES if path.is_file())
     return sorted(found)
@@ -320,7 +347,7 @@ def _catalog() -> tuple[_Function, ...]:
         except SyntaxError as exc:
             raise AssertionError(f"{relative}: could not parse: {exc}") from exc
         visited += 1
-        is_test = is_test_code(relative)
+        is_test = _is_test_code(relative)
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 hashed = _structure_hash(node)

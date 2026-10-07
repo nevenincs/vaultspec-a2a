@@ -1,10 +1,9 @@
-"""ACP prompt outcome and executable command validation."""
+"""ACP prompt outcome validation."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Never
 
-from ._acp_types import MAX_NATIVE_COMMAND_NAME_LENGTH
 from ._json_contract import JsonObject, lenient_json_object
 from .acp_exceptions import (
     AcpError,
@@ -105,14 +104,4 @@ def raise_for_prompt_stop_reason(
         data=data,
         effects_may_have_occurred=effects_may_have_occurred,
         usage_metadata=usage_metadata,
-    )
-
-
-def is_executable_native_command_name(name: str) -> bool:
-    if not name or name != name.strip() or not name.isprintable():
-        return False
-    return (
-        not any(character.isspace() for character in name)
-        and not name.startswith("/")
-        and len(name) <= MAX_NATIVE_COMMAND_NAME_LENGTH
     )

@@ -34,15 +34,10 @@ logger = logging.getLogger("vaultspec_a2a.providers.codex_chat_model")
 CLEANUP_TIMEOUT_SECONDS = 5.0
 """How long close waits before reporting a cancellation-resistant task."""
 
-_NATIVE_CONTROL_TIMEOUT_SECONDS = 10.0
-_MAX_CODEX_RUNTIME_ID_LENGTH = 256
-
 __all__ = [
     "CLEANUP_TIMEOUT_SECONDS",
     "_CAPABILITIES",
     "_CLIENT_INFO",
-    "_MAX_CODEX_RUNTIME_ID_LENGTH",
-    "_NATIVE_CONTROL_TIMEOUT_SECONDS",
     "_STREAM_CLOSED",
     "_CodexAppServerClient",
 ]

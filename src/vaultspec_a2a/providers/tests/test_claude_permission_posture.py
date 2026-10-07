@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ...team.team_config import load_agent_config
-from ...testing import DEFAULT_REQUIRED_ROLE, read_acp_frame, simulator_command
+from ...team.team_config import AgentCapabilitiesConfig, load_agent_config
+from ...testing import read_acp_frame, simulator_command
 from ...utils.enums import AcpRequestId
 from .._acp_session import claude_session_options, setup_session
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
@@ -45,6 +45,12 @@ if TYPE_CHECKING:
 _SESSION_ID = "session-under-test"
 _TIMEOUT = 10.0
 
+#: A persona that may do everything: no shipped persona declares a terminal, so
+#: the posture that denies no built-in is stated here.
+_EVERY_CAPABILITY = AgentCapabilitiesConfig(
+    filesystem_read=True, filesystem_write=True, terminal=True
+)
+
 # Echoes each stdin line back on stdout, so the frame a production seam wrote is
 # readable from the same context. A real pipe round-trip through a real process.
 
@@ -54,10 +60,17 @@ def _config(
     agent_id: str,
     workspace_root: Path,
     permission_callback: PermissionCallback | None = None,
+    capabilities: AgentCapabilitiesConfig | None = None,
 ) -> AcpModelConfig:
-    """Build the real frozen config a claude-family session is set up from."""
+    """Build the real frozen config a claude-family session is set up from.
+
+    *capabilities*, when given, replaces what the loaded persona declares.
+    """
+    agent_config = load_agent_config(agent_id)
+    if capabilities is not None:
+        agent_config = agent_config.model_copy(update={"capabilities": capabilities})
     return AcpModelConfig(
-        agent_config=load_agent_config(agent_id),
+        agent_config=agent_config,
         permission_callback=permission_callback,
         workspace_root=str(workspace_root),
         command=["claude-agent-acp"],
@@ -111,22 +124,25 @@ def test_session_options_admit_no_ambient_settings_source(tmp_path: Path) -> Non
 
 
 @pytest.mark.parametrize(
-    ("agent_id", "denied", "permitted"),
+    ("agent_id", "capabilities", "denied", "permitted"),
     [
         pytest.param(
             "vaultspec-adr-author",
+            None,
             CLAUDE_FILE_WRITE_TOOLS + CLAUDE_TERMINAL_TOOLS,
             (),
             id="no-write-no-terminal",
         ),
         pytest.param(
             "vaultspec-coder",
+            None,
             CLAUDE_TERMINAL_TOOLS,
             CLAUDE_FILE_WRITE_TOOLS,
             id="write-but-no-terminal",
         ),
         pytest.param(
-            DEFAULT_REQUIRED_ROLE,
+            "vaultspec-coder",
+            _EVERY_CAPABILITY,
             (),
             CLAUDE_FILE_WRITE_TOOLS + CLAUDE_TERMINAL_TOOLS,
             id="write-and-terminal",
@@ -136,12 +152,13 @@ def test_session_options_admit_no_ambient_settings_source(tmp_path: Path) -> Non
 def test_session_options_deny_the_built_ins_a_persona_may_not_use(
     tmp_path: Path,
     agent_id: str,
+    capabilities: AgentCapabilitiesConfig | None,
     denied: tuple[str, ...],
     permitted: tuple[str, ...],
 ) -> None:
     """A persona's declared capabilities reach the CLI's own built-in tools."""
     options = claude_session_options(
-        _config(agent_id=agent_id, workspace_root=tmp_path)
+        _config(agent_id=agent_id, workspace_root=tmp_path, capabilities=capabilities)
     )
 
     disallowed = _tool_names(options.get("disallowedTools", []))
@@ -553,7 +570,11 @@ def test_every_session_denies_the_credential_and_process_trees(
     where one mistake about that is unrecoverable.
     """
     options = claude_session_options(
-        _config(agent_id=DEFAULT_REQUIRED_ROLE, workspace_root=tmp_path)
+        _config(
+            agent_id="vaultspec-coder",
+            workspace_root=tmp_path,
+            capabilities=_EVERY_CAPABILITY,
+        )
     )
 
     disallowed = _tool_names(options["disallowedTools"])

@@ -657,7 +657,6 @@ async def test_unreadable_execution_state_requires_operator_intervention(
             write_authority=make_test_write_authority(),
             thread_id="thread-corrupt-execution-state",
             repair_status="healthy",
-            execution_readiness="healthy",
         )
         session.add(
             ThreadExecutionStateModel(

@@ -177,9 +177,8 @@ def _summary_checkpoint_state(
     probe: _CheckpointProbe,
     *,
     checkpointer_active: bool,
-) -> tuple[str | None, str | None, bool]:
+) -> tuple[str | None, bool]:
     repair_status = thread.repair_status
-    execution_readiness = thread.execution_readiness
     checkpoint_unverified = checkpointer_active and probe.unverified
     checkpoint_id: str | None = None
     if checkpointer_active and probe.tuple is not None:
@@ -187,8 +186,8 @@ def _summary_checkpoint_state(
             probe.tuple, thread_id=thread.id
         ).checkpoint_id
     if checkpoint_unverified:
-        repair_status, execution_readiness = escalate_repair_posture(
-            repair_status, execution_readiness, RepairStatus.CHECKPOINT_UNAVAILABLE
+        repair_status = escalate_repair_posture(
+            repair_status, RepairStatus.CHECKPOINT_UNAVAILABLE
         )
     # Judged as run-status judges it, so the two surfaces report the same
     # posture for one run: a settled run keeps its row unjudged, and only a
@@ -203,10 +202,10 @@ def _summary_checkpoint_state(
             checkpoint_id=checkpoint_id,
         )
     ):
-        repair_status, execution_readiness = escalate_repair_posture(
-            repair_status, execution_readiness, RepairStatus.NEEDS_RECONCILIATION
+        repair_status = escalate_repair_posture(
+            repair_status, RepairStatus.NEEDS_RECONCILIATION
         )
-    return repair_status, execution_readiness, checkpoint_unverified
+    return repair_status, checkpoint_unverified
 
 
 async def _thread_summary(
@@ -220,10 +219,8 @@ async def _thread_summary(
         thread.thread_metadata
     )
     execution_state = await get_thread_execution_state(db, thread.id)
-    repair_status, execution_readiness, checkpoint_unverified = (
-        _summary_checkpoint_state(
-            thread, execution_state, probe, checkpointer_active=checkpointer_active
-        )
+    repair_status, checkpoint_unverified = _summary_checkpoint_state(
+        thread, execution_state, probe, checkpointer_active=checkpointer_active
     )
     approval_status: str | None = None
     approval_request_id: str | None = None
@@ -240,7 +237,9 @@ async def _thread_summary(
         title=thread.title,
         status=thread.status,
         repair_status=repair_status,
-        execution_readiness=execution_readiness,
+        # Readiness is never judged apart from the repair posture: a run is as
+        # fit to resume as the posture this listing settled on says.
+        execution_readiness=repair_status,
         approval_status=approval_status,
         approval_request_id=approval_request_id,
         team_preset=thread.team_preset,

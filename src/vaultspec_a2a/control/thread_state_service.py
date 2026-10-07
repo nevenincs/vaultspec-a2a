@@ -401,8 +401,6 @@ async def capture_thread_state(
         thread_id=thread_id,
         status=thread.status,
         last_sequence=last_seq,
-        repair_status=thread.repair_status,
-        execution_readiness=thread.execution_readiness,
         approval_status=thread.approval_status,
         approval_request_id=thread.approval_request_id,
         failure_reason=thread.failure_reason,

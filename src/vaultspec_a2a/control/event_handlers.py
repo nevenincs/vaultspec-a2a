@@ -810,7 +810,6 @@ async def _persist_permission_request(
         record_permission_request,
         reserve_control_action,
         set_thread_approval_state,
-        set_thread_repair_state,
         supersede_permission_requests,
         thread_write_expectation,
     )
@@ -819,6 +818,8 @@ async def _persist_permission_request(
         ControlActionResultStatus,
         ControlActionType,
     )
+    from ..thread.repair_policy import RepairPhase, repair_state_for_action
+    from .repair_transitions import apply_repair_transition
 
     fields = _permission_request_fields(payload, event_type)
     if fields is None:
@@ -882,13 +883,10 @@ async def _persist_permission_request(
         allowed_options=allowed_options,
         tool_call=tool_call,
     )
-    await set_thread_repair_state(
+    await apply_repair_transition(
         db,
         thread_id,
-        repair_status=fx.repair_status,
-        repair_reason=fx.repair_reason,
-        execution_readiness=fx.repair_status.value,
-        last_applied_action=fx.last_applied_action,
+        repair_state_for_action(fx.last_applied_action, RepairPhase.APPLIED),
     )
     if fx.is_plan_approval:
         await set_thread_approval_state(

@@ -63,21 +63,19 @@ async def _pending_thread_sets(
             ThreadModel.id,
             ThreadModel.status,
             ThreadModel.repair_status,
-            ThreadModel.execution_readiness,
         ).where(ThreadModel.id.in_(thread_ids), path_safe_run_id_clause())
     )
     known_rows = rows.all()
     known_thread_ids = {thread_id for thread_id, *_rest in known_rows}
     terminal_thread_ids = {
         thread_id
-        for thread_id, status, _repair_status, _execution_readiness in known_rows
+        for thread_id, status, _repair_status in known_rows
         if status in TERMINAL_STATUS_VALUES
     }
     checkpoint_unavailable_thread_ids = {
         thread_id
-        for thread_id, _status, repair_status, execution_readiness in known_rows
+        for thread_id, _status, repair_status in known_rows
         if repair_status == RepairStatus.CHECKPOINT_UNAVAILABLE.value
-        or execution_readiness == RepairStatus.CHECKPOINT_UNAVAILABLE.value
     }
     return known_thread_ids, terminal_thread_ids, checkpoint_unavailable_thread_ids
 

@@ -437,8 +437,9 @@ class RunSummaryRecord(BaseModel):
     # reason this record exists rather than the discovery one.
     # All three answer from a closed set the service fixes, so they are served
     # as the enumerations that already own them rather than as bounded strings.
-    # ``repair_status`` and ``execution_readiness`` share one vocabulary
-    # deliberately: they ask different questions from the same set of answers.
+    # ``execution_readiness`` is derived from ``repair_status``: it is the same
+    # posture read as whether the run is fit to resume, so the two share one
+    # vocabulary and always agree.
     repair_status: RepairStatus | None = None
     execution_readiness: RepairStatus | None = None
     approval_status: ApprovalStatus | None = None

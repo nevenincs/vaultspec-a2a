@@ -238,10 +238,10 @@ class TestStatusDefaultsComeFromEnums:
         """The column round-trips every ``RepairStatus`` member.
 
         ``execution_readiness`` shares ``RepairStatus`` with ``repair_status``
-        rather than owning a parallel enum, because every producer in the
-        codebase already writes a ``RepairStatus`` member into it. This asserts
-        the whole vocabulary survives the column, so the sharing is a fact about
-        the schema and not just a convention.
+        rather than owning a parallel enum, because it is written from the
+        repair status and so can only ever hold a ``RepairStatus`` member. This
+        asserts the whole vocabulary survives the column, so the sharing is a
+        fact about the schema and not just a convention.
         """
         for index, member in enumerate(RepairStatus):
             session.add(

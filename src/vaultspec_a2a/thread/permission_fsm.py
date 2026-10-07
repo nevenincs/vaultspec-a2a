@@ -1,7 +1,8 @@
 """Pure permission state-machine decision logic — no I/O, no database.
 
 Computes the effects of permission request and resolution events as frozen
-descriptor dataclasses.
+descriptor dataclasses. The repair state each event leaves belongs to the
+repair policy, keyed by the action the event records.
 """
 
 from __future__ import annotations
@@ -12,7 +13,6 @@ from .enums import (
     ApprovalStatus,
     ControlActionType,
     PermissionRequestStatus,
-    RepairStatus,
     ThreadStatus,
 )
 from .snapshots import PLAN_APPROVAL_PAUSE_CAUSES
@@ -28,8 +28,6 @@ class PermissionRequestEffects:
     """Descriptor for DB mutations after a permission_request event."""
 
     thread_status: ThreadStatus
-    repair_status: RepairStatus
-    repair_reason: str
     last_applied_action: ControlActionType
     is_plan_approval: bool
     approval_status: ApprovalStatus | None
@@ -42,8 +40,6 @@ def compute_permission_request_effects(
     is_plan = pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
     return PermissionRequestEffects(
         thread_status=ThreadStatus.INPUT_REQUIRED,
-        repair_status=RepairStatus.PAUSED_RESUMABLE,
-        repair_reason="Worker reported a pending permission request",
         last_applied_action=ControlActionType.PERMISSION_REQUEST_CREATED,
         is_plan_approval=is_plan,
         approval_status=ApprovalStatus.PENDING if is_plan else None,
@@ -55,8 +51,6 @@ class PermissionResolutionEffects:
     """Descriptor for DB mutations after a permission_resolved event."""
 
     target_status: PermissionRequestStatus
-    repair_status: RepairStatus
-    repair_reason: None
     last_applied_action: ControlActionType
     is_plan_approval: bool
     approval_status: ApprovalStatus | None
@@ -87,8 +81,6 @@ def compute_permission_resolution_effects(
 
     return PermissionResolutionEffects(
         target_status=target_status,
-        repair_status=RepairStatus.HEALTHY,
-        repair_reason=None,
         last_applied_action=ControlActionType.PERMISSION_RESPONSE_APPLIED,
         is_plan_approval=is_plan,
         approval_status=approval,

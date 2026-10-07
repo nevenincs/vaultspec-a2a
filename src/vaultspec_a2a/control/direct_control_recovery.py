@@ -21,7 +21,6 @@ from ..database import (
     get_thread,
     mark_control_action_applied,
     release_control_action_lease,
-    set_thread_repair_state,
     thread_owned_by,
     thread_write_expectation,
 )
@@ -33,9 +32,9 @@ from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
     RecoveryCondition,
-    RepairStatus,
     ThreadStatus,
 )
+from ..thread.repair_policy import ACTION_QUARANTINED_TRANSITION
 from ..utils.coercion import decode_json_object
 from .accepted_input import (
     AcceptedActionInput,
@@ -59,6 +58,7 @@ from .recovery import (
     seed_recovery_attempts,
     settle_recovery_attempt,
 )
+from .repair_transitions import apply_repair_transition
 from .workspace import WorkspaceUnavailableError
 
 if TYPE_CHECKING:
@@ -262,6 +262,18 @@ async def _restore_requested_state(
     )
 
 
+async def _quarantine_for_operator(
+    db: AsyncSession, thread_id: str, refusal: DispatchRefusal
+) -> None:
+    """Hand a run whose accepted action was refused for good to an operator."""
+    await apply_repair_transition(
+        db,
+        thread_id,
+        ACTION_QUARANTINED_TRANSITION,
+        reason=f"{refusal.failure_type.value}: {refusal.reason}",
+    )
+
+
 async def _settle_permanent_refusal(
     db: AsyncSession,
     action: _StoredAction,
@@ -320,13 +332,7 @@ async def _settle_permanent_refusal(
         row.id,
         result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
     )
-    await set_thread_repair_state(
-        db,
-        action.thread_id,
-        repair_status=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
-        repair_reason=f"{refusal.failure_type.value}: {refusal.reason}",
-        execution_readiness=RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
-    )
+    await _quarantine_for_operator(db, action.thread_id, refusal)
     return True
 
 
@@ -363,13 +369,7 @@ async def _settle_orphaned_refusal(
             ThreadStatusElectionOutcome.RECEIPT_MISMATCH,
         }:
             return False
-    await set_thread_repair_state(
-        db,
-        thread_id,
-        repair_status=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
-        repair_reason=f"{refusal.failure_type.value}: {refusal.reason}",
-        execution_readiness=RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
-    )
+    await _quarantine_for_operator(db, thread_id, refusal)
     return True
 
 

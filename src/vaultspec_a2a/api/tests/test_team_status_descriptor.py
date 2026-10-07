@@ -162,7 +162,6 @@ async def test_thread_state_snapshot_reports_the_resolved_assignment(
             thread_id=thread_id,
             status="input_required",
             repair_status="healthy",
-            execution_readiness="healthy",
         )
         await session.commit()
 

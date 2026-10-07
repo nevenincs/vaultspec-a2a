@@ -75,7 +75,6 @@ async def test_checkpoint_failure_updates_execution_readiness_with_repair_status
             write_authority=make_test_write_authority(),
             thread_id="thread-closed-checkpointer",
             repair_status="healthy",
-            execution_readiness="healthy",
         )
         await session.commit()
 
@@ -120,7 +119,6 @@ async def test_missing_checkpoint_degrades_snapshot_readiness(tmp_path: Path) ->
                 thread_id="thread-missing-checkpoint",
                 status="running",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             await session.commit()
 
@@ -171,7 +169,6 @@ async def test_missing_checkpoint_hides_durable_pending_permission_state(
                 thread_id="thread-missing-checkpoint-permission",
                 status="input_required",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             thread.approval_status = "pending"
             thread.approval_request_id = "perm-missing-checkpoint-permission"
@@ -237,7 +234,6 @@ async def test_submitted_thread_missing_checkpoint_clears_stale_pending_approval
                 thread_id="thread-submitted-stale-approval",
                 status="submitted",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             thread.approval_status = "pending"
             thread.approval_request_id = "perm-submitted-stale-approval"
@@ -314,7 +310,6 @@ async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoin
                 thread_id="thread-corrupt-state",
                 status="running",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             session.add(
                 ThreadExecutionStateModel(
@@ -390,7 +385,6 @@ async def test_stale_execution_state_degrades_snapshot_readiness(
                 thread_id="thread-stale-state",
                 status="running",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             session.add(
                 ThreadExecutionStateModel(
@@ -469,7 +463,6 @@ async def test_unreadable_durable_permission_degrades_snapshot_without_crashing(
                 thread_id="thread-corrupt-permission",
                 status="input_required",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             await record_permission_request(
                 session,
@@ -544,7 +537,6 @@ async def test_unreadable_plan_approval_row_does_not_seed_pending_approval(
                 thread_id="thread-corrupt-plan-approval",
                 status="input_required",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             await record_permission_request(
                 session,
@@ -618,7 +610,6 @@ async def test_unreadable_plan_approval_row_clears_stale_thread_approval_state(
                 thread_id="thread-stale-plan-approval",
                 status="input_required",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             thread.approval_status = "pending"
             thread.approval_request_id = "perm-stale-plan"
@@ -693,7 +684,6 @@ async def test_missing_plan_approval_request_clears_stale_thread_pending_approva
                 thread_id="thread-stale-pending-approval",
                 status="input_required",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             thread.approval_status = "pending"
             thread.approval_request_id = "perm-missing-plan"
@@ -755,7 +745,6 @@ async def test_plan_approval_without_tool_call_preserves_pending_approval(
                 thread_id="thread-plan-no-tool-call",
                 status="input_required",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             thread.approval_status = "pending"
             thread.approval_request_id = "perm-plan-no-tool-call"
@@ -827,7 +816,6 @@ async def test_rejected_thread_approval_is_replaced_by_live_pending_plan_approva
                 thread_id="thread-rejected-stale-live-plan",
                 status="input_required",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             thread.approval_status = "rejected"
             thread.approval_request_id = "perm-stale-rejected-plan"
@@ -899,7 +887,6 @@ async def test_rejected_thread_approval_residue_does_not_surface_without_live_pl
                 thread_id="thread-rejected-residue",
                 status="running",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             thread.approval_status = "rejected"
             thread.approval_request_id = "perm-rejected-residue"
@@ -961,7 +948,6 @@ async def test_terminal_thread_excludes_durable_pending_permission_from_thread_s
                 thread_id="thread-terminal-permission-residue",
                 status="completed",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             thread.approval_status = "pending"
             thread.approval_request_id = "perm-terminal-permission-residue"
@@ -1037,7 +1023,6 @@ async def test_answered_pending_apply_permission_does_not_surface_in_thread_stat
                 thread_id="thread-answered-pending-apply",
                 status="input_required",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             thread.approval_status = "pending"
             thread.approval_request_id = "perm-answered-pending-apply"
@@ -1117,7 +1102,6 @@ async def test_aggregator_only_pending_permission_does_not_surface_in_thread_sta
                 thread_id="thread-aggregator-only-permission",
                 status="input_required",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             await session.commit()
 
@@ -1218,7 +1202,6 @@ async def test_checkpoint_only_pending_permission_does_not_surface_in_thread_sta
                 thread_id="thread-checkpoint-only-permission",
                 status="input_required",
                 repair_status="healthy",
-                execution_readiness="healthy",
             )
             await session.commit()
 

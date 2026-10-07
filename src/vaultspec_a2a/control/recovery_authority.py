@@ -16,7 +16,6 @@ from ..database import (
     elect_thread_status,
     get_control_action_by_dispatch_id,
     mark_control_action_applied,
-    set_thread_repair_state,
     thread_write_expectation,
 )
 from ..thread.checkpoint_evidence import (
@@ -26,14 +25,18 @@ from ..thread.checkpoint_evidence import (
 from ..thread.enums import (
     NON_ACTIVE_STATUSES,
     ControlActionType,
-    RepairStatus,
     ThreadStatus,
+)
+from ..thread.repair_policy import (
+    RECONCILIATION_REQUIRED_TRANSITION,
+    RepairPhase,
+    repair_state_for_action,
 )
 from .dispatch_receipts import (
     prepare_graph_action_receipt,
     validate_current_graph_receipt,
 )
-from .repair_transitions import mark_message_followup_requested
+from .repair_transitions import apply_repair_transition
 from .repositories.continuation_queue import (
     open_promoted_continuation,
     promoted_turn_deadline,
@@ -174,12 +177,11 @@ async def _reconcile_incomplete_checkpoint(
             action_receipt_id=decision.receipt.dispatch_id,
         )
         if election.outcome is ThreadStatusElectionOutcome.WON:
-            await set_thread_repair_state(
+            await apply_repair_transition(
                 db,
                 decision.thread_id,
-                repair_status=RepairStatus.NEEDS_RECONCILIATION,
-                repair_reason=evidence.kind.value,
-                execution_readiness=RepairStatus.NEEDS_RECONCILIATION.value,
+                RECONCILIATION_REQUIRED_TRANSITION,
+                reason=evidence.kind.value,
             )
         await db.commit()
         fresh = await db.get(ThreadModel, decision.thread_id, populate_existing=True)
@@ -257,7 +259,13 @@ async def _promote_queued_continuation(
         return await _refuse_promotion(db, decision, "receipt refused")
     if decision.last_sequence is not None:
         thread.last_sequence = decision.last_sequence
-    await mark_message_followup_requested(db, decision.thread_id)
+    await apply_repair_transition(
+        db,
+        decision.thread_id,
+        repair_state_for_action(
+            ControlActionType.MESSAGE_FOLLOWUP_REQUESTED, RepairPhase.REQUESTED
+        ),
+    )
     await db.commit()
     return RecoveryObservation(
         ThreadStatus.RUNNING,

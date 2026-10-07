@@ -1,4 +1,4 @@
-"""Named repair-state transition functions for route handlers."""
+"""Apply the repair policy's transitions to a run's durable repair state."""
 
 from __future__ import annotations
 
@@ -7,12 +7,55 @@ from typing import TYPE_CHECKING
 from ..database import get_thread, set_thread_repair_state, update_thread_status
 from ..providers.conditions import ProviderCondition
 from ..thread.enums import ControlActionType, ThreadStatus
-from ..thread.repair_policy import DISPATCH_FAILED_TRANSITION, repair_state_for_action
+from ..thread.repair_policy import (
+    DISPATCH_FAILED_TRANSITION,
+    RepairPhase,
+    repair_state_for_action,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database import ThreadModel
+    from ..thread.repair_policy import RepairTransition
+
+__all__ = [
+    "apply_dispatch_failure",
+    "apply_repair_transition",
+    "mark_cancel_requested",
+    "mark_ingest_requested",
+    "mark_permission_response_requested",
+    "record_undelivered_dispatch",
+]
+
+
+async def apply_repair_transition(
+    db: AsyncSession,
+    thread_id: str,
+    transition: RepairTransition,
+    *,
+    reason: str | None = None,
+) -> ThreadModel | None:
+    """Persist *transition* as the run's repair state.
+
+    Every policy transition reaches the row through here, so the state a
+    control-plane event leaves is decided by the policy alone. The repair
+    reason is rewritten each time - *reason*, else the transition's own
+    account, else nothing - so a transition clears whatever account the last
+    one left. The transition's action, when it has one, is recorded as the
+    run's last requested or last applied action according to its phase.
+    """
+    phase = transition.phase
+    return await set_thread_repair_state(
+        db,
+        thread_id,
+        repair_status=transition.repair_status,
+        repair_reason=reason or transition.reason,
+        last_requested_action=(
+            transition.action if phase is RepairPhase.REQUESTED else None
+        ),
+        last_applied_action=transition.action if phase is RepairPhase.APPLIED else None,
+    )
 
 
 async def apply_dispatch_failure(
@@ -63,8 +106,8 @@ async def apply_dispatch_failure(
             ProviderCondition.UNKNOWN.value if run_actually_failed else None
         ),
     )
-    return await mark_dispatch_failed(
-        db, thread_id, reason=reason or "Worker dispatch failed"
+    return await apply_repair_transition(
+        db, thread_id, DISPATCH_FAILED_TRANSITION, reason=reason
     )
 
 
@@ -102,94 +145,28 @@ async def record_undelivered_dispatch(
 
 
 async def mark_ingest_requested(db: AsyncSession, thread_id: str) -> ThreadModel | None:
-    transition = repair_state_for_action(ControlActionType.INGEST, "requested")
-    return await set_thread_repair_state(
+    return await apply_repair_transition(
         db,
         thread_id,
-        repair_status=transition.repair_status,
-        execution_readiness=transition.execution_readiness,
-        last_requested_action=ControlActionType.INGEST,
-    )
-
-
-async def mark_ingest_applied(db: AsyncSession, thread_id: str) -> ThreadModel | None:
-    transition = repair_state_for_action(ControlActionType.INGEST, "applied")
-    return await set_thread_repair_state(
-        db,
-        thread_id,
-        repair_status=transition.repair_status,
-        execution_readiness=transition.execution_readiness,
-        last_applied_action=ControlActionType.INGEST,
+        repair_state_for_action(ControlActionType.INGEST, RepairPhase.REQUESTED),
     )
 
 
 async def mark_permission_response_requested(
     db: AsyncSession, thread_id: str
 ) -> ThreadModel | None:
-    transition = repair_state_for_action(
-        ControlActionType.PERMISSION_RESPONSE_SUBMITTED, "requested"
-    )
-    return await set_thread_repair_state(
+    return await apply_repair_transition(
         db,
         thread_id,
-        repair_status=transition.repair_status,
-        execution_readiness=transition.execution_readiness,
-        last_requested_action=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-    )
-
-
-async def mark_message_followup_requested(
-    db: AsyncSession, thread_id: str
-) -> ThreadModel | None:
-    transition = repair_state_for_action(
-        ControlActionType.MESSAGE_FOLLOWUP_REQUESTED, "requested"
-    )
-    return await set_thread_repair_state(
-        db,
-        thread_id,
-        repair_status=transition.repair_status,
-        execution_readiness=transition.execution_readiness,
-        last_requested_action=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-    )
-
-
-async def mark_message_followup_applied(
-    db: AsyncSession, thread_id: str
-) -> ThreadModel | None:
-    transition = repair_state_for_action(
-        ControlActionType.MESSAGE_FOLLOWUP_APPLIED, "applied"
-    )
-    return await set_thread_repair_state(
-        db,
-        thread_id,
-        repair_status=transition.repair_status,
-        execution_readiness=transition.execution_readiness,
-        last_applied_action=ControlActionType.MESSAGE_FOLLOWUP_APPLIED,
+        repair_state_for_action(
+            ControlActionType.PERMISSION_RESPONSE_SUBMITTED, RepairPhase.REQUESTED
+        ),
     )
 
 
 async def mark_cancel_requested(db: AsyncSession, thread_id: str) -> ThreadModel | None:
-    transition = repair_state_for_action(ControlActionType.CANCEL, "requested")
-    return await set_thread_repair_state(
+    return await apply_repair_transition(
         db,
         thread_id,
-        repair_status=transition.repair_status,
-        execution_readiness=transition.execution_readiness,
-        last_requested_action=ControlActionType.CANCEL,
-    )
-
-
-async def mark_dispatch_failed(
-    db: AsyncSession,
-    thread_id: str,
-    *,
-    reason: str = "Worker dispatch failed",
-) -> ThreadModel | None:
-    transition = DISPATCH_FAILED_TRANSITION
-    return await set_thread_repair_state(
-        db,
-        thread_id,
-        repair_status=transition.repair_status,
-        repair_reason=reason,
-        execution_readiness=transition.execution_readiness,
+        repair_state_for_action(ControlActionType.CANCEL, RepairPhase.REQUESTED),
     )

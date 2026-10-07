@@ -344,7 +344,6 @@ class TestListThreads:
                     thread_id="thread-list-corrupt-plan",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "pending"
                 thread.approval_request_id = "perm-list-corrupt-plan"
@@ -385,7 +384,6 @@ class TestListThreads:
                     thread_id="thread-list-optionless-plan",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "pending"
                 thread.approval_request_id = "perm-list-optionless-plan"
@@ -420,7 +418,6 @@ class TestListThreads:
                     thread_id="thread-list-missing-plan",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "pending"
                 thread.approval_request_id = "perm-list-missing-plan"
@@ -446,7 +443,6 @@ class TestListThreads:
                     thread_id="thread-list-live-plan",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "pending"
                 thread.approval_request_id = "perm-list-stale-plan"
@@ -481,7 +477,6 @@ class TestListThreads:
                     thread_id="thread-list-rejected-live-plan",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "rejected"
                 thread.approval_request_id = "perm-list-stale-rejected-plan"
@@ -516,7 +511,6 @@ class TestListThreads:
                     thread_id="thread-list-rejected-residue",
                     status="running",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "rejected"
                 thread.approval_request_id = "perm-list-rejected-residue"
@@ -542,7 +536,6 @@ class TestListThreads:
                     thread_id="thread-list-terminal-plan",
                     status="completed",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "pending"
                 thread.approval_request_id = "perm-list-terminal-plan"
@@ -577,7 +570,6 @@ class TestListThreads:
                     thread_id="thread-list-answered-pending-apply",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "pending"
                 thread.approval_request_id = "perm-list-answered-pending-apply"
@@ -618,7 +610,6 @@ class TestListThreads:
                     thread_id="thread-list-stale-state",
                     status="running",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 session.add(
                     ThreadExecutionStateModel(
@@ -665,7 +656,6 @@ class TestListThreads:
                     thread_id="thread-list-checkpoint-drift",
                     status="running",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 session.add(
                     ThreadExecutionStateModel(
@@ -710,7 +700,6 @@ class TestListThreads:
                     thread_id="thread-list-checkpoint-unverified",
                     status="running",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 await session.commit()
 
@@ -742,7 +731,6 @@ class TestListThreads:
                     thread_id="thread-list-checkpoint-unverified-plan",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "pending"
                 thread.approval_request_id = "perm-list-checkpoint-unverified-plan"
@@ -930,7 +918,6 @@ class TestThreadState:
                     thread_id="thread-corrupt-permission-state",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 await record_permission_request(
                     session,
@@ -986,7 +973,6 @@ class TestThreadState:
                     thread_id="thread-stale-state-endpoint",
                     status="running",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 session.add(
                     ThreadExecutionStateModel(
@@ -1043,7 +1029,6 @@ class TestThreadState:
                     thread_id="thread-plan-no-tool-call-endpoint",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "pending"
                 thread.approval_request_id = "perm-plan-no-tool-call-endpoint"
@@ -1094,7 +1079,6 @@ class TestThreadState:
                     thread_id="thread-state-aggregator-only",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 await session.commit()
 
@@ -1142,7 +1126,6 @@ class TestThreadState:
                     thread_id="thread-state-missing-checkpoint-permission",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "pending"
                 thread.approval_request_id = (
@@ -1194,7 +1177,6 @@ class TestThreadState:
                     thread_id="thread-state-submitted-stale-approval",
                     status="submitted",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "pending"
                 thread.approval_request_id = (
@@ -1251,7 +1233,6 @@ class TestThreadState:
                     thread_id="thread-state-terminal-permission-residue",
                     status="completed",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "pending"
                 thread.approval_request_id = (
@@ -1308,7 +1289,6 @@ class TestThreadState:
                     thread_id="thread-state-answered-pending-apply",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 thread.approval_status = "pending"
                 thread.approval_request_id = "perm-thread-state-answered-pending-apply"
@@ -1390,7 +1370,6 @@ class TestThreadState:
                     thread_id="thread-state-checkpoint-only",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 await session.commit()
 
@@ -1520,7 +1499,6 @@ class TestSendMessage:
                     thread_id="thread-message-repair-needed",
                     status="repair_needed",
                     repair_status="checkpoint_unavailable",
-                    execution_readiness="checkpoint_unavailable",
                 )
                 await session.commit()
 
@@ -1555,7 +1533,6 @@ class TestSendMessage:
                     thread_id="thread-message-reconciling",
                     status="reconciling",
                     repair_status="needs_reconciliation",
-                    execution_readiness="needs_reconciliation",
                 )
                 await session.commit()
 
@@ -1674,7 +1651,6 @@ class TestTeamStatus:
                     thread_id="team-status-answered-pending-apply",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 await record_permission_request(
                     session,
@@ -1753,7 +1729,6 @@ class TestTeamStatus:
                     thread_id="team-status-malformed-durable",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 await record_permission_request(
                     session,
@@ -1825,7 +1800,6 @@ class TestTeamStatus:
                     thread_id="team-status-checkpoint-unavailable",
                     status="input_required",
                     repair_status="checkpoint_unavailable",
-                    execution_readiness="checkpoint_unavailable",
                 )
                 await record_permission_request(
                     session,
@@ -1915,7 +1889,6 @@ class TestTeamStatus:
                     thread_id="team-status/malformed-run-id",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 await create_thread(
                     session,
@@ -1923,7 +1896,6 @@ class TestTeamStatus:
                     thread_id="team-status-well-formed-run-id",
                     status="input_required",
                     repair_status="healthy",
-                    execution_readiness="healthy",
                 )
                 await record_permission_request(
                     session,
@@ -2748,7 +2720,6 @@ class TestDeleteThread:
                     thread_id="thread-delete-input-required",
                     status="input_required",
                     repair_status="paused_resumable",
-                    execution_readiness="paused_resumable",
                 )
                 await record_permission_request(
                     session,

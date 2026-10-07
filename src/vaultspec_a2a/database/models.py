@@ -359,14 +359,10 @@ class ThreadModel(Base):
     # worse than recording an honest floor value.
     provider_condition: Mapped[str | None] = mapped_column(default=None)
     # Typed by RepairStatus, the SAME closed vocabulary as repair_status above,
-    # and deliberately not by an enum of its own. The two columns answer
-    # different questions from one shared set of answers: repair_status is the
-    # run's repair classification, execution_readiness is the readiness reading
-    # a dispatcher consults before resuming it. Every producer already writes a
-    # RepairStatus member here — the repair policy, reconciliation, the control
-    # projection, and the thread-state service all do — and every consumer that
-    # narrows the value tests membership against RepairStatus members. A second
-    # enum duplicating those members would be a vocabulary no writer speaks.
+    # because it holds the same answer: a run is as fit to resume as its repair
+    # posture says. The repository writes it from repair_status on every write
+    # and no reader consults it - served readiness is derived from repair_status
+    # at read time - so it only keeps step with the posture until it is dropped.
     execution_readiness: Mapped[str] = mapped_column(default=RepairStatus.HEALTHY)
     # The reconnect cursor a client compares against to discard already-seen
     # WebSocket/SSE events (api/schemas/snapshots.py's ThreadStateSnapshot

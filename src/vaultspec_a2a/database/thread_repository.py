@@ -219,7 +219,6 @@ class _CreateThreadOptional(TypedDict, total=False):
     team_preset: str | None
     repair_status: RepairStatus | str
     repair_reason: str | None
-    execution_readiness: RepairStatus | str
 
 
 class _CreateThreadArgs(_CreateThreadOptional):
@@ -260,7 +259,7 @@ async def create_thread(
         is_active=coerced_status in ACTIVE_STATUSES,
         repair_status=coerced_repair_status.value,
         repair_reason=options.get("repair_reason"),
-        execution_readiness=options.get("execution_readiness", RepairStatus.HEALTHY),
+        execution_readiness=coerced_repair_status.value,
         thread_metadata=metadata,
         workspace_root=workspace_root,
         workspace_key=_workspace_key(workspace_root),
@@ -740,7 +739,6 @@ async def update_thread_status(
 
 class _RepairOptional(TypedDict, total=False):
     repair_reason: str | None
-    execution_readiness: RepairStatus | str | None
     last_requested_action: ControlActionType | str | None
     last_applied_action: ControlActionType | str | None
 
@@ -752,10 +750,14 @@ class _RepairArgs(_RepairOptional):
 async def set_thread_repair_state(
     session: AsyncSession, thread_id: str, **kwargs: Unpack[_RepairArgs]
 ) -> ThreadModel | None:
-    """Persist thread repair metadata used by restart reconciliation."""
+    """Persist thread repair metadata used by restart reconciliation.
+
+    The readiness column is written from the repair status every time: a run is
+    as fit to resume as its repair posture says, so the column carries no
+    judgement of its own and only keeps step with the posture it mirrors.
+    """
     repair_status = kwargs["repair_status"]
     repair_reason = kwargs.get("repair_reason")
-    execution_readiness = kwargs.get("execution_readiness")
     last_requested_action = kwargs.get("last_requested_action")
     last_applied_action = kwargs.get("last_applied_action")
     thread = await session.get(ThreadModel, thread_id)
@@ -763,9 +765,8 @@ async def set_thread_repair_state(
         return None
 
     thread.repair_status = _coerce_repair_status(repair_status).value
+    thread.execution_readiness = thread.repair_status
     thread.repair_reason = repair_reason
-    if execution_readiness is not None:
-        thread.execution_readiness = execution_readiness
     if last_requested_action is not None:
         thread.last_requested_action = _coerce_control_action_type(
             last_requested_action

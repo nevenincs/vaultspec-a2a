@@ -8,13 +8,12 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
-
 from ..database import (
     ThreadModel,
     ThreadStatusElectionOutcome,
     elect_thread_status,
     get_control_action_by_dispatch_id,
+    get_thread,
     has_live_queued_continuation_lease,
     mark_control_action_applied,
     read_latest_checkpoint,
@@ -188,7 +187,7 @@ async def _reconcile_incomplete_checkpoint(
                 reason=evidence.kind.value,
             )
         await db.commit()
-        fresh = await db.get(ThreadModel, decision.thread_id, populate_existing=True)
+        fresh = await get_thread(db, decision.thread_id, refresh=True)
         return RecoveryObservation(
             ThreadStatus(fresh.status) if fresh is not None else None,
             evidence.kind.value,
@@ -333,11 +332,7 @@ async def _reconcile_completed_checkpoint(
         last_sequence=decision.last_sequence,
     )
     await db.commit()
-    fresh = await db.scalar(
-        select(ThreadModel)
-        .where(ThreadModel.id == decision.thread_id)
-        .execution_options(populate_existing=True)
-    )
+    fresh = await get_thread(db, decision.thread_id, refresh=True)
     won = outcome is ThreadStatusElectionOutcome.WON
     return RecoveryObservation(
         ThreadStatus(fresh.status) if fresh is not None else None,
@@ -354,11 +349,7 @@ async def reconcile_run_checkpoint(
 ) -> RecoveryObservation:
     """Settle completion only from current durable action and checkpoint evidence."""
     thread_id = request.thread_id
-    thread = await db.scalar(
-        select(ThreadModel)
-        .where(ThreadModel.id == thread_id)
-        .execution_options(populate_existing=True)
-    )
+    thread = await get_thread(db, thread_id, refresh=True)
     if thread is None:
         return RecoveryObservation(None, "run_missing", None, False)
     status = ThreadStatus(thread.status)

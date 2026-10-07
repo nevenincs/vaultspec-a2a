@@ -10,17 +10,17 @@ conditional writes they stand on.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 
+from ._helpers import affected_rows
 from .models import ThreadDeletionSagaModel
 
 if TYPE_CHECKING:
     from datetime import datetime, timedelta
 
-    from sqlalchemy import CursorResult, Result
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
@@ -33,16 +33,6 @@ __all__ = [
     "remove_deletion_saga_row",
     "swap_cleanup_ledger",
 ]
-
-
-def _rows_matched(result: Result[Any]) -> int:
-    """Return how many rows a conditional write matched.
-
-    Both conditional writes here decide on the match count, and a DML execution
-    always yields a cursor result; only the declared return type of
-    ``Session.execute`` is the wider ``Result``.
-    """
-    return cast("CursorResult[Any]", result).rowcount
 
 
 async def get_deletion_saga_row(
@@ -125,7 +115,7 @@ async def claim_deletion_saga_row(
     row = await session.get(ThreadDeletionSagaModel, thread_id, populate_existing=True)
     if row is None:
         return None
-    return row, _rows_matched(claim) == 1
+    return row, affected_rows(claim) == 1
 
 
 async def release_deletion_saga_claim(
@@ -177,7 +167,7 @@ async def swap_cleanup_ledger(
         .values(result_json=replacement, updated_at=updated_at)
         .execution_options(synchronize_session="fetch")
     )
-    return _rows_matched(swap) == 1
+    return affected_rows(swap) == 1
 
 
 async def remove_deletion_saga_row(

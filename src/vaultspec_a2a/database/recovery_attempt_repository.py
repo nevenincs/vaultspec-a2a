@@ -8,13 +8,13 @@ holds the queries, the conditional writes and the row construction.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, TypedDict, Unpack
 from uuid import uuid4
 
 from sqlalchemy import exists, select, update
 
 from ..thread.enums import RecoveryCondition
-from ._helpers import save_model
+from ._helpers import affected_rows, save_model
 from ._leases import RECOVERY_ATTEMPT_LEASE, clear_lease
 from .control_action_repository import get_writer_action, select_recoverable_actions
 from .models import ControlActionModel, RecoveryAttemptModel, ThreadModel
@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
-    from sqlalchemy.engine import CursorResult
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.orm import QueryableAttribute
     from sqlalchemy.sql.elements import ColumnElement
@@ -327,18 +326,15 @@ async def claim_recovery_attempt(
     claim_expires_at: datetime,
 ) -> RecoveryAttemptModel | None:
     """Take one attempt by compare-and-set while it is still due and unheld."""
-    won = cast(
-        "CursorResult[Any]",
-        await session.execute(
-            update(RecoveryAttemptModel)
-            .where(RecoveryAttemptModel.id == attempt_id, *_due_unclaimed(acquired_at))
-            .values(
-                **RECOVERY_ATTEMPT_LEASE.granted(claim_token, claim_expires_at),
-                updated_at=acquired_at,
-            )
-        ),
+    won = await session.execute(
+        update(RecoveryAttemptModel)
+        .where(RecoveryAttemptModel.id == attempt_id, *_due_unclaimed(acquired_at))
+        .values(
+            **RECOVERY_ATTEMPT_LEASE.granted(claim_token, claim_expires_at),
+            updated_at=acquired_at,
+        )
     )
-    if won.rowcount != 1:
+    if affected_rows(won) != 1:
         return None
     return await session.get(RecoveryAttemptModel, attempt_id, populate_existing=True)
 
@@ -351,20 +347,17 @@ async def _update_claimed(
     **values: object,
 ) -> bool:
     """Write *values* and free the claim only while *claim_token* still holds it."""
-    result = cast(
-        "CursorResult[Any]",
-        await session.execute(
-            update(RecoveryAttemptModel)
-            .where(
-                RecoveryAttemptModel.id == attempt_id,
-                RECOVERY_ATTEMPT_LEASE.held_by(claim_token),
-                RecoveryAttemptModel.settled_at.is_(None),
-                *where,
-            )
-            .values(**RECOVERY_ATTEMPT_LEASE.released(), **values)
-        ),
+    result = await session.execute(
+        update(RecoveryAttemptModel)
+        .where(
+            RecoveryAttemptModel.id == attempt_id,
+            RECOVERY_ATTEMPT_LEASE.held_by(claim_token),
+            RecoveryAttemptModel.settled_at.is_(None),
+            *where,
+        )
+        .values(**RECOVERY_ATTEMPT_LEASE.released(), **values)
     )
-    return result.rowcount == 1
+    return affected_rows(result) == 1
 
 
 async def release_recovery_claim(

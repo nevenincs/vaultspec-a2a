@@ -18,7 +18,7 @@ from typing import Annotated, Any, Literal, cast
 
 from annotated_types import Ge, MaxLen, MinLen
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langgraph.checkpoint.base import WRITES_IDX_MAP
+from langgraph.checkpoint.base import WRITES_IDX_MAP, CheckpointTuple
 from langgraph.checkpoint.serde.types import INTERRUPT
 
 from ..graph.enums import (
@@ -30,6 +30,7 @@ from ..graph.enums import (
     ToolCallStatus,
     ToolKind,
 )
+from ..utils.coercion import coerce_object_mapping
 from .action_receipts import sha256_hex
 from .clarification import ClarificationRequest
 from .enums import (
@@ -70,6 +71,7 @@ __all__ = [
     "ToolCallData",
     "ToolCallLocation",
     "build_agent_descriptor",
+    "checkpoint_tuple_id",
     "classify_message_role",
     "classify_permission_pause_reason",
     "coerce_provider",
@@ -618,6 +620,22 @@ def _object_dict(value: object) -> dict[str, object]:
     return cast("dict[str, object]", value) if isinstance(value, dict) else {}
 
 
+def checkpoint_tuple_id(checkpoint_tuple: CheckpointTuple | None) -> str | None:
+    """Return the id a stored checkpoint answers to, or ``None`` without one.
+
+    The id the checkpoint records, falling back to the one its config names.
+    Durable storage is untrusted, so a checkpoint or config that is not a plain
+    string-keyed dict reads as naming no id.
+    """
+    checkpoint = (
+        coerce_object_mapping(getattr(checkpoint_tuple, "checkpoint", None)) or {}
+    )
+    config = coerce_object_mapping(getattr(checkpoint_tuple, "config", None)) or {}
+    configurable = coerce_object_mapping(config.get("configurable")) or {}
+    raw = checkpoint.get("id") or configurable.get("checkpoint_id")
+    return None if raw is None else str(raw)
+
+
 def extract_checkpoint_fields(
     checkpoint_tuple: Any,
     *,
@@ -634,11 +652,6 @@ def extract_checkpoint_fields(
     metadata = _object_dict(checkpoint_tuple.metadata)
     parent_config = _object_dict(checkpoint_tuple.parent_config)
     configurable_parent = _object_dict(parent_config.get("configurable", {}))
-    config = _object_dict(checkpoint_tuple.config)
-    config_configurable = _object_dict(config.get("configurable", {}))
-    checkpoint_id: object = checkpoint.get("id") or config_configurable.get(
-        "checkpoint_id"
-    )
     channel_values = cast(
         "dict[str, Any]", _object_dict(checkpoint.get("channel_values", {}))
     )
@@ -652,7 +665,7 @@ def extract_checkpoint_fields(
     projection = CheckpointProjection(
         channel_values=channel_values,
         config={"configurable": {"thread_id": thread_id}},
-        checkpoint_id=str(checkpoint_id) if checkpoint_id is not None else None,
+        checkpoint_id=checkpoint_tuple_id(checkpoint_tuple),
         checkpoint_created_at=_parse_checkpoint_created_at(checkpoint.get("ts")),
         checkpoint_parent_id=(
             str(parent_checkpoint_id_raw)

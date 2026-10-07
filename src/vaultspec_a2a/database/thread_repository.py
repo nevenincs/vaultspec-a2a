@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
-    from sqlalchemy.engine import CursorResult
     from sqlalchemy.ext.asyncio import AsyncSession
     from sqlalchemy.orm import QueryableAttribute
     from sqlalchemy.sql import Select
@@ -31,6 +30,7 @@ from ..thread.constants import (
 from ..thread.enums import (
     ACTIVE_STATUSES,
     NON_ACTIVE_STATUSES,
+    TERMINAL_STATUS_VALUES,
     ApprovalStatus,
     ControlActionType,
     DegradedReason,
@@ -46,6 +46,7 @@ from ._helpers import (
     _coerce,
     _journal_row_for,
     _UnsetType,
+    affected_rows,
     save_model,
 )
 from .models import (
@@ -77,8 +78,11 @@ __all__ = [
     "record_thread_execution_state",
     "select_invalid_authority_thread",
     "select_orphaned_writer_thread",
+    "select_settled_thread_ids",
     "set_thread_approval_state",
     "set_thread_repair_state",
+    "thread_exists",
+    "thread_last_sequence",
     "thread_owned_by",
     "thread_write_expectation",
 ]
@@ -159,6 +163,14 @@ def select_invalid_authority_thread() -> Select[tuple[str]]:
     """Select one thread whose stored write authority breaks a current CHECK."""
     return (
         select(ThreadModel.id).where(text(WRITE_AUTHORITY_VIOLATION_PREDICATE)).limit(1)
+    )
+
+
+def select_settled_thread_ids(*, before: datetime) -> Select[tuple[str]]:
+    """Select the runs that reached a terminal status before *before*."""
+    return select(ThreadModel.id).where(
+        ThreadModel.status.in_(TERMINAL_STATUS_VALUES),
+        ThreadModel.updated_at < before,
     )
 
 
@@ -312,8 +324,32 @@ async def create_thread(
         raise
 
 
-async def get_thread(session: AsyncSession, thread_id: str) -> ThreadModel | None:
-    return await session.get(ThreadModel, thread_id)
+async def get_thread(
+    session: AsyncSession, thread_id: str, *, refresh: bool = False
+) -> ThreadModel | None:
+    """Return one run's row by id.
+
+    ``refresh`` re-reads the row from the database instead of the identity map,
+    for a caller whose copy may predate a write another statement made.
+    """
+    return await session.get(ThreadModel, thread_id, populate_existing=refresh)
+
+
+async def thread_exists(session: AsyncSession, thread_id: str) -> bool:
+    """Whether a run's row exists, answered without loading it."""
+    return (
+        await session.scalar(select(ThreadModel.id).where(ThreadModel.id == thread_id))
+    ) is not None
+
+
+async def thread_last_sequence(session: AsyncSession, thread_id: str) -> int | None:
+    """Return the replay cursor captured on a run when it settled.
+
+    ``None`` for an absent run and for a present one that has not settled.
+    """
+    return await session.scalar(
+        select(ThreadModel.last_sequence).where(ThreadModel.id == thread_id)
+    )
 
 
 async def lock_thread_row(session: AsyncSession, thread_id: str) -> ThreadModel | None:
@@ -515,7 +551,7 @@ def _active_thread_page_statement(
 
 
 async def delete_thread(session: AsyncSession, thread_id: str) -> bool:
-    thread = await session.get(ThreadModel, thread_id)
+    thread = await get_thread(session, thread_id)
     if thread is None:
         return False
     await session.delete(thread)
@@ -711,23 +747,15 @@ async def _compare_and_set_thread(
         )
         .execution_options(synchronize_session=False)
     )
-    result = cast("CursorResult[object]", await session.execute(statement))
-    if result.rowcount == 1:
+    if affected_rows(await session.execute(statement)) == 1:
         # Callers apply repair, approval and journal side effects in this same
         # transaction. Refresh an already identity-mapped row before returning
         # so those steps observe the elected status and authority rather than
         # the witness that just lost ownership.
-        await session.scalar(
-            select(ThreadModel)
-            .where(ThreadModel.id == thread_id)
-            .execution_options(populate_existing=True)
-        )
+        await get_thread(session, thread_id, refresh=True)
         return ThreadStatusElectionResult(ThreadStatusElectionOutcome.WON)
 
-    row_exists = await session.scalar(
-        select(ThreadModel.id).where(ThreadModel.id == thread_id)
-    )
-    if row_exists is None:
+    if not await thread_exists(session, thread_id):
         return ThreadStatusElectionResult(ThreadStatusElectionOutcome.NOT_FOUND)
 
     matching_receipt = await session.scalar(select(receipt_exists))
@@ -759,7 +787,7 @@ async def set_thread_repair_state(
     repair_reason = kwargs.get("repair_reason")
     last_requested_action = kwargs.get("last_requested_action")
     last_applied_action = kwargs.get("last_applied_action")
-    thread = await session.get(ThreadModel, thread_id)
+    thread = await get_thread(session, thread_id)
     if thread is None:
         return None
 
@@ -798,7 +826,7 @@ async def set_thread_approval_state(
     approval_reason = kwargs.get("approval_reason", _UNSET)
     approval_response_action_id = kwargs.get("approval_response_action_id", _UNSET)
     approval_updated_at = kwargs.get("approval_updated_at")
-    thread = await session.get(ThreadModel, thread_id)
+    thread = await get_thread(session, thread_id)
     if thread is None:
         return None
     if not isinstance(approval_status, _UnsetType):
@@ -855,7 +883,7 @@ async def record_thread_execution_state(
     session: AsyncSession, **kwargs: Unpack[_ExecutionStateArgs]
 ) -> ThreadExecutionStateModel | None:
     """Create or refresh the latest execution-state projection for a thread."""
-    thread = await session.get(ThreadModel, kwargs["thread_id"])
+    thread = await get_thread(session, kwargs["thread_id"])
     if thread is None:
         return None
 

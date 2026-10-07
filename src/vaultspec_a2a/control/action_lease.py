@@ -88,7 +88,6 @@ class ControlActionClaimRequest:
     request_id: str | None = None
     worker_generation: int = 0
     now: datetime | None = None
-    lease_ttl: timedelta = CONTROL_ACTION_LEASE_TTL
     write_expectation: ThreadWriteExpectation | None = None
     recovery_timeout_seconds: int | None = None
     recovery_deadline_at: datetime | None = None
@@ -162,9 +161,9 @@ def _resolved_recovery_deadline(
 
 
 async def take_action_lease(
-    db: AsyncSession, action_id: str, *, now: datetime, ttl: timedelta
+    db: AsyncSession, action_id: str, *, now: datetime
 ) -> str | None:
-    """Take the unapplied action's lease for *ttl* under a fresh claim token.
+    """Take the unapplied action's lease under a fresh claim token.
 
     Returns the token when this call won the lease, and ``None`` when another
     dispatcher holds it.
@@ -174,7 +173,7 @@ async def take_action_lease(
         db,
         action_id,
         claim_token=claim_token,
-        claim_expires_at=now + ttl,
+        claim_expires_at=now + CONTROL_ACTION_LEASE_TTL,
         now=now,
     )
     return claim_token if won else None
@@ -185,7 +184,6 @@ async def _claim_reserved_action(
     reservation: ControlActionReservation,
     action_type: ControlActionType,
     instant: datetime,
-    lease_ttl: timedelta,
 ) -> tuple[str | None, bool]:
     action = reservation.action
     authority_matches = action_type not in RECOVERY_ACTION_TYPES or (
@@ -194,7 +192,7 @@ async def _claim_reserved_action(
     )
     if not authority_matches or not reservation.payload_matches or action.applied_at:
         return None, authority_matches
-    claim_token = await take_action_lease(db, action.id, now=instant, ttl=lease_ttl)
+    claim_token = await take_action_lease(db, action.id, now=instant)
     return claim_token, authority_matches
 
 
@@ -241,7 +239,7 @@ async def prepare_control_action_claim(
     result_status = action.result_status
 
     claim_token, authority_matches = await _claim_reserved_action(
-        db, reservation, resolved_type, instant, request.lease_ttl
+        db, reservation, resolved_type, instant
     )
     acquired = claim_token is not None
 

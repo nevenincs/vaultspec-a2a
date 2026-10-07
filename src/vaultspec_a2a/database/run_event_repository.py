@@ -20,14 +20,19 @@ frames.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
-from sqlalchemy import CursorResult, Delete, Insert, delete, func, select
+from sqlalchemy import Delete, Insert, delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from ..thread.enums import TERMINAL_STATUS_VALUES
-from .models import RunEventModel, ThreadModel
+from ._helpers import affected_rows
+from .models import RunEventModel
 from .session import begin_write_transaction
+from .thread_repository import (
+    select_settled_thread_ids,
+    thread_exists,
+    thread_last_sequence,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -208,27 +213,18 @@ class RunEventStore:
         be, since every later attempt carries the same doomed rows.
         """
         async with self.session_factory() as session:
-            return (
-                await session.execute(
-                    select(ThreadModel.id).where(ThreadModel.id == thread_id)
-                )
-            ).scalar_one_or_none() is not None
+            return await thread_exists(session, thread_id)
 
     async def settled_sequence(self, thread_id: str) -> int | None:
         """Return the cursor captured on *thread_id* when it settled.
 
-        Read here rather than through the thread repository because it is the
-        second half of ONE question - where this run's numbering stands -
+        The second half of ONE question - where this run's numbering stands -
         whose first half is :meth:`high_water_mark`. A caller seeding an
         allocator asks both against the same store and must not have to reach
         for two of them.
         """
         async with self.session_factory() as session:
-            return (
-                await session.execute(
-                    select(ThreadModel.last_sequence).where(ThreadModel.id == thread_id)
-                )
-            ).scalar_one_or_none()
+            return await thread_last_sequence(session, thread_id)
 
     async def delete_for_runs_settled_before(self, cutoff: datetime) -> int:
         """Delete every retained frame of a run that settled before *cutoff*.
@@ -243,22 +239,15 @@ class RunEventStore:
         """
         async with self.session_factory() as session:
             await begin_write_transaction(session)
-            settled = (
-                select(ThreadModel.id)
-                .where(
-                    ThreadModel.status.in_(TERMINAL_STATUS_VALUES),
-                    ThreadModel.updated_at < cutoff,
+            result = await session.execute(
+                delete(RunEventModel).where(
+                    RunEventModel.thread_id.in_(
+                        select_settled_thread_ids(before=cutoff)
+                    )
                 )
-                .scalar_subquery()
-            )
-            result = cast(
-                "CursorResult[Any]",
-                await session.execute(
-                    delete(RunEventModel).where(RunEventModel.thread_id.in_(settled))
-                ),
             )
             await session.commit()
-            return result.rowcount
+            return affected_rows(result)
 
     async def delete_produced_before(self, cutoff: datetime) -> int:
         """Delete every retained frame produced before *cutoff*, and count them.
@@ -269,11 +258,8 @@ class RunEventStore:
         """
         async with self.session_factory() as session:
             await begin_write_transaction(session)
-            result = cast(
-                "CursorResult[Any]",
-                await session.execute(
-                    delete(RunEventModel).where(RunEventModel.created_at < cutoff)
-                ),
+            result = await session.execute(
+                delete(RunEventModel).where(RunEventModel.created_at < cutoff)
             )
             await session.commit()
-            return result.rowcount
+            return affected_rows(result)

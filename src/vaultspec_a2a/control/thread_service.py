@@ -263,7 +263,7 @@ async def _failed_initial_dispatch(
     thread = context.thread
     action_receipt_id = context.claim.dispatch_id
     await db.commit()
-    current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
+    current_thread = await get_thread(db, thread.id, refresh=True)
     if current_thread is None:
         return ThreadCreationResult(
             thread_id=thread.id,
@@ -417,7 +417,7 @@ async def create_and_dispatch_thread(
         action_receipt_id=action_receipt_id,
     )
     await db.commit()
-    current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
+    current_thread = await get_thread(db, thread.id, refresh=True)
     if current_thread is None:
         return ThreadCreationResult(
             thread_id=thread.id,
@@ -514,9 +514,7 @@ async def delete_thread_service(
             manifest=manifest,
         )
         if saga is None:
-            current_thread = await db.get(
-                ThreadModel, thread_id, populate_existing=True
-            )
+            current_thread = await get_thread(db, thread_id, refresh=True)
             if current_thread is None:
                 return DeleteResult(deleted=False, not_found=True)
             if current_thread.status != ThreadStatus.DELETING.value:
@@ -596,7 +594,7 @@ class ArchiveResult:
 
 async def _archive_election_failure(db: AsyncSession, thread_id: str) -> ArchiveResult:
     await db.rollback()
-    current_thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+    current_thread = await get_thread(db, thread_id, refresh=True)
     if current_thread is None:
         return ArchiveResult(archived=False, not_found=True)
     refreshed = can_archive(current_thread.status)

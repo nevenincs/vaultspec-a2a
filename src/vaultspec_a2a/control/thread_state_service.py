@@ -421,7 +421,7 @@ async def capture_thread_state(
         ),
     )
     await db.commit()
-    thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+    thread = await get_thread(db, thread_id, refresh=True)
     if thread is None or thread.status == ThreadStatus.DELETING.value:
         return None
     snapshot = ThreadStateData(

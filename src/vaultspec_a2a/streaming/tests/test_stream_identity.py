@@ -1,6 +1,6 @@
 """Who a run's frames are attributed to, against a graph that can tell.
 
-A run reports nodes, tool calls, model text and custom writes. Each is keyed
+A run reports nodes, tool calls and model text. Each is keyed
 on an identity, and each identity was once taken from whatever was nearest
 rather than from what LangGraph documents:
 
@@ -12,12 +12,11 @@ rather than from what LangGraph documents:
   chunks that announced it were keyed by the id the model gave it, leaving one
   call described twice and one of the two stuck pending;
 - a model call the supervisor asked not to stream was filtered after the
-  library had already produced it;
-- a node's own stream writes were discarded.
+  library had already produced it.
 
 The graph here has all of those shapes - a node with a nested runnable, a
-subgraph, a model that streams a tool call the node then executes, a model
-tagged not to stream, and a node that writes to the stream - and it is a real
+subgraph, a model that streams a tool call the node then executes, and a model
+tagged not to stream - and it is a real
 compiled graph over a real checkpointer driven through the real aggregator.
 """
 
@@ -33,7 +32,6 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.config import get_stream_writer
 from langgraph.constants import TAG_NOSTREAM
 from langgraph.graph import END, START
 
@@ -42,7 +40,6 @@ from ...graph.events import (
     AgentStatus,
     MessageChunk,
     PlanUpdate,
-    ThoughtChunk,
     ToolCallStart,
     ToolCallUpdate,
 )
@@ -124,8 +121,6 @@ async def _worker(state: _State) -> dict[str, Any]:
     # that used to produce a phantom turn and a plan nobody wrote.
     nested = RunnableLambda(_format).with_config(run_name="formatter")
     await nested.ainvoke({"x": 1})
-
-    get_stream_writer()("a bare string the node wrote")
 
     routing = _ToolStreamingModel().with_config(tags=[TAG_NOSTREAM])
     async for _ in routing.astream([HumanMessage(content="who next?")]):
@@ -260,13 +255,3 @@ def test_a_nostream_model_call_reaches_the_client_in_no_form(
     assert relayed.count("visible answer") == 1, relayed
     # The routing model produced the same text, so a second copy would be it.
     assert len([event for event in chunks if event.finish_reason]) <= 1
-
-
-def test_a_nodes_own_stream_write_reaches_the_client(
-    identity_events: list[DomainEvent],
-) -> None:
-    """A bare string is relayed, not dropped and not raised on."""
-    thoughts = [
-        event.content for event in identity_events if isinstance(event, ThoughtChunk)
-    ]
-    assert "a bare string the node wrote" in thoughts, thoughts

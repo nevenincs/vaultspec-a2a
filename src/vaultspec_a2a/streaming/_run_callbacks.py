@@ -1,7 +1,7 @@
 """Tool and model-completion lifecycle, taken from the callback surface.
 
 A graph's public stream modes carry node boundaries, state updates, model
-tokens, custom writes and checkpoints. Two things they do not carry are a
+tokens and checkpoints. Two things they do not carry are a
 tool's own lifecycle and the end of a model turn: both are LangChain runs
 rather than graph supersteps, so their start, end and failure reach an
 application through the documented callback surface instead. This handler is

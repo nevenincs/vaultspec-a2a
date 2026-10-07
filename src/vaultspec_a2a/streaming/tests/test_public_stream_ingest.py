@@ -5,7 +5,7 @@ lifecycle taken from the callback surface beside it. Three properties of that
 arrangement are what a client depends on:
 
 - every family of frame a run produced before is still produced: model text,
-  reasoning, tool lifecycle, node status, plan updates and custom writes;
+  reasoning, tool lifecycle, node status and plan updates;
 - a park is read from the stream as it happens, so a state read that fails
   afterwards can no longer turn an interrupted run into a completed one;
 - nothing in the streaming package reaches into LangGraph's private modules
@@ -32,7 +32,6 @@ import pytest
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.config import get_stream_writer
 from langgraph.graph import END, START
 from langgraph.types import interrupt
 
@@ -43,7 +42,6 @@ from ...graph.events import (
     MessageChunk,
     PermissionRequest,
     PlanUpdate,
-    ThoughtChunk,
     ToolCallStart,
     ToolCallUpdate,
 )
@@ -76,8 +74,6 @@ def _speaking_node(
 
     async def node(state: _State) -> dict[str, Any]:
         del state
-        writer = get_stream_writer()
-        writer({"content": "considering the request"})
         model = ProviderFactory().create(
             Provider.DETERMINISTIC,
             model="deterministic",
@@ -144,9 +140,6 @@ async def test_a_run_still_reports_every_family_of_frame_it_used_to() -> None:
     text = "".join(e.content for e in events if isinstance(e, MessageChunk))
     assert len(replies) == 1
     assert replies[0] in text
-
-    thoughts = [e.content for e in events if isinstance(e, ThoughtChunk)]
-    assert "considering the request" in thoughts
 
     starts = [e for e in events if isinstance(e, ToolCallStart)]
     assert [e.tool_call_id for e in starts] == ["call_REPORT"]

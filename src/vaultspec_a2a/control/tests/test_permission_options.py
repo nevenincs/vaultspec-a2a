@@ -2,9 +2,10 @@
 
 ``decode_allowed_options`` owns the one JSON decode of the
 ``allowed_options_json`` column; the valid ids and the rejection verdict are
-answered by the canonical Layer 1 option rules over what it decodes. These tests
-pin the decode boundary, prove the two spellings survive the round trip through
-the column, and pin the verdict every settlement site shares.
+answered by the canonical Layer 1 option rules over what it decodes, and over an
+offer that never went through the column. These tests pin the decode boundary,
+prove the two spellings survive the round trip through the column, and pin the
+verdict every settlement site shares.
 
 The central verdict regression is a vocabulary confusion. An option's ``kind`` is
 drawn from a closed enum; its ``id`` is free-form and provider-defined. The
@@ -19,11 +20,12 @@ import json
 
 import pytest
 
+from ...graph.acp_options import valid_option_ids
 from ...thread.enums import PermissionRequestStatus
 from ...thread.permission_fsm import compute_permission_resolution_effects
 from ..permission_options import (
+    answer_is_rejection,
     decode_allowed_options,
-    extract_allowed_option_ids,
     response_is_rejection,
 )
 
@@ -52,21 +54,21 @@ def test_either_spelling_survives_the_json_column(key: str) -> None:
     """A row written by the ACP wire and one written by our own edge agree."""
     raw = json.dumps([{key: "allow_once", "name": "Allow"}])
 
-    assert extract_allowed_option_ids(raw) == {"allow_once"}
+    assert valid_option_ids(decode_allowed_options(raw)) == {"allow_once"}
 
 
 def test_a_mixed_spelling_row_yields_both_ids() -> None:
     """A durable row may carry options recorded through different transports."""
     raw = json.dumps([{"optionId": "approve"}, {"option_id": "reject_once"}])
 
-    assert extract_allowed_option_ids(raw) == {"approve", "reject_once"}
+    assert valid_option_ids(decode_allowed_options(raw)) == {"approve", "reject_once"}
 
 
 def test_an_option_without_a_usable_id_contributes_nothing() -> None:
     """A malformed stored option never admits a null answer as valid."""
     raw = json.dumps([{"optionId": "approve"}, {"label": "Nameless"}, {"optionId": ""}])
 
-    valid = extract_allowed_option_ids(raw)
+    valid = valid_option_ids(decode_allowed_options(raw))
 
     assert valid == {"approve"}
     assert None not in valid
@@ -86,7 +88,7 @@ def test_an_option_without_a_usable_id_contributes_nothing() -> None:
 )
 def test_an_unusable_column_offers_no_ids(raw: str | None) -> None:
     """Absent, malformed, or non-list columns fail closed rather than raise."""
-    assert extract_allowed_option_ids(raw) == set()
+    assert valid_option_ids(decode_allowed_options(raw)) == set()
 
 
 def test_an_absent_column_is_told_apart_from_an_unreadable_one() -> None:
@@ -95,6 +97,16 @@ def test_an_absent_column_is_told_apart_from_an_unreadable_one() -> None:
     assert decode_allowed_options("[]") == []
     for broken in ("", "not json at all", "{}", '"a string"'):
         assert decode_allowed_options(broken) is None
+
+
+def test_an_offer_that_never_met_the_column_is_judged_by_the_same_rule() -> None:
+    """The checkpoint's live offer and the column's copy of it cannot disagree."""
+    offered: list[object] = json.loads(_KIMI_OPTIONS)
+
+    assert answer_is_rejection(offered, "reject") is True
+    assert answer_is_rejection(offered, "approve_for_session") is False
+    assert answer_is_rejection(offered, None) is False
+    assert answer_is_rejection(None, "deny_once") is True
 
 
 def test_a_declared_kind_classifies_an_id_the_system_has_never_seen() -> None:

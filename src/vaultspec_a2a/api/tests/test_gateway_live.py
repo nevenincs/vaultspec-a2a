@@ -60,6 +60,7 @@ from ...thread.executable_graph import freeze_graph_definition
 from ...thread.idempotency import thread_create_action_key
 from ..routes.gateway import admission_gate
 from .conftest import make_app
+from .permission_harness import park_permission
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -174,11 +175,17 @@ async def _seed_live_thread(
 
 
 async def _seed_permission(
-    session_factory: SessionFactory, *, thread_id: str, request_id: str
-) -> None:
-    """Record a real pending permission request against a real run."""
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    *,
+    thread_id: str,
+) -> str:
+    """Park a real run on a permission request, journal it, and name it."""
     from ...database.permission_repository import record_permission_request
 
+    request_id = await park_permission(
+        checkpointer, thread_id=thread_id, tool_name="bash"
+    )
     async with session_factory() as session:
         await record_permission_request(
             session,
@@ -196,6 +203,7 @@ async def _seed_permission(
             tool_call="bash",
         )
         await session.commit()
+    return request_id
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -424,8 +432,9 @@ async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one
 
         owner = await _start("gwlive-05", "owns the permission")
         stranger = await _start("gwlive-06", "owns nothing")
-        request_id = f"{owner}:req-live"
-        await _seed_permission(session_factory, thread_id=owner, request_id=request_id)
+        request_id = await _seed_permission(
+            session_factory, checkpointer, thread_id=owner
+        )
 
         # Scoped: the stranger cannot answer the owner's question, and the
         # refusal is a not-found rather than a leak that the id exists.

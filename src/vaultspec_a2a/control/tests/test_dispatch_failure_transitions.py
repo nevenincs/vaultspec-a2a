@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from ...api.tests.clarification_harness import park_clarification
+from ...api.tests.permission_harness import park_permission
 from ...control._permission_response_contract import PermissionInput
 from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
@@ -418,12 +419,17 @@ async def test_a_reasonless_failure_still_carries_a_condition(
 
 async def _parked_permission_run(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
     *,
     thread_id: str,
     workspace: Path,
 ) -> str:
     """Seed a run parked on a real tool-permission question."""
-    request_id = f"{thread_id}:permission"
+    request_id = await park_permission(
+        checkpointer,
+        thread_id=thread_id,
+        options=[{"optionId": "allow_once", "name": "Allow once"}],
+    )
     async with session_factory() as session:
         await create_thread(
             session,
@@ -464,19 +470,18 @@ async def test_a_saturated_worker_leaves_the_parked_run_answerable(
     """
     thread_id = "capacity-refused-resume"
     request_id = await _parked_permission_run(
-        session_factory, thread_id=thread_id, workspace=tmp_path
+        session_factory, checkpointer, thread_id=thread_id, workspace=tmp_path
     )
 
     async with (
         _saturated_worker(checkpointer) as worker_client,
         session_factory() as session,
     ):
-        pending = await get_permission_request(session, request_id)
-        assert pending is not None
         result = await respond_to_permission(
             session,
-            permission=pending,
+            thread_id=thread_id,
             response=PermissionInput(request_id, "allow_once", "capacity-retry"),
+            checkpointer=checkpointer,
             transport=DispatchTransport(
                 worker_client=worker_client,
                 circuit_breaker=WorkerCircuitBreaker(
@@ -512,6 +517,7 @@ async def test_a_saturated_worker_leaves_the_parked_run_answerable(
 @pytest.mark.asyncio
 async def test_an_unreachable_worker_leaves_the_parked_run_answerable(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
     tmp_path: Path,
 ) -> None:
     """A transport failure retains the accepted answer for its scheduled retry.
@@ -523,19 +529,18 @@ async def test_an_unreachable_worker_leaves_the_parked_run_answerable(
     """
     thread_id = "unreachable-refused-resume"
     request_id = await _parked_permission_run(
-        session_factory, thread_id=thread_id, workspace=tmp_path
+        session_factory, checkpointer, thread_id=thread_id, workspace=tmp_path
     )
 
     async with (
         httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as worker_client,
         session_factory() as session,
     ):
-        pending = await get_permission_request(session, request_id)
-        assert pending is not None
         result = await respond_to_permission(
             session,
-            permission=pending,
+            thread_id=thread_id,
             response=PermissionInput(request_id, "allow_once", "unreachable-retry"),
+            checkpointer=checkpointer,
             transport=DispatchTransport(
                 worker_client=worker_client,
                 circuit_breaker=WorkerCircuitBreaker(

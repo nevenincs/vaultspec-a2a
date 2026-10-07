@@ -4,31 +4,47 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeIs
+from typing import TYPE_CHECKING, TypeIs, cast
 
-from ..graph.enums import PermissionType
-from ..thread.enums import ApprovalStatus, PermissionRequestStatus
-from .permission_options import response_is_rejection
+from ..graph.acp_options import valid_option_ids
+from ..graph.enums import PermissionOptionKind, PermissionType
+from ..thread.enums import ApprovalStatus
+from ..thread.snapshots import (
+    PERMISSION_REQUEST_EVENT_TYPES,
+    PLAN_APPROVAL_PAUSE_CAUSES,
+)
+from .permission_options import answer_is_rejection, decode_allowed_options
 
 if TYPE_CHECKING:
     from ..database import PermissionRequestModel, ThreadModel
     from ..ipc.schemas import DispatchRequest
+    from ..thread import CheckpointProjection, ProjectedInterrupt
     from ..thread.dispatch_policy import FailureType
     from .action_lease import ControlActionClaim
 
 __all__ = [
     "AuthorizedPermission",
+    "ParkedPermission",
     "PermissionInput",
     "PermissionResult",
     "PermissionTransition",
     "RejectedResponse",
     "audited_tool_name",
     "existing_rejection_error",
+    "held_interrupt",
     "rejected_payload",
     "rejected_permission_error",
     "response_payload",
     "response_verdict",
 ]
+
+#: The answers a plan or document decision accepts. An approval gate's interrupt
+#: names its request but offers no choices, so this pair is the whole offer; a
+#: tool permission's offer is the one its interrupt carries.
+_APPROVAL_OPTIONS: tuple[dict[str, str], ...] = (
+    {"option_id": "approve", "kind": PermissionOptionKind.ALLOW_ONCE.value},
+    {"option_id": "reject", "kind": PermissionOptionKind.REJECT_ONCE.value},
+)
 
 
 def response_payload(option_id: str, notes: str | None) -> dict[str, object]:
@@ -42,7 +58,94 @@ def _is_json_object(value: object) -> TypeIs[dict[str, object]]:
     return isinstance(value, dict)
 
 
-def response_verdict(permission: object, option_id: str) -> str:
+@dataclass(frozen=True, slots=True)
+class ParkedPermission:
+    """The permission or approval request a response answers.
+
+    A request the run's checkpoint holds is ``pending``: its interrupt names its
+    type and the options it offers, and nothing the journal cached about it
+    decides either. A request the checkpoint no longer holds is read from its
+    journal row, which can say what an earlier answer was addressed to so that a
+    replay of it is judged the same way, and never that the request is pending.
+    """
+
+    request_id: str
+    pause_reason_type: str
+    tool_call: str | None
+    description: str
+    offered: list[object]
+    pending: bool
+
+    @property
+    def option_ids(self) -> set[str]:
+        """The option ids a response to this request could name."""
+        return valid_option_ids(self.offered)
+
+    @classmethod
+    def from_interrupt(
+        cls, interrupt: ProjectedInterrupt, *, description: str
+    ) -> ParkedPermission:
+        """Read a request off the interrupt a checkpoint holds it under.
+
+        *description* is the journal's disclosure copy of the question, which
+        the interrupt does not carry.
+        """
+        offered: list[object]
+        tool_call: str | None = None
+        if interrupt.interrupt_type in PLAN_APPROVAL_PAUSE_CAUSES:
+            offered = [*_APPROVAL_OPTIONS]
+        else:
+            options: object = interrupt.payload.get("options")
+            offered = cast("list[object]", options) if isinstance(options, list) else []
+            tool_name: object = interrupt.payload.get("tool_name")
+            if isinstance(tool_name, str) and tool_name:
+                tool_call = tool_name
+        return cls(
+            request_id=interrupt.interrupt_id,
+            pause_reason_type=interrupt.interrupt_type,
+            tool_call=tool_call,
+            description=description,
+            offered=offered,
+            pending=True,
+        )
+
+    @classmethod
+    def from_journal(cls, row: PermissionRequestModel) -> ParkedPermission:
+        """Read a request the checkpoint no longer holds from its journal row."""
+        return cls(
+            request_id=row.request_id,
+            pause_reason_type=row.pause_reason_type,
+            tool_call=row.tool_call,
+            description=row.description,
+            offered=decode_allowed_options(row.allowed_options_json) or [],
+            pending=False,
+        )
+
+
+def held_interrupt(
+    projection: CheckpointProjection | None, request_id: str
+) -> ProjectedInterrupt | None:
+    """Return the permission or approval interrupt held under *request_id*.
+
+    The one reading of whether a request is pending: the interrupts a checkpoint
+    holds are the questions a run is parked on, so a request not among them is
+    not waiting for an answer, whatever the journal says about it. A projection
+    that could not be made holds nothing.
+    """
+    if projection is None:
+        return None
+    return next(
+        (
+            interrupt
+            for interrupt in projection.pending_interrupts
+            if interrupt.interrupt_id == request_id
+            and interrupt.interrupt_type in PERMISSION_REQUEST_EVENT_TYPES
+        ),
+        None,
+    )
+
+
+def response_verdict(permission: ParkedPermission, option_id: str) -> str:
     """Report the decision a response carries without flattening it to pending.
 
     Reads the verdict from the shared predicate against the options the request
@@ -55,15 +158,14 @@ def response_verdict(permission: object, option_id: str) -> str:
     from here, for the same reason: two derivations of "was this approved" are
     two chances to disagree about the same decision.
     """
-    raw_options = getattr(permission, "allowed_options_json", None)
     return (
         ApprovalStatus.REJECTED.value
-        if response_is_rejection(raw_options, option_id)
+        if answer_is_rejection(permission.offered, option_id)
         else ApprovalStatus.APPROVED.value
     )
 
 
-def audited_tool_name(permission: PermissionRequestModel) -> str:
+def audited_tool_name(permission: ParkedPermission) -> str:
     """Name the gated tool for the audit log, never leaving the column blank.
 
     An approval pause carries no ``tool_call`` because nothing tool-shaped was
@@ -75,20 +177,20 @@ def audited_tool_name(permission: PermissionRequestModel) -> str:
 
 
 def rejected_permission_error(
+    permission: ParkedPermission,
     *,
-    permission_status: str | None,
     thread_terminal: bool,
     option_id: str,
-    valid_option_ids: set[str],
 ) -> tuple[str, int]:
     """Return the protocol-facing error for a rejected permission response."""
     if thread_terminal:
         return ("thread is no longer active", 409)
-    if permission_status and permission_status != PermissionRequestStatus.PENDING.value:
+    if not permission.pending:
         return ("Permission request is no longer pending", 409)
-    if not valid_option_ids:
+    valid_ids = permission.option_ids
+    if not valid_ids:
         return ("Permission request has no valid options", 409)
-    if option_id not in valid_option_ids:
+    if option_id not in valid_ids:
         return ("Unknown permission option for this request", 409)
     return ("Permission response was previously rejected", 409)
 
@@ -166,7 +268,7 @@ class AuthorizedPermission:
     any rejection or dedup outcome is a :class:`PermissionResult` instead.
     """
 
-    permission: PermissionRequestModel
+    permission: ParkedPermission
     thread_record: ThreadModel
     thread_id: str
     resolved_idempotency_key: str

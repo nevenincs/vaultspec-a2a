@@ -49,6 +49,7 @@ from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fing
 from ...thread.idempotency import thread_create_action_key
 from ...worker.ipc import WorkerBridge
 from ..internal import internal_router
+from .permission_harness import park_plan_approval
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -584,7 +585,7 @@ class TestInternalEvents:
             thread_id, _receipt = await _seed_accepted_thread(session)
             await session.commit()
 
-        request_id = f"{thread_id}:plan-approval"
+        request_id = await park_plan_approval(checkpointer, thread_id=thread_id)
         async with AsyncClient(
             transport=ASGITransport(app=app),
             base_url="http://test",

@@ -4,8 +4,8 @@ Run through the harness::
 
     just build-clean
 
-The working directory is the repository being cleaned, and every removal is
-re-checked against it after resolution, so a symlink pointing out of the tree
+The repository being cleaned is the one this harness lives in, and every removal
+is re-checked against it after resolution, so a symlink pointing out of the tree
 cannot widen the blast radius.
 """
 
@@ -14,7 +14,12 @@ from __future__ import annotations
 __all__ = ["clean_build_artifacts", "main"]
 
 import shutil
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+from dev.paths import REPO_ROOT
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _remove_directory(root: Path, target: Path) -> None:
@@ -51,9 +56,8 @@ def clean_build_artifacts(root: Path) -> tuple[Path, ...]:
 
 
 def main() -> None:
-    """Clean the checkout the harness was invoked from."""
-    root = Path.cwd()
-    for path in clean_build_artifacts(root):
+    """Clean the checkout this harness lives in."""
+    for path in clean_build_artifacts(REPO_ROOT):
         print(f"removed {path.as_posix()}")
 
 

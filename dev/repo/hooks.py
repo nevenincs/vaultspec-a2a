@@ -23,6 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dev.paths import REPO_ROOT
 from dev.process import run_captured
 
 _MANAGED_MARKER = "Managed by the vaultspec-a2a development harness"
@@ -46,7 +47,7 @@ def _git_stdout(repo_root: Path, *args: str) -> str:
 
 
 def _resolve_repo_root(repo_root: Path | None = None) -> Path:
-    candidate = (repo_root or Path.cwd()).resolve()
+    candidate = (repo_root or REPO_ROOT).resolve()
     root = _git_stdout(candidate, "rev-parse", "--show-toplevel")
     return Path(root)
 

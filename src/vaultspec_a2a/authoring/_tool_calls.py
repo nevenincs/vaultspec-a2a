@@ -20,7 +20,7 @@ from weakref import WeakValueDictionary
 import aiosqlite
 
 from ..desktop._platform_acl import harden_credential_path
-from ..utils import path_is_link_like
+from ..utils import is_real_directory, path_is_link_like
 from ._ids import derive_idempotency_key
 from ._journal_index import (
     JournalIndex,
@@ -69,7 +69,7 @@ def private_tool_call_journal_path(run_id: str, call_scope: str) -> Path:
     from ..control.config import settings
 
     directory = settings.prepare_state_dir(settings.state_layout.authoring_calls_dir)
-    if path_is_link_like(directory) or not directory.is_dir():
+    if not is_real_directory(directory):
         raise ValueError("authoring journal directory is not a real directory")
     identity = derive_idempotency_key(json.dumps([run_id, call_scope]))
     path = directory / (identity.removeprefix("idk:") + ".db")
@@ -171,7 +171,7 @@ async def retire_run_tool_calls(run_id: str, *, directory: Path | None = None) -
     for directory in directories:
         if not os.path.lexists(directory):
             continue
-        if path_is_link_like(directory) or not directory.is_dir():
+        if not is_real_directory(directory):
             raise ValueError("authoring journal directory is not a real directory")
         marker = _closed_run_marker(directory, run_id)
         try:

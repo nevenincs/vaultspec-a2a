@@ -96,10 +96,9 @@ core := "uv run --no-sync --frozen --no-default-groups --group tooling vaultspec
 rag := "uv run --no-sync --frozen --no-default-groups --extra rag vaultspec-rag"
 safe_enroll := "uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.vault.enroll"
 
-# The bounded Docker Compose projects. Each is pinned to its own project name
-# so one stack can never tear another's containers down.
+# The bounded Docker Compose project. It is pinned to its own project name so
+# it can never tear another stack's containers down.
 compose_integration := creds + " compose -- docker compose --project-name vaultspec-a2a-integration -f service/docker-compose.integration.yml"
-compose_infrastructure := creds + " compose -- docker compose --project-name vaultspec-a2a-infrastructure -f service/docker-compose.integration.yml"
 
 # List every recipe, grouped by consequence.
 [group('meta')]
@@ -718,45 +717,25 @@ service-worker-up NAME="dev" *ARGS="":
 service-engine-up NAME REPO BUILD_REPO WORKSPACE *ARGS:
     {{procs}} up engine-dev {{ NAME }} --repo {{ REPO }} --build-repo {{ BUILD_REPO }} --workspace {{ WORKSPACE }} {{ ARGS }}
 
-# Validate the deterministic integration stack configuration.
+# Validate the Jaeger trace fixture's Compose configuration.
 [group('dev')]
 stack-integration-config: doctor-docker
     {{compose_integration}} config
 
-# Start the deterministic integration stack.
+# Start the Jaeger trace fixture.
 [group('dev')]
 stack-integration-up: doctor-docker
-    {{compose_integration}} up -d --build --wait
+    {{compose_integration}} up -d --wait jaeger
 
-# Stop and remove the deterministic integration stack.
+# Stop and remove the Jaeger trace fixture.
 [group('dev')]
 stack-integration-down: doctor-docker
     {{compose_integration}} down --remove-orphans
 
-# Show deterministic integration stack status.
+# Show Jaeger trace fixture status.
 [group('dev')]
 stack-integration-status: doctor-docker
     {{compose_integration}} ps
-
-# Validate the integration file used by the isolated infrastructure project.
-[group('dev')]
-stack-infrastructure-config: doctor-docker
-    {{compose_infrastructure}} config
-
-# Start only Jaeger in its isolated infrastructure Compose project.
-[group('dev')]
-stack-infrastructure-up: doctor-docker
-    {{compose_infrastructure}} up -d --wait jaeger
-
-# Stop and remove the isolated infrastructure Compose project.
-[group('dev')]
-stack-infrastructure-down: doctor-docker
-    {{compose_infrastructure}} down --remove-orphans
-
-# Show infrastructure stack status.
-[group('dev')]
-stack-infrastructure-status: doctor-docker
-    {{compose_infrastructure}} ps
 
 # Resolve locked tooling and enroll the workspace through Vaultspec Core.
 [group('dev')]

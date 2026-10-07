@@ -12,6 +12,7 @@ consumers include :mod:`vaultspec_a2a.api`, :mod:`vaultspec_a2a.control`,
 :mod:`vaultspec_a2a.providers`, and :mod:`vaultspec_a2a.worker`.
 """
 
+from ._file_checks import is_real_directory as is_real_directory
 from ._file_checks import is_single_regular_file as is_single_regular_file
 from ._file_checks import path_is_link_like as path_is_link_like
 from ._process_tree import kill_pid_tree_async as kill_pid_tree_async
@@ -43,6 +44,7 @@ __all__ = [
     "bearer_header",
     "bearer_matches",
     "configure_logging",
+    "is_real_directory",
     "is_secret_name",
     "is_single_regular_file",
     "kill_pid_tree_async",

@@ -28,6 +28,7 @@ from vaultspec_a2a.desktop.native_isolation import (
     RuntimeFile,
     RuntimeMount,
 )
+from vaultspec_a2a.utils import is_single_regular_file
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -62,16 +63,6 @@ def _run(
     )
 
 
-def _refuse_unless_single_regular_file(
-    path: Path, refusal: str, *, follow_symlinks: bool = True
-) -> os.stat_result:
-    """Return *path*'s metadata, or raise *refusal* unless it is a one-link file."""
-    metadata = path.stat(follow_symlinks=follow_symlinks)
-    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
-        raise ValueError(refusal)
-    return metadata
-
-
 def stage_linux_isolation_assets(
     capsule: Path, *, helper: Path, files: Mapping[str, Path]
 ) -> Path:
@@ -81,9 +72,10 @@ def stage_linux_isolation_assets(
     discovers libraries or invokes an installer on the user's machine.
     """
     source_helper = helper.resolve(strict=True)
-    _refuse_unless_single_regular_file(
-        source_helper, "native helper build input must be an unprivileged regular file"
-    )
+    if not is_single_regular_file(source_helper.stat()):
+        raise ValueError(
+            "native helper build input must be an unprivileged regular file"
+        )
     with source_helper.open("rb") as stream:
         require_unprivileged_static_helper(stream.fileno())
     version = _run(
@@ -100,9 +92,11 @@ def stage_linux_isolation_assets(
 
     def copy(source: Path, relative: str) -> RuntimeFile:
         resolved = source.resolve(strict=True)
-        metadata = _refuse_unless_single_regular_file(
-            resolved, "native runtime build inputs must be regular single-link files"
-        )
+        metadata = resolved.stat()
+        if not is_single_regular_file(metadata):
+            raise ValueError(
+                "native runtime build inputs must be regular single-link files"
+            )
         target = capsule / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(resolved, target)
@@ -130,10 +124,12 @@ def certificate_bundle(runtime: Path) -> Path:
     """Select public roots from the locked dependency already in the onedir."""
     bundle = runtime.resolve(strict=True) / "_internal/certifi/cacert.pem"
     refusal = "frozen certificate bundle must be a bounded regular file"
-    metadata = _refuse_unless_single_regular_file(
-        bundle, refusal, follow_symlinks=False
-    )
-    if bundle.resolve(strict=True) != bundle or not 0 < metadata.st_size <= 1024 * 1024:
+    metadata = bundle.stat(follow_symlinks=False)
+    if (
+        not is_single_regular_file(metadata)
+        or bundle.resolve(strict=True) != bundle
+        or not 0 < metadata.st_size <= 1024 * 1024
+    ):
         raise ValueError(refusal)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.load_verify_locations(cafile=str(bundle))

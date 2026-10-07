@@ -25,7 +25,7 @@ from importlib import metadata
 from typing import TYPE_CHECKING
 
 from ..context.harness import verify_harness
-from ..providers.binary_version import parse_binary_version
+from ..providers.binary_version import binary_version_text
 from ..utils.runtime_exec import module_command
 
 if TYPE_CHECKING:
@@ -199,8 +199,7 @@ def _resolved_version() -> str | None:
         return None
     if proc.returncode != 0:
         return None
-    version = parse_binary_version(proc.stdout)
-    return None if version is None else ".".join(map(str, version))
+    return binary_version_text(proc.stdout)
 
 
 def _compute_skew(pinned: str | None, resolved: str | None) -> str | None:

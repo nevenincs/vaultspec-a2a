@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import aiosqlite
 
 from ..desktop._platform_acl import harden_credential_path
-from ..utils import is_single_regular_file, path_is_link_like
+from ..utils import is_real_directory, is_single_regular_file, path_is_link_like
 from ._ids import derive_idempotency_key
 
 if TYPE_CHECKING:
@@ -85,7 +85,7 @@ class JournalIndex:
         root = settings.prepare_state_dir(
             settings.state_layout.authoring_calls_dir / "indexes"
         )
-        if path_is_link_like(root) or not root.is_dir():
+        if not is_real_directory(root):
             raise ValueError("authoring index root is not a real directory")
         if os.name == "posix":
             if root.stat().st_uid != os.getuid():

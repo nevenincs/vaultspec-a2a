@@ -84,8 +84,6 @@ from .repair_transitions import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database import (
@@ -373,10 +371,10 @@ async def _authorize_permission_response(
     )
 
 
-def _active_permission_request_id(
+async def _active_permission_request_id(
+    db: AsyncSession,
     permission: PermissionRequestModel,
     thread_record: ThreadModel,
-    pending_permissions: Sequence[PermissionRequestModel],
     request_id: str,
 ) -> str | None:
     """The request a response is measured against, which may be its own.
@@ -388,11 +386,19 @@ def _active_permission_request_id(
     a request that is no longer outstanding is measured against the newest one,
     which is what reports it superseded.
     """
-    if permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES:
+    locally_respondable = (
+        permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES
+    )
+    pending_permissions = await get_pending_permission_requests(
+        db,
+        thread_id=thread_record.id,
+        pause_reason_type=LOCALLY_RESPONDABLE_PAUSE_CAUSES
+        if locally_respondable
+        else None,
+    )
+    if locally_respondable:
         active_plan_permissions = [
-            pending.request_id
-            for pending in pending_permissions
-            if pending.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES
+            pending.request_id for pending in pending_permissions
         ]
         if request_id in active_plan_permissions:
             return request_id
@@ -491,9 +497,8 @@ async def _authorize_pending_permission(
             error_status_code=409,
         )
 
-    pending_permissions = await get_pending_permission_requests(db, thread_id=thread_id)
-    active_request_id = _active_permission_request_id(
-        permission, thread_record, pending_permissions, request_id
+    active_request_id = await _active_permission_request_id(
+        db, permission, thread_record, request_id
     )
 
     if active_request_id is not None and active_request_id != request_id:

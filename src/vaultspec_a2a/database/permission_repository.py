@@ -17,21 +17,28 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import CursorResult
     from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..control.permission_options import decode_allowed_options
+from ..graph.acp_options import valid_option_ids
 from ..thread.action_receipts import canonical_json
 from ..thread.enums import (
     RECOVERY_ACTION_TYPES,
+    TERMINAL_STATUS_VALUES,
     ControlActionResultStatus,
     ControlActionType,
     InterruptType,
     PermissionRequestStatus,
+    RepairStatus,
     ThreadStatus,
 )
 from ._helpers import _coerce, save_model
 from .models import ControlActionModel, PermissionRequestModel, ThreadModel, utcnow
+from .thread_repository import path_safe_run_id_clause
 
 __all__ = [
     "ControlActionReservation",
+    "PendingPermission",
     "acquire_control_action_lease",
+    "actionable_pending_permissions",
     "commit_control_action_lease",
     "create_control_action",
     "expire_pending_permission_requests",
@@ -69,6 +76,36 @@ class ControlActionReservation:
     action: ControlActionModel
     created: bool
     payload_matches: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PendingPermission:
+    """One unanswered permission request on a live run, its options read once.
+
+    ``offered`` is the decoded option list, or ``None`` when the stored column
+    cannot be read, which a caller that must fail closed tells apart from a row
+    that offered nothing. ``checkpoint_unavailable`` is the run's recorded
+    checkpoint posture, carried here so a query across many runs needs no second
+    read of their threads.
+    """
+
+    request: PermissionRequestModel
+    offered: list[object] | None
+    checkpoint_unavailable: bool
+
+    @property
+    def option_ids(self) -> set[str]:
+        """The option ids a response to this request could name."""
+        return valid_option_ids(self.offered)
+
+    @property
+    def actionable(self) -> bool:
+        """Whether a response could still be addressed to this request.
+
+        It must offer a usable option, and its run must still have checkpoint
+        truth to resume from.
+        """
+        return bool(self.option_ids) and not self.checkpoint_unavailable
 
 
 _OUTSTANDING_PERMISSION_STATUSES: tuple[str, str] = (
@@ -165,13 +202,14 @@ async def get_pending_permission_requests(
     session: AsyncSession,
     *,
     thread_id: str | None = None,
-    pause_reason_type: str | None = None,
+    pause_reason_type: str | Collection[str] | None = None,
     include_answered_pending_apply: bool = True,
 ) -> Sequence[PermissionRequestModel]:
     """Return unsettled permission requests, oldest first.
 
     ``thread_id`` and ``pause_reason_type`` narrow the rows in the query itself,
-    so a caller that wants one kind of pause never loads and filters the rest.
+    so a caller that wants some kinds of pause never loads and filters the rest.
+    ``pause_reason_type`` names one cause or any collection of them.
     """
     statuses = (
         _OUTSTANDING_PERMISSION_STATUSES
@@ -184,9 +222,62 @@ async def get_pending_permission_requests(
     if thread_id is not None:
         stmt = stmt.where(PermissionRequestModel.thread_id == thread_id)
     if pause_reason_type is not None:
-        stmt = stmt.where(PermissionRequestModel.pause_reason_type == pause_reason_type)
+        causes = (
+            (pause_reason_type,)
+            if isinstance(pause_reason_type, str)
+            else tuple(pause_reason_type)
+        )
+        stmt = stmt.where(PermissionRequestModel.pause_reason_type.in_(causes))
     stmt = stmt.order_by(PermissionRequestModel.created_at.asc())
     return (await session.execute(stmt)).scalars().all()
+
+
+async def actionable_pending_permissions(
+    session: AsyncSession,
+    *,
+    thread_id: str | None = None,
+) -> list[PendingPermission]:
+    """Return the unanswered permission requests on live runs, oldest first.
+
+    The one reading of "which permissions still wait on someone" shared by the
+    team status, the run status and the run listing. A run is live when its row
+    exists under a path-safe id and has not settled, so a request orphaned from
+    its run, left open on a settled run, or filed under an id the respond route
+    cannot address is never offered. The last matters beyond the route: one such
+    id handed to the status serializer would fail the whole response and hide
+    every other run's live question. ``thread_id`` narrows the query to one run.
+
+    Every live request is returned with its options already read, and the
+    surfaces keep their own stance on the ones that are not actionable: the team
+    status offers only ``actionable`` requests, while the run status degrades on
+    an unreadable one and the listing reads plan approvals alone. The run's
+    recorded checkpoint posture is judged by the team status only, because the
+    run status and the listing read their checkpoint afresh.
+    """
+    stmt = (
+        select(PermissionRequestModel, ThreadModel.repair_status)
+        .select_from(PermissionRequestModel)
+        .join(ThreadModel, ThreadModel.id == PermissionRequestModel.thread_id)
+        .where(
+            PermissionRequestModel.request_status
+            == PermissionRequestStatus.PENDING.value,
+            ThreadModel.status.not_in(TERMINAL_STATUS_VALUES),
+            path_safe_run_id_clause(),
+        )
+        .order_by(PermissionRequestModel.created_at.asc())
+    )
+    if thread_id is not None:
+        stmt = stmt.where(PermissionRequestModel.thread_id == thread_id)
+    return [
+        PendingPermission(
+            request=request,
+            offered=decode_allowed_options(request.allowed_options_json),
+            checkpoint_unavailable=(
+                repair_status == RepairStatus.CHECKPOINT_UNAVAILABLE.value
+            ),
+        )
+        for request, repair_status in (await session.execute(stmt)).all()
+    ]
 
 
 async def outstanding_permission_pause(

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..database import (
-    get_pending_permission_requests,
+    actionable_pending_permissions,
     get_thread_execution_state,
     list_threads,
     read_latest_checkpoint,
@@ -224,13 +224,10 @@ async def _thread_summary(
     )
     approval_status: str | None = None
     approval_request_id: str | None = None
-    if thread.status not in TERMINAL_STATUS_VALUES and not checkpoint_unverified:
+    # A settled run has no live request to read, so it needs no status check here.
+    if not checkpoint_unverified:
         approval_status, approval_request_id = durable_approval(
-            await get_pending_permission_requests(
-                db,
-                thread_id=thread.id,
-                include_answered_pending_apply=False,
-            )
+            await actionable_pending_permissions(db, thread_id=thread.id)
         )
     return ThreadSummaryData(
         thread_id=thread.id,

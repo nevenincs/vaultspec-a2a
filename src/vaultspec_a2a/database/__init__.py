@@ -56,8 +56,12 @@ from .models import ThreadModel as ThreadModel
 from .permission_repository import (
     ControlActionReservation as ControlActionReservation,
 )
+from .permission_repository import PendingPermission as PendingPermission
 from .permission_repository import (
     acquire_control_action_lease as acquire_control_action_lease,
+)
+from .permission_repository import (
+    actionable_pending_permissions as actionable_pending_permissions,
 )
 from .permission_repository import (
     commit_control_action_lease as commit_control_action_lease,
@@ -223,6 +227,7 @@ __all__ = [
     "ControlActionModel",
     "ControlActionReservation",
     "CostTrackingModel",
+    "PendingPermission",
     "PermissionLogModel",
     "PermissionRequestModel",
     "RecoveryAttemptModel",
@@ -238,6 +243,7 @@ __all__ = [
     "ThreadStatusElectionOutcome",
     "ThreadStatusElectionResult",
     "acquire_control_action_lease",
+    "actionable_pending_permissions",
     "append_cost_record",
     "append_permission_log",
     "application_session_factory",

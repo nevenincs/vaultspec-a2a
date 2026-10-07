@@ -618,6 +618,104 @@ async def test_a_plan_verdict_for_another_request_asks_again() -> None:
     assert resumed["approval_status"] == "approved"
 
 
+def _build_looping_approval_graph(
+    supervisor_node: Any,
+    workers: list[str],
+    worker_phase_map: dict[str, str] | None,
+) -> Any:
+    """The star wiring with the gate's reroute edge, so a rejection comes back.
+
+    A rejected plan returns to whoever revises it, and on a team with no
+    plan-phase worker that is the supervisor - which asks for approval again.
+    The edge is what lets a test reach the SECOND ask at all.
+    """
+    builder = new_state_graph()
+    add_test_node(builder, "supervisor", supervisor_node)
+    add_test_node(
+        builder, "plan_approval", create_plan_approval_node(workers, worker_phase_map)
+    )
+    builder.set_entry_point("supervisor")
+
+    def _route_on_approval(state: TeamState) -> str:
+        if state.get("approval_status") == "pending":
+            return "plan_approval"
+        return "__end__"
+
+    def _route_after_gate(state: TeamState) -> str:
+        return "supervisor" if state.get("next") == "supervisor" else "__end__"
+
+    builder.add_conditional_edges(
+        "supervisor",
+        _route_on_approval,
+        {"plan_approval": "plan_approval", "__end__": END},
+    )
+    builder.add_conditional_edges(
+        "plan_approval",
+        _route_after_gate,
+        {"supervisor": "supervisor", "__end__": END},
+    )
+    return compile_test_graph(builder, checkpointer=InMemorySaver())
+
+
+@pytest.mark.asyncio
+async def test_a_re_asked_plan_approval_takes_a_fresh_request_id() -> None:
+    """A re-ask of an unchanged plan is a new request, not the answered one.
+
+    The plan, its path and the exec worker are all unchanged when a human
+    rejects a plan and the gate asks again, so naming the request by those
+    alone minted the id the human had just answered. The control journal keys
+    an answer by the request id, so the second ask replayed the first
+    rejection and the plan could never be approved. The ask lineage is part of
+    the name, so each ask takes an id no earlier ask has spent - while a replay
+    of one ask still recomputes its own.
+    """
+    model = _StaticSupervisorModel("vaultspec-coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-coder"],
+        options=SupervisorOptions(
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=False,
+        ),
+    )
+    graph = _build_looping_approval_graph(
+        node, ["vaultspec-coder"], {"vaultspec-coder": "exec"}
+    )
+    config: RunnableConfig = {"configurable": {"thread_id": "plan-approval-reask"}}
+    state = _make_state_for_plan_approval(vault_index={"plan": [".vault/plan/plan.md"]})
+
+    first = await graph.ainvoke(state, config=config)
+    first_ask = first["__interrupt__"][0].value
+    first_id = first_ask["request_id"]
+
+    second = await graph.ainvoke(
+        Command(resume={"verdict": "rejected", "request_id": first_id}), config=config
+    )
+    assert "__interrupt__" in second
+    second_ask = second["__interrupt__"][0].value
+    assert second_ask["request_id"] != first_id
+    # Nothing the old name was derived from changed; only the lineage did.
+    assert second_ask["plan_paths"] == first_ask["plan_paths"]
+    assert second_ask["exec_worker"] == first_ask["exec_worker"]
+
+    # A stray answer parks the SAME ask again, under the id it already
+    # disclosed: a re-ask is minted by an answered verdict, not by a replay.
+    replayed = await graph.ainvoke(
+        Command(resume={"verdict": "rejected", "request_id": "another-plan"}),
+        config=config,
+    )
+    assert replayed["__interrupt__"][0].value["request_id"] == second_ask["request_id"]
+
+    approved = await graph.ainvoke(
+        Command(resume={"verdict": "approved", "request_id": second_ask["request_id"]}),
+        config=config,
+    )
+    assert approved["approval_status"] == "approved"
+    assert approved["next"] == "vaultspec-coder"
+    assert approved["plan_approvals_asked"] == [first_id, second_ask["request_id"]]
+
+
 @pytest.mark.asyncio
 async def test_supervisor_rejection_clears_consumed_approval_request_id() -> None:
     """Rejected plan resumes must not leave the consumed approval request active."""

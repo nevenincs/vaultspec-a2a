@@ -22,7 +22,7 @@ from ...thread import canonical_digest
 from ...thread.enums import VERDICT_APPROVED, ApprovalStatus, InterruptType
 from ...thread.errors import SupervisorRoutingError
 from ...thread.resume_values import parse_approval_verdict
-from ...thread.state import merge_vault_index
+from ...thread.state import merge_vault_index, read_untrusted_state_value
 from ._interrupts import await_request_scoped_resume
 from .vault_reader import refresh_vault_index
 
@@ -86,19 +86,50 @@ def _carried_approval(state: TeamState) -> dict[str, Any]:
 _PLAN_APPROVAL_ID_PREFIX = "plan-approval-"
 
 
+def _plan_approvals_asked(state: TeamState) -> list[str]:
+    """The plan approvals this run has already asked, narrowed at the boundary.
+
+    Read through the untrusted-state boundary because the annotation on the
+    channel describes what its reducer produces, not what a checkpoint
+    assembled elsewhere is guaranteed to hold.
+    """
+    recorded = read_untrusted_state_value(state, "plan_approvals_asked")
+    if not isinstance(recorded, list):
+        return []
+    return [
+        entry
+        for entry in cast("list[object]", recorded)
+        if isinstance(entry, str) and entry
+    ]
+
+
 def _plan_approval_request_id(
     state: TeamState, exec_worker: str, plan_paths: list[str]
 ) -> str:
-    """Name one plan-approval request by the run and the plan it approves.
+    """Name one plan-approval request by the run, the plan, and the asks before it.
 
     Derived from replay-stable material only: a resumed node re-runs from its
     start against the same checkpointed state, so the id it recomputes is the
-    id it disclosed. Naming the PLAN as well as the run is what makes a
-    verdict for a superseded plan recognisable after the plan was revised - a
+    id it disclosed. Naming the PLAN as well as the run is what makes a verdict
+    for a superseded plan recognisable after the plan was revised - a
     run-scoped handle alone would let an old approval release a new plan.
+
+    Naming the asks ALREADY MADE is what makes a re-ask a different request.
+    The plan and the exec worker are unchanged when a human rejects a plan and
+    the gate asks again, so this used to mint the id the human had just
+    answered; the control journal keys an answer by that id, so the second ask
+    replayed the first rejection and the run could not be approved at all. The
+    lineage is append-only, so each ask takes an id no earlier ask has spent,
+    and a replay of one ask recomputes its own.
     """
     digest = canonical_digest(
-        [state.get("thread_id") or "", exec_worker, sorted(plan_paths)], default=str
+        [
+            state.get("thread_id") or "",
+            exec_worker,
+            sorted(plan_paths),
+            _plan_approvals_asked(state),
+        ],
+        default=str,
     )
     return f"{_PLAN_APPROVAL_ID_PREFIX}{digest[:32]}"
 
@@ -718,11 +749,18 @@ def create_plan_approval_node(
         decision = await_request_scoped_resume(
             payload, request_id, parse_approval_verdict
         )
+        # The ask is recorded only once it has been answered, which is also the
+        # only replay-safe place to record it: until the answer arrives this node
+        # re-runs from its start and recomputes the same id from the same
+        # lineage. Recorded on every verdict, so the next ask cannot reuse an id
+        # a human has already spent.
+        asked = {"plan_approvals_asked": [request_id]}
         if decision.verdict == VERDICT_APPROVED:
             _logger.info(
                 "plan approved by user — routing to exec_worker=%r", exec_worker
             )
             return {
+                **asked,
                 "next": exec_worker,
                 "active_agent": _active_agent_for_route(exec_worker),
                 "current_plan": [_plan_entry_for_route(exec_worker)],
@@ -739,6 +777,7 @@ def create_plan_approval_node(
             # happens next rather than the rejection picking a worker for it.
             _logger.info("plan rejected by user — no plan-phase worker to revise")
             return {
+                **asked,
                 "next": "supervisor",
                 "active_agent": "",
                 "current_plan": [_plan_entry_for_route("supervisor")],
@@ -750,6 +789,7 @@ def create_plan_approval_node(
             "plan rejected by user — rerouting to %r for revision", revision_worker
         )
         return {
+            **asked,
             "next": revision_worker,
             "active_agent": _active_agent_for_route(revision_worker),
             "pipeline_phase": _phase_for_route(

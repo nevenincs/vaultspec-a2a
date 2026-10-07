@@ -315,6 +315,7 @@ class TestTeamStateStructure:
             # plan approval gate
             "approval_status",
             "approval_request_id",
+            "plan_approvals_asked",
             # tool permission gate
             "permission_answers",
             # document phase machine

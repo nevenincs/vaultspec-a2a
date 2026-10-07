@@ -36,7 +36,6 @@ from ...streaming import RelayHub
 from ...testing import (
     DEFAULT_TEAM_PRESET,
     ProgressDeadline,
-    ProgressStalledError,
     actor_tokens_body,
     async_catalog_run_fields,
     async_run_start_body,
@@ -45,6 +44,7 @@ from ...testing import (
     seed_live_thread,
     serve_on_loopback,
     wait_for_async,
+    wait_until_async,
 )
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
@@ -67,6 +67,11 @@ if TYPE_CHECKING:
     from .conftest import _InProcessWorker
 
 type SessionFactory = async_sessionmaker[AsyncSession]
+
+# The idle window and poll interval of a wait on in-process state that a task
+# elsewhere on the loop is changing.
+_WAIT_IDLE_WINDOW_S = 10.0
+_WAIT_POLL_S = 0.005
 
 
 @runtime_checkable
@@ -572,16 +577,12 @@ async def _await_probe_backed_ready(
         body = response.json()
         return body if is_ready(body) else None
 
-    try:
-        return await wait_for_async(
-            _ready,
-            deadline=ProgressDeadline(idle_window_s=idle_window_s),
-            interval_s=0.1,
-        )
-    except ProgressStalledError as stalled:
-        raise AssertionError(
-            f"{what} never became probe-ready; last: {body}"
-        ) from stalled
+    return await wait_for_async(
+        _ready,
+        deadline=ProgressDeadline(idle_window_s=idle_window_s),
+        interval_s=0.1,
+        stalled=lambda: f"{what} never became probe-ready; last: {body}",
+    )
 
 
 def _health_worker_status(body: JsonObject) -> object:
@@ -603,24 +604,6 @@ async def _await_service_worker_ready(client: httpx.AsyncClient) -> JsonObject:
     )
 
 
-async def _wait_until(
-    predicate: Callable[[], bool], *, what: str, timeout: float = 10.0
-) -> None:
-    """Poll *predicate* until true, failing the test rather than racing on."""
-
-    async def _satisfied() -> bool | None:
-        return True if predicate() else None
-
-    try:
-        await wait_for_async(
-            _satisfied,
-            deadline=ProgressDeadline(idle_window_s=timeout),
-            interval_s=0.005,
-        )
-    except ProgressStalledError as stalled:
-        raise AssertionError(f"timed out waiting for {what}") from stalled
-
-
 async def _run_same_id_insert_race(
     race_context: _LiveRaceContext,
     run_id: str,
@@ -631,14 +614,22 @@ async def _run_same_id_insert_race(
     await barrier.exec_driver_sql("BEGIN IMMEDIATE")
     try:
         first = asyncio.create_task(race_context.client.post("/v1/runs", json=payload))
-        await _wait_until(
+        await wait_until_async(
             lambda: race_context.gate.is_active(run_id),
-            what="the first modern request to pass its read",
+            deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: (
+                "timed out waiting for the first modern request to pass its read"
+            ),
         )
         second = asyncio.create_task(race_context.client.post("/v1/runs", json=payload))
-        await _wait_until(
+        await wait_until_async(
             lambda: race_context.checked_out() >= baseline + 2,
-            what="the second modern request to reach the store",
+            deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: (
+                "timed out waiting for the second modern request to reach the store"
+            ),
         )
         await asyncio.sleep(0.25)
     finally:
@@ -726,9 +717,13 @@ async def _run_nickname_insert_race(
             "nickname": nickname,
         },
     }
-    await _wait_until(
+    await wait_until_async(
         lambda: race_context.checked_out() == 0,
-        what="the same-id race connections to return to the pool",
+        deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+        interval_s=_WAIT_POLL_S,
+        stalled=lambda: (
+            "timed out waiting for the same-id race connections to return to the pool"
+        ),
     )
     barrier = await race_context.engine.connect()
     baseline = race_context.checked_out()
@@ -743,9 +738,13 @@ async def _run_nickname_insert_race(
                 json={**nickname_base, "run_id": left_id},
             )
         )
-        await _wait_until(
+        await wait_until_async(
             lambda: race_context.gate.is_active(left_id),
-            what="the first nickname request to pass its read",
+            deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: (
+                "timed out waiting for the first nickname request to pass its read"
+            ),
         )
         right = asyncio.create_task(
             race_context.client.post(
@@ -753,9 +752,13 @@ async def _run_nickname_insert_race(
                 json={**nickname_base, "run_id": right_id},
             )
         )
-        await _wait_until(
+        await wait_until_async(
             lambda: race_context.checked_out() >= baseline + 2,
-            what="the second nickname request to reach the store",
+            deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: (
+                "timed out waiting for the second nickname request to reach the store"
+            ),
         )
         await asyncio.sleep(0.25)
     finally:
@@ -855,9 +858,11 @@ async def _run_different_body_race(
         )
         # Admission happens after the check-then-act read and before the insert,
         # so an active run id proves the first request read an absent run.
-        await _wait_until(
+        await wait_until_async(
             lambda: race_context.gate.is_active(run_id),
-            what="the first request to pass its read",
+            deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: "timed out waiting for the first request to pass its read",
         )
         second = asyncio.create_task(
             race_context.client.post(
@@ -870,9 +875,13 @@ async def _run_different_body_race(
         )
         # A second leased connection proves the second request is issuing DB
         # work of its own while the barrier bars every insert.
-        await _wait_until(
+        await wait_until_async(
             lambda: race_context.checked_out() >= baseline + 2,
-            what="the second request to reach the store",
+            deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: (
+                "timed out waiting for the second request to reach the store"
+            ),
         )
         await asyncio.sleep(0.25)
     finally:
@@ -1576,10 +1585,11 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
 
         # Wait for the SSE handler to register its subscriber, then emit an
         # event into the same relay hub the live server is serving from.
-        await _wait_until(
+        await wait_until_async(
             lambda: agg.subscriber_count() > 0,
-            what="the SSE subscriber to register",
-            timeout=2.0,
+            deadline=ProgressDeadline(idle_window_s=2.0),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: "timed out waiting for the SSE subscriber to register",
         )
 
         agg.relay_payload(
@@ -1638,10 +1648,11 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
     ):
         assert resp.status_code == 200
         lines = resp.aiter_lines()
-        await _wait_until(
+        await wait_until_async(
             lambda: agg.subscriber_count() > 0,
-            what="the SSE subscriber to register",
-            timeout=2.0,
+            deadline=ProgressDeadline(idle_window_s=2.0),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: "timed out waiting for the SSE subscriber to register",
         )
 
         # A progress frame naming a research_adr node is stamped with the phase.
@@ -1734,10 +1745,13 @@ async def test_run_stream_verb_reserves_versioned_frames(
         assert resp.headers["content-type"].startswith("text/event-stream")
         lines = resp.aiter_lines()
 
-        await _wait_until(
+        await wait_until_async(
             lambda: agg.subscriber_count() > 0,
-            what="the run-stream subscriber to register",
-            timeout=2.0,
+            deadline=ProgressDeadline(idle_window_s=2.0),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: (
+                "timed out waiting for the run-stream subscriber to register"
+            ),
         )
 
         agg.relay_payload(

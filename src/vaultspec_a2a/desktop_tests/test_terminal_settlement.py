@@ -47,7 +47,6 @@ from ..testing import (
     DEFAULT_REQUIRED_ROLE,
     JsonReplyHandler,
     ProgressDeadline,
-    ProgressStalledError,
     armed_desktop_app_home,
     booted_gateway,
     broker_gateway_env,
@@ -56,8 +55,8 @@ from ..testing import (
     read_worker_ipc_secret,
     seat_app_home,
     serve_handler,
-    wait_for,
     wait_for_run_status_async,
+    wait_until,
 )
 from ..thread.enums import TERMINAL_STATUS_VALUES, ThreadStatus
 from ..utils import bearer_matches
@@ -144,20 +143,16 @@ def _assert_settlement_state(
 ) -> None:
     # The deterministic run completes on its own; poll the receiver until it accepts the
     # settlement for this run (retry included).
-    def _accepted() -> bool | None:
+    def _accepted() -> bool:
         with state.lock:
-            return (
-                True if any(b.get("run_id") == run_id for b in state.accepted) else None
-            )
+            return any(b.get("run_id") == run_id for b in state.accepted)
 
-    try:
-        wait_for(
-            _accepted, deadline=ProgressDeadline(idle_window_s=60.0), interval_s=0.5
-        )
-    except ProgressStalledError as stalled:
-        raise AssertionError(
-            "settlement was never delivered to the dashboard receiver"
-        ) from stalled
+    wait_until(
+        _accepted,
+        deadline=ProgressDeadline(idle_window_s=60.0),
+        interval_s=0.5,
+        stalled=lambda: "settlement was never delivered to the dashboard receiver",
+    )
 
     with state.lock:
         accepted = [b for b in state.accepted if b.get("run_id") == run_id]

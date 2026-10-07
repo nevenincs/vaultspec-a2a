@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
@@ -20,7 +19,10 @@ from ...team.team_config import load_team_config
 from ...testing import (
     DEFAULT_REQUIRED_ROLE,
     DEFAULT_TEAM_PRESET,
+    ProgressDeadline,
     current_execution_metadata,
+    wait_for,
+    wait_until,
 )
 from ...thread.action_receipts import (
     GraphActionReceipt,
@@ -146,16 +148,15 @@ def test_duplicate_worker_dispatch_schedules_one_real_executor_task(
     with TestClient(app) as client:
         first = client.post("/dispatch", json=dispatch.model_dump(mode="json"))
         duplicate = client.post("/dispatch", json=dispatch.model_dump(mode="json"))
-        deadline = time.monotonic() + 15
         bridge: WorkerBridge = app.state.bridge
         portal = client.portal
         assert portal is not None
-        terminal_events: list[WorkerEventEnvelope] = []
-        while time.monotonic() < deadline:
-            terminal_events = portal.call(_buffered_terminal_events, bridge)
-            if terminal_events:
-                break
-            time.sleep(0.01)
+        terminal_events = wait_for(
+            lambda: portal.call(_buffered_terminal_events, bridge) or None,
+            deadline=ProgressDeadline(idle_window_s=15.0),
+            interval_s=0.01,
+            stalled=lambda: "the bridge never buffered the terminal event",
+        )
 
         assert first.status_code == 200
         assert duplicate.status_code == 200
@@ -243,11 +244,15 @@ def test_concurrent_identical_capacity_dispatches_replay_one_acceptance(
             }
         )
         assert len(app.state.dispatch_ids) == 1
-        deadline = time.monotonic() + 5
-        while (
-            app.state.executor.active_ingest_count != 0 and time.monotonic() < deadline
-        ):
-            time.sleep(0.01)
+        wait_until(
+            lambda: app.state.executor.active_ingest_count == 0,
+            deadline=ProgressDeadline(idle_window_s=5.0),
+            interval_s=0.01,
+            stalled=lambda: (
+                f"{app.state.executor.active_ingest_count} ingest tasks are "
+                "still active"
+            ),
+        )
         # Only the request that synchronously admitted this ID generated a
         # capacity owner and crossed into task scheduling.
         assert app.state.executor._next_capacity_generation == 1

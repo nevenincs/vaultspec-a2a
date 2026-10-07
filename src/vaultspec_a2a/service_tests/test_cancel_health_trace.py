@@ -6,12 +6,14 @@ import time
 from typing import TYPE_CHECKING
 
 from ..testing import (
+    ProgressDeadline,
     json_object,
     json_object_list,
     required_bool,
     required_text,
     text_list,
     wait_for_run_status,
+    wait_until,
 )
 from ._state import thread_state
 
@@ -38,50 +40,54 @@ def _is_completed(state: JsonObject) -> bool:
     return state.get("status") == "completed"
 
 
+def _is_worker_ipc_trace(trace: JsonObject) -> bool:
+    """Whether *trace* is the worker's event-batch IPC call seen from A2A."""
+    processes = json_object(trace.get("processes"), at="Jaeger trace processes")
+    trace_services = {
+        service_name
+        for process in processes.values()
+        for service_name in [
+            json_object(process, at="Jaeger process").get("serviceName")
+        ]
+        if isinstance(service_name, str)
+    }
+    spans = json_object_list(trace.get("spans"), at="Jaeger trace spans")
+    operation_names = {
+        operation_name
+        for span in spans
+        for operation_name in [span.get("operationName")]
+        if isinstance(operation_name, str)
+    }
+    return (
+        "vaultspec-a2a" in trace_services
+        and "POST /internal/events/batch" in operation_names
+    )
+
+
 def _assert_worker_ipc_trace(service_stack: ServiceStack, start_us: int) -> None:
     """Poll Jaeger until the worker-originated IPC trace is visible."""
-    found = False
-    traces: JsonObject = {}
-    deadline = time.monotonic() + 30.0
-    while time.monotonic() < deadline:
-        end_us = int(time.time() * 1_000_000)
+
+    def _exported() -> bool:
         traces = json_object(
             service_stack.jaeger_traces(
                 service="vaultspec-a2a",
                 start_us=start_us,
-                end_us=end_us,
+                end_us=int(time.time() * 1_000_000),
                 limit=50,
             ),
             at="Jaeger traces",
         )
-        for trace in json_object_list(traces.get("data"), at="Jaeger traces.data"):
-            processes = json_object(trace.get("processes"), at="Jaeger trace processes")
-            trace_services = {
-                service_name
-                for process in processes.values()
-                for service_name in [
-                    json_object(process, at="Jaeger process").get("serviceName")
-                ]
-                if isinstance(service_name, str)
-            }
-            spans = json_object_list(trace.get("spans"), at="Jaeger trace spans")
-            operation_names = {
-                operation_name
-                for span in spans
-                for operation_name in [span.get("operationName")]
-                if isinstance(operation_name, str)
-            }
-            if (
-                "vaultspec-a2a" in trace_services
-                and "POST /internal/events/batch" in operation_names
-            ):
-                found = True
-                break
-        if found:
-            break
-        time.sleep(1.0)
+        return any(
+            _is_worker_ipc_trace(trace)
+            for trace in json_object_list(traces.get("data"), at="Jaeger traces.data")
+        )
 
-    assert found, "expected a Jaeger trace for worker-originated IPC traffic"
+    wait_until(
+        _exported,
+        deadline=ProgressDeadline(idle_window_s=30.0),
+        interval_s=1.0,
+        stalled=lambda: "expected a Jaeger trace for worker-originated IPC traffic",
+    )
 
 
 def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -> None:

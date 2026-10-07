@@ -17,10 +17,9 @@ import pytest
 from ...streaming import RelayHub
 from ...testing import (
     ProgressDeadline,
-    ProgressStalledError,
     seed_live_thread,
     serve_on_loopback,
-    wait_for_async,
+    wait_until_async,
 )
 from ._relay_events import progress_event, relay_events
 from .conftest import make_app
@@ -42,31 +41,23 @@ class _CheckedOutPool(Protocol):
 
 
 async def _wait_for_subscribers(aggregator: RelayHub, expected: int) -> None:
-    async def _attached() -> bool | None:
-        return True if aggregator.subscriber_count() >= expected else None
-
-    try:
-        await wait_for_async(
-            _attached, deadline=ProgressDeadline(idle_window_s=5.0), interval_s=0.01
-        )
-    except ProgressStalledError as stalled:
-        raise AssertionError(
+    await wait_until_async(
+        lambda: aggregator.subscriber_count() >= expected,
+        deadline=ProgressDeadline(idle_window_s=5.0),
+        interval_s=0.01,
+        stalled=lambda: (
             f"only {aggregator.subscriber_count()} of {expected} viewers attached"
-        ) from stalled
+        ),
+    )
 
 
 async def _wait_for_idle_pool(pool: _CheckedOutPool) -> None:
-    async def _idle() -> bool | None:
-        return True if pool.checkedout() == 0 else None
-
-    try:
-        await wait_for_async(
-            _idle, deadline=ProgressDeadline(idle_window_s=5.0), interval_s=0.01
-        )
-    except ProgressStalledError as stalled:
-        raise AssertionError(
-            f"{pool.checkedout()} pooled connections are still checked out"
-        ) from stalled
+    await wait_until_async(
+        lambda: pool.checkedout() == 0,
+        deadline=ProgressDeadline(idle_window_s=5.0),
+        interval_s=0.01,
+        stalled=lambda: f"{pool.checkedout()} pooled connections are still checked out",
+    )
 
 
 @pytest.mark.asyncio(loop_scope="function")

@@ -14,7 +14,6 @@ import os
 import shlex
 import shutil
 import subprocess
-import time
 from contextlib import contextmanager
 from http import HTTPStatus
 from importlib.resources import files
@@ -23,7 +22,14 @@ from typing import TYPE_CHECKING
 import httpx
 
 from ..lifecycle.discovery import write_service_json
-from ..testing import DEFAULT_ATTACH_CREDENTIAL, json_object, reap_contained
+from ..testing import (
+    DEFAULT_ATTACH_CREDENTIAL,
+    LivenessWatch,
+    ProgressDeadline,
+    json_object,
+    reap_contained,
+    wait_for,
+)
 from ..utils import ProcessContainment, bearer_header, spawn_contained
 
 if TYPE_CHECKING:
@@ -114,10 +120,10 @@ def _wait_for_engine(
 ) -> str:
     """Return the engine's service token once it answers ``/status`` with it."""
     discovery = workspace / ".vault" / "data" / "engine-data" / "service.json"
-    deadline = time.monotonic() + 40
     last_error = "not started"
-    while time.monotonic() < deadline:
-        assert process.poll() is None, "dashboard engine exited during startup"
+
+    def _ready() -> str | None:
+        nonlocal last_error
         try:
             record = json_object(
                 json.loads(discovery.read_text(encoding="utf-8")),
@@ -136,8 +142,25 @@ def _wait_for_engine(
             last_error = response.text
         except (OSError, KeyError, json.JSONDecodeError, httpx.HTTPError) as exc:
             last_error = repr(exc)
-        time.sleep(0.1)
-    raise AssertionError(f"dashboard engine did not become ready: {last_error}")
+        return None
+
+    def _exited() -> str | None:
+        if process.poll() is None:
+            return None
+        return (
+            f"exited with code {process.returncode} during startup; "
+            f"last readiness error: {last_error}"
+        )
+
+    return wait_for(
+        _ready,
+        deadline=ProgressDeadline(
+            idle_window_s=40.0,
+            watches=(LivenessWatch(label="dashboard engine", verdict=_exited),),
+        ),
+        interval_s=0.1,
+        stalled=lambda: f"dashboard engine did not become ready: {last_error}",
+    )
 
 
 def _shutdown_engine(

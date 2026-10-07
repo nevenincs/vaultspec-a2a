@@ -10,7 +10,7 @@ served status built on those reads.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -82,13 +82,15 @@ def gateway_run_verbs(
     team_preset: str = DEFAULT_TEAM_PRESET,
     tokens: Mapping[str, str] | None = None,
     selection: Callable[[str], Mapping[str, object]] | None = None,
+    message: str | None = None,
 ) -> RunVerbs:
     """The run-start verbs of a gateway :func:`booted_gateway` brought up.
 
     Every run is sited in the workspace that boot registered for *base_url*.
     Unless the caller names its own *selection*, a workspace's selection is the
     in-process lane the gateway serves, resolved once and cached so a prepare
-    and its commit or release present the same one.
+    and its commit or release present the same one. A named *message* replaces
+    the one the verbs default to.
     """
 
     def served(workspace: str) -> Mapping[str, object]:
@@ -99,7 +101,7 @@ def gateway_run_verbs(
             cache=True,
         )
 
-    return RunVerbs(
+    verbs = RunVerbs(
         base_url=base_url,
         authorization=authorization,
         team_preset=team_preset,
@@ -107,6 +109,7 @@ def gateway_run_verbs(
         selection=served if selection is None else selection,
         tokens=tokens,
     )
+    return verbs if message is None else replace(verbs, message=message)
 
 
 @dataclass(frozen=True, slots=True)

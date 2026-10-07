@@ -32,9 +32,11 @@ from ..desktop.profile import derive_state_paths
 from ..service_tests._live_desktop_gateway import armed_gateway
 from ..testing import (
     LIVE_PROVIDER_PREREQUISITES,
+    ProgressDeadline,
     free_port,
     json_object,
     selection_from_served_catalog,
+    wait_for,
 )
 from ..utils import bearer_header
 from ..utils.coercion import coerce_nonempty_str, coerce_object_mapping
@@ -302,16 +304,15 @@ def _scan_worker_log(
 
 def _await_exactly_one_worker_dispatch(app_home: Path) -> None:
     logs_dir = derive_state_paths(app_home).logs_dir
-    first_dispatch_deadline = time.monotonic() + 10
     hard_deadline = time.monotonic() + 20
-    quiet_deadline: float | None = None
+    quiet_since: float | None = None
     observed_tail = ""
     dispatch_count = 0
     offset = 0
     pending = ""
-    while time.monotonic() < min(
-        hard_deadline, quiet_deadline or first_dispatch_deadline
-    ):
+
+    def _quiet_after_dispatch() -> int | None:
+        nonlocal offset, pending, observed_tail, dispatch_count, quiet_since
         worker_logs = list(logs_dir.glob("worker-autospawn-*.stderr.log"))
         if len(worker_logs) == 1:
             with worker_logs[0].open("r", encoding="utf-8", errors="replace") as log:
@@ -328,9 +329,23 @@ def _await_exactly_one_worker_dispatch(app_home: Path) -> None:
             # The duplicate-free quiet window starts only after the scanner has
             # caught up to EOF; any subsequent log activity restarts it.
             if dispatch_count and saw_data:
-                quiet_deadline = time.monotonic() + 2
-        time.sleep(0.05)
-    assert dispatch_count == 1, observed_tail
+                quiet_since = time.monotonic()
+        if quiet_since is not None and time.monotonic() - quiet_since >= 2:
+            return dispatch_count
+        return None
+
+    # The first dispatch must land within the idle window; its arrival is the
+    # progress that opens the quiet window the duplicate-free proof needs.
+    dispatches = wait_for(
+        _quiet_after_dispatch,
+        deadline=ProgressDeadline(idle_window_s=10.0),
+        fingerprint=lambda: dispatch_count,
+        interval_s=0.05,
+        stalled=lambda: (
+            f"worker dispatches seen: {dispatch_count}; log tail: {observed_tail}"
+        ),
+    )
+    assert dispatches == 1, observed_tail
 
 
 def _exercise_lost_ack_flow(**options: Unpack[_LostAckFlowOptions]) -> None:

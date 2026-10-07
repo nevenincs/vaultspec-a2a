@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
-import time
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -19,12 +18,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...database.run_event_repository import RunEventRecord, RunEventStore
 from ...testing import (
+    ProgressDeadline,
     armed_gateway_env,
     booted_gateway,
     gateway_script,
     log_tail,
     seat_app_home,
     seed_journaled_thread,
+    wait_until,
 )
 from ...thread.enums import ThreadStatus
 
@@ -108,14 +109,15 @@ def test_a_running_gateway_expires_the_replay_window_on_its_own(
             script=gateway_script(log_level="warning"),
             detached=True,
         ):
-            deadline = time.monotonic() + 20.0
-            remaining = _retained(database_path)
-            while remaining and time.monotonic() < deadline:
-                time.sleep(0.2)
-                remaining = _retained(database_path)
+            wait_until(
+                lambda: _retained(database_path) == 0,
+                deadline=ProgressDeadline(idle_window_s=20.0),
+                interval_s=0.2,
+                stalled=lambda: (
+                    f"{_retained(database_path)} replay rows survived the sweep; "
+                    f"gateway log tail:\n{log_tail(log_path)}"
+                ),
+            )
     finally:
-        tail = log_tail(log_path)
         with suppress(OSError):
             log_path.unlink()
-
-    assert remaining == 0, tail

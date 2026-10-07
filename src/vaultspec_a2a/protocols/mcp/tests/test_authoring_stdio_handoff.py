@@ -14,11 +14,11 @@ import json
 import os
 import subprocess
 import sys
-import time
 from typing import TYPE_CHECKING
 
 from ....authoring import AgentTool, CatalogSnapshot
 from ....authoring.catalog import snapshot_to_catalog_payload
+from ....testing import LivenessWatch, ProgressDeadline, wait_until
 from ..authoring_stdio import (
     ENV_ACTOR_TOKEN,
     ENV_BASE_URL,
@@ -79,18 +79,31 @@ def test_bridge_serves_from_handed_catalog_without_engine(tmp_path: Path) -> Non
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+
+    def _marker_text() -> str:
+        return marker.read_text(encoding="utf-8") if marker.exists() else ""
+
+    def _bridge_exited() -> str | None:
+        if proc.poll() is None:
+            return None
+        return (
+            f"exited with code {proc.returncode} before serving; "
+            f"marker was {_marker_text()!r}"
+        )
+
     try:
-        deadline = time.monotonic() + 30.0
-        served = False
-        while time.monotonic() < deadline:
-            if marker.exists() and "serving tools=" in marker.read_text(
-                encoding="utf-8"
-            ):
-                served = True
-                break
-            if proc.poll() is not None:
-                break
-            time.sleep(0.05)
+        wait_until(
+            lambda: "serving tools=" in _marker_text(),
+            deadline=ProgressDeadline(
+                idle_window_s=30.0,
+                watches=(LivenessWatch(label="stdio bridge", verdict=_bridge_exited),),
+            ),
+            interval_s=0.05,
+            stalled=lambda: (
+                "bridge did not serve from the handed catalog against an "
+                f"unreachable engine; marker was {_marker_text()!r}"
+            ),
+        )
     finally:
         proc.terminate()
         try:
@@ -98,10 +111,5 @@ def test_bridge_serves_from_handed_catalog_without_engine(tmp_path: Path) -> Non
         except subprocess.TimeoutExpired:
             proc.kill()
 
-    text = marker.read_text(encoding="utf-8") if marker.exists() else ""
-    assert served, (
-        "bridge did not serve from the handed catalog against an unreachable "
-        f"engine; marker was {text!r}"
-    )
     # It served exactly the handed tool count, proving no engine fetch occurred.
-    assert "serving tools=3" in text
+    assert "serving tools=3" in _marker_text()

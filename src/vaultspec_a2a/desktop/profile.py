@@ -10,10 +10,11 @@ provider homes, and snapshots all live under the application home and never
 derive from the launch directory.
 
 :class:`DesktopProfile` binds one explicit application home to one explicit
-capsule root, validates both fail-closed, and derives every mutable sub-path as
-an explicit field. :func:`derive_state_paths` is the single authority for the
-application-home path math; the desktop settings profile delegates its mutable
-path derivation to it rather than duplicating the layout.
+capsule root, validates both fail-closed, and carries the application home's
+:class:`~vaultspec_a2a.control.state_layout.StateLayout`.
+:func:`derive_state_paths` adds the desktop profile's refusal of a relative
+application home to that one layout; the desktop settings profile delegates its
+mutable path derivation to it rather than duplicating the layout.
 
 The capsule root is validated against the installed-runtime asset layout owned by
 the provider factory (the bundled Node.js executable and the ACP adapter entry).
@@ -28,19 +29,15 @@ import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 
-from ..control.state_layout import seal_state_home, state_layout
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
+from ..control.state_layout import StateLayout, seal_state_home, state_layout
 
 __all__ = [
     "DesktopProfile",
     "DesktopProfileError",
-    "DesktopStatePaths",
     "derive_state_paths",
     "ensure_private_state",
+    "provisioned_directories",
 ]
 
 
@@ -54,219 +51,8 @@ class DesktopProfileError(ValueError):
     """
 
 
-_MISSING_DESKTOP_STATE_PATH = object()
-_DESKTOP_STATE_PATH_FIELDS = (
-    "app_home",
-    "database_path",
-    "checkpoint_path",
-    "logs_dir",
-    "discovery_path",
-    "workspaces_root",
-    "credentials_dir",
-    "receipts_dir",
-    "temp_homes_dir",
-    "snapshots_dir",
-)
-_DESKTOP_STATE_PATH_DEFAULTS = (_MISSING_DESKTOP_STATE_PATH,) * len(
-    _DESKTOP_STATE_PATH_FIELDS
-)
-
-
-def _bind_desktop_state_paths(
-    args: tuple[object, ...],
-    options: Mapping[str, object],
-) -> tuple[object, ...]:
-    """Bind the original public field order for state-path construction."""
-    if len(args) > len(_DESKTOP_STATE_PATH_FIELDS):
-        raise TypeError(
-            "expected at most "
-            f"{len(_DESKTOP_STATE_PATH_FIELDS)} positional arguments, "
-            f"got {len(args)}"
-        )
-    unknown = next(
-        (name for name in options if name not in _DESKTOP_STATE_PATH_FIELDS),
-        None,
-    )
-    if unknown is not None:
-        raise TypeError(f"unexpected keyword argument {unknown!r}")
-    duplicate = next(
-        (name for name in _DESKTOP_STATE_PATH_FIELDS[: len(args)] if name in options),
-        None,
-    )
-    if duplicate is not None:
-        raise TypeError(f"multiple values for argument {duplicate!r}")
-    return tuple(
-        args[index]
-        if index < len(args)
-        else options.get(name, _DESKTOP_STATE_PATH_DEFAULTS[index])
-        for index, name in enumerate(_DESKTOP_STATE_PATH_FIELDS)
-    )
-
-
-def _required_desktop_state_path(name: str, value: object) -> Path:
-    if value is _MISSING_DESKTOP_STATE_PATH:
-        raise TypeError(f"missing required argument {name!r}")
-    return cast("Path", value)
-
-
-@dataclass(frozen=True, slots=True)
-class _DesktopSeatedPaths:
-    """Mutable paths with an active runtime consumer."""
-
-    app_home: Path
-    database_path: Path
-    checkpoint_path: Path
-    logs_dir: Path
-    discovery_path: Path
-    workspaces_root: Path
-
-
-@dataclass(frozen=True, slots=True)
-class _DesktopReservedPaths:
-    """Mutable paths reserved for consumers that have not landed yet."""
-
-    credentials_dir: Path
-    receipts_dir: Path
-    temp_homes_dir: Path
-    snapshots_dir: Path
-
-
-class _DesktopStatePathsOptions(TypedDict, total=False):
-    app_home: Path
-    database_path: Path
-    checkpoint_path: Path
-    logs_dir: Path
-    discovery_path: Path
-    workspaces_root: Path
-    credentials_dir: Path
-    receipts_dir: Path
-    temp_homes_dir: Path
-    snapshots_dir: Path
-
-
-@dataclass(frozen=True, slots=True, init=False)
-class DesktopStatePaths:
-    """The explicit mutable-state sub-paths derived from an application home.
-
-    Every field is an absolute path beneath the application home. The fields fall
-    into two groups. The *seated* paths describe where live runtime state already
-    lands once the application home is bound: ``database_path`` and
-    ``checkpoint_path`` are the SQLite files the settings profile derives;
-    ``workspaces_root`` is the workspace tree; ``logs_dir`` is the runtime log
-    directory (``a2a_home/runtime``, matching the gateway and worker logging
-    convention); and ``discovery_path`` is the gateway discovery ``service.json``
-    file at the application-home root (the location owned by
-    ``lifecycle.discovery.service_json_path``). These mirror the operative
-    ``a2a_home`` derivation rather than inventing a parallel layout.
-
-    The *reserved* paths — ``credentials_dir``, ``receipts_dir``,
-    ``temp_homes_dir``, and ``snapshots_dir`` — are declared here so the
-    consistency-group snapshot and split-credential consumers bind one agreed
-    layout. They have no consumer yet and are therefore not materialised by
-    :meth:`DesktopProfile.ensure`.
-    """
-
-    _seated: _DesktopSeatedPaths
-    _reserved: _DesktopReservedPaths
-
-    def __init__(
-        self,
-        *args: object,
-        **options: Unpack[_DesktopStatePathsOptions],
-    ) -> None:
-        values = _bind_desktop_state_paths(args, options)
-        object.__setattr__(
-            self,
-            "_seated",
-            _DesktopSeatedPaths(
-                app_home=_required_desktop_state_path("app_home", values[0]),
-                database_path=_required_desktop_state_path("database_path", values[1]),
-                checkpoint_path=_required_desktop_state_path(
-                    "checkpoint_path", values[2]
-                ),
-                logs_dir=_required_desktop_state_path("logs_dir", values[3]),
-                discovery_path=_required_desktop_state_path(
-                    "discovery_path", values[4]
-                ),
-                workspaces_root=_required_desktop_state_path(
-                    "workspaces_root", values[5]
-                ),
-            ),
-        )
-        object.__setattr__(
-            self,
-            "_reserved",
-            _DesktopReservedPaths(
-                credentials_dir=_required_desktop_state_path(
-                    "credentials_dir", values[6]
-                ),
-                receipts_dir=_required_desktop_state_path("receipts_dir", values[7]),
-                temp_homes_dir=_required_desktop_state_path(
-                    "temp_homes_dir", values[8]
-                ),
-                snapshots_dir=_required_desktop_state_path("snapshots_dir", values[9]),
-            ),
-        )
-
-    @property
-    def app_home(self) -> Path:
-        return self._seated.app_home
-
-    @property
-    def database_path(self) -> Path:
-        return self._seated.database_path
-
-    @property
-    def checkpoint_path(self) -> Path:
-        return self._seated.checkpoint_path
-
-    @property
-    def logs_dir(self) -> Path:
-        return self._seated.logs_dir
-
-    @property
-    def discovery_path(self) -> Path:
-        return self._seated.discovery_path
-
-    @property
-    def workspaces_root(self) -> Path:
-        return self._seated.workspaces_root
-
-    @property
-    def credentials_dir(self) -> Path:
-        return self._reserved.credentials_dir
-
-    @property
-    def receipts_dir(self) -> Path:
-        return self._reserved.receipts_dir
-
-    @property
-    def temp_homes_dir(self) -> Path:
-        return self._reserved.temp_homes_dir
-
-    @property
-    def snapshots_dir(self) -> Path:
-        return self._reserved.snapshots_dir
-
-    @property
-    def provisioned_directories(self) -> tuple[Path, ...]:
-        """Return the directories with a live consumer that ``ensure`` creates.
-
-        Only the seated directories are materialised. ``discovery_path`` is a file
-        written by the discovery authority and its parent is the application home;
-        the reserved directories are omitted until their phases consume them.
-        """
-        return (
-            self._seated.app_home,
-            self._seated.database_path.parent,
-            self._seated.checkpoint_path.parent,
-            self._seated.logs_dir,
-            self._seated.workspaces_root,
-        )
-
-
-def derive_state_paths(app_home: Path) -> DesktopStatePaths:
-    """Derive the explicit mutable-state layout from an explicit application home.
+def derive_state_paths(app_home: Path) -> StateLayout:
+    """Derive the mutable-state layout from an explicit application home.
 
     The layout itself is :func:`~vaultspec_a2a.control.state_layout.state_layout`,
     the one shape every state home takes; this adds the desktop profile's
@@ -281,18 +67,24 @@ def derive_state_paths(app_home: Path) -> DesktopStatePaths:
             f"desktop application home must be an absolute path, got {app_home!r}; "
             "the desktop profile forbids launch-directory-relative state roots."
         )
-    layout = state_layout(app_home)
-    return DesktopStatePaths(
-        app_home=layout.home,
-        database_path=layout.database_path,
-        checkpoint_path=layout.checkpoint_path,
-        logs_dir=layout.logs_dir,
-        discovery_path=layout.discovery_path,
-        workspaces_root=layout.workspaces_root,
-        credentials_dir=layout.credentials_dir,
-        receipts_dir=layout.receipts_dir,
-        temp_homes_dir=layout.temp_homes_dir,
-        snapshots_dir=layout.snapshots_dir,
+    return state_layout(app_home)
+
+
+def provisioned_directories(state: StateLayout) -> tuple[Path, ...]:
+    """Return the directories :meth:`DesktopProfile.ensure` creates and restricts.
+
+    These are the home, the store directory, the runtime log directory and the
+    workspace tree. ``discovery_path`` is a file written by the discovery
+    authority and its parent is the home. The credential and temporary-home
+    directories are created by the writers that own them, and the receipt and
+    snapshot directories have no writer, so ``ensure`` never seeds them empty.
+    """
+    return (
+        state.home,
+        state.database_path.parent,
+        state.checkpoint_path.parent,
+        state.logs_dir,
+        state.workspaces_root,
     )
 
 
@@ -408,26 +200,26 @@ def _restrict_state_path(
         ) from exc
 
 
-def ensure_private_state(state: DesktopStatePaths) -> None:
+def ensure_private_state(state: StateLayout) -> None:
     """Fail closed before opening desktop databases or their SQLite side files.
 
     The private parent protects future side files; existing files also need
     hardening because Windows files can retain explicit, permissive ACLs.
     """
     # Refuse a linked home before the seal can write through it.
-    if state.app_home.is_symlink() or state.app_home.is_junction():
+    if state.home.is_symlink() or state.home.is_junction():
         raise DesktopProfileError(
-            f"desktop application home is linked: {state.app_home}; "
+            f"desktop application home is linked: {state.home}; "
             "choose a real directory with owner-only access."
         )
     try:
-        seal_state_home(state.app_home)
+        seal_state_home(state.home)
     except OSError as exc:
         raise DesktopProfileError(
-            f"cannot prepare desktop application home {state.app_home}: {exc}; "
+            f"cannot prepare desktop application home {state.home}: {exc}; "
             "choose a writable filesystem supporting owner-only access."
         ) from exc
-    for directory in dict.fromkeys(state.provisioned_directories):
+    for directory in dict.fromkeys(provisioned_directories(state)):
         _restrict_state_path(directory, directory=True)
     for database in (state.database_path, state.checkpoint_path):
         for suffix in ("", "-wal", "-shm", "-journal"):
@@ -448,7 +240,7 @@ class DesktopProfile:
 
     app_home: Path
     capsule_root: Path
-    state: DesktopStatePaths
+    state: StateLayout
 
     @classmethod
     def resolve(cls, app_home: Path, capsule_root: Path) -> DesktopProfile:
@@ -464,7 +256,7 @@ class DesktopProfile:
         """
         state = derive_state_paths(app_home)
         capsule = _validate_capsule_root(capsule_root)
-        home = state.app_home
+        home = state.home
         nested = home.is_relative_to(capsule) or capsule.is_relative_to(home)
         if home == capsule or nested:
             raise DesktopProfileError(
@@ -489,10 +281,10 @@ class DesktopProfile:
     def ensure(self) -> None:
         """Create the provisioned mutable-state directories beneath the app home.
 
-        Idempotent: existing state is rechecked and restricted. Only directories with
-        a live consumer are created; the reserved directories are left for their
-        consuming phases so ``ensure`` never seeds dead empty state. Called once
-        the profile is armed and about to seat live state.
+        Idempotent: existing state is rechecked and restricted. Only the
+        :func:`provisioned_directories` are created; every other directory is left
+        to the writer that owns it so ``ensure`` never seeds dead empty state.
+        Called once the profile is armed and about to seat live state.
 
         Each directory is restricted to its owner. The credential files one level
         over already get this treatment, and the state directory holds the

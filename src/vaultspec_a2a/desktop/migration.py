@@ -37,13 +37,13 @@ from ..database.checkpoint_schema import (
 from ..database.migrate import migration_script_location, run_migrations
 from ..database.migrations import backfill_teamstate_sdd_fields
 from ..database.session import checkpoint_wal
-from .profile import DesktopProfileError, ensure_private_state
+from .profile import DesktopProfileError, derive_state_paths, ensure_private_state
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from ..control.state_layout import StateLayout
     from .contract import MigrationRange
-    from .profile import DesktopStatePaths
 
 __all__ = [
     "MigrationStage",
@@ -375,7 +375,7 @@ def _failed_result(
 
 async def _run_mutations_bounded(
     started: float,
-    state: DesktopStatePaths,
+    state: StateLayout,
     target_head: str,
     *,
     compact: bool = False,
@@ -456,8 +456,6 @@ async def migrate_stores(
     is the caller's snapshot; this function only refuses (live/locked or failed
     preconditions) or completes.
     """
-    from .profile import derive_state_paths
-
     started = time.monotonic()
     try:
         target_head = package_migration_range().head
@@ -513,8 +511,6 @@ async def initialize_fresh_stores(app_home: Path) -> MigrationResult:
     store the dashboard has not snapshotted. Desktop boot itself remains
     non-mutating; this is the setup verb's seam.
     """
-    from .profile import derive_state_paths
-
     started = time.monotonic()
     state = derive_state_paths(app_home)
     try:

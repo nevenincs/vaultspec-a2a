@@ -21,7 +21,12 @@ from .._platform_acl import (
     windows_current_user_sid,
 )
 from ..migration import MigrationStage, initialize_fresh_stores, migrate_stores
-from ..profile import DesktopProfile, DesktopProfileError, derive_state_paths
+from ..profile import (
+    DesktopProfile,
+    DesktopProfileError,
+    derive_state_paths,
+    provisioned_directories,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Generator
@@ -121,7 +126,7 @@ def test_settings_store_preparation_enforces_desktop_privacy(tmp_path: Path) -> 
 
     settings.prepare_state_dir(state.database_path.parent)
 
-    for directory in state.provisioned_directories:
+    for directory in provisioned_directories(state):
         assert path_is_owner_restricted(directory)
     connection = sqlite3.connect(state.database_path)
     try:

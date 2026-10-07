@@ -83,9 +83,9 @@ def _install_runtime(authority: NativeLaunchAuthority) -> Path:
 
 def test_authority_cannot_grant_private_state_or_all_role_homes(tmp_path: Path) -> None:
     authority = _authority(tmp_path)
-    private = authority.app_home.path / "credentials"
-    private.mkdir()
     state = derive_state_paths(authority.app_home.path)
+    private = state.credentials_dir
+    private.mkdir()
     for workspace, home in (
         (private, authority.home.path),
         (authority.workspace.path, state.temp_homes_dir),
@@ -146,7 +146,7 @@ def test_native_grants_preserve_work_and_deny_other_planes(tmp_path: Path) -> No
             )
         return
     node = _install_runtime(authority)
-    private = authority.app_home.path / "credentials"
+    private = derive_state_paths(authority.app_home.path).credentials_dir
     private.mkdir()
     secret = private / "lifecycle-token"
     secret.write_text("synthetic-control-plane", encoding="utf-8")

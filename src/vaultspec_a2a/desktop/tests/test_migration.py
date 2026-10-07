@@ -28,7 +28,7 @@ from ..migration import (
     migrate_stores,
     package_migration_range,
 )
-from ..profile import derive_state_paths
+from ..profile import derive_state_paths, provisioned_directories
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -75,7 +75,7 @@ class TestMigrateStores:
         assert result.target_head == packaged.head
         assert result.failed_stage is None
         for path in (
-            *state.provisioned_directories,
+            *provisioned_directories(state),
             state.database_path,
             state.checkpoint_path,
         ):

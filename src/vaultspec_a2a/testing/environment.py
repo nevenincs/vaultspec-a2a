@@ -1,4 +1,4 @@
-"""Arm-and-restore seams for the two live singletons a test may safely mutate.
+"""Arm-and-restore seams for the live state a test may safely mutate.
 
 Two mechanisms, deliberately kept apart even though both "save, apply, then
 restore on exit":
@@ -6,7 +6,8 @@ restore on exit":
 - :func:`armed_environment` mutates ``os.environ``, the process-wide table a
   fresh ``Settings()`` construction reads at boot.
 - :func:`settings_override` mutates attributes directly on the shared
-  ``settings`` singleton production code already holds a reference to.
+  ``settings`` and ``domain_config`` singletons production code already holds a
+  reference to, each name on the singleton that declares it.
 
 Folding these into one function would hide which live object a test is
 touching, which is the one distinction that must never be ambiguous at a call
@@ -22,6 +23,8 @@ import os
 from typing import TYPE_CHECKING
 
 from ..control.config import settings as _settings
+from ..domain_config import DomainSettingsConfig
+from ..domain_config import domain_config as _domain_config
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -63,22 +66,29 @@ def armed_environment(**values: str | None) -> Generator[None]:
 
 @contextlib.contextmanager
 def settings_override(**updates: object) -> Generator[None]:
-    """Temporarily set attributes on the shared ``settings`` singleton.
+    """Temporarily set attributes on the singleton that owns each one.
+
+    A domain knob is set on ``domain_config`` and everything else on
+    ``settings``, so one override changes the value every reader of that field
+    sees: no field is declared by both singletons.
 
     Restoration runs in the ``finally`` clause, so an assertion raised inside
-    the block still leaves the singleton as later tests expect it. Distinct
+    the block still leaves the singletons as later tests expect them. Distinct
     from :func:`armed_environment`: this touches the already-constructed
-    ``settings`` object directly, not the environment a future construction
-    would read.
+    singletons directly, not the environment a future construction would read.
     """
-    originals = {name: getattr(_settings, name) for name in updates}
-    for name, value in updates.items():
-        setattr(_settings, name, value)
+    owners = {
+        name: _domain_config if name in DomainSettingsConfig.model_fields else _settings
+        for name in updates
+    }
+    originals = {name: getattr(owner, name) for name, owner in owners.items()}
     try:
+        for name, value in updates.items():
+            setattr(owners[name], name, value)
         yield
     finally:
         for name, value in originals.items():
-            setattr(_settings, name, value)
+            setattr(owners[name], name, value)
 
 
 @contextlib.contextmanager

@@ -42,6 +42,7 @@ from fastapi.responses import StreamingResponse
 
 from ..control.config import settings
 from ..database import get_thread
+from ..domain_config import domain_config
 from ..graph.enums import ServerEventType, StreamFrameKind
 from ..providers.conditions import ProviderCondition
 from ..streaming.sse_frames import encode_sse_frame, transport_frame
@@ -593,7 +594,7 @@ async def build_thread_stream_response(
     # This is the cheap early refusal, not the bound itself: registration happens
     # once the response body starts, and the shared subscriber registry enforces
     # the same limit at the moment of registration, which is where it holds.
-    limit = settings.max_stream_connections
+    limit = domain_config.max_stream_connections
     if limit > 0 and request.aggregator.subscriber_count() >= limit:
         raise HTTPException(
             status_code=503,

@@ -1,11 +1,12 @@
-"""Infrastructure configuration and backwards-compatible Settings facade.
+"""Infrastructure settings and the process-wide ``settings`` singleton.
 
-``InfraConfig`` holds every field that touches external services: ports, hosts,
-database URLs, API keys, filesystem paths, pool sizes, service timeouts, etc.
+``InfraConfig`` declares every field that touches external services: ports,
+hosts, database URLs, API keys, filesystem paths, pool sizes and service
+timeouts. ``Settings`` adds the derivation and path-anchoring validators and the
+properties built on the resolved values.
 
-``Settings`` composes ``DomainConfig`` (Layer 1 behavioural knobs) with
-``InfraConfig`` via multiple inheritance, producing a single object that is
-a drop-in replacement for the former ``core.config.Settings``.
+Behavioural knobs are not declared here: they belong to
+:mod:`vaultspec_a2a.domain_config`, and no field is reachable through both.
 """
 
 from pathlib import Path
@@ -15,11 +16,8 @@ from pydantic import (
     PrivateAttr,
     model_validator,
 )
-from pydantic_settings import SettingsConfigDict
 
-from ..domain_config import DomainSettingsConfig
 from ..utils.enums import Environment
-from .env_prefix import ENV_PREFIX
 from .infra_config import (
     InfraConfig,
     _synchronous_url,
@@ -50,21 +48,8 @@ if TYPE_CHECKING:
     from ..desktop.credentials import DesktopCredentialPaths
 
 
-class Settings(DomainSettingsConfig, InfraConfig):
-    """Backwards-compatible composed settings.
-
-    Inherits all ~18 domain fields from ``DomainConfig`` and all ~75
-    infrastructure fields from ``InfraConfig``.  The resulting object is
-    a drop-in replacement for the former ``core.config.Settings``.
-    """
-
-    model_config = SettingsConfigDict(
-        env_file=InfraConfig.operator_env_file(),
-        env_file_encoding="utf-8",
-        env_prefix=ENV_PREFIX,
-        extra="ignore",
-        env_ignore_empty=True,
-    )
+class Settings(InfraConfig):
+    """The infrastructure settings, with their derived values and anchored paths."""
 
     # The fields a source actually supplied, captured before any validator below
     # assigns one: an assignment marks a field as set, after which a configured
@@ -381,16 +366,6 @@ class Settings(DomainSettingsConfig, InfraConfig):
 
         state = derive_state_paths(self.desktop_app_home)
         return credential_paths(state.credentials_dir)
-
-    @property
-    def temp_homes_dir(self) -> Path:
-        """The root per-run provider configuration homes are created inside.
-
-        Inside the state home, so every home a run leaves behind is accounted
-        for with the rest of a2a's state rather than scattered through the
-        system temporary directory.
-        """
-        return self.state_layout.temp_homes_dir
 
     @property
     def resolved_database_backend(self) -> Literal["sqlite", "postgres"]:

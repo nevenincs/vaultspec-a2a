@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from ...api.tests.permission_harness import park_permission
 from ...control._permission_response_contract import PermissionInput
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.leased_dispatch import DispatchTransport
@@ -15,7 +16,6 @@ from ...control.permission_service import respond_to_permission
 from ...database import (
     create_thread,
     get_control_action_by_idempotency_key,
-    get_permission_request,
     record_permission_request,
 )
 from ...testing import adopted_spawner, current_execution_metadata
@@ -28,6 +28,7 @@ from .test_dispatch_failure_transitions import _seed_accepted_initial_action
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 _OPTIONS: list[dict[str, object]] = [
@@ -38,6 +39,7 @@ _OPTIONS: list[dict[str, object]] = [
 
 async def _run_case(
     sessions: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
     runtime_dir: Path,
     bodies: list[tuple[str, str | None]],
 ):
@@ -48,7 +50,9 @@ async def _run_case(
             status=ThreadStatus.INPUT_REQUIRED.value,
             metadata=current_execution_metadata(runtime_dir),
         )
-        request_id = f"{thread.id}:permission"
+        request_id = await park_permission(
+            checkpointer, thread_id=thread.id, options=_OPTIONS
+        )
         await record_permission_request(
             session,
             request_id=request_id,
@@ -71,14 +75,13 @@ async def _run_case(
             httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client,
         ):
             await start.wait()
-            permission = await get_permission_request(session, request_id)
-            assert permission is not None
             return await respond_to_permission(
                 session,
-                permission=permission,
+                thread_id=thread_id,
                 response=PermissionInput(
                     request_id, option_id, f"client-retry-{index}", notes
                 ),
+                checkpointer=checkpointer,
                 transport=DispatchTransport(
                     worker_client=client,
                     circuit_breaker=breaker,
@@ -104,10 +107,12 @@ async def _run_case(
 @pytest.mark.asyncio
 async def test_identical_concurrent_retries_share_one_request_lease(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
     tmp_path: Path,
 ) -> None:
     results, action = await _run_case(
         session_factory,
+        checkpointer,
         tmp_path,
         [("allow_once", "same"), ("allow_once", "same")],
     )
@@ -122,10 +127,12 @@ async def test_identical_concurrent_retries_share_one_request_lease(
 @pytest.mark.asyncio
 async def test_competing_concurrent_bodies_conflict_without_second_dispatch(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
     tmp_path: Path,
 ) -> None:
     results, action = await _run_case(
         session_factory,
+        checkpointer,
         tmp_path,
         [("allow_once", "first"), ("reject_once", "second")],
     )

@@ -39,7 +39,7 @@ from ...control.run_start_policy import (
     required_role_ids,
 )
 from ...control.worker_status import WorkerConnectionStatus
-from ...database import begin_write_transaction, get_db, get_permission_request
+from ...database import get_db
 from ...database.checkpoints import Checkpointer
 from ...domain_config import domain_config
 from ...providers.provider_catalog_service import (
@@ -397,6 +397,7 @@ async def run_permission_respond_endpoint(
     request_id: str,
     body: RunPermissionRespondRequest,
     context: _ActionEndpointContext = Depends(_get_action_endpoint_context),
+    checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> RunPermissionRespondResponse:
     """Answer a permission request the run raised on its progress stream.
 
@@ -419,24 +420,13 @@ async def run_permission_respond_endpoint(
     detected after the fact.
     """
     dependencies = context.dependencies
-    # The scoping read below opens the same transaction the service then writes
-    # in, so it must hold the write lock from the start; a deferred read that
-    # upgrades after a sibling commits is refused outright on SQLite.
-    await begin_write_transaction(dependencies.db)
-    permission = await get_permission_request(dependencies.db, request_id)
-    if permission is None or permission.thread_id != run_id:
-        await dependencies.db.rollback()
-        raise HTTPException(
-            status_code=404,
-            detail=f"Permission request {request_id!r} not found for run {run_id!r}",
-        )
-
     result = await respond_to_permission(
-        db=dependencies.db,
-        permission=permission,
+        dependencies.db,
+        thread_id=run_id,
         response=PermissionInput(
             request_id, body.option_id, context.idempotency_key, body.notes
         ),
+        checkpointer=checkpointer,
         transport=dependencies.transport(),
     )
 

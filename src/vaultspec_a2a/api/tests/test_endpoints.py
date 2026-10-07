@@ -35,7 +35,6 @@ from ...database import (
     get_thread,
     record_permission_request,
     record_permission_response_submission,
-    supersede_permission_requests,
 )
 from ...database.models import (
     PermissionRequestModel,
@@ -57,6 +56,11 @@ from ...thread.idempotency import (
     thread_create_action_key,
 )
 from .conftest import make_app
+from .permission_harness import (
+    park_permission,
+    park_permissions,
+    park_plan_approval,
+)
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 type JsonValue = str | int | float | bool | list[JsonValue] | JsonObject | None
@@ -1929,37 +1933,48 @@ class TestTeamStatus:
 # ---------------------------------------------------------------------------
 
 
+_ALLOW_ONCE_OFFER: list[dict[str, object]] = [
+    {"optionId": "allow_once", "name": "Allow once", "kind": "allow_once"}
+]
+
+
+def _seed_permission(
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    *,
+    thread_id: str,
+    options: list[dict[str, object]] | None = None,
+) -> str:
+    """Park *thread_id* on a bash permission, journal it as the relay does, name it.
+
+    The run's checkpoint is what makes the request answerable; the journal row is
+    the copy the relay writes beside it. *options* is what the provider offered
+    and defaults to a single once-only approval.
+    """
+    offered = _ALLOW_ONCE_OFFER if options is None else options
+
+    async def _run() -> str:
+        request_id = await park_permission(
+            checkpointer, thread_id=thread_id, tool_name="bash", options=offered
+        )
+        async with session_factory() as session:
+            await record_permission_request(
+                session,
+                request_id=request_id,
+                thread_id=thread_id,
+                pause_reason_type="bash",
+                description="Allow action?",
+                allowed_options=offered,
+                tool_call="bash",
+            )
+            await session.commit()
+        return request_id
+
+    return asyncio.run(_run())
+
+
 class TestPermissionRespond:
     """Tests for POST /v1/runs/{run_id}/permissions/{request_id}/respond."""
-
-    @staticmethod
-    def _seed_permission(
-        session_factory: SessionFactory,
-        *,
-        thread_id: str,
-        request_id: str,
-        tool_call: str = "bash",
-    ) -> None:
-        async def _run() -> None:
-            async with session_factory() as session:
-                await record_permission_request(
-                    session,
-                    request_id=request_id,
-                    thread_id=thread_id,
-                    pause_reason_type=tool_call,
-                    description="Allow action?",
-                    allowed_options=[
-                        {
-                            "option_id": "allow_once",
-                            "name": "Allow once",
-                            "kind": "allow_once",
-                        }
-                    ],
-                    tool_call=tool_call,
-                )
-                await session.commit()
-
-        asyncio.run(_run())
 
     def test_responds_dispatches_resume_to_worker(
         self,
@@ -1989,9 +2004,8 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-456"
-            self._seed_permission(
-                session_factory, thread_id=thread_id, request_id=request_id
+            request_id = _seed_permission(
+                session_factory, checkpointer, thread_id=thread_id
             )
 
             # The create dispatch is captured; clear it so we only check resume.
@@ -2058,9 +2072,8 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-applied-state"
-            self._seed_permission(
-                session_factory, thread_id=thread_id, request_id=request_id
+            request_id = _seed_permission(
+                session_factory, checkpointer, thread_id=thread_id
             )
 
             worker.dispatches.clear()
@@ -2137,9 +2150,8 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-001"
-            self._seed_permission(
-                session_factory, thread_id=thread_id, request_id=request_id
+            request_id = _seed_permission(
+                session_factory, checkpointer, thread_id=thread_id
             )
 
             # Now respond to a permission for that thread.
@@ -2210,9 +2222,8 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-invalid"
-            self._seed_permission(
-                session_factory, thread_id=thread_id, request_id=request_id
+            request_id = _seed_permission(
+                session_factory, checkpointer, thread_id=thread_id
             )
 
             worker.dispatches.clear()
@@ -2255,9 +2266,8 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-invalid-replay"
-            self._seed_permission(
-                session_factory, thread_id=thread_id, request_id=request_id
+            request_id = _seed_permission(
+                session_factory, checkpointer, thread_id=thread_id
             )
 
             worker.dispatches.clear()
@@ -2288,21 +2298,6 @@ class TestPermissionRespond:
             from ...database.models import ControlActionModel
 
             async with session_factory() as session:
-                await record_permission_request(
-                    session,
-                    request_id=request_id,
-                    thread_id=thread_id,
-                    pause_reason_type="bash",
-                    description="Allow action?",
-                    allowed_options=[
-                        {
-                            "option_id": "allow_once",
-                            "name": "Allow once",
-                            "kind": "allow_once",
-                        }
-                    ],
-                    tool_call="bash",
-                )
                 action = await create_control_action(
                     session,
                     thread_id=thread_id,
@@ -2330,7 +2325,9 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-invalid-replay-malformed-payload"
+            request_id = _seed_permission(
+                session_factory, checkpointer, thread_id=thread_id
+            )
             asyncio.run(_seed_rejected_action())
 
             worker.dispatches.clear()
@@ -2350,25 +2347,6 @@ class TestPermissionRespond:
         """Rejected idempotent replays must preserve the original conflict reason."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
-        async def _seed_permission() -> None:
-            async with session_factory() as session:
-                await record_permission_request(
-                    session,
-                    request_id=request_id,
-                    thread_id=thread_id,
-                    pause_reason_type="bash",
-                    description="Allow action?",
-                    allowed_options=[
-                        {
-                            "option_id": "allow_once",
-                            "name": "Allow once",
-                            "kind": "allow_once",
-                        }
-                    ],
-                    tool_call="bash",
-                )
-                await session.commit()
-
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
@@ -2381,8 +2359,9 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-invalid-then-valid"
-            asyncio.run(_seed_permission())
+            request_id = _seed_permission(
+                session_factory, checkpointer, thread_id=thread_id
+            )
 
             worker.dispatches.clear()
             invalid_headers = {"Idempotency-Key": "same-invalid-response"}
@@ -2415,13 +2394,14 @@ class TestPermissionRespond:
     ) -> None:
         """A request the run has left behind is refused; a live one is not.
 
-        Two requests both still outstanding are two live questions - a fan-out
-        stage parks each of its branches on its own - so being the older of two
-        is not what makes a request stale. Having been superseded is.
+        Two requests both still held are two live questions - a fan-out stage
+        parks each of its branches on its own - so being the older of two is not
+        what makes a request stale. Being absent from the run's checkpoint is,
+        whatever its journal row still says.
         """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
-        async def _seed_permissions() -> None:
+        async def _journal_old_request() -> None:
             async with session_factory() as session:
                 await record_permission_request(
                     session,
@@ -2429,34 +2409,8 @@ class TestPermissionRespond:
                     thread_id=thread_id,
                     pause_reason_type="bash",
                     description="Allow old action?",
-                    allowed_options=[
-                        {
-                            "option_id": "allow_once",
-                            "name": "Allow once",
-                            "kind": "allow_once",
-                        }
-                    ],
+                    allowed_options=_ALLOW_ONCE_OFFER,
                     tool_call="bash",
-                )
-                await record_permission_request(
-                    session,
-                    request_id=new_request_id,
-                    thread_id=thread_id,
-                    pause_reason_type="bash",
-                    description="Allow new action?",
-                    allowed_options=[
-                        {
-                            "option_id": "allow_once",
-                            "name": "Allow once",
-                            "kind": "allow_once",
-                        }
-                    ],
-                    tool_call="bash",
-                )
-                await supersede_permission_requests(
-                    session,
-                    thread_id=thread_id,
-                    except_request_id=new_request_id,
                 )
                 await session.commit()
 
@@ -2473,8 +2427,10 @@ class TestPermissionRespond:
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
             old_request_id = f"{thread_id}:req-old"
-            new_request_id = f"{thread_id}:req-new"
-            asyncio.run(_seed_permissions())
+            asyncio.run(_journal_old_request())
+            new_request_id = _seed_permission(
+                session_factory, checkpointer, thread_id=thread_id
+            )
 
             worker.dispatches.clear()
             stale = client.post(
@@ -2501,31 +2457,32 @@ class TestPermissionRespond:
         """A run waiting on two questions can be answered on either of them.
 
         A fan-out stage parks each of its branches on its own request, so both
-        are live and each dispatches its own resume. Only the run's checkpoint
-        knows which interrupts it still holds, so the worker - not this route -
-        is what turns an answer away that no pending interrupt asked for.
+        are live and each dispatches its own resume. The run's checkpoint holds
+        both interrupts, so neither answer is turned away here; the worker is
+        what addresses each resume to the interrupt it names.
         """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
-        async def _seed_permissions() -> None:
+        async def _park_and_journal() -> list[str]:
+            request_ids = await park_permissions(
+                checkpointer,
+                thread_id=thread_id,
+                calls=[("bash", {"command": "left"}), ("bash", {"command": "right"})],
+                options=_ALLOW_ONCE_OFFER,
+            )
             async with session_factory() as session:
-                for request_id in (left_request_id, right_request_id):
+                for request_id in request_ids:
                     await record_permission_request(
                         session,
                         request_id=request_id,
                         thread_id=thread_id,
                         pause_reason_type="bash",
                         description="Allow this branch?",
-                        allowed_options=[
-                            {
-                                "option_id": "allow_once",
-                                "name": "Allow once",
-                                "kind": "allow_once",
-                            }
-                        ],
+                        allowed_options=_ALLOW_ONCE_OFFER,
                         tool_call="bash",
                     )
                 await session.commit()
+            return request_ids
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -2539,9 +2496,7 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            left_request_id = f"{thread_id}:req-left"
-            right_request_id = f"{thread_id}:req-right"
-            asyncio.run(_seed_permissions())
+            left_request_id, right_request_id = asyncio.run(_park_and_journal())
 
             worker.dispatches.clear()
             left = client.post(
@@ -2562,18 +2517,25 @@ class TestPermissionRespond:
             right_request_id,
         ]
 
-    def test_plan_approval_uses_live_pending_request_over_stale_thread_pointer(
+    def test_plan_approval_answers_the_held_request_over_a_stale_thread_pointer(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Plan approval should not trust a stale thread approval_request_id."""
+        """Plan approval answers the request the checkpoint holds.
+
+        The thread row's approval pointer is a projection that can lag the run,
+        so a stale one never decides which request is answerable.
+        """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
-        async def _seed_plan_approval() -> None:
+        async def _seed_plan_approval() -> str:
+            live_request_id = await park_plan_approval(
+                checkpointer, thread_id=thread_id
+            )
             async with session_factory() as session:
                 thread = await session.get(ThreadModel, thread_id)
                 assert thread is not None
                 thread.approval_status = "pending"
-                thread.approval_request_id = stale_request_id
+                thread.approval_request_id = f"{thread_id}:req-stale-plan"
                 await record_permission_request(
                     session,
                     request_id=live_request_id,
@@ -2595,6 +2557,7 @@ class TestPermissionRespond:
                     tool_call="plan_approval",
                 )
                 await session.commit()
+            return live_request_id
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -2608,9 +2571,7 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            stale_request_id = f"{thread_id}:req-stale-plan"
-            live_request_id = f"{thread_id}:req-live-plan"
-            asyncio.run(_seed_plan_approval())
+            live_request_id = asyncio.run(_seed_plan_approval())
 
             worker.dispatches.clear()
             live = client.post(
@@ -2634,7 +2595,8 @@ class TestPermissionRespond:
         """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
-        async def _seed_plan_approval() -> None:
+        async def _seed_plan_approval() -> str:
+            request_id = await park_plan_approval(checkpointer, thread_id=thread_id)
             async with session_factory() as session:
                 await record_permission_request(
                     session,
@@ -2657,6 +2619,7 @@ class TestPermissionRespond:
                     tool_call="plan_approval",
                 )
                 await session.commit()
+            return request_id
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -2670,8 +2633,7 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-plan-notes"
-            asyncio.run(_seed_plan_approval())
+            request_id = asyncio.run(_seed_plan_approval())
 
             worker.dispatches.clear()
             resp = client.post(
@@ -2822,7 +2784,9 @@ class TestDeleteThread:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-plan-relay"
+            request_id = asyncio.run(
+                park_plan_approval(checkpointer, thread_id=thread_id)
+            )
 
             relay = client.post(
                 "/internal/events/batch",
@@ -2886,30 +2850,6 @@ class TestDeleteThread:
         """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
-        async def _seed_permission() -> None:
-            async with session_factory() as session:
-                await record_permission_request(
-                    session,
-                    request_id=request_id,
-                    thread_id=thread_id,
-                    pause_reason_type="bash",
-                    description="Allow action?",
-                    allowed_options=[
-                        {
-                            "option_id": "allow_once",
-                            "name": "Allow once",
-                            "kind": "allow_once",
-                        },
-                        {
-                            "option_id": "deny_once",
-                            "name": "Deny once",
-                            "kind": "deny_once",
-                        },
-                    ],
-                    tool_call="bash",
-                )
-                await session.commit()
-
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
@@ -2922,8 +2862,23 @@ class TestDeleteThread:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-stale"
-            asyncio.run(_seed_permission())
+            request_id = _seed_permission(
+                session_factory,
+                checkpointer,
+                thread_id=thread_id,
+                options=[
+                    {
+                        "optionId": "allow_once",
+                        "name": "Allow once",
+                        "kind": "allow_once",
+                    },
+                    {
+                        "optionId": "deny_once",
+                        "name": "Deny once",
+                        "kind": "reject_once",
+                    },
+                ],
+            )
 
             worker.dispatches.clear()
             first = client.post(
@@ -2947,36 +2902,6 @@ class TestDeleteThread:
             "option_id": "allow_once",
             "request_id": request_id,
         }
-
-    def _seed_bash_permission(
-        self,
-        session_factory: SessionFactory,
-        *,
-        thread_id: str,
-        request_id: str,
-    ) -> None:
-        """Record one durable single-option bash permission for *thread_id*."""
-
-        async def _seed() -> None:
-            async with session_factory() as session:
-                await record_permission_request(
-                    session,
-                    request_id=request_id,
-                    thread_id=thread_id,
-                    pause_reason_type="bash",
-                    description="Allow action?",
-                    allowed_options=[
-                        {
-                            "option_id": "allow_once",
-                            "name": "Allow once",
-                            "kind": "allow_once",
-                        }
-                    ],
-                    tool_call="bash",
-                )
-                await session.commit()
-
-        asyncio.run(_seed())
 
     def test_definite_resume_dispatch_failure_restores_permission_to_pending(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -3003,9 +2928,8 @@ class TestDeleteThread:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-dispatch-fail"
-            self._seed_bash_permission(
-                session_factory, thread_id=thread_id, request_id=request_id
+            request_id = _seed_permission(
+                session_factory, checkpointer, thread_id=thread_id
             )
 
             async def _thread_status() -> str:
@@ -3092,9 +3016,8 @@ class TestDeleteThread:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-dispatch-lost"
-            self._seed_bash_permission(
-                session_factory, thread_id=thread_id, request_id=request_id
+            request_id = _seed_permission(
+                session_factory, checkpointer, thread_id=thread_id
             )
 
             worker.dispatches.clear()
@@ -3138,24 +3061,11 @@ class TestDeleteThread:
         assert second.json()["applied"] is False
         assert worker.dispatches == []
 
-    def test_rejects_permission_request_without_valid_durable_options(
+    def test_rejects_permission_request_that_offers_no_options(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """A malformed durable permission row must fail closed."""
+        """A request whose interrupt offers nothing must fail closed."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
-
-        async def _seed_permission() -> None:
-            async with session_factory() as session:
-                await record_permission_request(
-                    session,
-                    request_id=request_id,
-                    thread_id=thread_id,
-                    pause_reason_type="bash",
-                    description="Allow action?",
-                    allowed_options=[],
-                    tool_call="bash",
-                )
-                await session.commit()
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -3169,8 +3079,9 @@ class TestDeleteThread:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-empty"
-            asyncio.run(_seed_permission())
+            request_id = _seed_permission(
+                session_factory, checkpointer, thread_id=thread_id, options=[]
+            )
 
             worker.dispatches.clear()
             resp = client.post(
@@ -3182,31 +3093,19 @@ class TestDeleteThread:
         assert resp.json()["detail"] == "Permission request has no valid options"
         assert worker.dispatches == []
 
-    def test_rejects_permission_request_with_malformed_durable_option_json(
+    def test_a_corrupted_journal_copy_of_the_options_does_not_block_the_answer(
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """Corrupted durable option payloads must also fail closed."""
+        """The journal's option column is a disclosure copy, never the authority.
+
+        The run's checkpoint still holds the request and the options it offers,
+        so a copy in the journal that can no longer be read changes nothing
+        about what may be answered.
+        """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
-        async def _seed_permission() -> None:
-            from ...database.models import PermissionRequestModel
-
+        async def _corrupt_journal_copy() -> None:
             async with session_factory() as session:
-                await record_permission_request(
-                    session,
-                    request_id=request_id,
-                    thread_id=thread_id,
-                    pause_reason_type="bash",
-                    description="Allow action?",
-                    allowed_options=[
-                        {
-                            "option_id": "allow_once",
-                            "name": "Allow once",
-                            "kind": "allow_once",
-                        }
-                    ],
-                    tool_call="bash",
-                )
                 permission = await session.get(PermissionRequestModel, request_id)
                 assert permission is not None
                 permission.allowed_options_json = '{"broken":'
@@ -3224,8 +3123,10 @@ class TestDeleteThread:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            request_id = f"{thread_id}:req-malformed"
-            asyncio.run(_seed_permission())
+            request_id = _seed_permission(
+                session_factory, checkpointer, thread_id=thread_id
+            )
+            asyncio.run(_corrupt_journal_copy())
 
             worker.dispatches.clear()
             resp = client.post(
@@ -3233,9 +3134,12 @@ class TestDeleteThread:
                 json={"option_id": "allow_once"},
             )
 
-        assert resp.status_code == 409
-        assert resp.json()["detail"] == "Permission request has no valid options"
-        assert worker.dispatches == []
+        assert resp.status_code == 200
+        assert len(worker.dispatches) == 1
+        assert worker.dispatches[0]["option_id"] == {
+            "option_id": "allow_once",
+            "request_id": request_id,
+        }
 
 
 # ---------------------------------------------------------------------------

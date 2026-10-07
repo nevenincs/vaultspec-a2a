@@ -31,6 +31,7 @@ from ...worker.app import create_worker_app
 from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
 from .conftest import make_app
+from .permission_harness import park_permission
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -104,11 +105,17 @@ async def _start_run(client: httpx.AsyncClient) -> str:
 
 
 async def _seed_permission(
-    session_factory: SessionFactory, *, thread_id: str, request_id: str
-) -> None:
-    """Record a real pending permission request against a real run."""
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    *,
+    thread_id: str,
+) -> str:
+    """Park a real run on a permission request, journal it, and name it."""
     from ...database.permission_repository import record_permission_request
 
+    request_id = await park_permission(
+        checkpointer, thread_id=thread_id, tool_name="bash"
+    )
     async with session_factory() as session:
         await record_permission_request(
             session,
@@ -126,6 +133,7 @@ async def _seed_permission(
             tool_call="bash",
         )
         await session.commit()
+    return request_id
 
 
 @pytest.mark.asyncio
@@ -144,8 +152,9 @@ async def test_a_permission_answer_to_a_busy_run_is_a_conflict_not_a_server_faul
         transport=ASGITransport(app=app), base_url="http://gateway", timeout=30.0
     ) as client:
         run_id = await _start_run(client)
-        request_id = f"{run_id}:busy"
-        await _seed_permission(session_factory, thread_id=run_id, request_id=request_id)
+        request_id = await _seed_permission(
+            session_factory, checkpointer, thread_id=run_id
+        )
 
         async with _saturated_worker(app, checkpointer, held_threads=[run_id]):
             refused = await client.post(
@@ -174,8 +183,9 @@ async def test_a_permission_answer_to_a_full_worker_asks_the_caller_to_retry(
         transport=ASGITransport(app=app), base_url="http://gateway", timeout=30.0
     ) as client:
         run_id = await _start_run(client)
-        request_id = f"{run_id}:full"
-        await _seed_permission(session_factory, thread_id=run_id, request_id=request_id)
+        request_id = await _seed_permission(
+            session_factory, checkpointer, thread_id=run_id
+        )
 
         held = [
             f"holder-{index}" for index in range(domain_config.max_concurrent_threads)

@@ -22,6 +22,7 @@ import anyio
 import httpx
 import pytest
 
+from ...api.tests.permission_harness import park_permission, park_plan_approval
 from ...control._permission_response_contract import PermissionInput
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.leased_dispatch import DispatchTransport
@@ -39,7 +40,6 @@ from ...worker.ipc import WorkerBridge
 from .. import (
     create_thread,
     get_permission_logs_by_thread,
-    get_permission_request,
     record_permission_request,
 )
 
@@ -68,10 +68,13 @@ class _PauseSpec:
     reason: str
     tool_call: str | None
     options: list[dict[str, object]]
+    plan_approval: bool
 
 
-_TOOL_PAUSE = _PauseSpec("bash", "bash", _TOOL_OPTIONS)
-_APPROVAL_PAUSE = _PauseSpec("plan_approval_request", None, _APPROVAL_OPTIONS)
+_TOOL_PAUSE = _PauseSpec("bash", "bash", _TOOL_OPTIONS, plan_approval=False)
+_APPROVAL_PAUSE = _PauseSpec(
+    "plan_approval_request", None, _APPROVAL_OPTIONS, plan_approval=True
+)
 
 
 @asynccontextmanager
@@ -97,13 +100,18 @@ async def _worker(
 
 async def _pause_run(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
     thread_id: str,
     *,
     workspace: Path,
     pause: _PauseSpec,
 ) -> str:
-    """Park a real run on a real durable permission request."""
-    request_id = f"{thread_id}:permission"
+    """Park a real run on a real request, journalled as the relay journals it."""
+    request_id = (
+        await park_plan_approval(checkpointer, thread_id=thread_id)
+        if pause.plan_approval
+        else await park_permission(checkpointer, thread_id=thread_id, tool_name="bash")
+    )
     async with session_factory() as db:
         await create_thread(
             db,
@@ -128,19 +136,20 @@ async def _pause_run(
 
 async def _decide(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
     worker_client: httpx.AsyncClient,
     *,
+    thread_id: str,
     request_id: str,
     option_id: str,
     idempotency_key: str,
 ):
     async with session_factory() as db:
-        permission = await get_permission_request(db, request_id)
-        assert permission is not None
         return await respond_to_permission(
             db,
-            permission=permission,
+            thread_id=thread_id,
             response=PermissionInput(request_id, option_id, idempotency_key),
+            checkpointer=checkpointer,
             transport=DispatchTransport(
                 worker_client=worker_client,
                 circuit_breaker=WorkerCircuitBreaker(
@@ -168,6 +177,7 @@ async def test_approving_a_tool_call_records_a_durable_audit_row(
     thread_id = "audit-approve-thread"
     request_id = await _pause_run(
         session_factory,
+        checkpointer,
         thread_id,
         workspace=tmp_path,
         pause=_TOOL_PAUSE,
@@ -177,7 +187,9 @@ async def test_approving_a_tool_call_records_a_durable_audit_row(
     async with _worker(checkpointer) as worker_client:
         result = await _decide(
             session_factory,
+            checkpointer,
             worker_client,
+            thread_id=thread_id,
             request_id=request_id,
             option_id="allow_once",
             idempotency_key="operator-approval",
@@ -207,6 +219,7 @@ async def test_rejecting_a_tool_call_records_the_denial_not_an_approval(
     thread_id = "audit-reject-thread"
     request_id = await _pause_run(
         session_factory,
+        checkpointer,
         thread_id,
         workspace=tmp_path,
         pause=_TOOL_PAUSE,
@@ -215,7 +228,9 @@ async def test_rejecting_a_tool_call_records_the_denial_not_an_approval(
     async with _worker(checkpointer) as worker_client:
         result = await _decide(
             session_factory,
+            checkpointer,
             worker_client,
+            thread_id=thread_id,
             request_id=request_id,
             option_id="reject_once",
             idempotency_key="operator-denial",
@@ -238,6 +253,7 @@ async def test_an_approval_pause_is_audited_under_the_plan_approval_sentinel(
     thread_id = "audit-plan-thread"
     request_id = await _pause_run(
         session_factory,
+        checkpointer,
         thread_id,
         workspace=tmp_path,
         pause=_APPROVAL_PAUSE,
@@ -246,7 +262,9 @@ async def test_an_approval_pause_is_audited_under_the_plan_approval_sentinel(
     async with _worker(checkpointer) as worker_client:
         result = await _decide(
             session_factory,
+            checkpointer,
             worker_client,
+            thread_id=thread_id,
             request_id=request_id,
             option_id="approve",
             idempotency_key="operator-plan-approval",
@@ -272,6 +290,7 @@ async def test_a_guard_rejected_response_is_not_recorded_as_a_decision(
     thread_id = "audit-refused-thread"
     request_id = await _pause_run(
         session_factory,
+        checkpointer,
         thread_id,
         workspace=tmp_path,
         pause=_TOOL_PAUSE,
@@ -280,7 +299,9 @@ async def test_a_guard_rejected_response_is_not_recorded_as_a_decision(
     async with _worker(checkpointer) as worker_client:
         result = await _decide(
             session_factory,
+            checkpointer,
             worker_client,
+            thread_id=thread_id,
             request_id=request_id,
             option_id="option_the_request_never_offered",
             idempotency_key="operator-bad-option",
@@ -305,6 +326,7 @@ async def test_a_client_retry_records_one_decision_not_two(
     thread_id = "audit-retry-thread"
     request_id = await _pause_run(
         session_factory,
+        checkpointer,
         thread_id,
         workspace=tmp_path,
         pause=_TOOL_PAUSE,
@@ -313,14 +335,18 @@ async def test_a_client_retry_records_one_decision_not_two(
     async with _worker(checkpointer) as worker_client:
         first = await _decide(
             session_factory,
+            checkpointer,
             worker_client,
+            thread_id=thread_id,
             request_id=request_id,
             option_id="allow_once",
             idempotency_key="operator-retry-1",
         )
         second = await _decide(
             session_factory,
+            checkpointer,
             worker_client,
+            thread_id=thread_id,
             request_id=request_id,
             option_id="allow_once",
             idempotency_key="operator-retry-2",

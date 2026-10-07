@@ -1,8 +1,10 @@
 """Permission response orchestration service.
 
 Extracts the state-machine logic from the REST route handler into a
-protocol-agnostic service function.  Does NOT commit the session, raise
-``HTTPException``, or import from ``api/``.
+protocol-agnostic service function.  Does NOT raise ``HTTPException`` or import
+from ``api/``.  The run's checkpoint says whether a request is pending and which
+options it offers; the permission journal keeps the answer's idempotency,
+rejection and audit records.
 """
 
 from __future__ import annotations
@@ -13,10 +15,12 @@ from typing import TYPE_CHECKING
 
 from ..database import (
     append_permission_log,
+    begin_write_transaction,
     create_control_action,
     get_control_action_by_idempotency_key,
-    get_pending_permission_requests,
+    get_permission_request,
     get_thread,
+    read_latest_checkpoint,
     record_permission_response_submission,
     reset_permission_response_submission,
     set_thread_approval_state,
@@ -45,6 +49,9 @@ from ._permission_response_contract import (
     AuthorizedPermission as _AuthorizedPermission,
 )
 from ._permission_response_contract import (
+    ParkedPermission as _ParkedPermission,
+)
+from ._permission_response_contract import (
     PermissionInput,
     PermissionResult,
 )
@@ -59,6 +66,9 @@ from ._permission_response_contract import (
 )
 from ._permission_response_contract import (
     existing_rejection_error as _existing_rejection_error,
+)
+from ._permission_response_contract import (
+    held_interrupt as _held_interrupt,
 )
 from ._permission_response_contract import (
     rejected_payload as _rejected_payload,
@@ -77,7 +87,7 @@ from .action_lease import (
     prepare_control_action_claim,
 )
 from .leased_dispatch import DispatchRefusal, build_followon_dispatch, dispatch_leased
-from .permission_options import extract_allowed_option_ids
+from .pause import project_checkpoint_read
 from .repair_transitions import (
     apply_dispatch_failure,
     apply_repair_transition,
@@ -86,10 +96,9 @@ from .repair_transitions import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database import (
-        PermissionRequestModel,
-        ThreadModel,
-    )
+    from ..database import ThreadModel
+    from ..database.checkpoints import Checkpointer
+    from ..thread import ProjectedInterrupt
     from .leased_dispatch import DispatchTransport, SettledDispatchFailure
 
 __all__ = [
@@ -144,17 +153,36 @@ async def _journal_rejection(
     )
 
 
+def _request_not_found(request_id: str, thread_id: str) -> PermissionResult:
+    """Refuse an answer to a request no run holds or journals under this id."""
+    return PermissionResult(
+        request_id=request_id,
+        thread_id=thread_id,
+        accepted=False,
+        applied=False,
+        action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+        error_detail=(
+            f"Permission request {request_id!r} not found for run {thread_id!r}"
+        ),
+        error_status_code=404,
+    )
+
+
 async def respond_to_permission(
     db: AsyncSession,
     *,
-    permission: PermissionRequestModel,
+    thread_id: str,
     response: PermissionInput,
+    checkpointer: Checkpointer,
     transport: DispatchTransport,
 ) -> PermissionResult:
     """Execute the permission-response state machine.
 
-    *permission* is the request row the caller already resolved and scoped to
-    its run; the service answers that row and never resolves the request again.
+    The run's checkpoint decides whether *response* answers a request the run is
+    parked on, and which options that request offers. The request's journal row
+    keeps the answer's idempotency, rejection and audit records and never opens,
+    closes or answers a pause: a request the checkpoint does not hold is refused,
+    except that an answer already accepted for it replays.
 
     Returns a :class:`PermissionResult` describing the outcome.  Commits the
     session before returning — the service owns its transaction boundary.
@@ -172,36 +200,67 @@ async def respond_to_permission(
         option_id,
         extra={
             "request_id": request_id,
-            "thread_id": permission.thread_id,
+            "thread_id": thread_id,
             "action": "permission_response",
             "option_id": option_id,
         },
     )
 
-    authorization = await _authorize_permission_response(db, permission, response)
-    if isinstance(authorization, PermissionResult):
-        return authorization
+    # An unknown run is refused before the checkpoint round trip below.
+    known = await get_thread(db, thread_id) is not None
+    await db.rollback()
+    if not known:
+        return _request_not_found(request_id, thread_id)
+    # The checkpoint read is remote I/O, so it happens before the durable
+    # transaction opens: holding the write lock across it would block every
+    # other writer for the length of a checkpoint round trip.
+    checkpoint = await read_latest_checkpoint(checkpointer, thread_id)
+    projection = project_checkpoint_read(checkpoint, thread_id)
+    held = _held_interrupt(projection, request_id)
+    # A checkpoint that did not answer, or answered with something that could not
+    # be projected, proves nothing about what the run holds.
+    unconfirmed = checkpoint.unreadable or (
+        checkpoint.checkpoint_tuple is not None and projection is None
+    )
 
-    # ------------------------------------------------------------------
-    # 5. Record the transition, then 6-7 dispatch the resume
-    # ------------------------------------------------------------------
-    transition = await _record_permission_transition(
-        db, authorized=authorization, response=response
-    )
-    if isinstance(transition, PermissionResult):
-        return transition
-    return await _dispatch_permission_resume(
-        db,
-        authorized=authorization,
-        transition=transition,
-        response=response,
-        transport=transport,
-    )
+    await begin_write_transaction(db)
+    try:
+        authorization = await _authorize_permission_response(
+            db,
+            thread_id,
+            response,
+            held,
+            checkpoint_unconfirmed=unconfirmed,
+        )
+        if isinstance(authorization, PermissionResult):
+            return authorization
+
+        # ------------------------------------------------------------------
+        # 5. Record the transition, then 6-7 dispatch the resume
+        # ------------------------------------------------------------------
+        transition = await _record_permission_transition(
+            db, authorized=authorization, response=response
+        )
+        if isinstance(transition, PermissionResult):
+            return transition
+        return await _dispatch_permission_resume(
+            db,
+            authorized=authorization,
+            transition=transition,
+            response=response,
+            transport=transport,
+        )
+    finally:
+        # The service owns its boundary and no caller commits after it, so a
+        # transaction still open here holds nothing worth keeping: release the
+        # write lock now rather than when the session closes.
+        if db.in_transaction():
+            await db.rollback()
 
 
 async def _deduplicate_permission_response(
     db: AsyncSession,
-    permission: PermissionRequestModel,
+    permission: _ParkedPermission,
     thread_record: ThreadModel,
     response: PermissionInput,
     resolved_idempotency_key: str,
@@ -220,14 +279,10 @@ async def _deduplicate_permission_response(
             == ControlActionResultStatus.REJECTED_INVALID_STATE.value
         ):
             stored_error_detail = _existing_rejection_error(existing_action)
-            valid_option_ids = extract_allowed_option_ids(
-                permission.allowed_options_json
-            )
             error_detail, error_status_code = _rejected_permission_error(
-                permission_status=permission.request_status,
+                permission,
                 thread_terminal=thread_record.status in TERMINAL_STATUSES,
                 option_id=option_id,
-                valid_option_ids=valid_option_ids,
             )
             return PermissionResult(
                 request_id=request_id,
@@ -273,8 +328,9 @@ async def _deduplicate_permission_response(
 
 
 def _document_approval_refusal(
-    permission: PermissionRequestModel, request_id: str, thread_id: str
+    permission: _ParkedPermission, thread_id: str
 ) -> PermissionResult | None:
+    request_id = permission.request_id
     if (
         permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
         and permission.pause_reason_type not in LOCALLY_RESPONDABLE_PAUSE_CAUSES
@@ -308,37 +364,58 @@ def _document_approval_refusal(
     return None
 
 
+async def _parked_permission(
+    db: AsyncSession,
+    thread_id: str,
+    request_id: str,
+    held: ProjectedInterrupt | None,
+) -> _ParkedPermission | None:
+    """Resolve the request a response answers, from the checkpoint first.
+
+    A request the run's checkpoint holds is read off its interrupt, and the
+    journal row is consulted only for the description it cached. One the
+    checkpoint does not hold is read from this run's journal row, so a replay of
+    an answer already accepted for it can still be judged; a run's checkpoint
+    and journal that both lack the request leave nothing to answer. A row filed
+    under another run is no record of a request on this one.
+    """
+    journal = await get_permission_request(db, request_id)
+    if journal is not None and journal.thread_id != thread_id:
+        journal = None
+    if held is not None:
+        return _ParkedPermission.from_interrupt(
+            held, description=journal.description if journal is not None else ""
+        )
+    return _ParkedPermission.from_journal(journal) if journal is not None else None
+
+
 async def _authorize_permission_response(
     db: AsyncSession,
-    permission: PermissionRequestModel,
+    thread_id: str,
     response: PermissionInput,
+    held: ProjectedInterrupt | None,
+    *,
+    checkpoint_unconfirmed: bool,
 ) -> PermissionResult | _AuthorizedPermission:
-    """Authorize a response to a resolved permission request before any change.
+    """Authorize a response to a request on a run before any change.
 
     Runs every read-side guard the state machine imposes - thread resolution,
-    idempotency dedup, permission-status and terminal checks, the
-    active-interrupt guard, and option validation. Returns a
-    :class:`PermissionResult` for any rejection, duplicate, or already-applied
-    outcome (committing the rejection journal action where the machine records
-    one), or an :class:`_AuthorizedPermission` when the response is admitted and
-    the transition may proceed.
+    idempotency dedup, the checkpoint's pending check, the terminal check, and
+    option validation. Returns a :class:`PermissionResult` for any rejection,
+    duplicate, or already-applied outcome (committing the rejection journal
+    action where the machine records one), or an :class:`_AuthorizedPermission`
+    when the response is admitted and the transition may proceed.
     """
     request_id = response.request_id
     # ------------------------------------------------------------------
-    # 1. Resolve the thread the request belongs to
+    # 1. Resolve the thread and the request it is being asked to answer
     # ------------------------------------------------------------------
-    thread_id = permission.thread_id
     thread_record = await get_thread(db, thread_id)
     if thread_record is None:
-        return PermissionResult(
-            request_id=request_id,
-            thread_id=thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            error_detail="Thread not found",
-            error_status_code=404,
-        )
+        return _request_not_found(request_id, thread_id)
+    permission = await _parked_permission(db, thread_id, request_id, held)
+    if permission is None:
+        return _request_not_found(request_id, thread_id)
 
     # ------------------------------------------------------------------
     # 1.5. Refuse pauses this route has no authority to answer
@@ -349,7 +426,7 @@ async def _authorize_permission_response(
     # contract — no second approval authority in A2A). Refusing here, before
     # the idempotency and transition logic runs, means no control action is
     # journalled and no resume value is ever constructed for this call.
-    document_refusal = _document_approval_refusal(permission, request_id, thread_id)
+    document_refusal = _document_approval_refusal(permission, thread_id)
     if document_refusal is not None:
         return document_refusal
 
@@ -366,68 +443,42 @@ async def _authorize_permission_response(
     if replay is not None:
         return replay
 
-    return await _authorize_pending_permission(
-        db, permission, thread_record, response, resolved_idempotency_key
-    )
-
-
-async def _active_permission_request_id(
-    db: AsyncSession,
-    permission: PermissionRequestModel,
-    thread_record: ThreadModel,
-    request_id: str,
-) -> str | None:
-    """The request a response is measured against, which may be its own.
-
-    A run can wait on more than one question at a time - a fan-out stage parks
-    each of its branches on its own - and each of those is answerable. So a
-    response to a request that is itself still outstanding is answering the
-    live question, whatever else is outstanding beside it. Only a response to
-    a request that is no longer outstanding is measured against the newest one,
-    which is what reports it superseded.
-    """
-    locally_respondable = (
-        permission.pause_reason_type in LOCALLY_RESPONDABLE_PAUSE_CAUSES
-    )
-    pending_permissions = await get_pending_permission_requests(
+    return await _authorize_parked_permission(
         db,
-        thread_id=thread_record.id,
-        pause_reason_type=LOCALLY_RESPONDABLE_PAUSE_CAUSES
-        if locally_respondable
-        else None,
+        permission,
+        thread_record,
+        response,
+        resolved_idempotency_key,
+        checkpoint_unconfirmed=checkpoint_unconfirmed,
     )
-    if locally_respondable:
-        active_plan_permissions = [
-            pending.request_id for pending in pending_permissions
-        ]
-        if request_id in active_plan_permissions:
-            return request_id
-        return (
-            active_plan_permissions[-1]
-            if active_plan_permissions
-            else thread_record.approval_request_id or request_id
-        )
-    if any(pending.request_id == request_id for pending in pending_permissions):
-        return request_id
-    if pending_permissions:
-        return pending_permissions[-1].request_id
-    return None
 
 
-async def _authorize_pending_permission(
+async def _refuse_unparked_permission(
     db: AsyncSession,
-    permission: PermissionRequestModel,
+    permission: _ParkedPermission,
     thread_record: ThreadModel,
     response: PermissionInput,
     resolved_idempotency_key: str,
-) -> PermissionResult | _AuthorizedPermission:
+    *,
+    checkpoint_unconfirmed: bool,
+) -> PermissionResult:
+    """Answer a response to a request the run's checkpoint does not hold.
+
+    The checkpoint has already said the request is not pending; the journal row
+    only decides how an answer to a finished request is reported. One recorded
+    as applied is answered with the duplicate it is. Any other is refused and
+    the refusal journalled - unless the checkpoint could not say, because then
+    nothing is known about the request and a journalled refusal would replay
+    under the same key after the store recovers.
+    """
     request_id = response.request_id
     option_id = response.option_id
     thread_id = thread_record.id
-    # ------------------------------------------------------------------
-    # 3. Permission status checks
-    # ------------------------------------------------------------------
-    if permission.request_status == PermissionRequestStatus.APPLIED.value:
+    journal = await get_permission_request(db, request_id)
+    if (
+        journal is not None
+        and journal.request_status == PermissionRequestStatus.APPLIED.value
+    ):
         action = await create_control_action(
             db,
             thread_id=thread_id,
@@ -450,26 +501,56 @@ async def _authorize_pending_permission(
             approval_status=thread_record.approval_status,
         )
 
-    if permission.request_status != PermissionRequestStatus.PENDING.value:
-        error_detail, error_status_code = _rejected_permission_error(
-            permission_status=permission.request_status,
-            thread_terminal=False,
-            option_id=option_id,
-            valid_option_ids=extract_allowed_option_ids(
-                permission.allowed_options_json
-            ),
+    if checkpoint_unconfirmed:
+        return PermissionResult(
+            request_id=request_id,
+            thread_id=thread_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            error_detail="Permission request cannot be confirmed pending",
+            error_status_code=409,
         )
-        return await _journal_rejection(
+
+    error_detail, error_status_code = _rejected_permission_error(
+        permission, thread_terminal=False, option_id=option_id
+    )
+    return await _journal_rejection(
+        db,
+        _RejectedResponse(
+            request_id,
+            thread_id,
+            option_id,
+            resolved_idempotency_key,
+            thread_record.approval_status,
+            error_detail,
+            error_status_code,
+        ),
+    )
+
+
+async def _authorize_parked_permission(
+    db: AsyncSession,
+    permission: _ParkedPermission,
+    thread_record: ThreadModel,
+    response: PermissionInput,
+    resolved_idempotency_key: str,
+    *,
+    checkpoint_unconfirmed: bool,
+) -> PermissionResult | _AuthorizedPermission:
+    request_id = response.request_id
+    thread_id = thread_record.id
+    # ------------------------------------------------------------------
+    # 3. Pending check: the checkpoint's, never the journal row's
+    # ------------------------------------------------------------------
+    if not permission.pending:
+        return await _refuse_unparked_permission(
             db,
-            _RejectedResponse(
-                request_id,
-                thread_id,
-                option_id,
-                resolved_idempotency_key,
-                thread_record.approval_status,
-                error_detail,
-                error_status_code,
-            ),
+            permission,
+            thread_record,
+            response,
+            resolved_idempotency_key,
+            checkpoint_unconfirmed=checkpoint_unconfirmed,
         )
 
     # ------------------------------------------------------------------
@@ -497,45 +578,6 @@ async def _authorize_pending_permission(
             error_status_code=409,
         )
 
-    active_request_id = await _active_permission_request_id(
-        db, permission, thread_record, request_id
-    )
-
-    if active_request_id is not None and active_request_id != request_id:
-        error_detail, error_status_code = _rejected_permission_error(
-            permission_status=PermissionRequestStatus.SUPERSEDED.value,
-            thread_terminal=False,
-            option_id=option_id,
-            valid_option_ids=extract_allowed_option_ids(
-                permission.allowed_options_json
-            ),
-        )
-        logger.warning(
-            "Permission respond rejected: request %s is not the active "
-            "interrupt for thread %s (active=%s)",
-            request_id,
-            thread_id,
-            active_request_id,
-            extra={
-                "thread_id": thread_id,
-                "request_id": request_id,
-                "active_request_id": active_request_id,
-                "action": "permission_response",
-            },
-        )
-        return await _journal_rejection(
-            db,
-            _RejectedResponse(
-                request_id,
-                thread_id,
-                option_id,
-                resolved_idempotency_key,
-                thread_record.approval_status,
-                error_detail,
-                error_status_code,
-            ),
-        )
-
     option_error = await _validate_permission_option(
         db, permission, thread_record, response, resolved_idempotency_key
     )
@@ -552,7 +594,7 @@ async def _authorize_pending_permission(
 
 async def _validate_permission_option(
     db: AsyncSession,
-    permission: PermissionRequestModel,
+    permission: _ParkedPermission,
     thread_record: ThreadModel,
     response: PermissionInput,
     resolved_idempotency_key: str,
@@ -560,43 +602,14 @@ async def _validate_permission_option(
     request_id = response.request_id
     option_id = response.option_id
     thread_id = thread_record.id
-    valid_option_ids = extract_allowed_option_ids(permission.allowed_options_json)
-    if not valid_option_ids:
-        error_detail, error_status_code = _rejected_permission_error(
-            permission_status=permission.request_status,
-            thread_terminal=False,
-            option_id=option_id,
-            valid_option_ids=set(),
-        )
-        logger.warning(
-            "Permission respond rejected: request %s has no valid durable options",
-            request_id,
-            extra={
-                "thread_id": thread_id,
-                "request_id": request_id,
-                "action": "permission_response",
-            },
-        )
-        return await _journal_rejection(
-            db,
-            _RejectedResponse(
-                request_id,
-                thread_id,
-                option_id,
-                resolved_idempotency_key,
-                thread_record.approval_status,
-                error_detail,
-                error_status_code,
-            ),
-        )
+    valid_option_ids = permission.option_ids
+    if option_id in valid_option_ids:
+        return None
 
-    if option_id not in valid_option_ids:
-        error_detail, error_status_code = _rejected_permission_error(
-            permission_status=permission.request_status,
-            thread_terminal=False,
-            option_id=option_id,
-            valid_option_ids=valid_option_ids,
-        )
+    error_detail, error_status_code = _rejected_permission_error(
+        permission, thread_terminal=False, option_id=option_id
+    )
+    if valid_option_ids:
         logger.warning(
             "Permission respond rejected: request %s received unknown option_id=%r",
             request_id,
@@ -609,19 +622,28 @@ async def _validate_permission_option(
                 "valid_option_ids": sorted(valid_option_ids),
             },
         )
-        return await _journal_rejection(
-            db,
-            _RejectedResponse(
-                request_id,
-                thread_id,
-                option_id,
-                resolved_idempotency_key,
-                thread_record.approval_status,
-                error_detail,
-                error_status_code,
-            ),
+    else:
+        logger.warning(
+            "Permission respond rejected: request %s offers no valid options",
+            request_id,
+            extra={
+                "thread_id": thread_id,
+                "request_id": request_id,
+                "action": "permission_response",
+            },
         )
-    return None
+    return await _journal_rejection(
+        db,
+        _RejectedResponse(
+            request_id,
+            thread_id,
+            option_id,
+            resolved_idempotency_key,
+            thread_record.approval_status,
+            error_detail,
+            error_status_code,
+        ),
+    )
 
 
 async def _record_permission_transition(
@@ -649,7 +671,7 @@ async def _record_permission_transition(
     context = permission_transition_context(authorized, response)
 
     resume_value = permission_resume_value(
-        context.permission.pause_reason_type,
+        authorized.permission.pause_reason_type,
         context.option_id,
         context.notes,
         request_id=context.request_id,
@@ -753,7 +775,7 @@ async def _record_permission_transition(
         # and the responder carries no authenticated identity. Recording the
         # decision without the actor beats fabricating one.
         agent_id=None,
-        tool_name=_audited_tool_name(context.permission),
+        tool_name=_audited_tool_name(authorized.permission),
         action=context.decision_verdict,
         option_id=context.option_id,
     )

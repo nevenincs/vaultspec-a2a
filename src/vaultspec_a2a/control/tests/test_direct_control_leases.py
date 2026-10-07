@@ -24,6 +24,7 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 
+from ...api.tests.permission_harness import park_permission
 from ...conftest import SqlitePosture
 from ...control import cancel_service
 from ...control._permission_response_contract import PermissionInput
@@ -260,7 +261,7 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
 ) -> None:
     """Worker scheduling ACK is not permission application truth."""
     thread_id = "permission-ack-only-thread"
-    request_id = f"{thread_id}:permission"
+    request_id = await park_permission(checkpointer, thread_id=thread_id)
     async with session_factory() as db:
         await _create_current_thread(
             db,
@@ -293,14 +294,13 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
         _bridge,
     ):
         async with session_factory() as db:
-            pending = await get_permission_request(db, request_id)
-            assert pending is not None
             result = await respond_to_permission(
                 db,
-                permission=pending,
+                thread_id=thread_id,
                 response=PermissionInput(
                     request_id, "allow_once", "permission-client-retry"
                 ),
+                checkpointer=checkpointer,
                 transport=DispatchTransport(
                     worker_client=worker_client,
                     circuit_breaker=_circuit_breaker(),
@@ -329,10 +329,12 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
 
 
 async def _parked_permission(
-    sessions: async_sessionmaker[AsyncSession], thread_id: str
+    sessions: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    thread_id: str,
 ) -> str:
     """Seed a run parked on a permission question and return its request id."""
-    request_id = f"{thread_id}:permission"
+    request_id = await park_permission(checkpointer, thread_id=thread_id)
     async with sessions() as db:
         await _create_current_thread(
             db,
@@ -361,6 +363,7 @@ async def _parked_permission(
 @pytest.mark.asyncio
 async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Ownership is given back only for a delivery proven not to have happened.
 
@@ -374,8 +377,12 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
     """
     definite_thread = "definite-resume-thread"
     ambiguous_thread = "ambiguous-resume-thread"
-    definite_request = await _parked_permission(session_factory, definite_thread)
-    ambiguous_request = await _parked_permission(session_factory, ambiguous_thread)
+    definite_request = await _parked_permission(
+        session_factory, checkpointer, definite_thread
+    )
+    ambiguous_request = await _parked_permission(
+        session_factory, checkpointer, ambiguous_thread
+    )
 
     shut = _circuit_breaker()
     shut.force_open()
@@ -383,12 +390,11 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
         httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.2) as no_worker,
         session_factory() as db,
     ):
-        definite_permission = await get_permission_request(db, definite_request)
-        assert definite_permission is not None
         definite = await respond_to_permission(
             db,
-            permission=definite_permission,
+            thread_id=definite_thread,
             response=PermissionInput(definite_request, "allow_once", "definite-retry"),
+            checkpointer=checkpointer,
             transport=DispatchTransport(
                 worker_client=no_worker,
                 circuit_breaker=shut,
@@ -401,14 +407,13 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
         httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.2) as unreachable,
         session_factory() as db,
     ):
-        ambiguous_permission = await get_permission_request(db, ambiguous_request)
-        assert ambiguous_permission is not None
         ambiguous = await respond_to_permission(
             db,
-            permission=ambiguous_permission,
+            thread_id=ambiguous_thread,
             response=PermissionInput(
                 ambiguous_request, "allow_once", "ambiguous-retry"
             ),
+            checkpointer=checkpointer,
             transport=DispatchTransport(
                 worker_client=unreachable,
                 circuit_breaker=_circuit_breaker(),

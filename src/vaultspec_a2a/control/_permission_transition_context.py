@@ -14,7 +14,7 @@ from ._permission_response_contract import (
 )
 
 if TYPE_CHECKING:
-    from ..database import PermissionRequestModel, ThreadModel
+    from ..database import ThreadModel
     from ..thread import ThreadWriteExpectation
 
 
@@ -38,10 +38,6 @@ class PermissionTransitionContext:
     @property
     def notes(self) -> str | None:
         return self.response.notes
-
-    @property
-    def permission(self) -> PermissionRequestModel:
-        return self.authorized.permission
 
     @property
     def thread_record(self) -> ThreadModel:

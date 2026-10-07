@@ -13,7 +13,7 @@ import pytest
 from vaultspec_core.config import ConfigurationError
 
 from ...domain_config import DomainSettingsConfig
-from ...testing import armed_environment
+from ...testing import armed_environment, settings_override
 from ..config import Settings, settings
 from ..settings_base import ENV_FILE_ENV, PROJECT_ROOT_ENV, read_configuration
 
@@ -96,6 +96,9 @@ def test_the_settings_singleton_refuses_to_be_pickled() -> None:
 
 def test_the_settings_singleton_compares_by_its_values() -> None:
     """Comparison reaches the settings, not the stand-in's identity."""
-    assert settings == Settings()
+    # The session seats its fixture lanes on the singleton alone, so a fresh
+    # read of the environment matches it only once they are unseated.
+    with settings_override(serve_in_process_lanes=False, lane_plugins=()):
+        assert settings == Settings()
     assert settings != "not the settings"
     assert bool(settings)

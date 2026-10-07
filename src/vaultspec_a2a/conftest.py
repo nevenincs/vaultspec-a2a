@@ -283,8 +283,11 @@ def _docker_compose_present() -> bool:
     Deliberately does NOT probe image pulls or daemon health: a Docker that is
     installed but broken is a failure to surface, not an absence to skip on.
     """
-    docker = shutil.which("docker") or shutil.which("docker.exe")
-    if docker is None:
+    from .service_tests.harness import resolve_docker_executable
+
+    try:
+        docker = resolve_docker_executable()
+    except FileNotFoundError:
         return False
     try:
         completed = subprocess.run(
@@ -435,6 +438,15 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         supply=(
             "check out the dashboard repository and export "
             "VAULTSPEC_A2A_ENGINE_SOURCE as its root"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
+        "engine-vault-adr",
+        what="an engine vault holding an ADR the read-a-named-ADR proof can use",
+        supply=(
+            "point the engine at a workspace whose `.vault/adr/` holds a decision "
+            "record carrying identifier-shaped text the proof's prompt does not repeat"
         ),
         probe=None,
     ),

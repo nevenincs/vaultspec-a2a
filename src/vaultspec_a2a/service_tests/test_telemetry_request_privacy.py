@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
 
 from ..testing.ports import free_port
+from .harness import COMPOSE_FILE, REPO_ROOT, resolve_docker_executable
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -65,9 +64,7 @@ def jaeger_request_privacy(
 ) -> Generator[tuple[str, str]]:
     """Start only the real collector in a uniquely owned Compose project."""
     external_prerequisite("docker")
-    docker = shutil.which("docker")
-    assert docker is not None
-    root = Path(__file__).resolve().parents[3]
+    docker = resolve_docker_executable()
     project = "vaultspec-request-privacy-" + uuid.uuid4().hex[:10]
     ui_port, otlp_port = free_port(), free_port()
     env = {
@@ -83,13 +80,13 @@ def jaeger_request_privacy(
         "-p",
         project,
         "-f",
-        str(root / "service" / "docker-compose.integration.yml"),
+        str(COMPOSE_FILE),
     ]
     try:
         subprocess.run(
             [*command, "up", "-d", "--no-deps", "--wait", "jaeger"],
             env=env,
-            cwd=root,
+            cwd=REPO_ROOT,
             capture_output=True,
             text=True,
             check=True,
@@ -100,7 +97,7 @@ def jaeger_request_privacy(
         subprocess.run(
             [*command, "down", "--remove-orphans"],
             env=env,
-            cwd=root,
+            cwd=REPO_ROOT,
             capture_output=True,
             text=True,
             check=True,

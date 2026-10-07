@@ -1,10 +1,11 @@
 """Real ACP context fixtures for providers/tests/."""
 
+from __future__ import annotations
+
 import asyncio
 import sys
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
@@ -12,6 +13,12 @@ import pytest_asyncio
 from .._acp_rpc_terminal_handlers import release_owned_terminal
 from .._acp_types import AcpSessionContext
 from .._factory_commands import claude_acp_entry
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
+
+    from ...conftest import ExternalPrerequisiteRule
 
 # ``claude_acp_entry()`` is install_root/node_modules/@agentclientprotocol/
 # claude-agent-acp/dist/index.js; the package root one level above ``dist`` is
@@ -30,8 +37,8 @@ _ECHO_CHILD = (
 
 
 @pytest.fixture
-def installed_acp_adapter() -> Path:
-    """Fail up front, naming the missing package, when the Node lane isn't installed.
+def installed_acp_adapter(external_prerequisite: ExternalPrerequisiteRule) -> Path:
+    """Report the missing prerequisite up front when the Node lane isn't installed.
 
     A checkout that has never run ``npm install`` fails every test exercising the
     Node ACP adapter anyway - ``_classify_acp_command`` raises its own
@@ -41,15 +48,18 @@ def installed_acp_adapter() -> Path:
     fixture states the one shared cause before either point is reached, so a
     bare worktree's result reads as a missing prerequisite rather than a
     regression.
+
+    The probe is the package directory rather than the rule's own, because the
+    rule accepts the binary backend and these tests read the Node package itself.
     """
     entry = claude_acp_entry()
     package_root = entry.parents[1]
     install_root = entry.parents[4]
     if not package_root.is_dir():
-        pytest.fail(
-            "missing prerequisite: @agentclientprotocol/claude-agent-acp is not "
-            f"installed at {package_root}; run 'npm install' in "
-            f"{install_root} to install it"
+        external_prerequisite.absent(
+            "claude-acp-adapter",
+            "@agentclientprotocol/claude-agent-acp is not installed at "
+            f"{package_root}; `npm install` has not run in {install_root}",
         )
     return package_root
 

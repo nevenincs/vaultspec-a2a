@@ -6,9 +6,13 @@ these readers exist to catch. So the vocabulary is read from the artefact that
 actually executes: the agent SDK's shipped type declaration for the ACP lane,
 and the app-server's own generated protocol schema for the Codex lane.
 
-Each reader raises when the installed artefact is absent or has changed shape,
-so a caller can convert that into a skip naming the missing prerequisite rather
-than silently asserting over an empty set.
+Each reader tells the two ways an artefact can disappoint apart. One that is not
+installed raises :class:`MissingInstalledVocabularyError`, naming the external
+prerequisite it reports, which :func:`read_installed` routes through the
+repository's prerequisite rule. One that is installed but no longer carries the
+vocabulary raises :class:`InstalledVocabularyDriftError`, which nothing converts:
+that is the regression these readers exist to catch, and reporting it as a skip
+would hide it behind the same word as a host that never had the adapter.
 """
 
 from __future__ import annotations
@@ -17,12 +21,18 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from ...graph.enums import Provider
 from ..cli_resolution import resolve_provider_cli_executable
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ...conftest import ExternalPrerequisiteRule
+
 __all__ = [
+    "InstalledVocabularyDriftError",
     "MissingInstalledVocabularyError",
     "acp_adapter_error_kinds",
     "acp_adapter_failure_categories",
@@ -32,11 +42,45 @@ __all__ = [
     "acp_adapter_source",
     "acp_error_kinds",
     "codex_error_info_variants",
+    "read_installed",
 ]
+
+_ACP_ADAPTER_PREREQUISITE = "claude-acp-adapter"
+_CODEX_CLI_PREREQUISITE = "codex-cli"
 
 
 class MissingInstalledVocabularyError(RuntimeError):
-    """The installed adapter artefact a vocabulary is read from is unavailable."""
+    """The installed artefact a vocabulary is read from is not on this host.
+
+    ``prerequisite`` is the id of the external prerequisite whose absence this
+    reports.
+    """
+
+    def __init__(self, prerequisite: str, detail: str) -> None:
+        super().__init__(detail)
+        self.prerequisite = prerequisite
+
+
+class InstalledVocabularyDriftError(RuntimeError):
+    """The artefact is installed but no longer carries the vocabulary read from it.
+
+    The vocabulary moved, shrank, or could not be generated: a real regression
+    to investigate, never an absence to skip on.
+    """
+
+
+def read_installed[T](
+    external_prerequisite: ExternalPrerequisiteRule, reader: Callable[[], T]
+) -> T:
+    """Run *reader*, reporting an artefact that is not installed through the rule.
+
+    Only absence is routed. Drift propagates untouched, so a changed artefact is
+    always a failure and never a skip.
+    """
+    try:
+        return reader()
+    except MissingInstalledVocabularyError as exc:
+        external_prerequisite.absent(exc.prerequisite, str(exc))
 
 
 def _repo_root() -> Path:
@@ -70,23 +114,19 @@ def acp_error_kinds() -> frozenset[str]:
     added upstream shows up as an unmapped kind instead of passing unnoticed.
     """
     types_path = acp_sdk_types_path()
-    try:
-        source = types_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise MissingInstalledVocabularyError(
-            "the installed @anthropic-ai/claude-agent-sdk type declaration is "
-            f"unavailable at {types_path} (run the project's npm install)"
-        ) from exc
+    source = _read_adapter_artefact(
+        types_path, "@anthropic-ai/claude-agent-sdk type declaration"
+    )
 
     declaration = _ACP_ERROR_KIND_DECLARATION.search(source)
     if declaration is None:
-        raise MissingInstalledVocabularyError(
+        raise InstalledVocabularyDriftError(
             "the installed agent SDK no longer declares SDKAssistantMessageError "
             f"in {types_path}; the ACP error-kind vocabulary moved"
         )
     kinds = frozenset(_STRING_LITERAL.findall(declaration.group(1)))
     if not kinds:
-        raise MissingInstalledVocabularyError(
+        raise InstalledVocabularyDriftError(
             "the installed SDKAssistantMessageError declaration lists no string "
             f"members in {types_path}"
         )
@@ -104,9 +144,20 @@ def _acp_adapter_dist() -> Path:
     )
 
 
-def _acp_adapter_bundle_path() -> Path:
-    """Return the installed ACP adapter bundle that attaches the error kind."""
-    return _acp_adapter_dist() / "acp-agent.js"
+#: The adapter module that attaches the error kind to its failure frames.
+_ACP_BUNDLE_MODULE = "acp-agent.js"
+
+
+def _read_adapter_artefact(path: Path, artefact: str) -> str:
+    """Return an installed adapter artefact's text, or report it as not installed."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise MissingInstalledVocabularyError(
+            _ACP_ADAPTER_PREREQUISITE,
+            f"the installed {artefact} is unavailable at {path} "
+            "(run the project's npm install)",
+        ) from exc
 
 
 def _acp_adapter_module_source(module: str) -> str:
@@ -118,14 +169,9 @@ def _acp_adapter_module_source(module: str) -> str:
     site keeps that fact visible instead of hiding it behind a reader that
     searches the whole tree and would quietly match a renamed neighbour.
     """
-    path = _acp_adapter_dist() / module
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise MissingInstalledVocabularyError(
-            "the installed @agentclientprotocol/claude-agent-acp bundle is "
-            f"unavailable at {path} (run the project's npm install)"
-        ) from exc
+    return _read_adapter_artefact(
+        _acp_adapter_dist() / module, "@agentclientprotocol/claude-agent-acp bundle"
+    )
 
 
 def acp_adapter_source() -> str:
@@ -137,14 +183,7 @@ def acp_adapter_source() -> str:
     Handing the source to the caller lets that claim be checked against the
     artefact that will run rather than against a reading of it.
     """
-    bundle = _acp_adapter_bundle_path()
-    try:
-        return bundle.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise MissingInstalledVocabularyError(
-            "the installed @agentclientprotocol/claude-agent-acp bundle is "
-            f"unavailable at {bundle} (run the project's npm install)"
-        ) from exc
+    return _acp_adapter_module_source(_ACP_BUNDLE_MODULE)
 
 
 #: The adapter module that owns the session permission-mode catalog.
@@ -182,14 +221,14 @@ def acp_adapter_permission_mode_ids() -> frozenset[str]:
     """
     builder = _ACP_AVAILABLE_MODES.search(acp_adapter_session_mode_source())
     if builder is None:
-        raise MissingInstalledVocabularyError(
+        raise InstalledVocabularyDriftError(
             "the installed ACP adapter no longer builds its available modes in "
             f"{_acp_adapter_dist() / _ACP_SESSION_MODE_MODULE}; the "
             "permission-mode vocabulary moved"
         )
     ids = frozenset(_ACP_MODE_ID.findall(builder.group(1)))
     if not ids:
-        raise MissingInstalledVocabularyError(
+        raise InstalledVocabularyDriftError(
             "the installed ACP adapter's mode builder lists no mode ids in "
             f"{_acp_adapter_dist() / _ACP_SESSION_MODE_MODULE}"
         )
@@ -215,14 +254,14 @@ def acp_adapter_shell_tool_names() -> frozenset[str]:
     """
     table = _ACP_REPORTER_TABLE.search(_acp_adapter_module_source(_ACP_REPORTER_MODULE))
     if table is None:
-        raise MissingInstalledVocabularyError(
+        raise InstalledVocabularyDriftError(
             "the installed ACP adapter no longer binds tool reporters in "
             f"{_acp_adapter_dist() / _ACP_REPORTER_MODULE}; the shell-tool "
             "vocabulary moved"
         )
     names = frozenset(_ACP_SHELL_REPORTER.findall(table.group(1)))
     if not names:
-        raise MissingInstalledVocabularyError(
+        raise InstalledVocabularyDriftError(
             "the installed ACP adapter's reporter table binds no tool to its "
             f"shell reporter in {_acp_adapter_dist() / _ACP_REPORTER_MODULE}"
         )
@@ -258,7 +297,7 @@ def acp_adapter_failure_categories() -> dict[str, str]:
     """
     body = _ACP_FAILURE_SWITCH.search(_acp_adapter_module_source(_ACP_FAILURE_MODULE))
     if body is None:
-        raise MissingInstalledVocabularyError(
+        raise InstalledVocabularyDriftError(
             "the installed ACP adapter no longer classifies provider failures in "
             f"{_acp_adapter_dist() / _ACP_FAILURE_MODULE}; the category "
             "vocabulary moved"
@@ -269,7 +308,7 @@ def acp_adapter_failure_categories() -> dict[str, str]:
         for kind in _ACP_FAILURE_CASE.findall(cases)
     }
     if not categories:
-        raise MissingInstalledVocabularyError(
+        raise InstalledVocabularyDriftError(
             "the installed ACP adapter's failure classifier lists no error kinds "
             f"in {_acp_adapter_dist() / _ACP_FAILURE_MODULE}"
         )
@@ -289,15 +328,7 @@ def acp_adapter_error_kinds() -> frozenset[str]:
     fall through. Only literal arguments are recovered here; the forwarding call
     sites pass a variable and are covered by the SDK union instead.
     """
-    bundle = _acp_adapter_bundle_path()
-    try:
-        source = bundle.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise MissingInstalledVocabularyError(
-            "the installed @agentclientprotocol/claude-agent-acp bundle is "
-            f"unavailable at {bundle} (run the project's npm install)"
-        ) from exc
-    return frozenset(_ACP_ADAPTER_OWN_KIND.findall(source))
+    return frozenset(_ACP_ADAPTER_OWN_KIND.findall(acp_adapter_source()))
 
 
 def _codex_error_branch_names(raw_branch: object) -> set[str]:
@@ -321,7 +352,7 @@ def _parse_codex_error_info_variants(schema_path: Path) -> frozenset[str]:
     try:
         raw_schema: object = json.loads(schema_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise MissingInstalledVocabularyError(
+        raise InstalledVocabularyDriftError(
             f"the generated codex protocol schema is unreadable at {schema_path}"
         ) from exc
     assert isinstance(raw_schema, dict)
@@ -336,7 +367,7 @@ def _parse_codex_error_info_variants(schema_path: Path) -> frozenset[str]:
     if isinstance(error_info, dict):
         branches = cast("dict[str, object]", error_info).get("oneOf")
     if not isinstance(branches, list) or not branches:
-        raise MissingInstalledVocabularyError(
+        raise InstalledVocabularyDriftError(
             "the generated codex protocol schema no longer declares CodexErrorInfo "
             f"as a union in {schema_path}; the error vocabulary moved"
         )
@@ -345,7 +376,7 @@ def _parse_codex_error_info_variants(schema_path: Path) -> frozenset[str]:
     for raw_branch in cast("list[object]", branches):
         variants.update(_codex_error_branch_names(raw_branch))
     if not variants:
-        raise MissingInstalledVocabularyError(
+        raise InstalledVocabularyDriftError(
             f"the generated CodexErrorInfo union lists no variants in {schema_path}"
         )
     return frozenset(variants)
@@ -366,8 +397,9 @@ def codex_error_info_variants(destination: Path) -> frozenset[str]:
     executable = resolve_provider_cli_executable(Provider.CODEX)
     if executable is None:
         raise MissingInstalledVocabularyError(
+            _CODEX_CLI_PREREQUISITE,
             "the codex CLI is not on PATH, so the app-server protocol schema "
-            "cannot be generated from the installed binary"
+            "cannot be generated from the installed binary",
         )
     destination.mkdir(parents=True, exist_ok=True)
     completed = subprocess.run(
@@ -378,7 +410,7 @@ def codex_error_info_variants(destination: Path) -> frozenset[str]:
         check=False,
     )
     if completed.returncode != 0:
-        raise MissingInstalledVocabularyError(
+        raise InstalledVocabularyDriftError(
             "the installed codex CLI could not generate its protocol schema "
             f"(exit {completed.returncode}): {completed.stderr.strip()[:400]}"
         )

@@ -10,9 +10,9 @@ related:
   - "[[2026-09-21-open-issue-remediation-audit]]"
 supersedes:
   - '2026-09-21-workspace-root-authority-adr'
-modified: '2026-10-04'
+modified: '2026-10-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:670fa488e9cc2fbbfe7dd10b2d1b1026ffe492ecd477e7e0778ed29d17d8a7f3'
+body_hash: 'sha256:02fbd3426a9cc583aafc71e565a49e28ad37c30018836f714a10f386141f3917'
 ---
 
 # `workspace-root-authority` adr: `Compose provider execution is isolated from service state` | (**status:** `accepted`)
@@ -210,3 +210,23 @@ that decision, and now requires projects within its lifecycle-derived tree.
 ### Application container retirement, 2026-10-04
 
 The owner's later explicit native-production directive in 2026-10-04-container-release-native-production-adr retires the application Compose topology and its packaged identity launcher. The preceding claim that Compose deployment obligations remain authoritative is limited by this later ruling: these are historical obligations for the retired profile, not a requirement to ship application containers. Workspace authority and private-service-state protection remain binding; native isolation must be established by native execution evidence, not the retired Docker proof.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+The subject of this record, Compose provider execution, is retired. `2026-10-04-container-release-native-production-adr` retires the application containers, and `2026-10-07-codebase-remediation-fixture-lanes-adr` leaves Compose carrying Jaeger only. No shipped profile mounts `/app/data`: `service/docker-compose.integration.yml` defines no gateway or worker service, no application Dockerfile remains under `service/docker/`, and the packaged launcher source and entrypoint are gone. The 2026-10-04 section "Application container retirement" above already limits the container obligations. This section states which clauses are historical and which still bind. The record stays accepted.
+
+Historical, because they describe or build the retired container topology:
+
+- Problem Statement and Considerations: the shared `/app/data` volume, the UID/GID 1001 images, and the 0600 `service.token` handoff between gateway and worker containers.
+- Implementation, Second (the gateway-only mount absent from the worker filesystem) and Third (the dedicated agent UID/GID, the packaged POSIX launcher, the SETUID and SETGID capabilities, the bounded startup migration and the bind-mount rules).
+- Constraints, "Compose remains a single-administrator profile"; Considered options and Rationale, the weighing of Compose boundary designs, kept as history; Consequences, the documented UID/GID and mount-permission contract.
+- Acceptance and migration: the six Compose proofs and the Issue #25 gate (issue #25 is closed).
+
+Still binding, now on the native profiles:
+
+- **Workspace admission, Implementation First, stated without Compose.** A configured workspace root is the admission boundary: a run root must be an existing canonical directory within it, with aliases resolved before comparison (`control/workspace.py:56-84`; callers `api/workspace.py:13-36`, `control/dispatch.py:511`, `control/accepted_input.py:75-76`). The setting is `VAULTSPEC_A2A_WORKSPACE_ROOT` (`control/infra_config.py:224-233`, `.env.example:194`), not the unprefixed name in the original text. The armed desktop profile derives its boundary from its lifecycle tree under `2026-10-04-workspace-root-authority-desktop-workspace-boundary-adr`.
+- **Privileged callbacks, Implementation closing paragraph and Constraints.** Worker-side ACP filesystem callbacks enforce canonical, symlink-safe containment independently of any child process identity (`providers/_acp_rpc_handlers.py:130-141`, `desktop/_filesystem_authority.py:616`).
+- **Scrubbed child environment.** Service, database and gateway credentials and the `VAULTSPEC_*` family never reach a provider child, and lane credentials re-enter only through lane-specific seams (`workspace/environment.py:63,84`).
+- **Constraints, authority and fail-closed admission.** The worker keeps database and checkpoint authority while no provider, tool or terminal descendant inherits it, and a failure to establish an execution boundary refuses admission and never falls back to the worker identity. The container launcher is no longer the means. Native execution is governed by `2026-10-04-workspace-root-authority-desktop-native-admission-adr`, and the optional external launcher setting that remains states that it alone does not prove OS isolation (`control/infra_config.py:234-251`, `providers/_provider_execution.py:25-61`). Native isolation is shown by native execution evidence, not by the retired Docker proof.

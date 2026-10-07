@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#provider-binary-policy'
 date: '2026-10-01'
-modified: '2026-10-04'
+modified: '2026-10-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:0852f1657017ebf2a419fb081a1c21159a201d0c26fa64bbe27ca54da61332fc'
+body_hash: 'sha256:2e82037b84e68b9d3a04447260e507e390401e558b7decb982f3cfa763c1816a'
 related:
   - "[[2026-10-01-provider-binary-policy-research]]"
   - "[[2026-09-24-architecture-review-audit]]"
@@ -253,7 +253,6 @@ unreconstructable after a checkpoint recovery. Grounding:
   reconsider D2's ceiling rule if upstream minor releases stop carrying behaviour
   changes that invalidate a turn proof.
 
-
 Desktop native execution restriction accepted 2026-10-04: completed-turn binary proof remains necessary, but cannot grant armed desktop native execution while no OS isolation backend is implemented and verified. Desktop native commands and their version probes refuse before child acquisition independently of proof and launcher settings. Development and Compose retain this record's existing binary admission contracts. Grounding: `2026-10-04-workspace-root-authority-desktop-native-admission-adr`.
 
 ## Proposed reconciliation of existing decisions
@@ -365,3 +364,17 @@ restored on a
 qualifying binary, the same exact frozen values may resume without changing
 the run's selection. The user authorized this fail-closed ruling on 2026-10-02
 after the conflicting restart and proof requirements were presented.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+`2026-10-04-container-release-native-production-adr` retires the application container profile, and `2026-10-07-codebase-remediation-fixture-lanes-adr` leaves Compose carrying Jaeger only. No application Dockerfile remains under `service/docker/`, so no image installs a Claude CLI. The clauses below name that retired profile and are historical. D1 to D5 and the other amendments are otherwise unchanged.
+
+- **Considered options, "correct for the capsule and for a container image" and "Capsule and container profiles run a pinned, service-owned binary."** The pinned, service-owned profile is the desktop capsule alone. A checkout or development host runs the service's installed CLI, as the same option states.
+- **Considered options, the fallback for "a headless container lane", and Rationale, "gives a headless container the only credential path it has."** The fallback never applied, because the D4 exception was accepted. D4 is unchanged: `claude_auth_channel` remains a declared, opt-in channel for any headless host (`control/infra_config.py:471-490`, `providers/factory.py:308-325`). Only the container as its named consumer is historical.
+- **Implementation, "the desktop, Compose, and checkout profiles."** The profiles in scope are the desktop capsule and the checkout or development host.
+- **D1, "The Compose worker image installs one exact CLI version and names it through the setting", and the 2026-10-02 capsule-authority amendment, "including for the pinned Compose profile."** Historical. The explicit-setting rung stays for every non-capsule profile: an absolute `claude_cli_executable` outranks the child environment, the service PATH and the lock-vendored binary, and an armed capsule root outranks it (`providers/cli_resolution.py:167-182`). D2 is unchanged and still admits a pinned-setting rung only at exact equality with the proven version.
+- **Consequences, "a lock or image bump."** A lock bump. `npm audit signatures` and a scheduled bump remain the mitigation.
+- **Desktop native execution restriction of 2026-10-04, "Development and Compose retain this record's existing binary admission contracts."** Development retains them. The Compose half is historical.
+- **Proposed reconciliation, the replacement clause for the harness-provisioning stack identity, "the image-pinned binary under Compose."** Its referent is historical. The commitment is D1's one-seam resolution: a capsule asset under an armed capsule, then the explicit setting, the child environment, the service's installed CLI, and the lock-vendored binary as the last resort. The same wording as adopted in `2026-07-15-agent-harness-provisioning-adr` has the same historical referent, and that record owns its own reconciliation.

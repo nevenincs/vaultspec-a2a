@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#service-lifecycle-architecture'
 date: '2026-07-22'
-modified: '2026-09-24'
+modified: '2026-10-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:37f349414944b5af7ed31d7fdff0e36af851c971575b06520463d983402092c6'
+body_hash: 'sha256:8074e2a96aec51894ee63ff952923280b3f09f29bbd479177beedd95bcabd501'
 related:
   - '[[2026-03-20-service-lifecycle-architecture-adr]]'
   - '[[2026-09-22-service-lifecycle-architecture-compose-host-lifecycle-reference]]'
@@ -25,7 +25,7 @@ Auto-generated index of all documents tagged with `#service-lifecycle-architectu
 ### adr
 
 - `2026-03-20-service-lifecycle-architecture-adr` - `service-lifecycle-architecture` adr: `adr-039` | (**status:** `accepted`)
-- `2026-09-22-service-lifecycle-architecture-container-api-boundary-adr` - `service-lifecycle-architecture` adr: `Compose CLI as the programmatic container boundary` | (**status:** `proposed`)
+- `2026-09-22-service-lifecycle-architecture-container-api-boundary-adr` - `service-lifecycle-architecture` adr: `Compose CLI as the programmatic container boundary` | (**status:** `rejected`)
 
 ### audit
 

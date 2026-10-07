@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-08-02'
-body_hash: 'sha256:c34e78026d6ef906eaa5819d4a525d471844075b05c3f644212974ef385820ef'
+modified: '2026-10-07'
+body_hash: 'sha256:f3b15689c194c139d69daad434cdb6bdf5e868a1d319342b3a5597d4a35561be'
 related:
   - "[[2026-07-19-codebase-health-research]]"
   - "[[2026-07-18-desktop-product-profile-adr]]"
@@ -356,3 +356,13 @@ live in `2026-07-19-codebase-health-research`.
   shared surfaces.
 - Dead-code removal becomes safer because compatibility ownership is checked
   across both repositories.
+
+## Amendment (2026-10-07): reconciliation with the codebase-remediation decisions
+
+Accepted 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments).
+
+`2026-10-04-container-release-native-production-adr` retires the application Compose topology, and `2026-10-07-codebase-remediation-fixture-lanes-adr` leaves Compose carrying Jaeger only. `service/docker-compose.integration.yml` defines no gateway or worker service, and no application Dockerfile remains under `service/docker/`. Three Compose clauses of Implementation therefore name a retired profile and are historical. The rest of the record is unchanged.
+
+- **Runtime ownership and provenance, "Desktop and Compose workers follow the same provenance rule."** The Compose half is historical. The rule stays binding for the armed desktop profile and is enforced there: only a worker whose authenticated pairing classifies as owned is adopted (`control/_worker_health.py:493-531`, `lifecycle/pairing.py:278-318`). This amendment changes no adoption behaviour. Outside the armed desktop profile, adoption and eviction of development-band workers follow `control/_worker_health.py:627-684` and are not ruled here.
+- **"Compose workers remain independently managed. Any Compose provenance mismatch fails closed without eviction."** Historical. What still applies is the sentence before it: only an owner-authorized desktop auto-spawn gateway may evict, and only a worker it demonstrably spawned under an earlier generation (`eviction_is_authorized` at `lifecycle/pairing.py:321-335`, called at `control/_worker_health.py:597`). A foreign or unidentified worker is neither adopted nor evicted, and an owned current-generation worker is adopted rather than evicted.
+- **Authenticated and positive edge contracts, "A Compose deployment without that credential disables those transition surfaces."** Historical. No Compose deployment exists. The mounted product surface is the `/v1` router and the administrative shutdown route (`api/routes/__init__.py:15-25`), and every `/v1` request requires the gateway bearer (`api/routes/gateway.py:77-80`). The attach-credential and lifecycle-capability requirements of that section are unchanged.

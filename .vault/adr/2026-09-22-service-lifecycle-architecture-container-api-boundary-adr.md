@@ -3,9 +3,9 @@ tags:
   - '#adr'
   - '#service-lifecycle-architecture'
 date: '2026-09-22'
-modified: '2026-09-24'
+modified: '2026-10-07'
 body_schema: 'body-v2'
-body_hash: 'sha256:4f0c95be901fc42cb5eb3db2cb705266658973a36e3750066e251496e3b50a14'
+body_hash: 'sha256:ae9511cc4aaf4f24d28e6ba2c120ac57fd463dac170fb37bafd93704cb4977a9'
 related:
   - "[[2026-03-20-service-lifecycle-architecture-adr]]"
   - "[[2026-09-22-service-lifecycle-architecture-container-api-comparison-research]]"
@@ -15,7 +15,7 @@ related:
   - '[[2026-09-24-service-lifecycle-architecture-independent-revalidation-audit]]'
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
 ---
-# `service-lifecycle-architecture` adr: `Compose CLI as the programmatic container boundary` | (**status:** `proposed`)
+# `service-lifecycle-architecture` adr: `Compose CLI as the programmatic container boundary` | (**status:** `rejected`)
 
 ## Problem Statement
 
@@ -59,3 +59,7 @@ The comparison in `2026-09-22-service-lifecycle-architecture-container-api-compa
 - It does not supply a direct Docker Engine API. If that is a hard requirement of issue #18, the owner must reject this proposal or explicitly revise the issue scope; this document cannot silently do so.
 - The implementation must still prove meaningful health aggregation, port preflight, log behavior, environment handling, and Windows/Linux operation before issue closure. The current evidence includes only a small Windows-host reconciliation experiment, not a full-stack certification.
 - A future demonstrated need for direct Engine observations or mutations warrants a separate evidence-backed ownership decision. This proposed ADR does not pre-approve that path.
+
+## Rejection (2026-10-07): the container API boundary is retired with the containers
+
+Rejected 2026-10-07 under the owner's remediation direction (drop unrequired code, remove duplication, delegate ADR amendments). This proposal chose the Compose CLI as the programmatic control boundary for the containerized gateway, worker and supporting server-stack projects, as the answer to issue #18, which is now closed. `2026-10-04-container-release-native-production-adr` retired the application containers, so no server stack remains for a programmatic container interface to control: `service/docker-compose.integration.yml` carries development fixtures only, and `2026-10-07-codebase-remediation-fixture-lanes-adr` leaves Compose carrying Jaeger alone. Nothing live depends on this record. The Justfile recipes that pass through to `docker compose` for Jaeger (`Justfile:99-102,748-784`) are the delegating command surface that the accepted `2026-07-19-repository-tooling-hardening-adr` already governs, the repository declares no Docker Engine client or Compose wrapper dependency (`pyproject.toml`) and carries no container supervisor for this record to constrain, and native host processes remain with `2026-07-15-dev-process-registry-adr`. The record's own Constraints already withheld authority from it until accepted, so rejection changes no behaviour. The comparison research and the host-lifecycle reference it cites remain as historical evidence.

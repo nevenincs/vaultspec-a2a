@@ -14,10 +14,10 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO, Protocol, cast
 
+from ..utils import is_single_regular_file, path_is_link_like
 from ._platform_acl import (
     confirm_opened_secret,
     credential_file_is_owner_restricted,
-    path_is_link_like,
     path_is_owner_restricted,
     unfollowed_read_flags,
 )
@@ -683,8 +683,7 @@ def confined_file_descriptor(
 
 
 def _confirm_confined_file(descriptor: int, *, write: bool) -> None:
-    metadata = os.fstat(descriptor)
-    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+    if not is_single_regular_file(os.fstat(descriptor)):
         raise ValueError("workspace file must be regular and have exactly one link")
     if write:
         os.ftruncate(descriptor, 0)
@@ -805,7 +804,7 @@ def _read_leased_private_file(
         if not confirm_opened_secret(descriptor, named=named, path=target):
             raise PrivateFileError(PrivateFileRefusal.CHANGED, target)
         opened = os.fstat(descriptor)
-        if opened.st_nlink != 1:
+        if not is_single_regular_file(opened):
             raise PrivateFileError(PrivateFileRefusal.MULTIPLY_LINKED, target)
         if opened.st_size > max_bytes:
             raise PrivateFileError(PrivateFileRefusal.OVERSIZE, target)

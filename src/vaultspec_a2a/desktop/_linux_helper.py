@@ -8,6 +8,7 @@ import stat
 import struct
 
 __all__ = [
+    "GROUP_OTHER_WRITE_BITS",
     "PRIVILEGED_MODE_BITS",
     "anonymous_arguments",
     "anonymous_data",
@@ -15,6 +16,7 @@ __all__ = [
 ]
 
 PRIVILEGED_MODE_BITS = stat.S_ISUID | stat.S_ISGID
+GROUP_OTHER_WRITE_BITS = stat.S_IWGRP | stat.S_IWOTH
 
 
 def require_unprivileged_static_helper(descriptor: int) -> None:

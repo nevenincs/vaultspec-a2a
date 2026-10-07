@@ -12,13 +12,20 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 
-from ..desktop._platform_acl import harden_credential_path, path_is_link_like
+from ..desktop._platform_acl import harden_credential_path
+from ..utils import is_single_regular_file, path_is_link_like
 from ._ids import derive_idempotency_key
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-__all__ = ["JournalIndex", "closed_marker_name", "flush_directory", "journal_name"]
+__all__ = [
+    "JournalIndex",
+    "closed_marker_name",
+    "flush_directory",
+    "is_unlinked_regular_file",
+    "journal_name",
+]
 
 _STORE = (
     "CREATE TABLE store (id INTEGER PRIMARY KEY CHECK (id=1), "
@@ -47,6 +54,22 @@ def flush_directory(directory: Path) -> None:
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
+
+
+def is_unlinked_regular_file(path: Path) -> bool:
+    """Return whether *path* names one regular, singly linked, unaliased file.
+
+    The name itself must not be a link or junction, and what it names must be a
+    regular file with no second hard link. A name that cannot be inspected once
+    it has passed the link test does not qualify.
+    """
+    if path_is_link_like(path):
+        return False
+    try:
+        metadata = path.stat()
+    except (OSError, ValueError):
+        return False
+    return is_single_regular_file(metadata)
 
 
 class JournalIndex:
@@ -133,11 +156,7 @@ class JournalIndex:
         # against its single owner before it grants any deletion authority.
         for candidate in self.directory.glob("*.db"):
             try:
-                if (
-                    path_is_link_like(candidate)
-                    or not candidate.is_file()
-                    or candidate.stat().st_nlink != 1
-                ):
+                if not is_unlinked_regular_file(candidate):
                     continue
                 async with (
                     aiosqlite.connect(

@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 def _profile(home: Path) -> DesktopProfile:
     # Capsule validation is separate from the state-protection boundary.
-    return DesktopProfile(home, home.parent / "capsule", derive_state_paths(home))
+    return DesktopProfile(home.parent / "capsule", derive_state_paths(home))
 
 
 def _make_public(path: Path) -> None:

@@ -1,7 +1,8 @@
 """Collect narrow utilities shared across runtime packages.
 
 Utilities cover enum handling, bearer-token headers and verification, logging,
-secret redaction, contained process spawn, and process termination. Some
+secret redaction, contained process spawn, link and regular-file refusals, and
+process termination. Some
 helpers support public integration points, while others remain internal
 implementation tools.
 
@@ -10,6 +11,8 @@ include :mod:`vaultspec_a2a.api`, :mod:`vaultspec_a2a.control`,
 :mod:`vaultspec_a2a.providers`, and :mod:`vaultspec_a2a.worker`.
 """
 
+from ._file_checks import is_single_regular_file as is_single_regular_file
+from ._file_checks import path_is_link_like as path_is_link_like
 from ._process_tree import kill_pid_tree_async as kill_pid_tree_async
 from .enums import AcpRequestId as AcpRequestId
 from .enums import Environment as Environment
@@ -40,8 +43,10 @@ __all__ = [
     "bearer_matches",
     "configure_logging",
     "is_secret_name",
+    "is_single_regular_file",
     "kill_pid_tree_async",
     "package_version",
+    "path_is_link_like",
     "reconfigure_console_utf8",
     "redact_text",
     "redact_url",

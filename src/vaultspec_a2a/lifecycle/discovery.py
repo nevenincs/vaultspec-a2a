@@ -54,11 +54,11 @@ from ..desktop._filesystem_authority import (
 from ..desktop._platform_acl import (
     harden_credential_path as _harden_credential_path,
 )
-from ..desktop._platform_acl import path_is_link_like
 from ..desktop._platform_acl import (
     restrict_windows_file as _restrict_windows_file,
 )
 from ..desktop.credentials import MAX_CREDENTIAL_BYTES
+from ..utils import path_is_link_like
 from ..utils._process_tree import pid_is_live
 from ..utils.atomic_write import atomic_write_text
 from ..utils.coercion import coerce_int, coerce_object_mapping

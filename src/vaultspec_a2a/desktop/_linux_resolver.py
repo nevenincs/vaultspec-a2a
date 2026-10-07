@@ -11,14 +11,14 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from ._linux_helper import PRIVILEGED_MODE_BITS
+from ..utils import is_single_regular_file
+from ._linux_helper import GROUP_OTHER_WRITE_BITS, PRIVILEGED_MODE_BITS
 
 __all__ = ["RESOLVER_TARGET", "ResolverData", "host_resolver_data", "parse_resolver"]
 
 RESOLVER_TARGET = PurePosixPath("/etc/resolv.conf")
 _MAX_BYTES = 16384
 _ROOT_OWNER = frozenset({0})
-_GROUP_OTHER_WRITE_BITS = stat.S_IWGRP | stat.S_IWOTH
 _RESOLVED_ALIASES = frozenset(
     {
         "/run/systemd/resolve/stub-resolv.conf",
@@ -154,7 +154,7 @@ def _trusted_directory(
 ) -> None:
     if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid not in owners:
         raise ValueError("native resolver directory is not host-owned")
-    if metadata.st_mode & _GROUP_OTHER_WRITE_BITS and not (
+    if metadata.st_mode & GROUP_OTHER_WRITE_BITS and not (
         sticky_alias and metadata.st_mode & stat.S_ISVTX
     ):
         raise ValueError("native resolver directory is writable by other identities")
@@ -209,9 +209,9 @@ def _signature(metadata: os.stat_result) -> tuple[int, ...]:
 
 def _read_snapshot(descriptor: int, *, owners: frozenset[int] = _ROOT_OWNER) -> bytes:
     before = os.fstat(descriptor)
-    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+    if not is_single_regular_file(before):
         raise ValueError("native resolver requires a regular single-link source")
-    if before.st_mode & (_GROUP_OTHER_WRITE_BITS | PRIVILEGED_MODE_BITS):
+    if before.st_mode & (GROUP_OTHER_WRITE_BITS | PRIVILEGED_MODE_BITS):
         raise ValueError("native resolver source has unsafe permissions")
     if before.st_uid not in owners:
         raise ValueError("native resolver source is not host-owned")

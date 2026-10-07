@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from ..desktop._filesystem_authority import read_private_file
-from ..desktop._platform_acl import path_is_link_like
+from ..utils import path_is_link_like
 from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:

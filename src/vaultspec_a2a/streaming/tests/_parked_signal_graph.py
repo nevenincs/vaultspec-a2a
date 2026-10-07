@@ -19,7 +19,7 @@ from langgraph.types import Send, interrupt
 
 from ...graph.nodes._config_contract import accepting_runnable_config
 from ...testing import add_test_node, compile_test_graph, new_state_graph
-from ...thread.clarification import CLARIFICATION_INTERRUPT_TYPE
+from ...thread import InterruptType
 from ._error_injecting_graph import InjectedSignal
 
 if TYPE_CHECKING:
@@ -50,7 +50,7 @@ def build_parked_then_signalled_graph() -> Any:
     async def _park(state: ParkedSignalInput) -> dict[str, Any]:
         interrupt(
             {
-                "type": CLARIFICATION_INTERRUPT_TYPE,
+                "type": InterruptType.CLARIFICATION_REQUEST.value,
                 "request_id": state.get("request_id", "parked-question"),
             }
         )

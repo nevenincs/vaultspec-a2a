@@ -33,6 +33,7 @@ from ..thread.enums import (
     TERMINAL_STATUS_VALUES,
     ApprovalStatus,
     DegradedReason,
+    InterruptType,
     RepairStatus,
     ThreadStatus,
 )
@@ -258,7 +259,7 @@ def _permission_data_from_interrupt(
     payload = coerce_object_mapping(interrupt.payload)
     if payload is None:
         return None
-    if interrupt.interrupt_type == "permission_request":
+    if interrupt.interrupt_type == InterruptType.PERMISSION_REQUEST:
         tool_name = str(payload.get("tool_name", "unknown"))
         raw_options = coerce_object_list(payload.get("options", []))
         options: list[PermissionOptionData] = []
@@ -301,7 +302,7 @@ def _permission_data_from_interrupt(
             tool_kind=str(classify_tool_kind(tool_name)),
         )
 
-    if interrupt.interrupt_type == "plan_approval_request":
+    if interrupt.interrupt_type == InterruptType.PLAN_APPROVAL_REQUEST:
         feature = str(payload.get("feature", "unknown"))
         plan_paths = coerce_object_list(payload.get("plan_paths", []))
         exec_worker = str(payload.get("exec_worker", "unknown"))
@@ -330,7 +331,7 @@ def _permission_data_from_interrupt(
             tool_kind="other",
         )
 
-    if interrupt.interrupt_type == "document_approval_request":
+    if interrupt.interrupt_type == InterruptType.DOCUMENT_APPROVAL_REQUEST:
         phase = str(payload.get("phase", "document"))
         feature = str(payload.get("feature", "unknown"))
         return PermissionData(

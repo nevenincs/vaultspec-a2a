@@ -20,7 +20,7 @@ from langgraph.config import get_config
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Interrupt, interrupt
 
-from ...thread import PermissionAnswer
+from ...thread import InterruptType, PermissionAnswer
 from ...thread.state import read_untrusted_state_value
 from ..acp_options import option_id_of, valid_option_ids
 
@@ -141,7 +141,7 @@ class _PermissionRequest:
     def payload(self) -> dict[str, Any]:
         """The interrupt payload this request suspends the run on."""
         return {
-            "type": "permission_request",
+            "type": InterruptType.PERMISSION_REQUEST.value,
             "request_id": self.request_id,
             "tool_name": self.tool_name,
             "tool_input": self.tool_input,

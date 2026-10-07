@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from .enums import ApprovalStatus as ApprovalStatus
     from .enums import ControlActionResultStatus as ControlActionResultStatus
     from .enums import ControlActionType as ControlActionType
+    from .enums import InterruptType as InterruptType
     from .enums import InvalidTransitionError as InvalidTransitionError
     from .enums import PermissionRequestStatus as PermissionRequestStatus
     from .enums import RepairStatus as RepairStatus
@@ -100,6 +101,7 @@ _LAZY_IMPORTS = {
     "ApprovalStatus": ".enums",
     "ControlActionResultStatus": ".enums",
     "ControlActionType": ".enums",
+    "InterruptType": ".enums",
     "InvalidTransitionError": ".enums",
     "PermissionRequestStatus": ".enums",
     "RepairStatus": ".enums",
@@ -182,6 +184,7 @@ __all__ = [
     "DocumentConformanceError",
     "EventAggregatorError",
     "ExecutionStateProjection",
+    "InterruptType",
     "InvalidTransitionError",
     "NicknameConflictError",
     "PermissionAnswer",

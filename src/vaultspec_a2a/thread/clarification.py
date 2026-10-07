@@ -49,6 +49,7 @@ from pydantic import (
 )
 
 from .constants import MAX_REQUEST_ID_CHARS, MAX_RUN_MESSAGE_CHARS
+from .enums import InterruptType
 from .snapshots import project_checkpoint_tuple
 
 if TYPE_CHECKING:
@@ -56,7 +57,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CLARIFICATION_DECLINE_MARKER",
-    "CLARIFICATION_INTERRUPT_TYPE",
     "CLARIFICATION_TOPOLOGIES",
     "MAX_ANSWER_CHARS",
     "MAX_IDENTIFIER_CHARS",
@@ -81,10 +81,10 @@ __all__ = [
     "validate_clarification_answers",
 ]
 
-# The interrupt discriminator the parked node raises and the three resolution
-# discriminators a resume may carry back. They are matched by string at the
-# checkpoint and dispatch boundaries, so they are named once here.
-CLARIFICATION_INTERRUPT_TYPE = "clarification_request"
+# The three resolution discriminators a resume may carry back. They are matched
+# by string at the dispatch boundary, so they are named once here; the
+# interrupt the parked node raises is discriminated by the shared
+# ``InterruptType`` vocabulary instead.
 CLARIFICATION_RESUME_TYPE = "clarification_response"
 CLARIFICATION_CONTINUATION_TYPE = "clarification_continuation"
 CLARIFICATION_DECLINE_TYPE = "clarification_decline"
@@ -299,7 +299,9 @@ class ClarificationRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["clarification_request"] = CLARIFICATION_INTERRUPT_TYPE
+    type: Literal[InterruptType.CLARIFICATION_REQUEST] = (
+        InterruptType.CLARIFICATION_REQUEST
+    )
     request_id: ClarificationRequestId
     questions: list[ClarificationQuestion] = Field(
         min_length=1, max_length=MAX_QUESTIONS_PER_REQUEST
@@ -336,7 +338,7 @@ class ClarificationRequest(BaseModel):
         if not isinstance(payload, dict):
             return None
         payload_map = cast("dict[str, object]", payload)
-        if payload_map.get("type") != CLARIFICATION_INTERRUPT_TYPE:
+        if payload_map.get("type") != InterruptType.CLARIFICATION_REQUEST:
             return None
         try:
             return cls.model_validate(payload_map)
@@ -590,7 +592,7 @@ def pending_clarification(
     except (AttributeError, TypeError, ValueError):
         return None
     for projected in projection.pending_interrupts:
-        if projected.interrupt_type != CLARIFICATION_INTERRUPT_TYPE:
+        if projected.interrupt_type != InterruptType.CLARIFICATION_REQUEST:
             continue
         request = ClarificationRequest.from_payload(projected.payload)
         if request is not None:

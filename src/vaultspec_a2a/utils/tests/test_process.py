@@ -1,8 +1,9 @@
-"""Real-process tests for the shared async tree-kill primitive.
+"""Real-process tests for the process-introspection backend and tree kill.
 
 Real subprocesses, no mocks: a process that spawns a grandchild is felled whole,
 so no orphan survives (the Windows taskkill /T behaviour the two former copies
-existed to provide). Liveness is asserted with the canonical pid_is_live probe.
+existed to provide). Liveness is asserted with the canonical pid_is_live probe,
+and listener ownership is read from the spawned tree's own sockets.
 """
 
 from __future__ import annotations
@@ -23,13 +24,12 @@ from ...utils._process_tree import (
     ListenerOwnership,
     _win_tree_kill,
     classify_listener_ownership,
+    descendant_pids,
     kill_pid_tree_async,
-    parse_netstat_listener_pid,
     pid_is_live,
     port_has_listener,
     port_has_listener_async,
-    port_listener_pid,
-    posix_descendant_pids,
+    process_start_identity,
     wait_pid_gone,
 )
 
@@ -101,8 +101,30 @@ def test_pid_is_live_reports_a_killed_but_unreaped_child_as_dead() -> None:
     assert child.returncode is not None
 
 
-def test_descendant_walk_finds_a_grandchild_per_the_platform_contract() -> None:
-    """POSIX enumerates descendants for the tree kill; Windows delegates to taskkill."""
+def test_start_identity_is_stable_and_tells_two_processes_apart() -> None:
+    """The pid-reuse guard reads one stamp per process start, not one per read."""
+    own = process_start_identity(os.getpid())
+    if sys.platform != "win32" and not sys.platform.startswith("linux"):
+        # No clock-independent stamp is read on this host; callers degrade to
+        # pid-liveness alone.
+        assert own is None
+        return
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        assert own is not None
+        assert process_start_identity(os.getpid()) == own
+        assert process_start_identity(child.pid) not in {None, own}
+    finally:
+        child.kill()
+        child.wait(timeout=10)
+
+
+def test_descendant_walk_finds_a_grandchild() -> None:
+    """The walk reaches a grandchild on every host.
+
+    The POSIX tree kill signals the snapshot it returns, and the listener
+    ownership verdict reads the sockets of every member it lists.
+    """
     parent = subprocess.Popen(
         [sys.executable, "-c", _SPAWN_GRANDCHILD],
         stdout=subprocess.PIPE,
@@ -111,10 +133,8 @@ def test_descendant_walk_finds_a_grandchild_per_the_platform_contract() -> None:
     assert parent.stdout is not None
     grandchild_pid = int(parent.stdout.readline().strip())
     try:
-        if sys.platform == "win32":
-            assert posix_descendant_pids(parent.pid) == []
-        else:
-            assert grandchild_pid in posix_descendant_pids(parent.pid)
+        assert grandchild_pid in descendant_pids(parent.pid)
+        assert parent.pid not in descendant_pids(parent.pid)
     finally:
         parent.kill()
         parent.wait()
@@ -175,6 +195,15 @@ _BIND_AND_HOLD = (
     "time.sleep(120)"
 )
 _SLEEP = "import time; time.sleep(120)"
+# A parent that hands the listener script (its argv[1]) to its OWN child, so the
+# listener is a descendant of the pid the test spawns rather than that pid.
+_SPAWN_LISTENING_GRANDCHILD = (
+    "import subprocess,sys,time;"
+    "g=subprocess.Popen([sys.executable,'-c',sys.argv[1]],"
+    "stdout=subprocess.PIPE,text=True);"
+    "print(g.stdout.readline().strip(),flush=True);"
+    "time.sleep(120)"
+)
 
 
 def _spawn_listener() -> tuple[subprocess.Popen[str], int]:
@@ -225,26 +254,28 @@ async def test_port_has_listener_true_on_a_real_listener_false_on_a_free_port() 
     assert await port_has_listener_async(bound_port, timeout=0.5) is False
 
 
-def test_port_listener_pid_resolves_a_real_listener() -> None:
-    """The resolver names a real, live pid holding the loopback port, not a guess.
+def test_ownership_classification_confirms_a_descendant_listener() -> None:
+    """A listener bound by a descendant of the root, not the root, is ours.
 
-    Exact equality with the spawned pid does not hold on a Windows venv host,
-    where ``python.exe`` is a launcher stub: the pid we spawn launches the real
-    interpreter child that actually binds the port, so the listener is a
-    descendant. The resolver must still name that real listening pid, and it must
-    belong to the spawned tree.
+    This is the per-process socket query the ownership gate rests on, run
+    without elevation over a real tree: the root holds no socket, its child
+    does. A Windows venv host deepens the tree further, since ``python.exe`` is
+    a launcher stub whose interpreter child is the real binder.
     """
-    listener, port = _spawn_listener()
+    parent = subprocess.Popen(
+        [sys.executable, "-c", _SPAWN_LISTENING_GRANDCHILD, _BIND_AND_HOLD],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert parent.stdout is not None
     try:
-        resolved = port_listener_pid(port)
-        assert resolved is not None
-        assert pid_is_live(resolved)
-        assert (
-            classify_listener_ownership(port, listener.pid)
-            is ListenerOwnership.CONFIRMED
+        port = int(parent.stdout.readline().strip())
+        assert classify_listener_ownership(port, parent.pid) is (
+            ListenerOwnership.CONFIRMED
         )
     finally:
-        _reap(listener)
+        asyncio.run(kill_pid_tree_async(parent.pid))
+        _reap(parent)
 
 
 def test_await_listener_accepts_a_port_our_child_owns() -> None:
@@ -273,32 +304,42 @@ def test_await_listener_rejects_a_foreign_port_holder() -> None:
         _reap(holder, not_the_binder)
 
 
-def test_ownership_classification_separates_confirmed_from_unresolved() -> None:
-    """The tri-state tells "ours" apart from "could not tell"; the bool cannot.
+def test_ownership_classification_reads_the_tree_not_the_port() -> None:
+    """Only a port the root's own tree listens on is ours.
 
-    Both cases accept, and both SHOULD accept - failing a legitimate boot because
-    a listener pid could not be read is worse than the risk it guards. But a host
-    that can never resolve a listener degrades every readiness probe permanently,
-    and a caller holding only the boolean cannot distinguish that deployment from
-    one where the ownership guarantee still holds. Asserting the two accepting
-    cases are DIFFERENT values is the whole point: collapse them again and this
-    fails, while the boolean assertions below stay green.
+    The verdict reads the sockets of the root and its descendants, never the
+    host table, so a port nobody in the tree holds is ``OUTSIDE`` whether or not
+    anything else listens there. A fully readable tree never reads as
+    ``UNRESOLVED``: that verdict is reserved for a member whose sockets could not
+    be read.
     """
     listener, port = _spawn_listener()
     try:
         assert classify_listener_ownership(port, listener.pid) is (
             ListenerOwnership.CONFIRMED
         )
-        # An unbound port resolves no listener at all.
         assert classify_listener_ownership(free_port(), listener.pid) is (
-            ListenerOwnership.UNRESOLVED
+            ListenerOwnership.OUTSIDE
         )
     finally:
         _reap(listener)
 
 
+def test_ownership_classification_of_a_gone_root_is_outside() -> None:
+    """A tree whose root has exited owns nothing, so it confirms no listener."""
+    holder, port = _spawn_listener()
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait(timeout=10)
+    try:
+        assert classify_listener_ownership(port, gone.pid) is (
+            ListenerOwnership.OUTSIDE
+        )
+    finally:
+        _reap(holder)
+
+
 def test_ownership_classification_reports_a_positively_foreign_holder() -> None:
-    """A resolved listener outside the root's tree is OUTSIDE, not merely not-ours."""
+    """A real listener held outside the root's tree is OUTSIDE."""
     listener, port = _spawn_listener()
     stranger = subprocess.Popen([sys.executable, "-c", _SLEEP])
     try:
@@ -307,161 +348,3 @@ def test_ownership_classification_reports_a_positively_foreign_holder() -> None:
         )
     finally:
         _reap(listener, stranger)
-
-
-# Real ``netstat -ano -p tcp`` output as a non-English Windows prints it. The
-# STATE column is localized to the Windows UI language, and the header row with
-# it, so a resolver that matches the word "LISTENING" reads nothing on any of
-# these hosts. Each block below holds one listener on port 8123 owned by pid 4242.
-_NETSTAT_ENGLISH = """
-Active Connections
-
-  Proto  Local Address          Foreign Address        State           PID
-  TCP    127.0.0.1:8123         0.0.0.0:0              LISTENING       4242
-  TCP    127.0.0.1:9000         93.184.216.34:443      ESTABLISHED     777
-"""
-
-_NETSTAT_GERMAN = """
-Aktive Verbindungen
-
-  Proto  Lokale Adresse         Remoteadresse          Status          PID
-  TCP    127.0.0.1:8123         0.0.0.0:0              ABHÖREN         4242
-  TCP    127.0.0.1:9000         93.184.216.34:443      HERGESTELLT     777
-"""
-
-# French is the case that breaks column indexing as well as literal matching:
-# the state is TWO tokens, so ``parts[3]`` is "À" and ``parts[4]`` is the rest of
-# the state rather than the pid.
-_NETSTAT_FRENCH = """
-Connexions actives
-
-  Proto  Adresse locale         Adresse distante       État            PID
-  TCP    127.0.0.1:8123         0.0.0.0:0              À L'ÉCOUTE      4242
-  TCP    127.0.0.1:9000         93.184.216.34:443      ÉTABLI          777
-"""
-
-_NETSTAT_JAPANESE = """
-アクティブな接続
-
-  プロトコル  ローカル アドレス  外部アドレス  状態  PID
-  TCP    127.0.0.1:8123         0.0.0.0:0              受信待ち        4242
-  TCP    127.0.0.1:9000         93.184.216.34:443      確立済み        777
-"""
-
-# The decode compounds the localization: ``text=True`` with ``errors="replace"``
-# and no explicit encoding decodes through the host code page, so localized state
-# text can reach the parser already destroyed. Even a substring or
-# normalized-word match would have nothing left to match here.
-_NETSTAT_MANGLED = """
-  Proto  Local Address          Foreign Address        ����            PID
-  TCP    127.0.0.1:8123         0.0.0.0:0              ABH�REN         4242
-"""
-
-_LOCALIZED_NETSTAT = {
-    "english": _NETSTAT_ENGLISH,
-    "german": _NETSTAT_GERMAN,
-    "french": _NETSTAT_FRENCH,
-    "japanese": _NETSTAT_JAPANESE,
-    "code-page-mangled": _NETSTAT_MANGLED,
-}
-
-
-@pytest.mark.parametrize("locale_name", sorted(_LOCALIZED_NETSTAT))
-def test_netstat_parse_resolves_the_listener_on_every_localized_windows(
-    locale_name: str,
-) -> None:
-    """The listener resolves whatever language the host renders its STATE column in.
-
-    This is the defect itself: matching the literal ``"LISTENING"`` resolves the
-    pid on an English host and ``None`` on every other one, which turns the
-    readiness ownership check into a permanent no-op on exactly the deployments
-    whose logs nobody reads in English. The parse must key on structure - a
-    zero-port peer address and a trailing pid - not on a word.
-    """
-    resolved = parse_netstat_listener_pid(_LOCALIZED_NETSTAT[locale_name], 8123)
-
-    assert resolved == 4242
-
-
-def test_netstat_parse_reads_the_pid_positionally_from_the_end() -> None:
-    """A multi-token localized state shifts every column, so a fixed index is wrong.
-
-    French prints ``À L'ÉCOUTE`` - two whitespace-separated tokens - so the row
-    splits into six fields instead of five and the pid lands at index 5, not 4.
-    Normalizing the state word would still not fix this: the pid has to be read
-    from the END of the row for any locale whose state is not a single token.
-    """
-    row = _NETSTAT_FRENCH.splitlines()[4]
-    assert len(row.split()) == 6  # the shift is real, not hypothetical
-    assert row.split()[4] != "4242"  # a fixed index reads the state, not the pid
-
-    assert parse_netstat_listener_pid(_NETSTAT_FRENCH, 8123) == 4242
-
-
-def test_netstat_parse_refuses_a_connected_row_on_the_same_local_port() -> None:
-    """The zero-peer discriminator must mean "listening", not "any row for the port".
-
-    Guards the replacement from degenerating into "return the pid of whatever row
-    mentions this port", which would resolve an outbound connection's pid and
-    misattribute the port to the wrong process - the exact misattribution
-    ``port_listener_pid`` promises never to make.
-    """
-    connected_only = """
-  Proto  Local Address          Foreign Address        State           PID
-  TCP    127.0.0.1:9000         93.184.216.34:443      ESTABLISHED     777
-"""
-    assert parse_netstat_listener_pid(connected_only, 9000) is None
-
-
-def test_netstat_parse_resolves_an_ipv6_wildcard_listener() -> None:
-    """A ``[::]`` wildcard listener serves loopback, so it must resolve too."""
-    ipv6 = """
-  Proto  Local Address          Foreign Address        State           PID
-  TCP    [::]:8123              [::]:0                 LISTENING       4242
-"""
-    assert parse_netstat_listener_pid(ipv6, 8123) == 4242
-
-
-def test_windows_tcp_table_resolves_a_real_listener_without_parsing_text() -> None:
-    """The primary Windows path resolves a real listener off the binary TCP table.
-
-    The localized-output tests above prove the degraded fallback; this proves the
-    path that actually runs. It reads ``GetExtendedTcpTable`` directly, so the
-    listening state is a numeric constant in a struct and no host language can
-    reword it - the same property the Linux path gets from ``/proc/net/tcp``'s
-    ``0A``. On POSIX the table is Windows-only and must say so rather than
-    silently report an empty table, which is what keeps the caller from treating
-    "cannot answer" as "nothing is listening".
-    """
-    from ...utils._process_tree import _tcp_table_listener_pid
-
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.bind(("127.0.0.1", 0))
-    listener.listen(5)
-    port = listener.getsockname()[1]
-    try:
-        if sys.platform == "win32":
-            assert _tcp_table_listener_pid(port) == os.getpid()
-        else:
-            with pytest.raises(OSError):
-                _tcp_table_listener_pid(port)
-    finally:
-        listener.close()
-
-
-def test_windows_tcp_table_reports_no_listener_on_an_unbound_port() -> None:
-    """An unbound port is ``None``, not an error - the fallback must not be spawned.
-
-    The two negative answers are different: "nothing is listening" is the common
-    not-ready-yet poll and must stay in-process, while "this host cannot read the
-    table" is what earns the ``netstat`` fallback. Collapsing them would spawn a
-    subprocess on every iteration of the readiness loop.
-    """
-    from ...utils._process_tree import _tcp_table_listener_pid
-
-    if sys.platform == "win32":
-        assert _tcp_table_listener_pid(free_port()) is None
-    else:
-        # POSIX never reaches this path; it must refuse rather than answer "none".
-        with pytest.raises(OSError):
-            _tcp_table_listener_pid(free_port())

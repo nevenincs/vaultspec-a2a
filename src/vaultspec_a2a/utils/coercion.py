@@ -21,6 +21,7 @@ __all__ = [
     "coerce_object_list",
     "coerce_object_mapping",
     "coerce_string_list",
+    "decode_json_object",
 ]
 
 _OBJECT_MAPPING: TypeAdapter[dict[str, object]] = TypeAdapter(dict[str, object])
@@ -74,6 +75,31 @@ def coerce_object_mapping(value: object) -> dict[str, object] | None:
     """
     try:
         return _OBJECT_MAPPING.validate_python(value, strict=True)
+    except ValidationError:
+        return None
+
+
+def decode_json_object(encoded: str | None) -> dict[str, object] | None:
+    """Return the JSON object *encoded* holds, or ``None`` when it holds none.
+
+    The text-shaped counterpart to :func:`coerce_object_mapping`, validated
+    through the same adapter so a stored column and an already-parsed value
+    narrow identically. An absent column, malformed JSON, and JSON that is not
+    an object are one outcome - the record names no object - and the caller
+    decides what that means for it.
+
+    Args:
+        encoded: JSON text read from a column or a file, or ``None`` when the
+            column is absent.
+
+    Returns:
+        The decoded ``dict``, or ``None`` when *encoded* is absent, is not valid
+        JSON, or does not decode to a string-keyed object.
+    """
+    if encoded is None:
+        return None
+    try:
+        return _OBJECT_MAPPING.validate_json(encoded, strict=True)
     except ValidationError:
         return None
 

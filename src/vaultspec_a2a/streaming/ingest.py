@@ -24,6 +24,7 @@ from ..providers.acp_exceptions import AcpPromptCancelledError
 from ..providers.conditions import condition_is_retryable
 from ..thread.enums import ThreadStatus
 from ..thread.errors import describe_exception_chain
+from ._interrupt_projection import emit_interrupt_events
 from ._run_callbacks import RunLifecycleCallbacks
 from .buffering import BufferingManager
 from .emitters import EventEmitters
@@ -32,7 +33,6 @@ from .transformer import (
     EventProjectionServices,
     StreamFrame,
     durable_loop_checkpoint_id,
-    emit_interrupt_events,
     frame_reports_interrupt,
     process_stream_frame,
 )

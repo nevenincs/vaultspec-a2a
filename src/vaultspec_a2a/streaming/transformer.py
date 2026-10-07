@@ -27,7 +27,6 @@ from typing import cast
 from ..domain_config import domain_config
 from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
-from ._interrupt_projection import emit_interrupt_events as emit_interrupt_events
 from .buffering import BufferingManager
 from .custom_writes import custom_write_node_name
 from .emitters import EventEmitters

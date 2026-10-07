@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, cast
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
@@ -23,6 +23,7 @@ from ..thread.action_receipts import (
     control_action_payload_fingerprint,
 )
 from ..thread.enums import NON_ACTIVE_STATUSES, ControlActionType
+from ..utils.coercion import decode_json_object
 from .accepted_input import AcceptedActionInput, dispatch_matches_accepted_input
 
 if TYPE_CHECKING:
@@ -31,7 +32,6 @@ if TYPE_CHECKING:
     from ..thread import ThreadWriteExpectation
 
 logger = logging.getLogger(__name__)
-_PAYLOAD = TypeAdapter(dict[str, object])
 
 
 def validate_current_graph_receipt(
@@ -52,9 +52,10 @@ def validate_current_graph_receipt(
             "action"
         ] != GRAPH_ACTION_VERB.get(receipt.action_type):
             return None
-        fingerprint = control_action_payload_fingerprint(
-            _PAYLOAD.validate_json(action.payload_json)
-        )
+        payload = decode_json_object(action.payload_json)
+        if payload is None:
+            return None
+        fingerprint = control_action_payload_fingerprint(payload)
         expectation = thread_write_expectation(thread)
     except (ValueError, ValidationError):
         return None
@@ -95,7 +96,9 @@ def _accepted_graph_action(
         return None
     try:
         action_type = ControlActionType(action.action_type)
-        payload = _PAYLOAD.validate_json(action.payload_json)
+        payload = decode_json_object(action.payload_json)
+        if payload is None:
+            return None
         accepted = AcceptedActionInput.model_validate(payload)
         if accepted.dispatch["thread_id"] != thread_id or accepted.dispatch[
             "action"

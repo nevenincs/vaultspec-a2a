@@ -1,0 +1,8 @@
+[agent]
+id           = "deterministic-hold-then-complete"
+display_name = "Deterministic Hold Then Complete"
+role         = "coder"
+description  = "In-process ProviderFactory scenario that holds its turn until the test releases it, then completes."
+
+[agent.persona]
+system_prompt = "Hold the programmed deterministic turn until its release, then complete it."

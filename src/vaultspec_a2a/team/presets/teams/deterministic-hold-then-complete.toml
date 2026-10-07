@@ -1,0 +1,30 @@
+[team]
+id           = "deterministic-hold-then-complete"
+display_name = "Deterministic Hold Then Complete"
+description  = """
+Scripted held-turn scenario: the one worker's turn stays in flight while the
+stack's hold gate is closed and completes as soon as the test opens it, so a run
+is busy mid-turn for exactly as long as the test needs. A later turn on the same
+run completes at once unless the gate is closed again.
+
+Runs on the in-process deterministic provider, so it needs no credential, no
+network, and no tape server.
+"""
+
+[team.topology]
+type  = "pipeline"
+order = ["deterministic-hold-then-complete"]
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = "Run the in-process deterministic hold-then-complete scenario."
+
+[team.graph]
+step_timeout_seconds = 60
+run_timeout_seconds = 600
+recursion_limit      = 10
+
+[[team.workers]]
+agent_id = "deterministic-hold-then-complete"

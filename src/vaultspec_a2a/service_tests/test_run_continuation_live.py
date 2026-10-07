@@ -17,6 +17,7 @@ from sqlalchemy.engine import make_url
 
 from ..control.accepted_input import AcceptedActionInput, restore_accepted_dispatch
 from ..testing import wait_for_run_status
+from ..testing.lanes import held_turns
 from ..testing.payloads import json_object, json_object_list
 from ..testing.sse import read_frames_until
 from ..thread.action_receipts import GraphActionReceipt
@@ -29,6 +30,11 @@ if TYPE_CHECKING:
 
     from ..conftest import ExternalPrerequisiteRule
     from .harness import ServiceStack
+
+# The scenario whose turn stays in flight on the real worker until the test opens
+# the stack's hold gate, so a run can be held busy mid-turn across a probe or a
+# gateway restart.
+_HELD_PRESET = "deterministic-hold-then-complete"
 
 
 async def _wait_for_completed_checkpoint(path: Path, run_id: str) -> None:
@@ -319,12 +325,10 @@ def test_postgres_admission_at_the_worker_completion_boundary_has_one_outcome(
 
 
 def _assert_busy_worker_retains_the_accepted_run(stack: ServiceStack) -> None:
-    stack.catalog_selection(str(stack.runtime_dir), "mock-success-multi")
-    stack.pause_mock_service()
-    try:
+    with held_turns(stack.hold_gate):
         created = stack.create_thread(
             initial_message="Complete the accepted turn after the busy probe.",
-            team_preset="mock-success-multi",
+            team_preset=_HELD_PRESET,
             autonomous=True,
         )
         run_id = str(created["run_id"])
@@ -347,8 +351,6 @@ def _assert_busy_worker_retains_the_accepted_run(stack: ServiceStack) -> None:
         assert original[1] is not None
         assert GraphActionReceipt.model_validate_json(original[1]) == receipt
         assert dispatch_id != probe_id
-    finally:
-        stack.resume_mock_service()
 
     completed = wait_for_run_status(
         lambda: thread_state(stack, run_id),
@@ -382,14 +384,10 @@ def test_postgres_real_busy_worker_keeps_its_accepted_run(
 def test_gateway_restart_promotes_queued_turn_once(
     service_stack: ServiceStack,
 ) -> None:
-    service_stack.catalog_selection(
-        str(service_stack.runtime_dir), "mock-success-multi"
-    )
-    service_stack.pause_mock_service()
-    try:
+    with held_turns(service_stack.hold_gate):
         created = service_stack.create_thread(
             initial_message="Finish this turn while the gateway restarts.",
-            team_preset="mock-success-multi",
+            team_preset=_HELD_PRESET,
             autonomous=True,
         )
         run_id = str(created["run_id"])
@@ -401,8 +399,6 @@ def test_gateway_restart_promotes_queued_turn_once(
             )
         assert queued.status_code == 202, queued.text
         service_stack.crash_gateway()
-    finally:
-        service_stack.resume_mock_service()
     asyncio.run(
         _wait_for_completed_checkpoint(service_stack.runtime_dir / "service.db", run_id)
     )
@@ -440,12 +436,10 @@ def test_postgres_gateway_restart_promotes_queued_turn_once(
     postgres_service_stack: ServiceStack,
 ) -> None:
     stack = postgres_service_stack
-    stack.catalog_selection(str(stack.runtime_dir), "mock-success-multi")
-    stack.pause_mock_service()
-    try:
+    with held_turns(stack.hold_gate):
         created = stack.create_thread(
             initial_message="Finish this PostgreSQL turn while the gateway restarts.",
-            team_preset="mock-success-multi",
+            team_preset=_HELD_PRESET,
             autonomous=True,
         )
         run_id = str(created["run_id"])
@@ -457,8 +451,6 @@ def test_postgres_gateway_restart_promotes_queued_turn_once(
             )
         assert queued.status_code == 202, queued.text
         stack.crash_gateway()
-    finally:
-        stack.resume_mock_service()
     assert stack.postgres_url is not None
     _wait_for_postgres_completed_checkpoint(stack.postgres_url, run_id)
     assert _queued_action_state(stack, run_id, str(queued.json()["action_id"])) == (

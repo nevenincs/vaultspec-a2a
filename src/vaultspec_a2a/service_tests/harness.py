@@ -38,6 +38,7 @@ from ..testing import (
     reap_process,
     spawn_logged,
 )
+from ..testing.lanes import armed_lane_environment
 from ..testing.ports import free_port
 
 if TYPE_CHECKING:
@@ -164,7 +165,6 @@ class ServiceStack:
         default=None, init=False, repr=False
     )
     _gateway_log_name: str = field(default="gateway.log", init=False, repr=False)
-    _mock_paused: bool = field(default=False, init=False, repr=False)
     _stopped: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -197,6 +197,15 @@ class ServiceStack:
     @property
     def jaeger_url(self) -> str:
         return f"http://127.0.0.1:{self.ports['jaeger_ui']}"
+
+    @property
+    def hold_gate(self) -> Path:
+        """The gate this stack's hold-then-complete turns wait on.
+
+        Hand it to :func:`vaultspec_a2a.testing.lanes.held_turns` to hold a run
+        mid-turn on the real worker for the length of a block.
+        """
+        return self.runtime_dir / "hold-then-complete.gate"
 
     def record(self, name: str, payload: Any) -> None:
         self.artifacts[name] = payload
@@ -327,14 +336,6 @@ class ServiceStack:
                 "VAULTSPEC_A2A_GATEWAY_TOKEN": _GATEWAY_SERVICE_TOKEN,
                 "VAULTSPEC_A2A_INSTALL_ROOT": str(REPO_ROOT),
                 "VAULTSPEC_A2A_MOCK_API_BASE": self.vidaimock_url,
-                # Arm the in-process lanes. This stack has no provider
-                # credentials, and a run now has to present a selection naming a
-                # lane the gateway reports selectable - so without this the
-                # catalog offers nothing selectable at all and every run here is
-                # unstartable. The mock lane additionally needs a tape server,
-                # which VAULTSPEC_A2A_MOCK_API_BASE above supplies, so both
-                # in-process lanes are served and the mock presets can select their own.
-                "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true",
                 "OTEL_EXPORTER_OTLP_ENDPOINT": (
                     f"http://127.0.0.1:{self.ports['jaeger_otlp']}"
                 ),
@@ -348,6 +349,12 @@ class ServiceStack:
                 "OTEL_SDK_DISABLED": "false",
             }
         )
+        # Arm the in-process lanes. This stack has no provider credentials, and a
+        # run has to present a selection naming a lane the gateway reports
+        # selectable - so without this the catalog offers nothing selectable and
+        # every run here is unstartable. The worker is spawned with the same
+        # arming, and with it the hold gate its held turns wait on.
+        env.update(armed_lane_environment(hold_gate=self.hold_gate))
         if self.postgres_url is not None:
             env["VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL"] = self.postgres_url
             env["VAULTSPEC_A2A_POSTGRES_REQUIRED"] = "true"
@@ -421,20 +428,6 @@ class ServiceStack:
         self._start_gateway()
         self.wait_for_ready()
 
-    def pause_mock_service(self) -> None:
-        """Hold model replies while a real worker retains its active turn."""
-        if self._mock_paused:
-            raise RuntimeError("mock service is already paused")
-        _run_compose(self.project_name, "pause", "vidaimock", ports=self.ports)
-        self._mock_paused = True
-
-    def resume_mock_service(self) -> None:
-        """Release a held model reply after the gateway has been killed."""
-        if not self._mock_paused:
-            raise RuntimeError("mock service is not paused")
-        _run_compose(self.project_name, "unpause", "vidaimock", ports=self.ports)
-        self._mock_paused = False
-
     def _wait_for_process_health(
         self,
         probe: Callable[[], dict[str, Any]],
@@ -457,11 +450,6 @@ class ServiceStack:
             self.record("teardown", {"status": "already_stopped"})
             return
         self._stopped = True
-        if self._mock_paused:
-            try:
-                self.resume_mock_service()
-            except Exception as exc:
-                self.record("mock-unpause-error", {"error": repr(exc)})
         for process in (self._gateway_proc, self._worker_proc):
             if process is not None:
                 reap_process(process)
@@ -680,26 +668,24 @@ class ServiceStack:
         catalog served FOR THIS WORKSPACE, so it has to name a lane this gateway
         actually reports selectable, at that lane's current revision.
 
-        The lane is chosen to match what the preset is FOR. These presets run the
-        in-process lanes - the mock lane replays a tape, the deterministic lane
-        answers from fixed role-keyed content - and picking anything else would
-        change what the test exercises. So an external lane is never selected
-        here even when one is available: on a developer machine with a real
-        provider session this would otherwise quietly send certification traffic
-        to a billable lane, which is a worse failure than not running.
+        The lane is chosen to match what the preset is FOR. Every preset this
+        stack runs is a deterministic scenario, keyed by its agents on the
+        deterministic lane, and picking anything else would change what the test
+        exercises. So an external lane is never selected here even when one is
+        available: on a developer machine with a real provider session this
+        would otherwise quietly send certification traffic to a billable lane,
+        which is a worse failure than not running.
         """
-        # The lane the preset is pinned to, so a mock preset keeps replaying its
-        # tape rather than being answered by the deterministic lane. Refusing a
-        # non-in-process lane is the mechanism's own guarantee: it will not hand
-        # back a billable lane even if one is the only selectable thing this
-        # stack serves. The choice is cached because the first catalog read on a
-        # gateway builds it cold across every registered lane.
+        # Refusing a non-in-process lane is the mechanism's own guarantee: it
+        # will not hand back a billable lane even if one is the only selectable
+        # thing this stack serves. The choice is cached because the first catalog
+        # read on a gateway builds it cold across every registered lane.
         try:
             with self._client() as client:
                 return fetch_in_process_selection(
                     client,
                     workspace_root,
-                    prefer_provider_id=Provider.MOCK.value,
+                    prefer_provider_id=Provider.DETERMINISTIC.value,
                     cache=True,
                 )
         except NoSelectableLaneError as exc:

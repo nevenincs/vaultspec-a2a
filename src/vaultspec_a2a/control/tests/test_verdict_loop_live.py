@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import pathlib
 import uuid
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -81,6 +80,7 @@ from ...testing import (
     elect_status,
     mint_raw_token,
     new_state_graph,
+    served_worker,
     settings_override,
 )
 from ...tests._write_authority import make_test_write_authority
@@ -88,9 +88,6 @@ from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ...thread.idempotency import thread_create_action_key
-from ...utils import bearer_header
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
 from ...worker.ipc import WorkerBridge
 from .._verdict_subscriber_config import VerdictSubscriberConfig
 from ..circuit_breaker import WorkerCircuitBreaker
@@ -110,7 +107,7 @@ if TYPE_CHECKING:
 
     from ...providers.team_selection import FrozenLaneAssignment
     from ...thread.state import TeamState
-    from ...worker.graph_lifecycle import RegisteredCompiledGraph
+    from ...worker.graph_lifecycle import GraphCompilationKey, RegisteredCompiledGraph
 
 # Every dispatch names an active project, as a real one does. This package's own
 # repository is real, absolute, and present on either platform.
@@ -122,7 +119,6 @@ _TEST_INTERNAL_TOKEN = "verdict-loop-live-test-token"
 class _LiveVerdictResources:
     session_factory: async_sessionmaker[AsyncSession]
     checkpointer: AsyncSqliteSaver
-    executor: Executor
     graph: RegisteredCompiledGraph
     definition: FrozenGraphDefinition
     model_assignment: dict[str, FrozenLaneAssignment]
@@ -134,13 +130,6 @@ class _LiveVerdictIdentity:
     thread_id: str
     info: dict[str, str]
     baseline: int
-
-
-@dataclass(frozen=True, slots=True)
-class _VerdictWorkerContext:
-    client: AuthoringClient
-    resources: _LiveVerdictResources
-    identity: _LiveVerdictIdentity
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,15 +192,14 @@ def _bridge_stub() -> WorkerBridge:
     return bridge
 
 
-def _install_verdict_loop_graph(
-    executor: Executor,
-    thread_id: str,
+def _verdict_loop_graph(
+    checkpointer: AsyncSqliteSaver,
     proposal_id: str,
     *,
     definition: FrozenGraphDefinition,
     model_assignment_digest: str,
-) -> RegisteredCompiledGraph:
-    """Compile+cache a real, minimal seed -> phase-gate -> finish graph.
+) -> tuple[GraphCompilationKey, RegisteredCompiledGraph]:
+    """Compile a real, minimal seed -> phase-gate -> finish graph and its cache key.
 
     ``seed`` commits ``gate_pending_proposal_id`` (the REAL proposal id
     already submitted+decided against the live engine by the caller) so the
@@ -244,32 +232,16 @@ def _install_verdict_loop_graph(
     builder.add_edge("seed", "gate")
     builder.add_edge("finish", "__end__")
     graph: RegisteredCompiledGraph = compile_test_graph(
-        builder, checkpointer=executor._checkpointer
+        builder, checkpointer=checkpointer
     )
-
-    executor.register_compiled_graph(
-        thread_id,
-        (
-            DEFAULT_TEAM_PRESET,
-            _WORKSPACE,
-            False,
-            model_assignment_digest,
-            definition.digest(),
-        ),
-        graph,
+    key: GraphCompilationKey = (
+        DEFAULT_TEAM_PRESET,
+        _WORKSPACE,
+        False,
+        model_assignment_digest,
+        definition.digest(),
     )
-    return graph
-
-
-@asynccontextmanager
-async def _worker_test_lifespan(app: FastAPI):
-    """No-op lifespan: ``httpx.ASGITransport`` never runs FastAPI's real
-    lifespan protocol, so production wiring (state, task group) is done
-    explicitly by the caller before any request is sent. This exists only so
-    ``create_worker_app`` does not fall back to the production ``_lifespan``
-    (which needs real registration/telemetry infra this test has no use for).
-    """
-    yield
+    return key, graph
 
 
 async def _prepare_live_verdict_case(
@@ -446,48 +418,12 @@ async def _resume_live_verdict_run(
         assert thread.status != ThreadStatus.INPUT_REQUIRED.value
 
 
-async def _run_live_verdict_worker(
-    context: _VerdictWorkerContext,
-) -> None:
-    worker_app = create_worker_app(lifespan=_worker_test_lifespan)
-    worker_app.state.executor = context.resources.executor
-    async with (
-        httpx.AsyncClient(
-            transport=ASGITransport(app=worker_app),
-            base_url="http://worker",
-            headers=bearer_header(_TEST_INTERNAL_TOKEN),
-        ) as worker_client,
-        anyio.create_task_group() as tg,
-    ):
-        # ASGITransport never runs FastAPI's lifespan protocol, so the
-        # production dispatch route's task group is wired explicitly.
-        worker_app.state.task_group = tg
-        config = await _ingest_live_verdict_run(
-            _VerdictIngestContext(
-                worker_client=worker_client,
-                resources=context.resources,
-                identity=context.identity,
-            )
-        )
-        await _resume_live_verdict_run(
-            _VerdictResumeContext(
-                client=context.client,
-                worker_client=worker_client,
-                resources=context.resources,
-                identity=context.identity,
-                config=config,
-            )
-        )
-
-
 async def _run_live_verdict_a2a(
     client: AuthoringClient,
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
     identity: _LiveVerdictIdentity,
 ) -> None:
-    bridge = _bridge_stub()
-    executor = Executor(checkpointer=checkpointer, bridge=bridge)
     workspace = Path(_WORKSPACE)
     metadata = current_execution_metadata(workspace)
     execution_authority = resolve_execution_authority(metadata)
@@ -495,28 +431,42 @@ async def _run_live_verdict_a2a(
         load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
-    graph = _install_verdict_loop_graph(
-        executor,
-        identity.thread_id,
+    key, graph = _verdict_loop_graph(
+        checkpointer,
         identity.info["proposal_id"],
         definition=definition,
         model_assignment_digest=execution_authority.model_assignment_digest,
     )
-    await _run_live_verdict_worker(
-        _VerdictWorkerContext(
-            client=client,
-            resources=_LiveVerdictResources(
-                session_factory=session_factory,
-                checkpointer=checkpointer,
-                executor=executor,
-                graph=graph,
-                definition=definition,
-                model_assignment=execution_authority.model_assignment,
-                metadata=metadata,
-            ),
-            identity=identity,
-        )
+    resources = _LiveVerdictResources(
+        session_factory=session_factory,
+        checkpointer=checkpointer,
+        graph=graph,
+        definition=definition,
+        model_assignment=execution_authority.model_assignment,
+        metadata=metadata,
     )
+    async with served_worker(
+        checkpointer,
+        bridge=_bridge_stub(),
+        graphs={identity.thread_id: (key, graph)},
+        drain_dispatches=True,
+    ) as worker:
+        config = await _ingest_live_verdict_run(
+            _VerdictIngestContext(
+                worker_client=worker.client,
+                resources=resources,
+                identity=identity,
+            )
+        )
+        await _resume_live_verdict_run(
+            _VerdictResumeContext(
+                client=client,
+                worker_client=worker.client,
+                resources=resources,
+                identity=identity,
+                config=config,
+            )
+        )
 
 
 @pytest.mark.service

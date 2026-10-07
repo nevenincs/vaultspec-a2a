@@ -25,7 +25,7 @@ from ..authoring import (
 from ..graph.compiler import compile_team_graph
 from ..providers.factory import ProviderFactory
 from ..team import load_agent_config, load_team_config
-from ..testing import AcceptanceHarness, deterministic_model_assignment
+from ..testing import deterministic_model_assignment, mint_raw_token
 from ..thread.actor_tokens import ActorTokenBundle
 from ..worker.token_store import RunTokenStore
 
@@ -93,7 +93,7 @@ async def _live_token_store(
     tokens: dict[str, str] = {}
     async with AuthoringClient(base_url, bearer) as client:
         for spec in phase_specs.values():
-            tokens[spec.document_role] = await AcceptanceHarness.mint(
+            tokens[spec.document_role] = await mint_raw_token(
                 client, f"agent:{spec.document_role}-{thread_id}", "agent"
             )
     store = RunTokenStore()

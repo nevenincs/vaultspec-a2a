@@ -14,6 +14,7 @@ from ...control._worker_health import worker_liveness
 from ...control.infra_config import InfraConfig
 from ...streaming import RelayHub
 from ...testing import settings_override
+from ...utils import bearer_header
 from ...worker.app import create_worker_app
 from ..app import create_app
 
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 _TOKEN = "body-limit-test"
-_AUTH = {"authorization": f"Bearer {_TOKEN}", "content-type": "application/json"}
+_AUTH = {**bearer_header(_TOKEN), "content-type": "application/json"}
 _ROUTES = (
     "/internal/events/batch",
     "/internal/heartbeat",

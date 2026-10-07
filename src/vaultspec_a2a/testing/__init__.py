@@ -214,6 +214,8 @@ if TYPE_CHECKING:
         clarification_graph,
         park_clarification,
         park_document_approval,
+        park_journaled_permission,
+        park_journaled_permissions,
         park_permission,
         park_permissions,
         park_plan_approval,
@@ -276,6 +278,7 @@ if TYPE_CHECKING:
         seed_create_action,
         seed_journaled_thread,
         seed_live_thread,
+        seed_thread_expectation,
     )
     from .session_root import (
         TEST_ROOT_NAME,
@@ -620,6 +623,14 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.parking",
         "park_document_approval",
     ),
+    "park_journaled_permission": (
+        "vaultspec_a2a.testing.parking",
+        "park_journaled_permission",
+    ),
+    "park_journaled_permissions": (
+        "vaultspec_a2a.testing.parking",
+        "park_journaled_permissions",
+    ),
     "park_permission": ("vaultspec_a2a.testing.parking", "park_permission"),
     "park_permissions": ("vaultspec_a2a.testing.parking", "park_permissions"),
     "park_plan_approval": ("vaultspec_a2a.testing.parking", "park_plan_approval"),
@@ -689,6 +700,10 @@ _LAZY_EXPORTS = {
         "seed_journaled_thread",
     ),
     "seed_live_thread": ("vaultspec_a2a.testing.seeding", "seed_live_thread"),
+    "seed_thread_expectation": (
+        "vaultspec_a2a.testing.seeding",
+        "seed_thread_expectation",
+    ),
     "CPU_BUDGET_ENV": ("vaultspec_a2a.testing.harness_names", "CPU_BUDGET_ENV"),
     "COMPLETION_ENDPOINT_ENV": (
         "vaultspec_a2a.testing.harness_names",
@@ -910,6 +925,8 @@ __all__ = [
     "override_selection_from_served_catalog",
     "park_clarification",
     "park_document_approval",
+    "park_journaled_permission",
+    "park_journaled_permissions",
     "park_permission",
     "park_permissions",
     "park_plan_approval",
@@ -947,6 +964,7 @@ __all__ = [
     "seed_create_action",
     "seed_journaled_thread",
     "seed_live_thread",
+    "seed_thread_expectation",
     "selection_from_served_catalog",
     "serve_handler",
     "serve_on_loopback",

@@ -40,6 +40,7 @@ from ...testing import (
     seed_journaled_thread,
 )
 from ...thread.enums import ThreadStatus
+from ...utils import bearer_header
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -118,7 +119,7 @@ def _post_worker_batch(base_url: str, secret: str, sequences: list[int]) -> None
         response = client.post(
             "/internal/events/batch",
             json=_relay_body(sequences),
-            headers={"Authorization": f"Bearer {secret}"},
+            headers=bearer_header(secret),
         )
     assert response.status_code == 200, response.text
 

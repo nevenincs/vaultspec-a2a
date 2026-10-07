@@ -10,43 +10,16 @@ import pytest
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ...testing import seed_thread_expectation
 from ...thread import RunWriteAuthority, ThreadWriteExpectation
 from ...thread.enums import ControlActionType, InvalidTransitionError, ThreadStatus
 from ..control_action_repository import create_control_action
 from ..thread_repository import (
     ThreadStatusElectionOutcome,
-    create_thread,
     elect_thread_status,
     get_thread,
     thread_write_expectation,
 )
-
-
-async def _seed(
-    session_factory: async_sessionmaker[AsyncSession],
-    thread_id: str,
-    status: ThreadStatus,
-    receipt: str,
-) -> ThreadWriteExpectation:
-    authority = RunWriteAuthority(0, 1, ControlActionType.INGEST, receipt)
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            thread_id=thread_id,
-            status=status,
-            write_authority=authority,
-        )
-        await create_control_action(
-            session,
-            thread_id=thread_id,
-            action_type=ControlActionType.INGEST,
-            idempotency_key=f"{thread_id}-ingest",
-            dispatch_id=receipt,
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-        )
-        expectation = thread_write_expectation(thread)
-        await session.commit()
-    return expectation
 
 
 @pytest.mark.asyncio
@@ -63,7 +36,7 @@ async def test_stale_terminal_sessions_elect_exactly_one_winner(
     loser_status: ThreadStatus,
 ) -> None:
     thread_id = f"winner-{winner_status.value}"
-    expected = await _seed(
+    expected = await seed_thread_expectation(
         session_factory,
         thread_id,
         ThreadStatus.RUNNING,
@@ -107,7 +80,7 @@ async def test_completion_before_running_wins_and_late_running_loses(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "early-completion"
-    expected = await _seed(
+    expected = await seed_thread_expectation(
         session_factory, thread_id, ThreadStatus.SUBMITTED, "early-completion-receipt"
     )
     writer = expected.authority
@@ -141,7 +114,7 @@ async def test_winner_refreshes_same_session_identity_map(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "same-session-truth"
-    await _seed(
+    await seed_thread_expectation(
         session_factory, thread_id, ThreadStatus.RUNNING, "same-session-truth-receipt"
     )
     async with session_factory() as session:
@@ -186,7 +159,7 @@ async def test_each_stale_authority_dimension_loses(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "all-dimensions"
-    current = await _seed(
+    current = await seed_thread_expectation(
         session_factory, thread_id, ThreadStatus.RUNNING, "all-dimensions-receipt"
     )
     altered = (
@@ -245,10 +218,10 @@ async def test_each_stale_authority_dimension_loses(
 async def test_successor_requires_same_thread_action_receipt(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    expected = await _seed(
+    expected = await seed_thread_expectation(
         session_factory, "receipt-owner", ThreadStatus.RUNNING, "receipt-owner-ingest"
     )
-    await _seed(
+    await seed_thread_expectation(
         session_factory, "foreign-owner", ThreadStatus.RUNNING, "foreign-cancel-receipt"
     )
     async with session_factory() as session:
@@ -285,7 +258,7 @@ async def test_changed_action_advances_generation_and_exact_receipt_wins(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "changed-action"
-    expected = await _seed(
+    expected = await seed_thread_expectation(
         session_factory, thread_id, ThreadStatus.RUNNING, "changed-action-ingest"
     )
     async with session_factory() as session:
@@ -324,7 +297,7 @@ async def test_terminal_reopen_refuses_before_sql(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "terminal-refusal"
-    expected = await _seed(
+    expected = await seed_thread_expectation(
         session_factory, thread_id, ThreadStatus.COMPLETED, "terminal-refusal-receipt"
     )
     async with session_factory() as session:
@@ -344,7 +317,7 @@ async def test_noop_election_is_refused(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "successor-refusal"
-    expected = await _seed(
+    expected = await seed_thread_expectation(
         session_factory, thread_id, ThreadStatus.RUNNING, "successor-refusal-receipt"
     )
     async with session_factory() as session:
@@ -379,7 +352,7 @@ async def test_missing_thread_and_failure_reason_bound(
     assert absent.outcome is ThreadStatusElectionOutcome.NOT_FOUND
 
     thread_id = "bounded-reason"
-    expected = await _seed(
+    expected = await seed_thread_expectation(
         session_factory, thread_id, ThreadStatus.RUNNING, "bounded-reason-receipt"
     )
     async with session_factory() as session:

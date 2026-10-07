@@ -24,9 +24,10 @@ from ..node_metadata import (
     node_metadata_from_graph,
 )
 from ..subscribers import RelayHub
+from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
-    from ..types import SequencedEvent, StreamableGraph
+    from ..types import StreamableGraph
 
 
 class _Node:
@@ -177,12 +178,7 @@ def test_relayed_graph_metadata_is_scoped_to_its_thread() -> None:
 async def test_team_status_defaults_every_field_but_keeps_caller_values() -> None:
     """emit_team_status fills every field without clobbering supplied ones."""
     producer = RunEventProducer()
-    relayed: list[SequencedEvent] = []
-
-    async def _capture(sequenced: SequencedEvent) -> None:
-        relayed.append(sequenced)
-
-    producer.add_broadcast_hook(_capture)
+    relayed = relayed_events(producer)
     producer.register_graph("thread-1", cast("StreamableGraph", _graph()))
 
     await producer._emitters.emit_team_status(

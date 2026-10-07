@@ -25,6 +25,7 @@ from starlette.datastructures import State
 from starlette.requests import Request
 
 from ...conftest import SqlitePosture
+from ...testing import seed_thread_expectation
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import (
     ApprovalStatus,
@@ -65,7 +66,6 @@ from ..session import (
     init_db,
     verify_wal_mode,
 )
-from .test_thread_status_election import _seed
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -95,7 +95,9 @@ async def _elect_from(
     returns, so what comes back is what the production lifecycle write leaves
     durable.
     """
-    expectation = await _seed(session_factory, run, source, f"{run}-receipt")
+    expectation = await seed_thread_expectation(
+        session_factory, run, source, f"{run}-receipt"
+    )
     authority = expectation.authority
     async with session_factory() as session:
         await elect_thread_status(
@@ -327,7 +329,7 @@ class TestThreadCRUD:
     ) -> None:
         """Lifecycle writes restore the denormalized discovery selector."""
         run = "stale-selector"
-        expectation = await _seed(
+        expectation = await seed_thread_expectation(
             session_factory, run, ThreadStatus.RUNNING, f"{run}-receipt"
         )
         authority = expectation.authority
@@ -528,7 +530,7 @@ class TestThreadCRUD:
         value is stale after the update unless the election refreshes the row.
         """
         run = "staleness-check"
-        expectation = await _seed(
+        expectation = await seed_thread_expectation(
             session_factory, run, ThreadStatus.SUBMITTED, f"{run}-receipt"
         )
         authority = expectation.authority
@@ -591,7 +593,7 @@ class TestThreadCRUD:
     ) -> None:
         """elect_thread_status() refuses a status that is not a ThreadStatus."""
         run = "untyped-status"
-        expectation = await _seed(
+        expectation = await seed_thread_expectation(
             session_factory, run, ThreadStatus.SUBMITTED, f"{run}-receipt"
         )
         authority = expectation.authority

@@ -46,8 +46,8 @@ from ...streaming import RelayHub
 from ...testing import (
     DEFAULT_TEAM_PRESET,
     catalog_run_fields,
-    park_permission,
-    park_permissions,
+    park_journaled_permission,
+    park_journaled_permissions,
     park_plan_approval,
     seed_journaled_thread,
     settings_override,
@@ -1958,30 +1958,17 @@ def _seed_permission(
 ) -> str:
     """Park *thread_id* on a bash permission, journal it as the relay does, name it.
 
-    The run's checkpoint is what makes the request answerable; the journal row is
-    the copy the relay writes beside it. *options* is what the provider offered
-    and defaults to a single once-only approval.
+    *options* is what the provider offered and defaults to a single once-only
+    approval.
     """
-    offered = _ALLOW_ONCE_OFFER if options is None else options
-
-    async def _run() -> str:
-        request_id = await park_permission(
-            checkpointer, thread_id=thread_id, tool_name="bash", options=offered
+    return asyncio.run(
+        park_journaled_permission(
+            checkpointer,
+            session_factory,
+            thread_id=thread_id,
+            options=_ALLOW_ONCE_OFFER if options is None else options,
         )
-        async with session_factory() as session:
-            await record_permission_request(
-                session,
-                request_id=request_id,
-                thread_id=thread_id,
-                pause_reason_type="bash",
-                description="Allow action?",
-                allowed_options=offered,
-                tool_call="bash",
-            )
-            await session.commit()
-        return request_id
-
-    return asyncio.run(_run())
+    )
 
 
 class TestPermissionRespond:
@@ -2474,27 +2461,6 @@ class TestPermissionRespond:
         """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
-        async def _park_and_journal() -> list[str]:
-            request_ids = await park_permissions(
-                checkpointer,
-                thread_id=thread_id,
-                calls=[("bash", {"command": "left"}), ("bash", {"command": "right"})],
-                options=_ALLOW_ONCE_OFFER,
-            )
-            async with session_factory() as session:
-                for request_id in request_ids:
-                    await record_permission_request(
-                        session,
-                        request_id=request_id,
-                        thread_id=thread_id,
-                        pause_reason_type="bash",
-                        description="Allow this branch?",
-                        allowed_options=_ALLOW_ONCE_OFFER,
-                        tool_call="bash",
-                    )
-                await session.commit()
-            return request_ids
-
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
                 "/v1/runs",
@@ -2507,7 +2473,18 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["run_id"]
-            left_request_id, right_request_id = asyncio.run(_park_and_journal())
+            left_request_id, right_request_id = asyncio.run(
+                park_journaled_permissions(
+                    checkpointer,
+                    session_factory,
+                    thread_id=thread_id,
+                    calls=[
+                        ("bash", {"command": "left"}),
+                        ("bash", {"command": "right"}),
+                    ],
+                    options=_ALLOW_ONCE_OFFER,
+                )
+            )
 
             worker.dispatches.clear()
             left = client.post(

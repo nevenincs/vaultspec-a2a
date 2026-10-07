@@ -23,13 +23,14 @@ from ...providers import ProviderFactory
 from ...team.team_config import load_agent_config
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import RunEventProducer
+from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
 
     from langchain_core.language_models import BaseChatModel
 
-    from ..types import SequencedEvent, StreamableGraph
+    from ..types import StreamableGraph
 
 
 class _State(TypedDict):
@@ -75,12 +76,7 @@ async def test_a_nostream_model_call_is_not_relayed_to_clients() -> None:
     graph = cast("StreamableGraph", compile_test_graph(builder))
 
     producer = RunEventProducer()
-    events: list[SequencedEvent] = []
-
-    async def _relay(sequenced: SequencedEvent) -> None:
-        events.append(sequenced)
-
-    producer.add_broadcast_hook(_relay)
+    events = relayed_events(producer)
     ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
     outcome = await asyncio.wait_for(
         ingest(

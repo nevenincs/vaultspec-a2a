@@ -52,6 +52,7 @@ from ..testing import (
     AcceptanceCase,
     AcceptanceHarness,
     ResilientAuthoringClient,
+    mint_raw_token,
     observe_bridged_authoring_run,
     reachable_stack,
     resolve_selection,
@@ -159,7 +160,7 @@ async def test_codex_authoring_tool_call_reaches_the_engine(
         # still lives downstream; this is the declared run mode reaching the
         # engine, not a bypass. A distinct human principal sets it, clearing the
         # self-approval ban.
-        mode_setter = await harness.mint(ec, f"mode-setter:{harness.run_id}", "human")
+        mode_setter = await mint_raw_token(ec, f"mode-setter:{harness.run_id}", "human")
         await harness.set_mode(ec, MODE_AUTONOMOUS, setter_token=mode_setter)
         # The gateway seam is authenticated; the harness takes the client from its
         # caller, so the bearer belongs HERE. Built unauthenticated, every gateway

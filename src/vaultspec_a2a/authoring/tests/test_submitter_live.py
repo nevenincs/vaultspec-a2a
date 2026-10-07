@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
+from ...testing import mint_raw_token
 from ...thread.actor_tokens import ActorTokenBundle
 from ...worker.token_store import RunTokenStore
 
@@ -37,7 +38,6 @@ from .. import (
     DocumentProposalSubmitter,
     PhaseAuthoringSpec,
     derive_idempotency_key,
-    mint_actor_token,
 )
 
 _RESEARCH_ROLE = "synthesist"
@@ -49,14 +49,7 @@ async def _store_with_role_token(
 ) -> RunTokenStore:
     """Mint a real per-actor token for *role* and register it for the run."""
     async with AuthoringClient(base_url, bearer) as client:
-        minted = await mint_actor_token(
-            client, actor_id=f"agent:{role}-{thread_id}", kind="agent"
-        )
-    assert isinstance(minted, AuthoringResponse)
-    minted_data: object = minted.data
-    assert isinstance(minted_data, dict)
-    raw = cast("dict[str, object]", minted_data).get("raw_token")
-    assert isinstance(raw, str) and raw
+        raw = await mint_raw_token(client, f"agent:{role}-{thread_id}", "agent")
     store = RunTokenStore()
     store.register(
         thread_id, ActorTokenBundle(tokens={role: raw}, engine_bearer=bearer)

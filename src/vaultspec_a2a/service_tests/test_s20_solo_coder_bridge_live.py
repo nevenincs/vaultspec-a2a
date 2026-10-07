@@ -56,6 +56,7 @@ from ..testing import (
     AcceptanceCase,
     AcceptanceHarness,
     ResilientAuthoringClient,
+    mint_raw_token,
     observe_bridged_authoring_run,
     reachable_stack,
     resolve_selection,
@@ -136,7 +137,7 @@ async def _run_solo_coder_proof(
         # mode-policy setter (mode-set requires a human/system actor, clearing the
         # self-approval ban). The mode must be live before the run submits the
         # gated op.
-        mode_setter = await harness.mint(ec, f"mode-setter:{harness.run_id}", "human")
+        mode_setter = await mint_raw_token(ec, f"mode-setter:{harness.run_id}", "human")
         await harness.set_mode(ec, MODE_AUTONOMOUS, setter_token=mode_setter)
         async with httpx.AsyncClient(headers=GATEWAY_AUTH_HEADERS) as hc:
             await harness.run_start(

@@ -48,13 +48,14 @@ from ...providers import ProviderFactory
 from ...team.team_config import load_agent_config
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..aggregator import RunEventProducer
+from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Coroutine
 
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from ..types import SequencedEvent, StreamableGraph
+    from ..types import StreamableGraph
 
 
 class _State(TypedDict, total=False):
@@ -106,17 +107,6 @@ def _full_surface_graph(saver: AsyncSqliteSaver, replies: list[str]) -> Streamab
     return cast("StreamableGraph", compile_test_graph(builder, checkpointer=saver))
 
 
-def _relayed(producer: RunEventProducer) -> list[SequencedEvent]:
-    """Collect every event *producer* hands its relay, in order."""
-    received: list[SequencedEvent] = []
-
-    async def _capture(sequenced: SequencedEvent) -> None:
-        received.append(sequenced)
-
-    producer.add_broadcast_hook(_capture)
-    return received
-
-
 @pytest.mark.asyncio
 async def test_a_run_still_reports_every_family_of_frame_it_used_to(
     checkpointer: AsyncSqliteSaver,
@@ -124,7 +114,7 @@ async def test_a_run_still_reports_every_family_of_frame_it_used_to(
     """The public stream plus its callbacks carry the whole wire surface."""
     replies: list[str] = []
     producer = RunEventProducer()
-    relayed = _relayed(producer)
+    relayed = relayed_events(producer)
     ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     outcome = await asyncio.wait_for(
@@ -196,7 +186,7 @@ async def test_a_parked_run_is_reported_interrupted_and_asks_for_its_answer(
 ) -> None:
     """The stream reports the park, and the projection publishes the request."""
     producer = RunEventProducer()
-    relayed = _relayed(producer)
+    relayed = relayed_events(producer)
     ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
 
     outcome = await asyncio.wait_for(

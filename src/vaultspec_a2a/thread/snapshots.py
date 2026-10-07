@@ -37,7 +37,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
 __all__ = [
-    "CHECKPOINT_ERROR_REPAIR_MAP",
     "CLARIFICATION_REQUEST_INTERRUPT_TYPE",
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
     "PLAN_APPROVAL_PAUSE_CAUSES",
@@ -107,24 +106,6 @@ PLAN_APPROVAL_PAUSE_CAUSES: frozenset[str] = frozenset(
 # respond-route gating.
 LOCALLY_RESPONDABLE_PAUSE_CAUSES: frozenset[str] = PLAN_APPROVAL_PAUSE_CAUSES - {
     "document_approval_request"
-}
-
-# Checkpoint error → repair status mapping.  Used by snapshot replay
-# logic to decide which RepairStatus to assign when a checkpoint probe
-# fails or returns degraded data.
-#
-# ``checkpoint_missing`` and ``checkpoint_unavailable`` are distinct conditions
-# and classify differently. Unavailable means the probe itself failed - the
-# checkpoint's contents are unknown, so the run may still be intact. Missing
-# means the probe succeeded and found nothing: the history a replay would rebuild
-# from is provably absent, which is a replay gap, not an unknown. Collapsing the
-# two onto CHECKPOINT_UNAVAILABLE reported a known gap as an unknown probe and
-# left REPLAY_GAP with no producer at all.
-CHECKPOINT_ERROR_REPAIR_MAP: dict[str, RepairStatus] = {
-    "checkpoint_unavailable": RepairStatus.CHECKPOINT_UNAVAILABLE,
-    "checkpoint_missing": RepairStatus.REPLAY_GAP,
-    "checkpoint_corrupt": RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
-    "checkpoint_timeout": RepairStatus.NEEDS_RECONCILIATION,
 }
 
 # ---------------------------------------------------------------------------
@@ -304,7 +285,8 @@ class CheckpointProjection:  # pylint: disable=too-many-instance-attributes
     history_depth: int | None = None
     pause_cause: str | None = None
     pending_interrupts: list[ProjectedInterrupt] = field(default_factory=list)
-    degraded_reasons: list[str] = field(default_factory=list)
+    # Every observation, once per occurrence; merging onto a snapshot dedupes.
+    degraded_reasons: list[DegradedReason] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -320,7 +302,7 @@ class ExecutionStateProjection:  # pylint: disable=too-many-instance-attributes
     next_nodes: list[str] = field(default_factory=list)
     interrupt_types: list[str] = field(default_factory=list)
     execution_tasks: list[ExecutionTaskData] = field(default_factory=list)
-    degraded_reasons: list[str] = field(default_factory=list)
+    degraded_reasons: list[DegradedReason] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -484,7 +466,7 @@ class ThreadStateData:  # pylint: disable=too-many-instance-attributes
     pending_interrupt_count: int = 0
     execution_tasks: list[ExecutionTaskData] = field(default_factory=list)
     snapshot_complete: bool = True
-    degraded_reasons: list[str] = field(default_factory=list)
+    degraded_reasons: list[DegradedReason] = field(default_factory=list)
     replay_status: str = "unknown"
     repair_status: str | None = None
     execution_readiness: str | None = None
@@ -688,14 +670,12 @@ def _project_pending_interrupt(
 ) -> None:
     payload_raw: object = getattr(raw_interrupt, "value", raw_interrupt)
     if not isinstance(payload_raw, dict):
-        if "interrupt_payload_unreadable" not in projection.degraded_reasons:
-            projection.degraded_reasons.append("interrupt_payload_unreadable")
+        projection.degraded_reasons.append(DegradedReason.INTERRUPT_PAYLOAD_UNREADABLE)
         return
     payload = cast("dict[str, Any]", payload_raw)
     interrupt_type = payload.get("type")
     if not isinstance(interrupt_type, str):
-        if "interrupt_payload_untyped" not in projection.degraded_reasons:
-            projection.degraded_reasons.append("interrupt_payload_untyped")
+        projection.degraded_reasons.append(DegradedReason.INTERRUPT_PAYLOAD_UNTYPED)
         return
     interrupt_id = str(
         payload.get("request_id")
@@ -773,7 +753,7 @@ def fold_pending_writes(
         projection.pause_cause = projection.pending_interrupts[0].interrupt_type
 
     if projection.history_depth is None:
-        projection.degraded_reasons.append("checkpoint_history_unknown")
+        projection.degraded_reasons.append(DegradedReason.CHECKPOINT_HISTORY_UNKNOWN)
 
 
 def project_checkpoint_tuple(
@@ -988,11 +968,13 @@ def finalize_snapshot_replay_status(
     else:
         snapshot.snapshot_complete = False
         if DegradedReason.CHECKPOINT_MISSING not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append(DegradedReason.CHECKPOINT_MISSING.value)
-        repair = CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_missing"]
+            snapshot.degraded_reasons.append(DegradedReason.CHECKPOINT_MISSING)
+        # The probe succeeded and found nothing, so the history a replay would
+        # rebuild from is provably absent: a replay gap, not the unknown that an
+        # unavailable checkpoint reports.
         with contextlib.suppress(AttributeError):
-            snapshot.repair_status = repair.value
+            snapshot.repair_status = RepairStatus.REPLAY_GAP.value
         with contextlib.suppress(AttributeError):
-            snapshot.execution_readiness = repair.value
+            snapshot.execution_readiness = RepairStatus.REPLAY_GAP.value
         snapshot.replay_status = ReplayStatus.GAP_DETECTED.value
     return snapshot

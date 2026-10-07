@@ -148,10 +148,15 @@ class DegradedReason(StrEnum):
     EXECUTION_STATE_PROJECTION_TIMEOUT = "execution_state_projection_timeout"
     EXECUTION_STATE_PROJECTION_UNAVAILABLE = "execution_state_projection_unavailable"
     EXECUTION_STATE_PROJECTION_UNREADABLE = "execution_state_projection_unreadable"
+    # One reason for every way stored execution authority fails to resolve:
+    # absent, corrupt, and retired authority all leave the run unable to
+    # re-enter execution, which is the fact a client branches on.
     INCOMPATIBLE_EXECUTION_AUTHORITY = "incompatible_execution_authority"
     INVALID_AGENT_DESCRIPTORS = "invalid_agent_descriptors"
+    INVALID_ASSIGNMENT_DIGEST = "invalid_assignment_digest"
     INTERRUPT_PAYLOAD_UNREADABLE = "interrupt_payload_unreadable"
     INTERRUPT_PAYLOAD_UNTYPED = "interrupt_payload_untyped"
+    MISSING_ASSIGNMENT_DIGEST = "missing_assignment_digest"
     PENDING_PERMISSION_WITHOUT_CHECKPOINT_TRUTH = (
         "pending_permission_without_checkpoint_truth"
     )

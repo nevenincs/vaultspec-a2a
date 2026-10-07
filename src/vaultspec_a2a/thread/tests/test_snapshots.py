@@ -9,10 +9,9 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ...graph.enums import AgentLifecycleState, Provider
-from ..enums import RepairStatus
+from ..enums import DegradedReason, RepairStatus
 from ..models import PlanEntry
 from ..snapshots import (
-    CHECKPOINT_ERROR_REPAIR_MAP,
     CLARIFICATION_REQUEST_INTERRUPT_TYPE,
     PLAN_APPROVAL_PAUSE_CAUSES,
     AgentData,
@@ -248,28 +247,35 @@ def test_finalize_gap_detected() -> None:
 
 
 def test_replay_gap_is_distinct_from_checkpoint_unavailable() -> None:
-    """The two checkpoint conditions do not collapse onto one repair status.
+    """The two checkpoint conditions do not collapse onto one classification.
 
     An unavailable checkpoint means the probe failed and the contents are
     unknown; a missing one means the probe succeeded and the history is provably
-    absent. They are different operator situations and must classify differently.
+    absent. They are different operator situations, so the replay contract
+    names a replay gap only for the second and leaves the first to the reader
+    that knows why its probe failed.
     """
-    assert (
-        CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_missing"]
-        != CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_unavailable"]
+    missing = ThreadStateData(thread_id="t1", status="running", last_sequence=0)
+    finalize_snapshot_replay_status(
+        missing,
+        checkpoint_loaded=False,
+        checkpoint_present=False,
+        checkpoint_error=False,
+        thread_status="running",
     )
-    assert CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_missing"] is RepairStatus.REPLAY_GAP
+    unread = ThreadStateData(thread_id="t1", status="running", last_sequence=0)
+    finalize_snapshot_replay_status(
+        unread,
+        checkpoint_loaded=False,
+        checkpoint_present=False,
+        checkpoint_error=True,
+        thread_status="running",
+    )
 
-
-def test_every_repair_status_has_a_producer() -> None:
-    """No RepairStatus member is unreachable from the code that assigns them.
-
-    REPLAY_GAP was a contract value no code path could emit: the one condition
-    that meant it was classified as something else. This asserts the enum and the
-    checkpoint classification map cannot drift apart again silently.
-    """
-    classified = set(CHECKPOINT_ERROR_REPAIR_MAP.values())
-    assert RepairStatus.REPLAY_GAP in classified
+    assert missing.repair_status == RepairStatus.REPLAY_GAP.value
+    assert DegradedReason.CHECKPOINT_MISSING in missing.degraded_reasons
+    assert unread.repair_status is None
+    assert DegradedReason.CHECKPOINT_MISSING not in unread.degraded_reasons
 
 
 # ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ from ...database import (
 )
 from ...database.models import ThreadExecutionStateModel
 from ...tests._write_authority import make_test_write_authority
+from ...thread.enums import DegradedReason
 from ...thread.snapshots import (
     CheckpointProjection,
     ExecutionStateProjection,
@@ -360,7 +361,7 @@ def test_project_execution_state_model_normalizes_latest_row() -> None:
             '"interrupt_types":["permission_request"],"has_nested_state":false,'
             '"has_result":false}]'
         ),
-        degraded_reasons_json='["execution_state_projection_partial"]',
+        degraded_reasons_json='["execution_state_projection_timeout"]',
     )
 
     projection = project_execution_state_model(model)
@@ -372,7 +373,9 @@ def test_project_execution_state_model_normalizes_latest_row() -> None:
     assert projection.interrupt_types == ["permission_request"]
     assert projection.task_count == 1
     assert projection.interrupt_count == 1
-    assert projection.degraded_reasons == ["execution_state_projection_partial"]
+    assert projection.degraded_reasons == [
+        DegradedReason.EXECUTION_STATE_PROJECTION_TIMEOUT
+    ]
     assert projection.execution_tasks == [
         ExecutionTaskData(
             task_id="task-1",
@@ -496,7 +499,7 @@ def test_apply_execution_state_projection_merges_normalized_fields() -> None:
                 has_result=False,
             )
         ],
-        degraded_reasons=["execution_state_projection_partial"],
+        degraded_reasons=[DegradedReason.EXECUTION_STATE_PROJECTION_TIMEOUT],
     )
 
     projected = apply_execution_state_projection(snapshot, projection)
@@ -505,7 +508,9 @@ def test_apply_execution_state_projection_merges_normalized_fields() -> None:
     assert projected.task_count == 1
     assert projected.pending_interrupt_count == 1
     assert len(projected.execution_tasks) == 1
-    assert "execution_state_projection_partial" in projected.degraded_reasons
+    assert (
+        DegradedReason.EXECUTION_STATE_PROJECTION_TIMEOUT in projected.degraded_reasons
+    )
 
 
 @pytest.mark.asyncio

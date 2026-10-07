@@ -115,7 +115,9 @@ def test_narrowed_run_status_accepts_every_captured_combination() -> None:
                 repair_status=cast("RepairStatus", repair),
                 execution_readiness=cast("RepairStatus", repair),
                 provider_condition=cast("ProviderCondition", "unknown"),
-                degraded_reasons=sorted(LIVE_DEGRADED_REASON),
+                degraded_reasons=cast(
+                    "list[DegradedReason]", sorted(LIVE_DEGRADED_REASON)
+                ),
             )
             assert response.repair_status is RepairStatus(repair)
             assert response.semantic_phase is SemanticPhase(phase)
@@ -289,42 +291,44 @@ def test_repair_status_write_gate_admits_only_declared_members() -> None:
         _coerce_repair_status("reconciling")
 
 
-def test_degraded_reason_vocabulary_covers_every_producer_in_the_tree() -> None:
-    """Every reason literal appended anywhere in production is a declared member.
+def test_degraded_reason_producers_hand_over_members_not_literals() -> None:
+    """No production module hands a bare string to a degradation list.
 
-    Sweeps the source rather than trusting a hand-kept list, because the whole
-    hazard this guards is a producer added in a module the reviewer did not
-    open. A literal appended to a snapshot's degradation list that is not a
-    member here is exactly the value that would break the field once narrowed.
+    The served field is narrowed to the enumeration, so a literal that is not a
+    member fails the response rather than the write. Every producer therefore
+    passes a member, and this sweeps the source for any literal path left over,
+    because the whole hazard is a producer added in a module the reviewer did
+    not open.
     """
     import re
     from pathlib import Path
 
     package_root = Path(__file__).resolve().parents[2]
     appended = re.compile(r'degraded_reasons\.append\(\s*"([a-z_]+)"\s*\)')
+    marked = re.compile(r'mark_degraded\([^()]*?"([a-z_]+)"')
     # A payload built with its reasons already in hand never appends: the
     # literal sits in the list handed to the constructor keyword instead.
     constructed = re.compile(r"degraded_reasons=\[([^\]]*)\]")
     quoted = re.compile(r'"([a-z_]+)"')
 
-    declared = {member.value for member in DegradedReason}
     found: dict[str, str] = {}
+    member_references = 0
     for source in package_root.rglob("*.py"):
-        if "tests" in source.parts:
+        if "tests" in source.parts or source.name == "enums.py":
             continue
         text = source.read_text(encoding="utf-8")
-        literals = appended.findall(text)
+        member_references += text.count("DegradedReason.")
+        literals = appended.findall(text) + marked.findall(text)
         for listed in constructed.findall(text):
             literals.extend(quoted.findall(listed))
         for literal in literals:
             found[literal] = str(source.relative_to(package_root))
 
-    undeclared = {
-        value: where for value, where in found.items() if value not in declared
-    }
-    assert not undeclared, f"degraded reasons with no declared member: {undeclared}"
-    # A sweep that found nothing would pass vacuously.
-    assert len(found) >= 8, f"reason sweep found only {len(found)} literals"
+    assert not found, f"degraded reasons handed over as bare strings: {found}"
+    # An absence proves nothing unless the sweep was reading the producers.
+    assert member_references >= 8, (
+        f"reason sweep saw only {member_references} member references"
+    )
 
 
 # --- One declaration per concept -------------------------------------------

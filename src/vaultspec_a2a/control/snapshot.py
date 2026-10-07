@@ -17,6 +17,7 @@ from ..streaming.types import (
     classify_tool_kind,
     map_action_item_status,
 )
+from ..thread.enums import DegradedReason
 from ..thread.snapshots import (
     AgentData,
     ArtifactData,
@@ -30,9 +31,16 @@ from ..thread.snapshots import (
     normalize_artifacts,
     normalize_plan_entries,
 )
+from .projection import mark_degraded
 
 if TYPE_CHECKING:
     from ..streaming.aggregator import EventAggregator
+
+__all__ = [
+    "MinimalState",
+    "checkpoint_history_depth",
+    "enrich_snapshot_from_state",
+]
 
 
 def _is_valid_agent_descriptor(name: object, descriptor: object) -> bool:
@@ -94,8 +102,7 @@ def _checkpoint_agents(
                 for name, descriptor in descriptors.items()
             ]
         else:
-            snapshot.snapshot_complete = False
-            snapshot.degraded_reasons.append("invalid_agent_descriptors")
+            mark_degraded(snapshot, DegradedReason.INVALID_AGENT_DESCRIPTORS)
     elif aggregator is not None:
         node_summaries = aggregator.get_node_summaries(snapshot.thread_id)
     if not node_summaries:
@@ -255,18 +262,19 @@ def enrich_snapshot_from_state(
 
     snapshot.messages = msgs
     assignment_digest = state.values.get("model_assignment_digest")
-    if expected_assignment_digest is None:
-        snapshot.snapshot_complete = False
-        snapshot.degraded_reasons.append("incompatible_execution_authority")
-    elif assignment_digest == expected_assignment_digest:
-        snapshot.model_assignment_digest = expected_assignment_digest
-    else:
-        snapshot.snapshot_complete = False
-        snapshot.degraded_reasons.append(
-            "missing_assignment_digest"
-            if assignment_digest is None
-            else "invalid_assignment_digest"
-        )
+    # Without an expected digest there is nothing to verify the checkpoint's
+    # evidence against, so none is disclosed. The caller that failed to resolve
+    # execution authority is the one that knows it failed, and reports it.
+    if expected_assignment_digest is not None:
+        if assignment_digest == expected_assignment_digest:
+            snapshot.model_assignment_digest = expected_assignment_digest
+        else:
+            mark_degraded(
+                snapshot,
+                DegradedReason.MISSING_ASSIGNMENT_DIGEST
+                if assignment_digest is None
+                else DegradedReason.INVALID_ASSIGNMENT_DIGEST,
+            )
     snapshot.checkpoint_id = checkpoint_id
     snapshot.plan = plan_entries
     snapshot.artifacts = artifact_data

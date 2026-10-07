@@ -19,14 +19,13 @@ from ..database import (
     read_latest_checkpoint,
 )
 from ..domain_config import domain_config
-from ..thread.enums import (
-    TERMINAL_STATUS_VALUES,
-    ApprovalStatus,
-    RepairStatus,
-    ThreadStatus,
+from ..thread.enums import TERMINAL_STATUS_VALUES, RepairStatus, ThreadStatus
+from ..thread.snapshots import project_checkpoint_tuple
+from .projection import (
+    durable_approval,
+    escalate_repair_posture,
+    execution_state_is_stale,
 )
-from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES, project_checkpoint_tuple
-from .permission_options import extract_allowed_option_ids
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -41,29 +40,6 @@ __all__ = [
 
 # The listing moved out of the thread service; its records keep that name.
 logger = logging.getLogger("vaultspec_a2a.control.thread_service")
-
-_PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
-
-
-def _degrade_stale_execution_state_summary(
-    *,
-    repair_status: str | None,
-    execution_readiness: str | None,
-) -> tuple[str | None, str | None]:
-    """Fail closed when summary lineage is stale but still readable."""
-    if repair_status not in {
-        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
-        RepairStatus.NEEDS_RECONCILIATION.value,
-        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
-    }:
-        repair_status = RepairStatus.NEEDS_RECONCILIATION.value
-    if execution_readiness not in {
-        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
-        RepairStatus.NEEDS_RECONCILIATION.value,
-        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
-    }:
-        execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
-    return repair_status, execution_readiness
 
 
 def _parse_thread_summary_metadata(
@@ -211,41 +187,27 @@ def _summary_checkpoint_state(
             probe.tuple, thread_id=thread.id
         ).checkpoint_id
     if checkpoint_unverified:
-        repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
-        execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
-    if execution_state is not None and (
-        execution_state.recovery_epoch != thread.recovery_epoch
-        or (
-            checkpoint_id is not None and execution_state.checkpoint_id != checkpoint_id
+        repair_status, execution_readiness = escalate_repair_posture(
+            repair_status, execution_readiness, RepairStatus.CHECKPOINT_UNAVAILABLE
+        )
+    # Judged as run-status judges it, so the two surfaces report the same
+    # posture for one run: a settled run keeps its row unjudged, and only a
+    # listing that read checkpoints can say whether the row still matches one.
+    if (
+        checkpointer_active
+        and execution_state is not None
+        and thread.status not in TERMINAL_STATUS_VALUES
+        and execution_state_is_stale(
+            execution_state,
+            thread,
+            checkpoint_present=probe.tuple is not None,
+            checkpoint_id=checkpoint_id,
         )
     ):
-        repair_status, execution_readiness = _degrade_stale_execution_state_summary(
-            repair_status=repair_status,
-            execution_readiness=execution_readiness,
+        repair_status, execution_readiness = escalate_repair_posture(
+            repair_status, execution_readiness, RepairStatus.NEEDS_RECONCILIATION
         )
     return repair_status, execution_readiness, checkpoint_unverified
-
-
-async def _summary_approval(
-    db: AsyncSession, thread: ThreadModel, *, checkpoint_unverified: bool
-) -> tuple[str | None, str | None]:
-    if thread.status in TERMINAL_STATUS_VALUES or checkpoint_unverified:
-        return None, None
-    live_plan_permissions = [
-        permission
-        for permission in await get_pending_permission_requests(
-            db,
-            thread_id=thread.id,
-            include_answered_pending_apply=False,
-        )
-        if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
-    ]
-    if not live_plan_permissions:
-        return None, None
-    live_permission = live_plan_permissions[-1]
-    if not extract_allowed_option_ids(live_permission.allowed_options_json):
-        return None, None
-    return ApprovalStatus.PENDING.value, live_permission.request_id
 
 
 async def _thread_summary(
@@ -264,9 +226,16 @@ async def _thread_summary(
             thread, execution_state, probe, checkpointer_active=checkpointer_active
         )
     )
-    approval_status, approval_request_id = await _summary_approval(
-        db, thread, checkpoint_unverified=checkpoint_unverified
-    )
+    approval_status: str | None = None
+    approval_request_id: str | None = None
+    if thread.status not in TERMINAL_STATUS_VALUES and not checkpoint_unverified:
+        approval_status, approval_request_id = durable_approval(
+            await get_pending_permission_requests(
+                db,
+                thread_id=thread.id,
+                include_answered_pending_apply=False,
+            )
+        )
     return ThreadSummaryData(
         thread_id=thread.id,
         title=thread.title,

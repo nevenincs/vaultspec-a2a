@@ -18,7 +18,7 @@ from ...graph.enums import (
     ToolCallStatus,
     ToolKind,
 )
-from ...thread.enums import ThreadStatus
+from ...thread.enums import DegradedReason, ThreadStatus
 from ...thread.models import PlanEntry
 
 __all__ = [
@@ -230,7 +230,7 @@ class ThreadStateSnapshot(BaseModel):
     pending_interrupt_count: int = 0
     execution_tasks: list[ExecutionTaskSnapshot] = Field(default_factory=list)
     snapshot_complete: bool = True
-    degraded_reasons: list[str] = Field(default_factory=list)
+    degraded_reasons: list[DegradedReason] = Field(default_factory=list)
     replay_status: str = "unknown"
     repair_status: str | None = None
     execution_readiness: str | None = None

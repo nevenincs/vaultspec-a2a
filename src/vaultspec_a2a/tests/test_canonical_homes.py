@@ -161,6 +161,33 @@ def _declaring_modules(pattern: str) -> list[str]:
             "control/projection.py, which signals a broken internal invariant "
             "rather than degrading untrusted input.",
         ),
+        (
+            "interrupt-type discriminator",
+            r"class InterruptType\(StrEnum\):",
+            1,
+            "thread/enums.py",
+            "The `type` discriminator every parked interrupt payload carries. "
+            "The worker's tool-permission rung, the supervisor's plan gate, "
+            "the document phase gates and the clarification node each write "
+            "one member's `.value` into the checkpointed payload, because the "
+            "checkpoint serializer does not round-trip enum members. A second "
+            "declaration would let two producers, or a producer and a reader, "
+            "disagree on which strings the discriminator can hold.",
+        ),
+        (
+            "transport-frame kind discriminator",
+            r"class StreamFrameKind\(StrEnum\):",
+            1,
+            "graph/enums.py",
+            "The discriminator for progress-stream frames the stream mints "
+            "about ITSELF - where a run stood at attachment, why a stream was "
+            "refused, what a viewer lost - rather than about a graph event. "
+            "Consumed by streaming/sse_frames.transport_frame and the "
+            "gateway's stream route. It sits beside ServerEventType rather "
+            "than inside it, because that vocabulary's serializer dispatches "
+            "on ServerEventType and a member here has no domain event to "
+            "dispatch from; a second declaration would blur that split.",
+        ),
     ],
 )
 def test_a_rehomed_concept_still_has_one_declaration(

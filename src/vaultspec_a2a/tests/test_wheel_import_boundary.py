@@ -41,6 +41,7 @@ partial answer and a wrong answer are the same answer.
 from __future__ import annotations
 
 import ast
+import re
 import tomllib
 from pathlib import Path, PurePosixPath
 
@@ -79,6 +80,28 @@ def _wheel_exclusions() -> list[str]:
     return list(patterns)
 
 
+def _shipped_modules() -> list[Path]:
+    """Return every module the wheel ships, sorted.
+
+    Shared by both tests below so the "what does the wheel exclude" judgement
+    is computed once: two independent copies could pass one test and fail the
+    other over a genuinely identical question.
+    """
+    patterns = _wheel_exclusions()
+    sources = sorted(_PACKAGE_ROOT.rglob("*.py"))
+    excluded = {
+        path
+        for path in sources
+        if any(
+            PurePosixPath(path.relative_to(_PROJECT_ROOT).as_posix()).full_match(
+                pattern
+            )
+            for pattern in patterns
+        )
+    }
+    return [path for path in sources if path not in excluded]
+
+
 def _module_path(dotted: list[str]) -> tuple[Path, Path]:
     """Return the module-file and package-``__init__`` candidates for *dotted*."""
     base = _SOURCE_ROOT.joinpath(*dotted)
@@ -114,20 +137,10 @@ def _imported_targets(
 
 def test_no_shipped_module_imports_a_wheel_excluded_package() -> None:
     """Every module the wheel ships must resolve from the wheel alone."""
-    patterns = _wheel_exclusions()
     sources = sorted(_PACKAGE_ROOT.rglob("*.py"))
     every_source = set(sources)
-    excluded = {
-        path
-        for path in sources
-        if any(
-            PurePosixPath(path.relative_to(_PROJECT_ROOT).as_posix()).full_match(
-                pattern
-            )
-            for pattern in patterns
-        )
-    }
-    shipped = [path for path in sources if path not in excluded]
+    shipped = _shipped_modules()
+    excluded = every_source - set(shipped)
 
     resolved_imports = 0
     violations: list[str] = []
@@ -174,4 +187,109 @@ def test_no_shipped_module_imports_a_wheel_excluded_package() -> None:
         "mechanism into a package the wheel ships, or move the importing module "
         "out of the wheel - do not widen the exclusion list to make this pass, "
         "which trades a caught defect for a shipped one."
+    )
+
+
+_MINIMUM_CONSTANT_SCAN_MODULES = 100
+"""Floor on shipped modules scanned for a wheel-excluded dotted name."""
+
+
+def _wheel_excluded_module_stems() -> frozenset[str]:
+    """Return the dotted-name stem of every package the wheel leaves behind.
+
+    Derived from the SAME exclude patterns :func:`_wheel_exclusions` reads,
+    never restated: a directory pattern becomes its dotted name
+    (``src/vaultspec_a2a/testing`` -> ``vaultspec_a2a.testing``); the
+    universal ``**/tests`` pattern becomes the bare final component
+    ``tests``, because it excludes any package's OWN tests subpackage, not
+    one fixed path.
+    """
+    stems: set[str] = set()
+    prefix = f"src/{_DISTRIBUTION}/"
+    for pattern in _wheel_exclusions():
+        if pattern in ("**/tests", "**/tests/**"):
+            stems.add("tests")
+            continue
+        if not pattern.startswith(prefix):
+            continue
+        trimmed = pattern.removeprefix(prefix).removesuffix("/**")
+        if "." in trimmed:
+            continue  # a specific excluded FILE (conftest.py, a preset), not a package
+        stems.add(f"{_DISTRIBUTION}.{trimmed}")
+    assert stems, "no package-shaped exclusion was derived from pyproject.toml"
+    return frozenset(stems)
+
+
+def _docstring_constant_ids(tree: ast.AST) -> set[int]:
+    """Return the ``id()`` of every ``Constant`` node that is a real docstring.
+
+    Checked by identity rather than value, so two identical docstrings do not
+    make the scan below treat the second occurrence as exempt too.
+    """
+    ids: set[int] = set()
+    scopes: list[ast.AST] = [tree]
+    scopes.extend(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+    )
+    for scope in scopes:
+        body: list[ast.stmt] = getattr(scope, "body", [])
+        if not body:
+            continue
+        first = body[0]
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            ids.add(id(first.value))
+    return ids
+
+
+def test_no_shipped_module_names_a_wheel_excluded_package_as_a_string() -> None:
+    """Close the dynamic-import bypass a static ``import`` scan cannot see (Q.5h).
+
+    ``importlib.import_module("vaultspec_a2a.testing.something")`` never
+    produces an :class:`ast.Import`/:class:`ast.ImportFrom` node, so the
+    sibling test above - which reads only those two node types - is blind to
+    it. This is the same invariant, read off every string constant instead,
+    which is also why a docstring describing the architecture in prose (this
+    very module's own docstring, for one) is exempt rather than flagged: Q.5h
+    asks for the dynamic-import bypass, not for a ban on naming these packages
+    at all.
+    """
+    excluded_components = {
+        stem.rsplit(".", 1)[-1] for stem in _wheel_excluded_module_stems()
+    }
+    dotted_name = re.compile(
+        rf"\b{re.escape(_DISTRIBUTION)}(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b"
+    )
+    shipped = _shipped_modules()
+
+    violations: list[str] = []
+    for path in shipped:
+        tree = ast.parse(path.read_bytes(), filename=str(path))
+        exempt = _docstring_constant_ids(tree)
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+                continue
+            if id(node) in exempt:
+                continue
+            for match in dotted_name.finditer(node.value):
+                components = set(match.group(0).split(".")[1:])
+                if excluded_components & components:
+                    site = path.relative_to(_PROJECT_ROOT).as_posix()
+                    violations.append(f"{site}:{node.lineno} names {match.group(0)!r}")
+                    break
+
+    assert len(shipped) >= _MINIMUM_CONSTANT_SCAN_MODULES, (
+        f"only {len(shipped)} shipped modules were scanned; a partial scan "
+        "reports no violations for the wrong reason"
+    )
+    assert not violations, (
+        "these shipped modules spell a wheel-excluded package as a string "
+        "constant outside a docstring, which is invisible to the "
+        "import-statement scan above and breaks the same way once installed "
+        "from the wheel:\n  " + "\n  ".join(sorted(violations))
     )

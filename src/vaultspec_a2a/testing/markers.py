@@ -103,6 +103,11 @@ _DIRECTORY_RULES: Final[Mapping[str, LayerRule]] = {
                 "test_dispatch_injection.py",
                 "test_stdio_refresh.py",
                 "test_tool_call_retirement.py",
+                # Real loopback HTTP servers stand in for the engine.
+                "test_authoring_scope_binding.py",
+                "test_client_reresolve.py",
+                "test_discovery_unit.py",
+                "test_engine_discovery_security.py",
             }
         ),
         live_files=frozenset({"test_live_engine.py"}),

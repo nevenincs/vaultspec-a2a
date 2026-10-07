@@ -93,7 +93,6 @@ if TYPE_CHECKING:
         free_port,
         hold_for_process_lifetime,
         reserve_scratch_ports,
-        reserved_port,
     )
     from .progress import (
         LivenessWatch,
@@ -277,7 +276,6 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.ports",
         "reserve_scratch_ports",
     ),
-    "reserved_port": ("vaultspec_a2a.testing.ports", "reserved_port"),
     "LivenessWatch": ("vaultspec_a2a.testing.progress", "LivenessWatch"),
     "ProgressDeadline": ("vaultspec_a2a.testing.progress", "ProgressDeadline"),
     "ProgressStalledError": ("vaultspec_a2a.testing.progress", "ProgressStalledError"),
@@ -408,7 +406,6 @@ __all__ = [
     "registry_watch",
     "request_permission_request",
     "reserve_scratch_ports",
-    "reserved_port",
     "resolve_gateway_url",
     "resolve_service",
     "resolve_spec",

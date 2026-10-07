@@ -58,10 +58,22 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dev.exit_codes import FAILED, OK, TOOL_BROKEN
 from dev.paths import PACKAGE_PATH, REPO_ROOT, is_test_code, repo_relative
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+__all__ = [
+    "ALLOW",
+    "DEFERRED",
+    "INSTALL_ROOT_READERS",
+    "NAME_DECLARING_MODULES",
+    "SETTINGS_MODULES",
+    "SIBLING_NAMES",
+    "TOOLING_ROOTS",
+    "main",
+]
 
 #: Repository tooling and the container entrypoint, relative to the scanned
 #: root, held to the ``tempfile`` rule only.
@@ -307,9 +319,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv: The argument vector, or ``None`` to read :data:`sys.argv`.
 
     Returns:
-        0 when no undeferred violation remains, 1 when any does, and 2 when the
-        package is missing beneath the scanned root (which means the gate was
-        pointed at the wrong tree and must not report a false pass).
+        :data:`OK` when no undeferred violation remains, :data:`FAILED` when
+        any does, and :data:`TOOL_BROKEN` when the gate could not run - the
+        package is missing beneath the scanned root, or a module does not
+        parse - which must not read as a pass.
     """
     parser = argparse.ArgumentParser(
         prog="python -m dev.guards.storage_anchors",
@@ -328,7 +341,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{package} not found - point --root at a repository checkout.",
             file=sys.stderr,
         )
-        return 2
+        return TOOL_BROKEN
 
     violations: list[str] = []
     deferred_hits: dict[str, int] = {}
@@ -346,7 +359,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             tree = ast.parse(text, filename=shown)
         except SyntaxError as exc:
             print(f"{shown}: could not parse: {exc}", file=sys.stderr)
-            return 2
+            return TOOL_BROKEN
 
         if relative is None or is_test_code(relative):
             found = _tempfile_violations(tree)
@@ -391,7 +404,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         for key in stale:
             print(f"  {key}", file=sys.stderr)
-        return 1
+        return FAILED
 
     if violations:
         print(
@@ -403,9 +416,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         for violation in violations:
             print(f"  {violation}", file=sys.stderr)
-        return 1
+        return FAILED
 
-    return 0
+    return OK
 
 
 if __name__ == "__main__":

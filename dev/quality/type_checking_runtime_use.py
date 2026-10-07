@@ -29,12 +29,11 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from dev.exit_codes import FAILED, OK, TOOL_BROKEN
 from dev.paths import PACKAGE_ROOT, REPO_ROOT, repo_relative
+from dev.quality.gate import gate_main
 from dev.quality.source_import_analysis import (
     UnreadableSourceError,
     load_modules,
@@ -46,6 +45,20 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from dev.quality.source_import_analysis import SourceModule
+
+__all__ = [
+    "RuntimeUse",
+    "RuntimeUseVerdict",
+    "guarded_bindings",
+    "has_future_annotations",
+    "lazy_nodes",
+    "main",
+    "run_gate",
+    "runtime_bindings",
+    "scan_module",
+    "unevaluated_annotations",
+    "verdict_as_json",
+]
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -336,6 +349,35 @@ def run_gate(
     )
 
 
+def verdict_as_json(verdict: RuntimeUseVerdict) -> str:
+    """Render the verdict as the machine-readable report.
+
+    Args:
+        verdict: The gate's verdict.
+
+    Returns:
+        The JSON document.
+    """
+    return json.dumps(
+        {
+            "clean": verdict.is_clean,
+            "modules_scanned": verdict.modules_scanned,
+            "guarded_names": verdict.guarded_names,
+            "findings": [
+                {
+                    "path": f.path,
+                    "line": f.line,
+                    "name": f.name,
+                    "position": f.position,
+                }
+                for f in verdict.findings
+            ],
+        },
+        indent=2,
+        ensure_ascii=False,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the scan and report.
 
@@ -343,46 +385,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv: The argument vector, or ``None`` to read :data:`sys.argv`.
 
     Returns:
-        :data:`OK` when clean, :data:`FAILED` on findings, and
-        :data:`TOOL_BROKEN` when the measurement could not be taken.
+        The exit code :func:`~dev.quality.gate.gate_main` maps the verdict
+        onto.
     """
     parser = argparse.ArgumentParser(
         description="Find runtime references to TYPE_CHECKING-only imports.",
     )
     parser.add_argument("--json", action="store_true", help="Emit the result as JSON.")
     args = parser.parse_args(list(argv) if argv is not None else None)
-
-    try:
-        verdict = run_gate()
-    except RuntimeError as exc:
-        print(str(exc), file=sys.stderr)
-        return TOOL_BROKEN
-
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "clean": verdict.is_clean,
-                    "modules_scanned": verdict.modules_scanned,
-                    "guarded_names": verdict.guarded_names,
-                    "findings": [
-                        {
-                            "path": f.path,
-                            "line": f.line,
-                            "name": f.name,
-                            "position": f.position,
-                        }
-                        for f in verdict.findings
-                    ],
-                },
-                indent=2,
-                ensure_ascii=False,
-            ),
-        )
-    else:
-        stream = sys.stdout if verdict.is_clean else sys.stderr
-        stream.write(verdict.report() + "\n")
-    return OK if verdict.is_clean else FAILED
+    return gate_main(run_gate, verdict_as_json if args.json else None)
 
 
 if __name__ == "__main__":

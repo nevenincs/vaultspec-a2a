@@ -17,13 +17,12 @@ would report one defect as two.
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from dev.audit.unreachable_code import declared_exports
-from dev.exit_codes import FAILED, OK, TOOL_BROKEN
 from dev.paths import PACKAGE_ROOT, REPO_ROOT, repo_relative
+from dev.quality.gate import gate_main
 from dev.quality.source_import_analysis import (
     SourceModule,
     UnreadableSourceError,
@@ -35,6 +34,8 @@ from dev.quality.source_import_analysis import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+__all__ = ["UnconsumedExport", "UnconsumedExportVerdict", "main", "run_gate"]
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -153,17 +154,10 @@ def main() -> int:
     """Print the live set and fail until it is empty.
 
     Returns:
-        :data:`OK` when clean, :data:`FAILED` on findings, and
-        :data:`TOOL_BROKEN` when the measurement could not be taken.
+        The exit code :func:`~dev.quality.gate.gate_main` maps the verdict
+        onto.
     """
-    try:
-        verdict = run_gate()
-    except RuntimeError as exc:
-        print(str(exc), file=sys.stderr)
-        return TOOL_BROKEN
-    stream = sys.stdout if verdict.is_clean else sys.stderr
-    stream.write(verdict.report() + "\n")
-    return OK if verdict.is_clean else FAILED
+    return gate_main(run_gate)
 
 
 if __name__ == "__main__":

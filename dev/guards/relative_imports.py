@@ -24,13 +24,11 @@ from __future__ import annotations
 
 import ast
 import sys
-from pathlib import Path
 
-#: The package whose internals must import themselves relatively.
-PACKAGE = "vaultspec_a2a"
+from dev.exit_codes import FAILED, OK, TOOL_BROKEN
+from dev.paths import PACKAGE, PACKAGE_ROOT, UTF_8, repo_relative
 
-#: Source root scanned by the gate.
-ROOT = Path("src") / PACKAGE
+__all__ = ["ALLOW", "main"]
 
 #: Trailing comment that exempts a single line.
 ALLOW = "absolute-import-ok"
@@ -67,31 +65,30 @@ def main() -> int:
     """Scan the package and report every absolute self-import.
 
     Returns:
-        0 when the package is clean, 1 when any violation remains, and 2 when
-        the source root is missing (which means the gate was run from the
-        wrong directory and must not report a false pass).
+        :data:`OK` when the package is clean, :data:`FAILED` when any
+        violation remains, and :data:`TOOL_BROKEN` when the gate could not
+        run - the package directory is missing or a module does not parse -
+        which must not read as a pass.
     """
-    if not ROOT.is_dir():
-        print(
-            f"{ROOT} not found - run this from the repository root.",
-            file=sys.stderr,
-        )
-        return 2
+    if not PACKAGE_ROOT.is_dir():
+        print(f"{PACKAGE_ROOT} not found.", file=sys.stderr)
+        return TOOL_BROKEN
 
     violations: list[str] = []
-    for path in sorted(ROOT.rglob("*.py")):
-        text = path.read_text(encoding="utf-8")
+    for path in sorted(PACKAGE_ROOT.rglob("*.py")):
+        shown = repo_relative(path)
+        text = path.read_text(encoding=UTF_8)
         lines = text.splitlines()
         try:
-            tree = ast.parse(text, filename=str(path))
+            tree = ast.parse(text, filename=shown)
         except SyntaxError as exc:
-            print(f"{path}: could not parse: {exc}", file=sys.stderr)
-            return 2
+            print(f"{shown}: could not parse: {exc}", file=sys.stderr)
+            return TOOL_BROKEN
         for lineno, statement in _offending_lines(tree):
             source = lines[lineno - 1] if lineno <= len(lines) else ""
             if ALLOW in source:
                 continue
-            violations.append(f"{path}:{lineno}: {statement}")
+            violations.append(f"{shown}:{lineno}: {statement}")
 
     if violations:
         print(
@@ -101,9 +98,9 @@ def main() -> int:
         )
         for violation in violations:
             print(f"  {violation}", file=sys.stderr)
-        return 1
+        return FAILED
 
-    return 0
+    return OK
 
 
 if __name__ == "__main__":

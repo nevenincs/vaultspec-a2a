@@ -33,7 +33,12 @@ from dev.exit_codes import (
     OK,
 )
 from dev.init.contract import DONE, FAILED, StepResult
-from dev.process import ToolMissingError, ToolUnavailableError, run_captured
+from dev.process import (
+    ToolMissingError,
+    ToolUnavailableError,
+    combined_output,
+    run_captured,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -111,7 +116,7 @@ def classify(code: int, output: str) -> int:
         restated here.
     """
     if code == 0:
-        return 0
+        return OK
     haystack = output.lower()
     if any(marker in haystack for marker in _LOCKED_MARKERS):
         return INIT_LOCKED
@@ -141,7 +146,7 @@ def run(step: Step, *, cwd: Path, echo: bool = True) -> tuple[StepResult, int]:
     started = time.monotonic()
     try:
         completed = run_captured(step.argv, cwd=cwd, timeout=step.timeout)
-        output = completed.stdout + completed.stderr
+        output = combined_output(completed)
         code = completed.returncode
     except ToolMissingError as exc:
         return (
@@ -161,8 +166,8 @@ def run(step: Step, *, cwd: Path, echo: bool = True) -> tuple[StepResult, int]:
         code = INIT_STEP_FAILED
 
     duration = int((time.monotonic() - started) * 1000)
-    if echo and output.strip():
-        print(output.rstrip(), file=sys.stderr, flush=True)
+    if echo and output:
+        print(output, file=sys.stderr, flush=True)
     result = StepResult(
         name=step.name,
         argv=step.argv,
@@ -173,5 +178,5 @@ def run(step: Step, *, cwd: Path, echo: bool = True) -> tuple[StepResult, int]:
         advisory=step.advisory,
     )
     if code == 0 or step.advisory:
-        return result, 0
+        return result, OK
     return result, classify(code, output)

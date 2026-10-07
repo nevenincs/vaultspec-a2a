@@ -35,6 +35,7 @@ __all__ = [
     "ToolOrDocker",
     "child_environment",
     "dev_module",
+    "resolve_executable",
     "run",
     "run_tool_or_docker",
     "uv_run",
@@ -130,6 +131,25 @@ def child_environment(
     return {**os.environ, **(env or {})}
 
 
+def resolve_executable(name: str) -> str | None:
+    """Return the absolute path a command name runs as, or ``None`` when absent.
+
+    Resolved through `shutil.which` rather than by handing the bare name to
+    `subprocess`. On Windows the interesting tools ship as `.cmd` shims - `npx`
+    is a POSIX shell script that CreateProcess cannot execute, while `npx.cmd`
+    beside it is the real entry point - and only PATHEXT resolution finds the
+    right one. Without this, `npx` reads as "not installed" on a machine where
+    Node is installed and on PATH.
+
+    Args:
+        name: The executable name, or a path to it.
+
+    Returns:
+        The resolved path, or ``None`` when nothing on ``PATH`` answers to it.
+    """
+    return shutil.which(name)
+
+
 def run(
     argv: Sequence[str],
     env: Mapping[str, str] | None = None,
@@ -160,13 +180,7 @@ def run(
     argv = ci_formats.augment(argv, merged)
     print(f"$ {' '.join(argv)}", flush=True)
 
-    # Resolve through `shutil.which` rather than handing the bare name to
-    # `subprocess`. On Windows the interesting tools ship as `.cmd` shims -
-    # `npx` is a POSIX shell script that CreateProcess cannot execute, while
-    # `npx.cmd` beside it is the real entry point - and only PATHEXT resolution
-    # finds the right one. Without this, `npx` reads as "not installed" on a
-    # machine where Node is installed and on PATH.
-    resolved = shutil.which(argv[0])
+    resolved = resolve_executable(argv[0])
     if resolved is None:
         print(f"{argv[0]} not found on PATH", file=sys.stderr, flush=True)
         return TOOL_MISSING
@@ -201,29 +215,29 @@ def run_tool_or_docker(step: ToolOrDocker) -> int:
         The exit code of whichever form ran, or :data:`TOOL_MISSING` when
         neither the tool nor Docker is present.
     """
-    if shutil.which(step.tool):
+    if resolve_executable(step.tool) is not None:
         return run([step.tool, *step.argv])
-    if shutil.which("docker"):
-        container_argv = step.docker_argv if step.docker_argv is not None else step.argv
-        return run(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "-v",
-                f"{Path.cwd()}:/repo",
-                "-w",
-                "/repo",
-                step.image,
-                *container_argv,
-            ]
+    if resolve_executable("docker") is None:
+        print(
+            f"{step.tool} not found and docker is unavailable",
+            file=sys.stderr,
+            flush=True,
         )
-    print(
-        f"{step.tool} not found and docker is unavailable",
-        file=sys.stderr,
-        flush=True,
+        return TOOL_MISSING
+    container_argv = step.docker_argv if step.docker_argv is not None else step.argv
+    return run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{Path.cwd()}:/repo",
+            "-w",
+            "/repo",
+            step.image,
+            *container_argv,
+        ]
     )
-    return TOOL_MISSING
 
 
 def uv_run(*argv: str) -> Cmd:

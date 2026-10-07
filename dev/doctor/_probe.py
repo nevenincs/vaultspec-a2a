@@ -1,44 +1,20 @@
-"""Shared primitives for probing an external tool and reporting the verdict.
+"""Shared primitives for reporting a probe's verdict.
 
-The probes in this package all have the same shape: run an executable through
-:func:`dev.process.run_captured` to learn its version, and either report
-success or explain how to install the thing that is missing. Expressing that
-shape once is what keeps the individual checks declarative.
+The probes in this package all have the same shape: ask a tool whether it is
+there and working - through :func:`dev.init.probe.check`, the one host-tool
+probe in ``dev/``, or :func:`dev.process.run_captured` for the checks that are
+not a version - and either report success or explain how to install the thing
+that is missing. Expressing the reporting once is what keeps the individual
+checks declarative.
 """
 
 from __future__ import annotations
 
-import re
 import sys
 
-__all__ = ["fail", "format_version", "parse_version", "report", "warn"]
+from dev.exit_codes import FAILED, OK
 
-#: Matches the first dotted numeric triple in a version banner. Tools pad their
-#: ``--version`` output with names, build hashes, and release channels; the
-#: triple is the only part any of these checks compares.
-_SEMVER = re.compile(r"(\d+)\.(\d+)\.(\d+)")
-
-
-def parse_version(banner: str) -> tuple[int, int, int] | None:
-    """Extract the first dotted numeric triple from a version banner.
-
-    Args:
-        banner: The raw ``--version`` output.
-
-    Returns:
-        The parsed ``(major, minor, patch)`` triple, or ``None`` when the
-        banner carries no recognisable version.
-    """
-    match = _SEMVER.search(banner)
-    if match is None:
-        return None
-    major, minor, patch = match.groups()
-    return int(major), int(minor), int(patch)
-
-
-def format_version(version: tuple[int, int, int]) -> str:
-    """Render a parsed version triple back into dotted form."""
-    return ".".join(str(part) for part in version)
+__all__ = ["fail", "report", "warn"]
 
 
 def fail(message: str) -> int:
@@ -48,10 +24,11 @@ def fail(message: str) -> int:
         message: What is wrong and how to fix it.
 
     Returns:
-        Always 1, so the caller can ``return fail(...)`` in one line.
+        Always :data:`FAILED`, so the caller can ``return fail(...)`` in one
+        line.
     """
     print(message, file=sys.stderr, flush=True)
-    return 1
+    return FAILED
 
 
 def warn(message: str) -> int:
@@ -64,10 +41,10 @@ def warn(message: str) -> int:
         message: What is missing and when it would matter.
 
     Returns:
-        Always 0.
+        Always :data:`OK`.
     """
     print(message, file=sys.stderr, flush=True)
-    return 0
+    return OK
 
 
 def report(message: str) -> None:

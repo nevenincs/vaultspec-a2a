@@ -80,6 +80,34 @@ def _checkpoint_config(
     return {"configurable": configurable}
 
 
+def _relay_permission_request(
+    client: TestClient, *, thread_id: str, request_id: str, description: str
+) -> None:
+    """Relay one permission request through the route the worker posts to."""
+    response = client.post(
+        "/internal/events/batch",
+        json={
+            "events": [
+                {
+                    "thread_id": thread_id,
+                    "ts": 1.0,
+                    "payload": {
+                        "type": "permission_request",
+                        "event_type": "permission_request",
+                        "thread_id": thread_id,
+                        "agent_id": "vaultspec-coder",
+                        "request_id": request_id,
+                        "description": description,
+                        "options": [],
+                        "sequence": 1,
+                    },
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200, response.text
+
+
 def _assert_resume_dispatch_log(
     caplog: pytest.LogCaptureFixture,
     *,
@@ -1050,22 +1078,7 @@ class TestThreadState:
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Thread state must not expose permissions without durable backing."""
-        agg = EventAggregator()
-        asyncio.run(
-            agg.emit_permission_request(
-                thread_id="thread-state-aggregator-only",
-                agent_id="vaultspec-coder",
-                request_id="thread-state-aggregator-only:perm-1",
-                description="Allow file write?",
-                options=[],
-            )
-        )
-
-        app, _agg, _worker, _cp = make_app(
-            session_factory,
-            checkpointer,
-            aggregator=agg,
-        )
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         async def _seed_thread() -> None:
             await checkpointer.setup()
@@ -1089,9 +1102,16 @@ class TestThreadState:
                 )
                 await session.commit()
 
-        asyncio.run(_seed_thread())
-
         with TestClient(app, raise_server_exceptions=True) as client:
+            # Relayed while the run has no durable row, so the gateway
+            # aggregator is the only place the request lives.
+            _relay_permission_request(
+                client,
+                thread_id="thread-state-aggregator-only",
+                request_id="thread-state-aggregator-only:perm-1",
+                description="Allow file write?",
+            )
+            asyncio.run(_seed_thread())
             resp = client.get("/v1/runs/thread-state-aggregator-only/history")
 
         assert resp.status_code == 200
@@ -1707,22 +1727,15 @@ class TestTeamStatus:
         self, session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Aggregator-only pending permissions must not appear in team status."""
-        agg = EventAggregator()
-        asyncio.run(
-            agg.emit_permission_request(
-                thread_id="thread-abc",
-                agent_id="vaultspec-coder",
-                request_id="thread-abc:perm-001",
-                description="Allow file write?",
-                options=[],
-            )
-        )
-
-        app, _agg, _worker, _cp = make_app(
-            session_factory, checkpointer, aggregator=agg
-        )
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
+            _relay_permission_request(
+                client,
+                thread_id="thread-abc",
+                request_id="thread-abc:perm-001",
+                description="Allow file write?",
+            )
             resp = client.get("/v1/team/status")
 
         assert resp.status_code == 200

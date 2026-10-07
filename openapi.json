@@ -5224,7 +5224,7 @@
           "last_sequence"
         ],
         "title": "ThreadStateSnapshot",
-        "description": "Complete thread state for reconnection replay.\n\nThe client fetches this via REST, notes ``last_sequence``, then\ndiscards any WebSocket events with ``sequence <= last_sequence``."
+        "description": "Complete thread state for reattaching to a run's event stream.\n\nThe client fetches this via REST, notes ``last_sequence``, then\ndiscards any streamed frame with ``sequence <= last_sequence``."
       },
       "ThreadStatus": {
         "type": "string",

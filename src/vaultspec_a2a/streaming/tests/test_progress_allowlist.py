@@ -383,7 +383,7 @@ def test_the_catalog_enumerates_exactly_the_frame_kinds_that_can_be_produced() -
     emitted.
 
     Both sides are derived, not listed: the projected kinds come from the live
-    ``ServerEvent`` discriminator enum, and the transport kinds from the set
+    ``ServerEventType`` enum, and the transport kinds from the set
     above, whose members each name a producer.
     """
     projected = {kind.value for kind in ServerEventType}

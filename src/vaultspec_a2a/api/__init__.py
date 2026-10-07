@@ -15,12 +15,8 @@ Request handling delegates orchestration to direct
 at ``/openapi.json`` is authoritative for the served edge surface.
 """
 
-from .schemas import EventEnvelope as EventEnvelope
-from .schemas import ServerEvent as ServerEvent
 from .schemas import ThreadStateSnapshot as ThreadStateSnapshot
 
 __all__ = [
-    "EventEnvelope",
-    "ServerEvent",
     "ThreadStateSnapshot",
 ]

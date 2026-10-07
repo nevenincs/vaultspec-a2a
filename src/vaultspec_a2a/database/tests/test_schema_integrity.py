@@ -22,8 +22,8 @@ each one a decision that would otherwise survive only as a comment:
   COLUMN declares, measured off the mapped column rather than off a number
   repeated in the test.
 
-Everything drives real SQLite databases, the real revision chain, and the real
-Pydantic models.
+Everything drives real SQLite databases, the real revision chain, the real
+Pydantic models, and the real stream catalog.
 """
 
 from __future__ import annotations
@@ -48,10 +48,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from ...api.schemas.events import (
-    MAX_TOOL_CALL_CHARS,
-    PermissionRequestEvent,
-)
 from ...api.schemas.gateway import (
     ActiveRunRecord,
     ProviderCatalogSelection,
@@ -60,6 +56,7 @@ from ...api.schemas.gateway import (
 )
 from ...control.run_discovery_service import discover_active_runs
 from ...graph.enums import ServerEventType
+from ...streaming.sse_frames import enforce_progress_allowlist
 from ...tests._write_authority import (
     make_test_thread_authority_columns,
     make_test_write_authority,
@@ -71,7 +68,7 @@ from ..models import Base, ControlActionModel, ThreadModel
 from ..thread_repository import create_thread, list_active_thread_page
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Iterator
+    from collections.abc import AsyncGenerator, Iterator, Mapping
 
 # The four partial indexes revision 0009 created descending, and the ordering it
 # gave each one. Newest-first listing is the access pattern they exist for, so
@@ -330,21 +327,23 @@ class TestStatusDefaultsComeFromEnums:
         assert stored.result_status == ControlActionResultStatus.ACCEPTED_NOT_APPLIED
 
 
-def _permission_event(
+def _served_permission_frame(
     *, description: str, tool_call: str | None
-) -> PermissionRequestEvent:
-    """Build a permission frame the way ``api/event_adapter`` builds one."""
-    return PermissionRequestEvent(
-        type=ServerEventType.PERMISSION_REQUEST,
-        thread_id="thread-1",
-        agent_id="agent-1",
-        timestamp=datetime.now(UTC),
-        sequence=1,
-        request_id="req-1",
-        description=description,
-        options=[],
-        tool_call=tool_call,
-    )
+) -> Mapping[str, object]:
+    """Project a permission frame through the catalog the stream serves it with."""
+    payload: dict[str, object] = {
+        "type": ServerEventType.PERMISSION_REQUEST,
+        "thread_id": "thread-1",
+        "agent_id": "agent-1",
+        "timestamp": 1.0,
+        "sequence": 1,
+        "request_id": "req-1",
+        "description": description,
+        "options": [],
+    }
+    if tool_call is not None:
+        payload["tool_call"] = tool_call
+    return enforce_progress_allowlist(payload)
 
 
 class TestPermissionTextIsBounded:
@@ -353,39 +352,45 @@ class TestPermissionTextIsBounded:
     def test_oversize_description_is_truncated_not_refused(self) -> None:
         """A pathological description is shortened and still delivered.
 
-        The delivery half matters as much as the bound. ``event_adapter`` builds
-        this frame with no error handling, and the frame is the only signal that
-        a run is waiting on an operator, so a cap that raised would convert an
-        over-long description into a silently hung run.
+        The delivery half matters as much as the bound. The frame is the only
+        signal that a run is waiting on an operator, so a cap that refused it
+        would convert an over-long description into a silently hung run.
         """
-        event = _permission_event(
-            description="d" * (MAX_PERMISSION_DESCRIPTION_CHARS * 3), tool_call=None
-        )
+        description = "d" * (MAX_PERMISSION_DESCRIPTION_CHARS * 3)
+        frame = _served_permission_frame(description=description, tool_call=None)
 
-        assert len(event.description) == MAX_PERMISSION_DESCRIPTION_CHARS
+        served = frame["description"]
+        assert isinstance(served, str)
+        assert frame["request_id"] == "req-1"
+        assert 0 < len(served) <= MAX_PERMISSION_DESCRIPTION_CHARS
+        assert description.startswith(served)
 
     def test_oversize_tool_call_is_truncated_not_refused(self) -> None:
         """An over-long tool identifier is shortened rather than fatal."""
-        event = _permission_event(
-            description="fine", tool_call="t" * (MAX_TOOL_CALL_CHARS * 3)
-        )
+        tool_call = "t" * 4096
+        frame = _served_permission_frame(description="fine", tool_call=tool_call)
 
-        assert event.tool_call is not None
-        assert len(event.tool_call) == MAX_TOOL_CALL_CHARS
+        served = frame["tool_call"]
+        assert isinstance(served, str)
+        assert frame["request_id"] == "req-1"
+        assert 0 < len(served) < len(tool_call)
+        assert tool_call.startswith(served)
 
     def test_text_within_the_bound_is_untouched(self) -> None:
         """The cap shortens only what exceeds it."""
         description = "a permission is required" * 8
-        event = _permission_event(description=description, tool_call="write_file")
+        frame = _served_permission_frame(
+            description=description, tool_call="write_file"
+        )
 
-        assert event.description == description
-        assert event.tool_call == "write_file"
+        assert frame["description"] == description
+        assert frame["tool_call"] == "write_file"
 
     def test_absent_tool_call_stays_absent(self) -> None:
-        """The bound leaves the optional field's ``None`` alone."""
-        event = _permission_event(description="fine", tool_call=None)
+        """The bound leaves the optional field's absence alone."""
+        frame = _served_permission_frame(description="fine", tool_call=None)
 
-        assert event.tool_call is None
+        assert "tool_call" not in frame
 
 
 class TestWorkspaceRootBoundIsTheColumn:

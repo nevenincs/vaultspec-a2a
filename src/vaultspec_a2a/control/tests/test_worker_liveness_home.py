@@ -302,7 +302,6 @@ def test_a_real_heartbeat_reaches_the_wire_with_its_fields_intact() -> None:
     positive case leans on it. A catalog that passed everything through would
     otherwise satisfy the survival assertion while enforcing nothing.
     """
-    from ...api.schemas.events import HeartbeatEvent
     from ...streaming.sse_frames import encode_sse_frame, enforce_progress_allowlist
 
     uncatalogued = enforce_progress_allowlist(
@@ -324,13 +323,15 @@ def test_a_real_heartbeat_reaches_the_wire_with_its_fields_intact() -> None:
             f"catalog lookup missed for {probe!r} - frame would arrive empty"
         )
 
-    # The real producer's own frame, through the real encode boundary.
-    heartbeat = HeartbeatEvent(
-        timestamp=datetime.now(UTC),
-        server_uptime_seconds=42.5,
-    )
+    # A heartbeat frame shaped as the stream mints one, through the real encode
+    # boundary.
     raw = encode_sse_frame(
-        heartbeat.model_dump(mode="json"),
+        {
+            "type": ServerEventType.HEARTBEAT.value,
+            "event_type": ServerEventType.HEARTBEAT.value,
+            "timestamp": datetime.now(UTC).timestamp(),
+            "server_uptime_seconds": 42.5,
+        },
         event=ServerEventType.HEARTBEAT,
         thread_id="t-probe",
     )

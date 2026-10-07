@@ -1,11 +1,13 @@
-"""State replay snapshot models for WebSocket reconnection.
+"""Run-history snapshot models served over REST.
 
-When a client reconnects, it fetches the latest ``ThreadStateSnapshot``
-via REST. The ``last_sequence`` field enables gap detection: the client
-discards any subsequent WebSocket events with ``sequence <= last_sequence``.
+When a client reattaches to a run's event stream, it fetches the latest
+``ThreadStateSnapshot`` first. The ``last_sequence`` field enables gap
+detection: the client discards any subsequent streamed frame with
+``sequence <= last_sequence``.
 """
 
 from datetime import datetime
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -18,7 +20,6 @@ from ...graph.enums import (
 )
 from ...thread.enums import ThreadStatus
 from ...thread.models import PlanEntry
-from .events import ToolCallContent, ToolCallLocation
 
 __all__ = [
     "AgentSnapshot",
@@ -28,7 +29,48 @@ __all__ = [
     "MessageSnapshot",
     "PermissionSnapshot",
     "ThreadStateSnapshot",
+    "ToolCallContent",
+    "ToolCallContentDiff",
+    "ToolCallContentTerminal",
+    "ToolCallContentText",
+    "ToolCallLocation",
     "ToolCallSnapshot",
+]
+
+
+class ToolCallLocation(BaseModel):
+    """File location associated with a tool call."""
+
+    path: str
+    line: int | None = None
+
+
+class ToolCallContentText(BaseModel):
+    """Plain text content block within a tool call."""
+
+    content_type: Literal["text"] = "text"
+    text: str
+
+
+class ToolCallContentDiff(BaseModel):
+    """Diff content block within a tool call."""
+
+    content_type: Literal["diff"] = "diff"
+    path: str
+    old_text: str | None = None
+    new_text: str
+
+
+class ToolCallContentTerminal(BaseModel):
+    """Terminal output content block within a tool call."""
+
+    content_type: Literal["terminal"] = "terminal"
+    terminal_id: str
+
+
+ToolCallContent = Annotated[
+    ToolCallContentText | ToolCallContentDiff | ToolCallContentTerminal,
+    Field(discriminator="content_type"),
 ]
 
 
@@ -136,10 +178,10 @@ class ExecutionTaskSnapshot(BaseModel):
 
 
 class ThreadStateSnapshot(BaseModel):
-    """Complete thread state for reconnection replay.
+    """Complete thread state for reattaching to a run's event stream.
 
     The client fetches this via REST, notes ``last_sequence``, then
-    discards any WebSocket events with ``sequence <= last_sequence``.
+    discards any streamed frame with ``sequence <= last_sequence``.
     """
 
     thread_id: str

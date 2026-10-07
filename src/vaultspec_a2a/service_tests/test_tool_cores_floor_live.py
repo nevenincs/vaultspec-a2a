@@ -60,6 +60,7 @@ import pytest
 
 from ..control.run_start_policy import required_role_ids
 from ..graph.enums import ServerEventType
+from ..streaming.sse_frames import SseEvent, iter_sse_events
 from ..team.team_config import load_team_config
 from ..testing.tests._support.payloads import json_object
 from .test_pw7_acceptance import (
@@ -221,16 +222,13 @@ def _message_content(payload: JsonObject) -> str | None:
 
 
 def _parse_sse_payload(
-    raw_line: str,
+    event: SseEvent,
     *,
     at: str,
     error_source: str,
 ) -> JsonObject | None:
-    """Decode one data frame, ignoring non-data and empty SSE lines."""
-    line = raw_line.strip()
-    if not line.startswith("data:"):
-        return None
-    body = line[len("data:") :].strip()
+    """Decode one event's JSON object, ignoring an event with no data."""
+    body = event.data.strip()
     if not body:
         return None
     try:
@@ -256,9 +254,9 @@ async def _observe_named_adr_run(
             timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
         ) as response:
             response.raise_for_status()
-            async for raw_line in response.aiter_lines():
+            async for event in iter_sse_events(response.aiter_lines()):
                 payload = _parse_sse_payload(
-                    raw_line,
+                    event,
                     at="grounding floor SSE stream",
                     error_source="grounding floor stream",
                 )
@@ -306,9 +304,9 @@ async def _observe_rag_run(
             timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
         ) as response:
             response.raise_for_status()
-            async for raw_line in response.aiter_lines():
+            async for event in iter_sse_events(response.aiter_lines()):
                 payload = _parse_sse_payload(
-                    raw_line,
+                    event,
                     at="semantic tool SSE stream",
                     error_source="semantic tool stream",
                 )

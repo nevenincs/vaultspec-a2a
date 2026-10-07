@@ -14,8 +14,8 @@ import httpx
 import pytest
 
 from ...streaming.aggregator import EventAggregator
+from ...testing import SseReader
 from ...thread.enums import ThreadStatus
-from ._sse_reader import SseReader
 from .conftest import _live_server, make_app, seed_run_with_status
 
 if TYPE_CHECKING:
@@ -40,7 +40,7 @@ async def _first_frame(
         "GET", f"/v1/runs/{_RUN}/stream", headers=headers, params=params
     ) as response:
         assert response.status_code == 200, response.text
-        return await SseReader(response.aiter_bytes()).next_frame()
+        return await SseReader(response.aiter_lines()).next_frame()
 
 
 @pytest.mark.asyncio(loop_scope="function")

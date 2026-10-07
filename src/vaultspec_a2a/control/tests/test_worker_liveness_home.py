@@ -304,6 +304,7 @@ def test_a_real_heartbeat_reaches_the_wire_with_its_fields_intact() -> None:
     """
     from ...api.schemas.events import HeartbeatEvent
     from ...streaming.sse_frames import encode_sse_frame, enforce_progress_allowlist
+    from ...testing import decode_frame
 
     uncatalogued = enforce_progress_allowlist(
         {"type": "definitely_not_catalogued", "server_uptime_seconds": 99.5}
@@ -334,14 +335,7 @@ def test_a_real_heartbeat_reaches_the_wire_with_its_fields_intact() -> None:
         event=ServerEventType.HEARTBEAT,
         thread_id="t-probe",
     )
-    text = raw.decode("utf-8")
-    decoded = json.loads(
-        "".join(
-            line.removeprefix("data: ")
-            for line in text.splitlines()
-            if line.startswith("data: ")
-        )
-    )
+    decoded = decode_frame(raw).data
     assert decoded["server_uptime_seconds"] == 42.5
     assert decoded["type"] == ServerEventType.HEARTBEAT.value
 
@@ -371,7 +365,7 @@ async def test_the_shared_frame_reader_skips_heartbeats_under_either_wire_key(
     under the other as untyped - which means it neither skips the keep-alive it
     was asked to skip nor recognises the frame it was asked to wait for.
     """
-    from ...testing.tests._support.sse import read_frame
+    from ...testing import read_frame
 
     frames = [
         json.dumps({key: ServerEventType.HEARTBEAT.value, "server_uptime_seconds": 1}),

@@ -75,6 +75,7 @@ from pydantic import TypeAdapter, ValidationError
 from ..acceptance.tests._harness import certified_gateway
 from ..authoring.discovery import resolve_engine_with_retry
 from ..control.config import setting_env, settings
+from ..streaming.sse_frames import decode_sse_lines
 from ..team.team_config import load_team_config
 from ..testing.tests._support.catalog_selection import (
     NoSelectableLaneError,
@@ -372,22 +373,15 @@ def _read_frame(lines: Iterable[str], *, wanted: str, deadline: float) -> JsonOb
     the park - an emission or relay gap, which is a product defect rather than a
     timing artefact of this test.
     """
-    buffer: list[str] = []
     seen: list[str] = []
-    for raw in lines:
-        line = raw.rstrip("\r")
-        if line.startswith("data: "):
-            buffer.append(line.removeprefix("data: "))
-            continue
-        if line == "" and buffer:
-            decoded: object = json.loads("".join(buffer))
-            payload = json_object(decoded, at="clarification SSE frame")
-            buffer = []
-            kind = str(payload.get("type") or payload.get("event_type") or "<untyped>")
-            if kind not in seen:
-                seen.append(kind)
-            if payload.get("type") == wanted:
-                return payload
+    for event in decode_sse_lines(lines):
+        decoded: object = json.loads(event.data)
+        payload = json_object(decoded, at="clarification SSE frame")
+        kind = str(payload.get("type") or payload.get("event_type") or "<untyped>")
+        if kind not in seen:
+            seen.append(kind)
+        if payload.get("type") == wanted:
+            return payload
         if time.monotonic() > deadline:
             break
     raise AssertionError(

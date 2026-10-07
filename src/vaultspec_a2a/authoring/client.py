@@ -19,6 +19,7 @@ from urllib.parse import quote
 
 import httpx
 
+from ..streaming.sse_frames import iter_sse_events
 from ._connection_proof import EngineConnectionError, authenticated_client
 
 if TYPE_CHECKING:
@@ -52,43 +53,15 @@ class _ClientOptions(TypedDict, total=False):
 
 
 async def _iter_sse_frames(response: httpx.Response) -> AsyncIterator[SseFrame]:
-    """Reassemble SSE line events from a stream and decode each into a frame.
+    """Decode the response's SSE stream into typed lifecycle frames.
 
-    Follows the SSE framing rules: an ``event:`` field names the type
-    (defaulting to ``message``), ``data:`` fields accumulate (joined by newline),
-    a blank line dispatches the buffered event, and a line starting with ``:`` is
-    a keep-alive comment. Undecodable or unrecognised frames are dropped by
-    :func:`parse_sse_frame` returning ``None``.
+    Undecodable or unrecognised events are dropped by :func:`parse_sse_frame`
+    returning ``None``.
     """
-    event_type = "message"
-    data_lines: list[str] = []
-    async for raw in response.aiter_lines():
-        line = raw.rstrip("\r")
-        if line == "":
-            frame = _buffered_sse_frame(event_type, data_lines)
-            if frame is not None:
-                yield frame
-            event_type = "message"
-            data_lines = []
-            continue
-        if line.startswith(":"):
-            continue
-        field, _, value = line.partition(":")
-        if value.startswith(" "):
-            value = value[1:]
-        if field == "event":
-            event_type = value
-        elif field == "data":
-            data_lines.append(value)
-    frame = _buffered_sse_frame(event_type, data_lines)
-    if frame is not None:
-        yield frame
-
-
-def _buffered_sse_frame(event_type: str, data_lines: list[str]) -> SseFrame | None:
-    if not data_lines:
-        return None
-    return parse_sse_frame(event_type, "\n".join(data_lines))
+    async for event in iter_sse_events(response.aiter_lines()):
+        frame = parse_sse_frame(event.event, event.data)
+        if frame is not None:
+            yield frame
 
 
 class AuthoringClient:

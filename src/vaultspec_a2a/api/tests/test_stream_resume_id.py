@@ -17,9 +17,8 @@ from sqlalchemy import text
 
 from ...control.config import settings
 from ...streaming.aggregator import EventAggregator
-from ...testing import settings_override
+from ...testing import SseReader, settings_override
 from ...thread.enums import ThreadStatus
-from ._sse_reader import SseReader
 from .conftest import _live_server, make_app, seed_run_with_status
 
 if TYPE_CHECKING:
@@ -81,7 +80,7 @@ async def test_a_served_frame_carries_its_run_and_sequence_as_the_sse_id(
         client.stream("GET", f"/v1/runs/{_RUN}/stream") as response,
     ):
         assert response.status_code == 200
-        reader = SseReader(response.aiter_bytes())
+        reader = SseReader(response.aiter_lines())
         snapshot = await reader.next_frame()
         assert snapshot.type == "stream_snapshot"
         # The snapshot is produced by the stream itself and crosses no
@@ -122,7 +121,7 @@ async def test_no_frame_carries_an_id_while_replay_is_switched_off(
             client.stream("GET", f"/v1/runs/{_RUN}/stream") as response,
         ):
             assert response.status_code == 200
-            reader = SseReader(response.aiter_bytes())
+            reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
 
             await post_relay_batch(client, _RUN, 2)
@@ -165,7 +164,7 @@ async def test_an_unnumbered_run_carries_no_id_although_replay_is_switched_on(
         client.stream("GET", f"/v1/runs/{_RUN}/stream") as response,
     ):
         assert response.status_code == 200
-        reader = SseReader(response.aiter_bytes())
+        reader = SseReader(response.aiter_lines())
         assert (await reader.next_frame()).type == "stream_snapshot"
 
         await post_relay_batch(client, _RUN, 2)

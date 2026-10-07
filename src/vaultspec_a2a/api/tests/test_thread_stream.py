@@ -15,13 +15,14 @@ streaming loop is exercised end-to-end by the mock-tape run proofs.
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import TYPE_CHECKING, Any
 
 from fastapi.testclient import TestClient
 
 from ...database.thread_repository import create_thread, update_thread_status
 from ...providers.conditions import ProviderCondition
+from ...streaming.sse_frames import decode_sse_text
+from ...testing import SseFrame
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from .conftest import SessionFactory, make_app
@@ -32,18 +33,8 @@ if TYPE_CHECKING:
 
 def _sse_frames(body: str) -> list[tuple[str, dict[str, Any]]]:
     """Split a finite SSE body into its ``(event name, payload)`` pairs."""
-    frames: list[tuple[str, dict[str, Any]]] = []
-    for block in body.split("\n\n"):
-        name: str | None = None
-        data: str | None = None
-        for line in block.splitlines():
-            if line.startswith("event: "):
-                name = line.removeprefix("event: ").strip()
-            elif line.startswith("data: "):
-                data = line.removeprefix("data: ")
-        if name is not None and data is not None:
-            frames.append((name, json.loads(data)))
-    return frames
+    frames = (SseFrame.from_event(event) for event in decode_sse_text(body))
+    return [(frame.event, frame.data) for frame in frames]
 
 
 class TestStreamThreadEvents:

@@ -24,7 +24,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import httpx
 import pytest
@@ -44,6 +44,7 @@ from ...database import (
 from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
+from ...testing import read_frame
 from ...testing.tests._support.catalog_selection import in_process_selection
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
@@ -53,7 +54,7 @@ from ..routes.gateway import admission_gate
 from .conftest import make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
+    from collections.abc import AsyncGenerator, Callable, Mapping
 
     from fastapi import FastAPI
     from langchain_core.runnables import RunnableConfig
@@ -1664,7 +1665,7 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
             },
         )
 
-        progress = await _read_event(lines, wanted="message_chunk")
+        progress, _raw = await read_frame(lines, wanted="message_chunk", timeout=5.0)
         assert progress["api_version"] == "v1"
         assert progress["type"] == "message_chunk"
         assert progress["content"] == "tick"
@@ -1679,7 +1680,7 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
                 "status": "completed",
             },
         )
-        terminal = await _read_event(lines, wanted="thread_terminal")
+        terminal, _raw = await read_frame(lines, wanted="thread_terminal", timeout=5.0)
         assert terminal["api_version"] == "v1"
         assert terminal["status"] == "completed"
 
@@ -1726,7 +1727,7 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
                 "state": "working",
             },
         )
-        status_frame = await _read_event(lines, wanted="agent_status")
+        status_frame, _raw = await read_frame(lines, wanted="agent_status", timeout=5.0)
         assert status_frame["api_version"] == "v1"
         assert status_frame["semantic_phase"] == "synthesizing_research"
 
@@ -1745,7 +1746,9 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
                 "content": document_body,
             },
         )
-        artifact_frame = await _read_event(lines, wanted="artifact_update")
+        artifact_frame, _raw = await read_frame(
+            lines, wanted="artifact_update", timeout=5.0
+        )
         assert artifact_frame["api_version"] == "v1"
         assert artifact_frame["artifact_id"] == "art-1"
         assert "content" not in artifact_frame
@@ -1762,7 +1765,7 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
                 "content": "tick",
             },
         )
-        dropped = await _read_event(lines, wanted="progress_dropped")
+        dropped, _raw = await read_frame(lines, wanted="progress_dropped", timeout=5.0)
         assert dropped["api_version"] == "v1"
         assert dropped["dropped_type"] == "message_chunk"
 
@@ -1775,7 +1778,7 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
                 "status": "completed",
             },
         )
-        terminal = await _read_event(lines, wanted="thread_terminal")
+        terminal, _raw = await read_frame(lines, wanted="thread_terminal", timeout=5.0)
         assert terminal["status"] == "completed"
 
 
@@ -1819,7 +1822,7 @@ async def test_run_stream_verb_reserves_versioned_frames(
                 "content": "tick",
             },
         )
-        progress = await _read_event(lines, wanted="message_chunk")
+        progress, _raw = await read_frame(lines, wanted="message_chunk", timeout=5.0)
         assert progress["api_version"] == "v1"
         assert progress["type"] == "message_chunk"
         assert progress["content"] == "tick"
@@ -1834,7 +1837,7 @@ async def test_run_stream_verb_reserves_versioned_frames(
                 "status": "completed",
             },
         )
-        terminal = await _read_event(lines, wanted="thread_terminal")
+        terminal, _raw = await read_frame(lines, wanted="thread_terminal", timeout=5.0)
         assert terminal["api_version"] == "v1"
         assert terminal["status"] == "completed"
 
@@ -1852,32 +1855,6 @@ async def test_run_stream_unknown_run_is_404(
         resp = await client.get("/v1/runs/does-not-exist/stream")
         assert resp.status_code == 404
         assert resp.json()["detail"] == "Run not found"
-
-
-async def _read_event(
-    lines: AsyncIterator[str], *, wanted: str, timeout: float = 5.0
-) -> JsonObject:
-    """Read SSE ``data:`` frames from *lines* until one whose ``type`` matches.
-
-    Heartbeat frames (emitted on idle) are skipped. Raises on timeout so a
-    broken stream fails the test instead of hanging it.
-    """
-
-    async def _scan() -> JsonObject:
-        buffer: list[str] = []
-        async for raw in lines:
-            line = raw.rstrip("\r")
-            if line.startswith("data: "):
-                buffer.append(line.removeprefix("data: "))
-                continue
-            if line == "" and buffer:
-                payload = cast("JsonObject", json.loads("".join(buffer)))
-                buffer = []
-                if payload.get("type") == wanted:
-                    return payload
-        raise AssertionError(f"stream ended before a {wanted!r} frame")
-
-    return await asyncio.wait_for(_scan(), timeout=timeout)
 
 
 @pytest.mark.asyncio(loop_scope="function")

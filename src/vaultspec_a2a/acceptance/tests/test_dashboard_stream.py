@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...testing.tests._support.sse import read_frame
+from ...testing import read_frame
 from ...thread.enums import TERMINAL_STATUS_VALUES
 from .conftest import wait_for_terminal
 

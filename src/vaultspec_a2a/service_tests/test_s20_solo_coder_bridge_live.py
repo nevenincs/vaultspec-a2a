@@ -51,6 +51,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..graph.enums import ServerEventType
 from ..providers._json_contract import JsonObject
+from ..streaming.sse_frames import iter_sse_events
 from ..testing.tests._support.payloads import json_object
 from .test_pw7_acceptance import (
     _MODE_AUTONOMOUS,
@@ -196,18 +197,15 @@ async def _observe_solo_coder_run(
             timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
         ) as response:
             response.raise_for_status()
-            async for raw_line in response.aiter_lines():
-                line = raw_line.strip()
-                terminal = False
-                if line.startswith("data:"):
-                    payload = _parse_event(line[len("data:") :].strip())
-                    content = _message_content(payload)
-                    if content:
-                        output_parts.append(content)
-                        narrated_bridge_names.update(
-                            _extract_bridge_tools("".join(output_parts))
-                        )
-                    terminal = payload.get("type") == "thread_terminal"
+            async for event in iter_sse_events(response.aiter_lines()):
+                payload = _parse_event(event.data)
+                content = _message_content(payload)
+                if content:
+                    output_parts.append(content)
+                    narrated_bridge_names.update(
+                        _extract_bridge_tools("".join(output_parts))
+                    )
+                terminal = payload.get("type") == "thread_terminal"
                 now = time.monotonic()
                 # Poll the engine (not the narration) for this run's changeset.
                 if now - last_engine_poll >= _ENGINE_POLL_SECONDS:

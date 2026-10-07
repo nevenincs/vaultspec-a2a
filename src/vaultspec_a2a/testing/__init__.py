@@ -90,6 +90,7 @@ if TYPE_CHECKING:
         machine_cpu_budget,
         register_session,
     )
+    from .sse import SseFrame, SseReader, decode_frame, read_frame
 
 
 #: Fully-qualified (never relative) submodule names: this dict's string values
@@ -187,6 +188,10 @@ _LAZY_EXPORTS = {
     "live_peer_sessions": ("vaultspec_a2a.testing.sessions", "live_peer_sessions"),
     "machine_cpu_budget": ("vaultspec_a2a.testing.sessions", "machine_cpu_budget"),
     "register_session": ("vaultspec_a2a.testing.sessions", "register_session"),
+    "SseFrame": ("vaultspec_a2a.testing.sse", "SseFrame"),
+    "SseReader": ("vaultspec_a2a.testing.sse", "SseReader"),
+    "decode_frame": ("vaultspec_a2a.testing.sse", "decode_frame"),
+    "read_frame": ("vaultspec_a2a.testing.sse", "read_frame"),
 }
 
 
@@ -228,6 +233,8 @@ __all__ = [
     "ResourceDeclarationError",
     "ResourceDiedError",
     "ResourceSpec",
+    "SseFrame",
+    "SseReader",
     "allocate_free_ports",
     "apply_layer_markers",
     "armed_desktop_app_home",
@@ -235,6 +242,7 @@ __all__ = [
     "await_child",
     "child_tree_progress",
     "declared_claims",
+    "decode_frame",
     "effective_worker_count",
     "exclusive_keys",
     "file_size_fingerprint",
@@ -247,6 +255,7 @@ __all__ = [
     "machine_cpu_budget",
     "measured_child_startup_s",
     "plant_link_to_file",
+    "read_frame",
     "register_session",
     "registry_watch",
     "reserve_scratch_ports",

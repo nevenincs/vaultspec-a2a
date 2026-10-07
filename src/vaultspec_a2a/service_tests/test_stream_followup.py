@@ -7,6 +7,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
+from ..streaming.sse_frames import decode_sse_lines
 from ..testing.tests._support.payloads import (
     json_object,
     json_object_list,
@@ -51,36 +52,14 @@ def _read_sse_frames(
 ) -> list[JsonObject]:
     deadline = time.monotonic() + timeout
     events: list[JsonObject] = []
-    fields: dict[str, list[str]] = {"data": []}
-
-    def _flush() -> JsonObject | None:
-        data_lines = fields.get("data", [])
-        if not data_lines:
-            fields.clear()
-            fields["data"] = []
-            return None
-        decoded: object = json.loads("\n".join(data_lines))
-        payload = json_object(decoded, at="SSE frame")
-        fields.clear()
-        fields["data"] = []
-        return payload
-
-    for raw_line in response.iter_lines():
+    for event in decode_sse_lines(response.iter_lines()):
         if time.monotonic() > deadline:
             break
-        if raw_line == "":
-            payload = _flush()
-            if payload is None:
-                continue
-            events.append(payload)
-            if stop_when(payload):
-                return events
-            continue
-        if ":" not in raw_line:
-            continue
-        key, value = raw_line.split(":", 1)
-        if key == "data":
-            fields.setdefault("data", []).append(value.lstrip())
+        decoded: object = json.loads(event.data)
+        payload = json_object(decoded, at="SSE frame")
+        events.append(payload)
+        if stop_when(payload):
+            return events
     raise AssertionError(f"timed out waiting for SSE event; events={events!r}")
 
 

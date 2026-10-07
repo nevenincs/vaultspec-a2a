@@ -16,10 +16,9 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...streaming.aggregator import EventAggregator
-from ...testing import settings_override
+from ...testing import SseReader, settings_override
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
-from ._sse_reader import SseReader
 from .conftest import _live_server, make_app, seed_run_with_status
 from .test_stream_resume_replay import _progress_event, _relay
 
@@ -55,7 +54,7 @@ async def test_a_run_with_retained_frames_reports_a_resumable_stream(
         async with client.stream(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": "-"}
         ) as response:
-            reader = SseReader(response.aiter_bytes())
+            reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
             replayed = await reader.next_frame()
 

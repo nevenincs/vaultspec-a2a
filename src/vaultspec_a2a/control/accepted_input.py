@@ -72,7 +72,7 @@ def restore_accepted_dispatch(
             "actor_tokens": None,
         }
     )
-    if dispatch.action != "cancel" and dispatch.workspace_root is not None:
+    if dispatch.requires_graph_receipt and dispatch.workspace_root is not None:
         require_admitted_workspace_root(dispatch.workspace_root)
     return dispatch
 

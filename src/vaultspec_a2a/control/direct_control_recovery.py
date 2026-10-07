@@ -237,7 +237,7 @@ async def _reconstruct_dispatch(
         return DispatchRefusal(
             FailureType.INCOMPATIBLE_STATE, "accepted input identity mismatch"
         )
-    if dispatch.action != "cancel" and (
+    if dispatch.requires_graph_receipt and (
         dispatch.workspace_root is None or not Path(dispatch.workspace_root).is_dir()
     ):
         return DispatchRefusal(

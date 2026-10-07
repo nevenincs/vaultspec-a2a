@@ -118,17 +118,23 @@ def replay_is_served(relay_hub: RelayHub, thread_id: str) -> bool:
 async def run_stream_resumability(app: Any, db: AsyncSession, thread_id: str) -> bool:
     """Whether this run's stream can be resumed from the id its frames carry.
 
-    Both halves of the posture, because either alone misreports it. The
-    switch governs the whole mechanism; the retained rows say whether THIS
-    run has a window behind it, which a run that has produced nothing - or
-    one whose window has expired - does not. The writer's unflushed ring
-    counts as retained: a resume taken in that interval reads it, so
-    answering false there would understate a capability the stream has.
+    Three conditions, because any two of them alone misreport it. The switch
+    governs the whole mechanism. The retained rows say whether THIS run has a
+    window behind it, which a run that has produced nothing - or one whose
+    window has expired - does not; the writer's unflushed ring counts as
+    retained, since a resume taken in that interval reads it, and answering
+    false there would understate a capability the stream has. And this
+    gateway must not have FAILED to establish the run's numbering: such a run
+    is unnumbered for the rest of this process's lifetime, so every frame it
+    serves carries no id and a client is handed no cursor to come back with,
+    however much is retained.
 
-    Read off the retained window rather than this gateway's numbering, unlike
-    :func:`replay_is_served`, because a resume is served from that window: a
-    gateway that never numbered the run - a second process, or this one after
-    a restart - still reads the table, and still serves what it holds.
+    Only that last failure is read off this gateway's numbering, and the
+    asymmetry is deliberate. A gateway that merely never touched the run - a
+    second process, or this one after a restart - still reads the table and
+    still serves what it holds, so its silence is not an answer about the
+    run. A failed seed is an answer: it is a decision this process took and
+    will keep.
 
     Probed on the caller's own session rather than through a factory of its
     own. Run-status is the hottest read on the gateway and it already holds a
@@ -141,6 +147,9 @@ async def run_stream_resumability(app: Any, db: AsyncSession, thread_id: str) ->
     one told it can and then refused has already thrown away its position.
     """
     if not settings.stream_replay_enabled:
+        return False
+    relay_hub = cast("RelayHub | None", getattr(app.state, "relay_hub", None))
+    if relay_hub is not None and relay_hub.numbering_failed(thread_id):
         return False
     writer = replay_writer_seat(app)
     if writer is not None and writer.pending(thread_id):

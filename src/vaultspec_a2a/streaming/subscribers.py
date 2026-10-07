@@ -232,6 +232,24 @@ class RunSequenceAllocator:
         live = self._counters.get(thread_id)
         return live if live is not None else self._issued.get(thread_id)
 
+    def is_unseedable(self, thread_id: str) -> bool:
+        """Whether this process TRIED to number *thread_id* and could not.
+
+        The narrower of the two negative answers, and the distinction is what
+        makes it worth asking. A run this process has simply never touched
+        says nothing about itself: another gateway lifetime may have numbered
+        it, and its retained window is still a window a resume can be served
+        from. A run whose seed reads FAILED is different - it is unnumbered
+        for the rest of this process's lifetime by decision, so every frame it
+        serves from here carries no id, and a client watching this gateway is
+        handed no cursor to come back with however much is retained.
+
+        False once the run is forgotten, even though it failed earlier: the
+        floor a forgotten run keeps is not a failure record, and the next
+        frame reseeds.
+        """
+        return thread_id in self._unnumbered
+
     def is_numbered(self, thread_id: str) -> bool:
         """Whether this gateway's own numbers are what this run's frames carry.
 
@@ -357,6 +375,16 @@ class RelayHub:
         """
         allocator = self._allocator
         return None if allocator is None else allocator.issued_high_water(thread_id)
+
+    def numbering_failed(self, thread_id: str) -> bool:
+        """Whether this hub tried to establish *thread_id*'s numbering and failed.
+
+        ``False`` on a hub that numbers nothing at all: a gateway serving no
+        replay never tried, and reporting a failure it did not have would
+        confuse "this feature is off" with "this run is broken".
+        """
+        allocator = self._allocator
+        return allocator is not None and allocator.is_unseedable(thread_id)
 
     async def prepare_run(self, thread_id: str) -> None:
         """Establish *thread_id*'s numbering before its frames are relayed.

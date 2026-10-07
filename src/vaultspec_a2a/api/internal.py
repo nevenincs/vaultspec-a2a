@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.security import HTTPBearer
 from pydantic import ValidationError
 
 from ..control._worker_health import worker_liveness
@@ -72,36 +71,6 @@ def _app_session_factory(app: Any) -> Any:
     return declared
 
 
-#: Declares the internal-IPC bearer in the generated OpenAPI document.
-#:
-#: A SEPARATE scheme from the gateway's ``GatewayServiceToken``, because it is a
-#: separate credential: this plane verifies ``app.state.internal_token``, the
-#: gateway<->worker IPC secret the gateway seated, not the attach credential that
-#: lifecycle discovery publishes for external callers. Declaring both under one
-#: scheme would tell a reader the two surfaces accept the same token, which they
-#: do not.
-#:
-#: Declared here rather than beside :func:`verify_internal_bearer`: that module is
-#: framework-free by design and leaves transport mapping to each caller, so a
-#: FastAPI security object belongs on this side of the boundary.
-#:
-#: ``auto_error=False`` keeps it inert - the raw header below is still what the
-#: verifier compares, and the 401/500 mapping stays in one place.
-internal_bearer_scheme = HTTPBearer(
-    auto_error=False,
-    scheme_name="InternalIpcToken",
-    description=(
-        "Internal gateway-to-worker IPC token. Not the gateway service token: "
-        "these routes are the worker's callback surface, not a client surface."
-    ),
-)
-
-#: Declaration-only dependency for the router below. Never read; depending on it
-#: is what puts the security requirement on these operations in the published
-#: contract.
-_declare_internal_bearer = Depends(internal_bearer_scheme)
-
-
 async def _verify_internal_token(
     request: Request,
     authorization: str | None = Header(None, include_in_schema=False),
@@ -119,8 +88,8 @@ async def _verify_internal_token(
     In production/staging/testing, a missing token is a configuration error.
     Delegates the rule to the shared IPC bearer verifier.
 
-    Reads the raw header rather than a security object; see
-    :data:`internal_bearer_scheme`.
+    Reads the raw header directly: this plane is unpublished, so no security
+    object is declared for it, and the 401/500 mapping stays in one place.
     """
     verdict, detail = verify_internal_bearer(
         authorization,
@@ -137,16 +106,20 @@ async def _verify_internal_token(
 internal_router = APIRouter(
     prefix="/internal",
     tags=["internal"],
-    dependencies=[Depends(_verify_internal_token), _declare_internal_bearer],
-    # Both refusals belong to the gate every route here sits behind, not to any
-    # one verb. Note the misconfiguration case is a 500 on this plane, where the
-    # gateway's attach gate answers 503: an unset internal token outside
-    # DEVELOPMENT is this service's own configuration error, not a dependency
-    # that might yet become available.
-    responses={
-        401: {"description": "Missing or invalid internal IPC token."},
-        500: {"description": "Internal IPC token is not configured."},
-    },
+    dependencies=[Depends(_verify_internal_token)],
+    # Unpublished, and that is the contract rather than an omission. These are
+    # the worker's callback surface: they verify a different credential from
+    # every client surface, are reachable only from this service's own worker,
+    # and no external caller may use them. Publishing them told a client
+    # generator to emit methods for a plane no client may call, and told a
+    # reader of the contract that this service exposes an unauthenticated
+    # ``/internal/health`` alongside its versioned verbs.
+    #
+    # It also removes them from ``route_signature``, which is served on an
+    # authenticated client surface and compared by the doctor CLI: the
+    # signature describes the surface a client may address, not this service's
+    # private wiring.
+    include_in_schema=False,
 )
 
 

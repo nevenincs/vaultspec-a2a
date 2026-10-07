@@ -25,6 +25,7 @@ from .node_metadata import (
     node_metadata_from_graph,
 )
 from .run_event_writer import FrameProjector, RunEventWriter
+from .sse_frames import catalog_json_schema
 from .subscribers import (
     AllocationSink,
     HeldFrame,
@@ -52,6 +53,7 @@ __all__ = [
     "SequenceAllocation",
     "SequencedEvent",
     "StreamableGraph",
+    "catalog_json_schema",
     "classify_tool_kind",
     "emit_interrupt_events",
     "node_metadata_fields",

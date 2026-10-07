@@ -38,7 +38,7 @@ from ...database import (
     get_permission_logs_by_thread,
     resolve_session_factory,
 )
-from ...streaming import RelayHub
+from ...streaming import RelayHub, catalog_json_schema
 from ...thread.constants import (
     MAX_DISCOVERY_RESULTS,
     MAX_FEATURE_TAG_LENGTH,
@@ -629,7 +629,39 @@ def register(router: APIRouter) -> None:
         },
     )(active_runs_endpoint)
     router.get("/runs/{run_id}", response_model=RunStatusResponse)(run_status_endpoint)
-    router.get("/runs/{run_id}/stream")(run_stream_endpoint)
+    router.get(
+        "/runs/{run_id}/stream",
+        # Declared rather than inferred. FastAPI reads the handler's return
+        # annotation, which is a response CLASS and carries no body shape, so
+        # it published an empty ``application/json`` schema for a route that
+        # serves ``text/event-stream`` - telling a generated client to parse
+        # one JSON object and stop.
+        response_class=StreamingResponse,
+        response_model=None,
+        responses={
+            200: {
+                "description": (
+                    "The run's progress stream. Each event's data is one "
+                    "progress frame; the frame kind is on the SSE 'event' "
+                    "line and in the body under both kind keys. A frame whose "
+                    "replay is retained carries an 'id' a reconnect may offer "
+                    "back as Last-Event-ID. Frames are non-authoritative: "
+                    "reconcile run state from run-status."
+                ),
+                # Generated from the one frame catalog the encoder projects
+                # every outgoing frame onto, so the published shape cannot
+                # describe a frame the service does not serve.
+                "content": {"text/event-stream": {"schema": catalog_json_schema()}},
+            },
+            404: {"description": "No such run."},
+            503: {
+                "description": (
+                    "Gateway service token is not configured, or the gateway "
+                    "is at its progress-stream connection limit; retry later."
+                )
+            },
+        },
+    )(run_stream_endpoint)
     router.get("/runs/{run_id}/history", response_model=RunHistoryResponse)(
         run_history_endpoint
     )

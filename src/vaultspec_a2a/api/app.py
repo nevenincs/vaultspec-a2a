@@ -53,6 +53,7 @@ from ..control.health import (
     probe_desktop_readiness,
 )
 from ..control.leased_dispatch import DispatchTransport
+from ..control.readiness import DesktopReadiness
 from ..control.reconciliation import reconcile_threads_on_startup
 from ..control.settings_base import build_now
 from ..control.verdict_subscriber import VerdictSubscriber
@@ -98,6 +99,7 @@ from ..utils import (
 from .auth import verify_attach_bearer
 from .internal import internal_router
 from .routes import register_routes
+from .schemas.gateway import GatewayHealthResponse
 from .schemas.gateway_readiness import LivenessResponse
 
 _RECOVERY_POLL_SECONDS = 2.0
@@ -901,7 +903,26 @@ def create_app(lifespan: Any | None = None) -> FastAPI:
     register_routes(app)
     app.include_router(internal_router)
 
-    @app.get("/health")
+    @app.get(
+        "/health",
+        # Three bodies on one route, each from a different profile and gate, so
+        # the contract names all three rather than collapsing them into a model
+        # that is wrong for two. Serialization stays with the returns below:
+        # these are already-dumped dicts, and a response model would re-coerce
+        # them through a shape none of them owns.
+        response_model=None,
+        responses={
+            200: {
+                "description": (
+                    "The armed desktop profile serves the readiness projection "
+                    "to an attach-authenticated caller and the minimal liveness "
+                    "fact to everyone else; the unarmed profile serves the "
+                    "probe aggregate."
+                ),
+                "model": (DesktopReadiness | LivenessResponse | GatewayHealthResponse),
+            }
+        },
+    )
     async def health_endpoint(
         request: Request,
         db: AsyncSession = _HEALTH_DB,

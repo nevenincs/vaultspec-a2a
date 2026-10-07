@@ -86,6 +86,7 @@ __all__ = [
     "ActiveRunRecord",
     "ActiveRunsResponse",
     "FrozenTeamAssignmentSummary",
+    "GatewayHealthResponse",
     "PathSafeRunId",
     "PresetSummary",
     "PresetsListResponse",
@@ -945,6 +946,36 @@ class PresetsListResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     presets: list[PresetSummary] = Field(default_factory=list)
+
+
+class GatewayHealthResponse(BaseModel):
+    """The unarmed profile's probe body on ``GET /health``.
+
+    Declared because this is the one surface an external prober has, and it
+    was published as an untyped object: a reader of the contract learned no
+    field name, no status vocabulary, and no way to tell this body from the
+    armed profile's minimal liveness one.
+
+    Open on purpose. The fields below are the ones the endpoint itself
+    guarantees on every answer, including the degraded answer it gives when a
+    runtime singleton is missing; the probe aggregate carries further
+    dependency checks whose set depends on what this build probes, and
+    publishing them as a closed shape would promise a client a stability the
+    aggregate does not have. ``additionalProperties`` says so rather than
+    leaving the whole body unnamed.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    service: Literal["gateway"] = "gateway"
+    #: The probe verdict across every dependency this build checks.
+    status: str = Field(max_length=32)
+    #: The NARROWER local question: is this gateway's own worker usable. Not a
+    #: restatement of ``status``; see the endpoint for why the two differ.
+    ready: bool
+    #: The live process id, so a lifecycle caller can confirm the owner of a
+    #: discovery record is the process answering here.
+    pid: int
 
 
 class ServiceStateResponse(BaseModel):

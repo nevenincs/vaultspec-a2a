@@ -188,7 +188,7 @@ class _RunDispatchResult:
     thread_id: str
     status: str
     nickname: str | None
-    frozen: Any | None
+    frozen: FrozenTeamSelection | None
     replayed: bool
 
 

@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 from ..control.config import settings
 from ..control.env_registry import CREDENTIAL_VARIABLES
+from ..control.infra_config import ACP_BACKENDS
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from ..utils.async_cleanup import complete_cleanup
@@ -602,7 +603,7 @@ def _admit_execution_mode(
         )
         if acp_prefix is not None and execution_mode.startswith(acp_prefix):
             frozen_backend = execution_mode.removeprefix(acp_prefix)
-            if frozen_backend not in {"node", "binary"}:
+            if frozen_backend not in ACP_BACKENDS:
                 raise ValueError(
                     f"Provider {provider.value!r} cannot execute mode "
                     f"{execution_mode!r}"

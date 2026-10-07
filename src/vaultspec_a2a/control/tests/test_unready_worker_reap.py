@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import socket
 import subprocess
 import sys
 import time
@@ -40,6 +39,7 @@ from ...control._worker_readiness import (
 )
 from ...control.worker_management import LazyWorkerSpawner
 from ...lifecycle.shutdown import ShutdownDeadline
+from ...testing import free_port
 from ...utils import kill_pid_tree_async
 from ...utils._process_tree import pid_is_live, port_has_listener_async, wait_pid_gone
 from ...utils.process import ProcessContainment, ProcessContainmentError
@@ -58,12 +58,6 @@ _WORKER_WITH_CHILDREN = (
     "print(' '.join(str(k.pid) for k in kids), flush=True)\n"
     "time.sleep(300)\n"
 )
-
-
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-        listener.bind(("127.0.0.1", 0))
-        return int(listener.getsockname()[1])
 
 
 def _cooperative_worker_script(port: int, marker: Path) -> str:
@@ -330,7 +324,7 @@ async def test_spawner_cooperates_then_reaps_the_remaining_owned_tree(
     tmp_path: Path,
 ) -> None:
     """A real 202 stop precedes bounded containment escalation for descendants."""
-    port = _free_port()
+    port = free_port()
     marker = tmp_path / "cooperative-stop.txt"
     process, containment, spawner = await _serving_contained_worker(
         _cooperative_worker_script(port, marker), port
@@ -360,7 +354,7 @@ async def test_shutdown_reaps_child_created_after_cooperative_request(
     tmp_path: Path,
 ) -> None:
     """Containment authority survives a root that exits after creating a child."""
-    port = _free_port()
+    port = free_port()
     marker = tmp_path / "late-child.txt"
     process, containment, spawner = await _serving_contained_worker(
         _late_child_worker_script(port, marker), port

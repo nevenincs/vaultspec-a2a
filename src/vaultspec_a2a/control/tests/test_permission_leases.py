@@ -8,16 +8,15 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...control._permission_response_contract import (
-    PermissionInput,
-    PermissionRuntime,
-)
+from ...control._permission_response_contract import PermissionInput
 from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_thread,
     get_control_action_by_idempotency_key,
+    get_permission_request,
     record_permission_request,
 )
 from ...testing.catalog_authority import current_execution_metadata
@@ -75,12 +74,19 @@ async def _run_case(
             httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client,
         ):
             await start.wait()
+            permission = await get_permission_request(session, request_id)
+            assert permission is not None
             return await respond_to_permission(
                 session,
+                permission=permission,
                 response=PermissionInput(
                     request_id, option_id, f"client-retry-{index}", notes
                 ),
-                runtime=PermissionRuntime(breaker, spawner, client, 25, None),
+                transport=DispatchTransport(
+                    worker_client=client,
+                    circuit_breaker=breaker,
+                    worker_spawner=spawner,
+                ),
             )
 
     tasks = [

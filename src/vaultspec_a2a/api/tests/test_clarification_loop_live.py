@@ -56,6 +56,7 @@ from ...control.clarification_service import (
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.graph_definition import read_accepted_graph_definition
+from ...control.leased_dispatch import DispatchTransport, accepted_recursion_budget
 from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     create_control_action,
@@ -536,7 +537,7 @@ async def _prepare_expired_claim(
             thread_id=run.thread_id,
             option_id=resolution.as_resume_value(),
             workspace_root=str(Path.cwd()),
-            recursion_limit=100,
+            recursion_limit=accepted_recursion_budget(definition),
             team_preset=_BUNDLE_FREE_PRESET,
             graph_definition=definition,
             model_assignment=resolve_execution_authority(metadata).model_assignment,
@@ -600,11 +601,11 @@ async def _redrive_expired_claim(
     async with _real_worker(None, run.target, checkpointer) as worker_client:
         runtime = ClarificationRuntime(
             checkpointer,
-            worker_client,
-            circuit_breaker,
-            worker_spawner,
-            100,
-            None,
+            DispatchTransport(
+                worker_client=worker_client,
+                circuit_breaker=circuit_breaker,
+                worker_spawner=worker_spawner,
+            ),
         )
         first = await redrive_clarification_actions(
             session_factory,

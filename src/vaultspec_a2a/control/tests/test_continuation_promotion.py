@@ -25,7 +25,7 @@ from ...thread.enums import (
     ThreadStatus,
 )
 from ..drain import DrainGate
-from ..event_handlers import CheckpointPruneRegistry, relay_event
+from ..event_handlers import CheckpointPruneRegistry, RelayServices, relay_event
 from ..recovery_authority import (
     CONTINUATION_PROMOTED,
     RecoveryObservation,
@@ -167,10 +167,12 @@ async def test_a_promoted_run_keeps_its_history_and_its_admission_slot(
     await relay_event(
         RUN,
         {"type": "thread_terminal", "status": ThreadStatus.COMPLETED.value},
-        session_factory=busy_run.sessions,
-        checkpointer=busy_run.saver,
-        drain_gate=gate,
-        prune_registry=prunes,
+        services=RelayServices(
+            session_factory=busy_run.sessions,
+            checkpointer=busy_run.saver,
+            drain_gate=gate,
+            prune_registry=prunes,
+        ),
     )
     await prunes.settle()
 
@@ -196,10 +198,12 @@ async def test_relaying_a_terminal_with_no_continuation_still_settles(
     await relay_event(
         RUN,
         {"type": "thread_terminal", "status": ThreadStatus.COMPLETED.value},
-        session_factory=busy_run.sessions,
-        checkpointer=busy_run.saver,
-        drain_gate=gate,
-        prune_registry=prunes,
+        services=RelayServices(
+            session_factory=busy_run.sessions,
+            checkpointer=busy_run.saver,
+            drain_gate=gate,
+            prune_registry=prunes,
+        ),
     )
     await prunes.settle()
 

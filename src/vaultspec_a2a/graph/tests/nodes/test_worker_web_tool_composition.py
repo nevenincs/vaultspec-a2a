@@ -64,7 +64,7 @@ from ....providers.lane_admission import (
 )
 from ....testing import simulator_command
 from ...enums import Provider
-from ...nodes.worker import create_worker_node
+from ...nodes.worker import WorkerNodeOptions, create_worker_node
 from ._native_read_floor import scoped_read_floor
 
 if TYPE_CHECKING:
@@ -154,8 +154,7 @@ async def _allowed_tools_at_spawn(
         model=model,
         system_prompt="You are grounding a claim.",
         name=agent_id,
-        autonomous=True,
-        role=role,
+        options=WorkerNodeOptions(autonomous=True, role=role),
     )
     result = await node(_make_state())
     assert isinstance(result, dict)
@@ -321,8 +320,7 @@ async def test_a_supervised_run_receives_no_web_builtin(tmp_path: Path) -> None:
         model=composed,
         system_prompt="You are grounding a claim.",
         name="worker",
-        autonomous=False,
-        role="researcher",
+        options=WorkerNodeOptions(autonomous=False, role="researcher"),
     )
     await node(_make_state())
 

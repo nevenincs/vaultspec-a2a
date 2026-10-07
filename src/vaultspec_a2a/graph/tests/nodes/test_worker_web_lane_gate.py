@@ -38,7 +38,7 @@ from langchain_core.messages import HumanMessage
 from ....providers.lane_admission import web_tool_names_for
 from ....team import load_agent_config
 from ....testing import simulator_command
-from ...nodes.worker import create_worker_node
+from ...nodes.worker import WorkerNodeOptions, create_worker_node
 from ._native_read_floor import scoped_read_floor
 
 if TYPE_CHECKING:
@@ -138,8 +138,7 @@ async def test_an_unproven_lane_surfaces_no_web_tool_name(
         model=_model(tmp_path, provider=provider, session_new=record_file),
         system_prompt="You are a researcher.",
         name="researcher",
-        autonomous=True,
-        role="researcher",
+        options=WorkerNodeOptions(autonomous=True, role="researcher"),
     )
 
     result = await node(_make_state())
@@ -184,8 +183,7 @@ async def test_an_unproven_lane_adds_no_web_capability_text(
         model=_model(tmp_path, provider="claude", session_prompt=prompt_file),
         system_prompt=persona,
         name=agent_id,
-        autonomous=True,
-        role=role,
+        options=WorkerNodeOptions(autonomous=True, role=role),
     )
 
     await node(_make_state())
@@ -231,8 +229,7 @@ async def test_a_shipped_capability_bound_reaches_the_model_intact(
         model=_model(tmp_path, provider="claude", session_prompt=prompt_file),
         system_prompt=persona,
         name="vaultspec-researcher",
-        autonomous=True,
-        role="researcher",
+        options=WorkerNodeOptions(autonomous=True, role="researcher"),
     )
 
     await node(_make_state())

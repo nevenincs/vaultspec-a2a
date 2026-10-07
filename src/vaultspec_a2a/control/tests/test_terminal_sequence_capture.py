@@ -30,7 +30,7 @@ from ...streaming import RelayHub, RunSequenceAllocator
 from ...testing import seed_completed_authority
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
-from ..event_handlers import _handle_terminal_event
+from ..event_handlers import RelayServices, _handle_terminal_event
 from ..thread_state_service import capture_thread_state
 
 if TYPE_CHECKING:
@@ -107,9 +107,11 @@ async def test_settle_records_the_number_the_allocator_issued(
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
-        aggregator=aggregator,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
+        services=RelayServices(
+            aggregator=aggregator,
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+        ),
     )
 
     async with session_factory() as session:
@@ -140,9 +142,11 @@ async def test_a_reconnecting_client_reads_the_true_cursor_after_settle(
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
-        aggregator=aggregator,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
+        services=RelayServices(
+            aggregator=aggregator,
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+        ),
     )
 
     async with session_factory() as db:
@@ -236,9 +240,11 @@ async def test_a_run_no_allocator_numbers_settles_without_a_cursor(
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
-        aggregator=aggregator,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
+        services=RelayServices(
+            aggregator=aggregator,
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+        ),
     )
 
     async with session_factory() as session:

@@ -62,6 +62,7 @@ from .nodes.phase_gate import (
     revision_granted,
 )
 from .nodes.worker import (
+    WorkerNodeOptions,
     compose_worker_turn_model,
     create_worker_node,
     worker_turn_preamble,
@@ -469,14 +470,16 @@ def _compile_research_adr(
             roles[role].model,
             roles[role].prompt,
             name=name,
-            autonomous=autonomous,
-            workspace_root=workspace_root,
-            role=role,
-            harness_mcp_servers=harness_mcp_servers,
-            cost_port=options.get("cost_port"),
-            runtime_identity_port=options.get("runtime_identity_port"),
-            feedback_reader=feedback,
-            joins_research_findings=joins_research_findings,
+            options=WorkerNodeOptions(
+                autonomous=autonomous,
+                workspace_root=workspace_root,
+                role=role,
+                harness_mcp_servers=harness_mcp_servers,
+                cost_port=options.get("cost_port"),
+                runtime_identity_port=options.get("runtime_identity_port"),
+                feedback_reader=feedback,
+                joins_research_findings=joins_research_findings,
+            ),
         )
 
     # Every branch runs on the researcher's lane, so the prompt composed against

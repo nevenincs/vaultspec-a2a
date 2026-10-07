@@ -57,7 +57,7 @@ from ...authoring import (
 )
 from ...control._verdict_subscriber_config import VerdictSubscriberConfig
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.event_handlers import relay_event
+from ...control.event_handlers import RelayServices, relay_event
 from ...control.execution_authority import resolve_execution_authority
 from ...control.verdict_subscriber import VerdictSubscriber
 from ...database import (
@@ -686,8 +686,9 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
         await relay_event(
             thread_id,
             receipt,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                session_factory=session_factory, checkpointer=checkpointer
+            ),
         )
 
         async with session_factory() as db:
@@ -790,8 +791,9 @@ async def _run_clobbered_reconcile(
         await relay_event(
             seed.thread_id,
             receipt,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                session_factory=session_factory, checkpointer=checkpointer
+            ),
         )
         async with session_factory() as db:
             settled = await get_control_action_by_idempotency_key(

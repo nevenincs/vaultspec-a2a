@@ -49,7 +49,10 @@ from ..thread.enums import (
 )
 from ..thread.snapshots import ThreadStateData, project_checkpoint_tuple
 from ..utils.coercion import coerce_string_list, decode_json_object
-from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
+from .execution_authority import (
+    ExecutionAuthorityError,
+    resolve_execution_authority_from_fields,
+)
 from .graph_definition import read_accepted_graph_definition
 
 if TYPE_CHECKING:
@@ -193,13 +196,11 @@ class SemanticContext:
 class MetadataView:
     """A thread's stored metadata, decoded once for every reader of its capture.
 
-    ``text`` is the blob as stored, for the readers whose own verbs take stored
-    text. ``fields`` is the JSON object it holds, for the readers of one keyed
+    ``fields`` is the JSON object the blob holds, for the readers of one keyed
     entry, and ``provenance`` is the metadata model those fields satisfy. Both are
     ``None`` when the blob is absent or does not decode to what they name.
     """
 
-    text: str | None
     fields: dict[str, object] | None
     provenance: ThreadMetadata | None
 
@@ -281,7 +282,7 @@ def _view_metadata(thread_id: str, text: str | None) -> MetadataView:
                 "reporting it absent",
                 thread_id,
             )
-    return MetadataView(text=text, fields=fields, provenance=provenance)
+    return MetadataView(fields=fields, provenance=provenance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -434,9 +435,10 @@ async def capture_thread_state(
     snapshot = await enrich_snapshot_from_durable_state(
         db, thread=thread, snapshot=snapshot
     )
+    metadata = _view_metadata(thread_id, thread.thread_metadata)
     try:
-        expected_assignment_digest = resolve_execution_authority(
-            thread.thread_metadata
+        expected_assignment_digest = resolve_execution_authority_from_fields(
+            metadata.fields
         ).model_assignment_digest
     except ExecutionAuthorityError:
         expected_assignment_digest = None
@@ -491,7 +493,7 @@ async def capture_thread_state(
         snapshot=finalized_snapshot,
         checkpoint_projection=captured_projection,
         team_preset=thread.team_preset,
-        metadata=_view_metadata(thread_id, thread.thread_metadata),
+        metadata=metadata,
         proposal_ids=proposal_ids,
         changeset_ids=changeset_ids,
         transcript=classify_transcript_availability(

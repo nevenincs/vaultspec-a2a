@@ -10,7 +10,6 @@ responsible for translating errors into HTTP or WebSocket responses.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import dataclass
@@ -30,11 +29,11 @@ from ..ipc.schemas import (
     DispatchRequest,
     DispatchResponse,
 )
-from ..thread.dispatch_policy import FailureType
+from ..thread.dispatch_policy import FailureType, resolve_failure_type
 from ..thread.enums import ThreadStatus
-from ..utils.coercion import coerce_object_mapping
+from ..utils.coercion import coerce_object_mapping, decode_json_object
 from ._thread_metadata import workspace_root_from_metadata
-from .accepted_input import AcceptedActionInput, restore_accepted_dispatch
+from .accepted_input import read_accepted_input, restore_accepted_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
 from .terminal_settlement import TerminalEvidence, lock_terminal_run, settle_terminal
@@ -178,11 +177,10 @@ async def dispatch_to_worker(
         WorkerDispatchRejectedError: Worker returned non-2xx (e.g. 500/503).
         WorkerUnreachableError: httpx transport error (caller decides policy).
     """
-    if dispatch.requires_graph_receipt:
-        try:
-            dispatch.require_graph_action_receipt()
-        except ValueError as exc:
-            raise IncompatibleDispatchAuthorityError(str(exc)) from exc
+    try:
+        dispatch.graph_receipt_if_required()
+    except ValueError as exc:
+        raise IncompatibleDispatchAuthorityError(str(exc)) from exc
     await spawner.ensure_worker()
 
     # Cancellation bypasses admission but not classification: it must reach a
@@ -356,18 +354,6 @@ def _log_redispatch_failure_ladder(
         logger.warning(message, *args)
 
 
-def _reconciling_metadata(thread: ThreadModel) -> dict[str, object]:
-    """Read one thread's optional metadata without losing the rest of the sweep."""
-    if not thread.thread_metadata:
-        return {}
-    try:
-        raw_metadata: object = json.loads(thread.thread_metadata)
-    except json.JSONDecodeError:
-        logger.debug("Failed to parse thread metadata for %s", thread.id, exc_info=True)
-        return {}
-    return coerce_object_mapping(raw_metadata) or {}
-
-
 async def _fail_reconciling_run(
     db: AsyncSession,
     thread: ThreadModel,
@@ -494,7 +480,7 @@ async def _restore_reconciling_dispatch(
         logger.warning("No accepted action for reconciling thread %s", thread.id)
         return None
     try:
-        accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+        accepted = read_accepted_input(action)
         dispatch = restore_accepted_dispatch(
             accepted, dispatch_id=authority.action_receipt_id
         )
@@ -567,7 +553,7 @@ async def redispatch_reconciling_threads(
             failure_counts: dict[str, int] = {}
             failure_thread_ids: dict[str, list[str]] = {}
             for thread in threads:
-                meta = _reconciling_metadata(thread)
+                meta = decode_json_object(thread.thread_metadata) or {}
                 # Reuse the frozen effective assignment on
                 # restart so the run recompiles the exact launched models, never
                 # a re-resolution against possibly-drifted config.
@@ -734,9 +720,4 @@ def _rejected_failure_type(exc: WorkerDispatchRejectedError) -> FailureType:
     duplicate delivery indistinguishable from a broken request, and the recovery
     coordinator then released work that was in fact being done.
     """
-    if exc.condition is None:
-        return FailureType.REJECTED
-    try:
-        return FailureType(exc.condition)
-    except ValueError:
-        return FailureType.REJECTED
+    return resolve_failure_type(exc.condition) or FailureType.REJECTED

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -23,7 +22,7 @@ if TYPE_CHECKING:
     from sqlalchemy.sql import Select
     from sqlalchemy.sql.elements import ColumnElement
 
-from ..thread import RunWriteAuthority, ThreadWriteExpectation
+from ..thread import RunWriteAuthority, ThreadWriteExpectation, sha256_hex
 from ..thread.constants import (
     MAX_FEATURE_TAG_LENGTH,
     MAX_WORKSPACE_ROOT_LENGTH,
@@ -41,6 +40,7 @@ from ..thread.enums import (
 from ..thread.errors import NicknameConflictError
 from ..thread.lifecycle_guards import can_delete
 from ..thread.transitions import validate_transition
+from ..utils.coercion import decode_json_object
 from ._helpers import (
     _UNSET,
     _coerce,
@@ -208,17 +208,11 @@ def normalize_workspace_identity(value: str | os.PathLike[str]) -> str:
 
 def _discovery_selectors(metadata: str | None) -> tuple[str | None, str | None]:
     """Project bounded discovery selectors once at the metadata write seam."""
-    if not metadata:
+    value = decode_json_object(metadata)
+    if value is None:
         return None, None
-    try:
-        value = json.loads(metadata)
-    except (json.JSONDecodeError, RecursionError, TypeError):
-        return None, None
-    if not isinstance(value, dict):
-        return None, None
-    value_obj = cast("dict[str, object]", value)
-    workspace = value_obj.get("workspace_root")
-    feature = value_obj.get("feature_tag")
+    workspace = value.get("workspace_root")
+    feature = value.get("feature_tag")
     if (
         not isinstance(workspace, str)
         or not os.path.isabs(workspace)
@@ -236,7 +230,7 @@ def _workspace_key(workspace_root: str | None) -> str | None:
     """Return an index-safe identity for an already-canonical workspace path."""
     if workspace_root is None:
         return None
-    return hashlib.sha256(workspace_root.encode("utf-8")).hexdigest()
+    return sha256_hex(workspace_root.encode("utf-8"))
 
 
 class _CreateThreadOptional(TypedDict, total=False):

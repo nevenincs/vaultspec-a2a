@@ -190,6 +190,17 @@ class DispatchRequest(BaseModel):
         """
         return self.action in GRAPH_ACTION_VERB.values()
 
+    def graph_receipt_if_required(self) -> GraphActionReceipt | None:
+        """Return the validated receipt of a graph dispatch; a cancel has none.
+
+        Raises:
+            ValueError: When a graph dispatch carries no accepted definition or
+                no receipt matching it.
+        """
+        if not self.requires_graph_receipt:
+            return None
+        return self.require_graph_action_receipt()
+
     def require_graph_action_receipt(self) -> GraphActionReceipt:
         """Require a matching current receipt before graph execution admission."""
         self.require_graph_definition()

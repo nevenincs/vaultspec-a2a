@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
 
 __all__ = [
     "FailureType",
     "evaluate_dispatch_failure",
+    "resolve_failure_type",
 ]
 
 
@@ -50,38 +50,36 @@ class FailureType(StrEnum):
     DEADLINE_EXCEEDED = "deadline_exceeded"
 
 
-@dataclass(frozen=True, slots=True)
-class FailureAction:
-    """Describes how the caller should react to a dispatch failure."""
-
-    should_mark_failed: bool
-    """Whether the thread should transition to FAILED status."""
-
-
-_POLICY: dict[FailureType, FailureAction] = {
+# Whether a dispatch failure of each type moves the run to FAILED. A type absent
+# from the table does, so a new failure fails the run until it is judged.
+_MARKS_RUN_FAILED: dict[FailureType, bool] = {
     # An open circuit, a saturated worker and an unreachable one are all
     # conditions that pass. The accepted work stays alive for the retry the
     # recovery coordinator already scheduled, so none of them may move the run
     # to a failed status: doing so quarantines a run that nothing is wrong with
     # and strands work that was going to be delivered.
-    FailureType.CIRCUIT_OPEN: FailureAction(should_mark_failed=False),
-    FailureType.AT_CAPACITY: FailureAction(should_mark_failed=False),
-    FailureType.UNREACHABLE: FailureAction(should_mark_failed=False),
-    FailureType.REJECTED: FailureAction(should_mark_failed=True),
+    FailureType.CIRCUIT_OPEN: False,
+    FailureType.AT_CAPACITY: False,
+    FailureType.UNREACHABLE: False,
+    FailureType.REJECTED: True,
     # The worker already holds this run's slot, so the dispatch was a duplicate
     # of work that IS being done. Failing the run here would kill the very turn
     # the refusal is reporting as alive.
-    FailureType.RUN_BUSY: FailureAction(should_mark_failed=False),
+    FailureType.RUN_BUSY: False,
 }
 
-_DEFAULT = FailureAction(should_mark_failed=True)
 
-_NO_FAILURE = FailureAction(should_mark_failed=False)
+def resolve_failure_type(value: str | None) -> FailureType | None:
+    """Return the failure type *value* names, or ``None`` when it names none."""
+    try:
+        return FailureType(value)
+    except ValueError:
+        return None
 
 
 def evaluate_dispatch_failure(
     failure_type: str | None,
-) -> tuple[FailureAction, FailureType | None]:
+) -> tuple[bool, FailureType | None]:
     """Classify a dispatch outcome and resolve its typed failure together.
 
     The leased delivery sequence is the one consumer: it reports the typed
@@ -93,7 +91,7 @@ def evaluate_dispatch_failure(
             success.
 
     Returns:
-        The :class:`FailureAction` the failure calls for and the
+        Whether the failure moves the run to FAILED, and the
         :class:`FailureType` the string maps to (``None`` when there is no
         failure type).
 
@@ -101,6 +99,8 @@ def evaluate_dispatch_failure(
         ValueError: If *failure_type* names no :class:`FailureType`.
     """
     if not failure_type:
-        return _NO_FAILURE, None
-    typed = FailureType(failure_type)
-    return _POLICY.get(typed, _DEFAULT), typed
+        return False, None
+    typed = resolve_failure_type(failure_type)
+    if typed is None:
+        raise ValueError(f"{failure_type!r} is not a valid FailureType")
+    return _MARKS_RUN_FAILED.get(typed, True), typed

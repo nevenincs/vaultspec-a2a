@@ -19,7 +19,7 @@ from langchain_core.messages import HumanMessage
 
 from ....providers._acp_authoring import authoring_allowed_tool_names
 from ....testing import simulator_command
-from ...nodes.worker import create_worker_node
+from ...nodes.worker import WorkerNodeOptions, create_worker_node
 from ._native_read_floor import scoped_read_floor
 from .test_worker_authoring_wiring import binding, stdio_provider
 
@@ -74,8 +74,7 @@ async def test_document_role_autonomous_permits_native_read_builtins(
         model=_model(record_file, tmp_path),
         system_prompt="You are a researcher.",
         name="researcher",
-        autonomous=True,
-        role="researcher",
+        options=WorkerNodeOptions(autonomous=True, role="researcher"),
     )
 
     result = await node(_make_state())
@@ -101,10 +100,12 @@ async def test_native_read_tools_union_with_authoring_allowlist(
         model=_model(record_file, tmp_path),
         system_prompt="You are a researcher.",
         name="researcher",
-        autonomous=True,
-        role="researcher",
-        authoring_binding_provider=stdio_provider(
-            thread_id="test-thread-native-read", agent_id="researcher"
+        options=WorkerNodeOptions(
+            autonomous=True,
+            role="researcher",
+            authoring_binding_provider=stdio_provider(
+                thread_id="test-thread-native-read", agent_id="researcher"
+            ),
         ),
     )
 
@@ -128,8 +129,7 @@ async def test_non_document_role_gets_no_native_read_builtins(
         model=_model(record_file, tmp_path),
         system_prompt="You are a coder.",
         name="coder",
-        autonomous=True,
-        role=None,
+        options=WorkerNodeOptions(autonomous=True, role=None),
     )
 
     await node(_make_state())
@@ -148,8 +148,7 @@ async def test_human_in_loop_document_role_gets_no_allowlist(
         model=_model(record_file, tmp_path),
         system_prompt="You are a researcher.",
         name="researcher",
-        autonomous=False,
-        role="researcher",
+        options=WorkerNodeOptions(autonomous=False, role="researcher"),
     )
 
     await node(_make_state())

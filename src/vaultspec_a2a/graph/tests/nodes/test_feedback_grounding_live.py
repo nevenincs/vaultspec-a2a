@@ -28,7 +28,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import PrivateAttr
 
 from ....authoring import FeedbackContextReader
-from ....graph.nodes.worker import create_worker_node
+from ....graph.nodes.worker import WorkerNodeOptions, create_worker_node
 from ....thread.actor_tokens import ActorTokenBundle
 from ....utils import bearer_header
 from ....worker.token_store import RunTokenStore
@@ -165,8 +165,7 @@ async def test_synthesist_node_grounds_on_a_real_feedback_batch(
         model=recording,
         system_prompt="You are the synthesist.",
         name="synthesis",
-        role="synthesist",
-        feedback_reader=reader,
+        options=WorkerNodeOptions(role="synthesist", feedback_reader=reader),
     )
 
     state: TeamState = {
@@ -207,8 +206,7 @@ async def test_synthesist_node_ungrounded_without_a_batch(
         model=recording,
         system_prompt="You are the synthesist.",
         name="synthesis",
-        role="synthesist",
-        feedback_reader=reader,
+        options=WorkerNodeOptions(role="synthesist", feedback_reader=reader),
     )
     state: TeamState = {
         "messages": [HumanMessage(content="Draft the research document.")],

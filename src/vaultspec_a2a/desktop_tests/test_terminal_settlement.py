@@ -34,7 +34,11 @@ from typing import TYPE_CHECKING, Any
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from ..control.event_handlers import _handle_terminal_event, _settlement_tasks
+from ..control.event_handlers import (
+    RelayServices,
+    _handle_terminal_event,
+    _settlement_tasks,
+)
 from ..database import get_thread
 from ..desktop.profile import derive_state_paths
 from ..testing import (
@@ -232,8 +236,7 @@ async def _settle_completed_run(app_home: Path, run_id: str) -> None:
             await _handle_terminal_event(
                 run_id,
                 {"event_type": "thread_terminal", "status": "completed"},
-                session_factory=factory,
-                checkpointer=saver,
+                services=RelayServices(session_factory=factory, checkpointer=saver),
             )
             scheduled = _settlement_tasks - prior_tasks
             assert len(scheduled) == 1, "terminal event must schedule settlement"

@@ -24,7 +24,11 @@ from ..thread.action_receipts import (
 )
 from ..thread.enums import NON_ACTIVE_STATUSES, ControlActionType
 from ..utils.coercion import decode_json_object
-from .accepted_input import AcceptedActionInput, dispatch_matches_accepted_input
+from .accepted_input import (
+    AcceptedActionInput,
+    dispatch_matches_accepted_input,
+    read_accepted_input,
+)
 
 if TYPE_CHECKING:
     from ..database import ControlActionModel
@@ -47,7 +51,7 @@ def validate_current_graph_receipt(
         return None
     try:
         receipt = GraphActionReceipt.model_validate_json(action.graph_receipt_json)
-        accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+        accepted = read_accepted_input(action)
         if accepted.dispatch["thread_id"] != thread.id or accepted.dispatch[
             "action"
         ] != GRAPH_ACTION_VERB.get(receipt.action_type):
@@ -166,7 +170,7 @@ def _matching_dispatch_receipt(
 ) -> GraphActionReceipt | None:
     if receipt is None or action is None or action.payload_json is None:
         return receipt
-    accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+    accepted = read_accepted_input(action)
     return receipt if dispatch_matches_accepted_input(dispatch, accepted) else None
 
 

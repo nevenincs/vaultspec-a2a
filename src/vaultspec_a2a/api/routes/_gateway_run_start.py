@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 from fastapi import (
+    APIRouter,
     Depends,
     HTTPException,
     Request,
@@ -17,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata
+from ...control._thread_metadata import RunLeaseBinding, stored_run_lease_binding
 from ...control._worker_health import worker_liveness
 from ...control.admission import AdmissionBroker, AdmissionReadiness
 from ...control.execution_authority import read_frozen_team_selection
@@ -55,6 +57,7 @@ from ...thread.enums import (
     ThreadStatus,
 )
 from ...thread.errors import NicknameConflictError
+from ...utils.coercion import decode_json_object
 from .._dispatch_refusals import (
     DISPATCH_FAILURES,
     refusal_responses,
@@ -86,7 +89,6 @@ from .gateway import (
     _persist_lease,
     _persist_request_digest,
     _persist_team_selection,
-    _persisted_lease_binding,
     _prepare_workspace_root,
     _probe_admission_readiness,
     _probe_harness,
@@ -96,10 +98,9 @@ from .gateway import (
     _validate_and_freeze_selection_or_refuse,
     admission_broker,
     admission_gate,
-    router,
 )
 
-__all__ = ["_RunLeaseBinding"]
+__all__ = ["register"]
 
 logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
 
@@ -146,40 +147,6 @@ def _log_readiness_refusal(
 # ---------------------------------------------------------------------------
 
 
-@router.post(
-    "/runs",
-    response_model=(
-        RunStartResponse | RunPrepareResponse | RunCommitResponse | RunReleaseResponse
-    ),
-    status_code=201,
-    responses=refusal_responses(
-        DISPATCH_FAILURES,
-        {
-            404: {
-                "description": (
-                    "The run was gone by the time its first dispatch settled."
-                ),
-            },
-            409: {
-                "description": (
-                    "The run was not started as asked: its id already belongs to "
-                    "a different request, its nickname is taken, its predecessor "
-                    "cannot be continued, the commit does not match its prepared "
-                    "reservation, or the worker refused the first dispatch with "
-                    "the typed code every run action shares."
-                ),
-            },
-            503: {
-                "description": (
-                    "Gateway service token is not configured, the gateway is "
-                    "draining or out of admission capacity, execution or the "
-                    "provider catalog is not ready, or the worker is saturated "
-                    "or shut out by the failure breaker; retry later."
-                ),
-            },
-        },
-    ),
-)
 async def run_start_endpoint(
     request: Request,
     body: RunStartRequest,
@@ -225,13 +192,6 @@ class _RunDispatchResult:
     nickname: str | None
     frozen: FrozenTeamSelection | None
     replayed: bool
-
-
-@dataclass(frozen=True, slots=True)
-class _RunLeaseBinding:
-    lease_id: str
-    reservation_id: str
-    commit_digest: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,7 +258,9 @@ async def _require_settled_predecessor(
     }:
         raise HTTPException(status_code=409, detail="predecessor run is not settled")
     try:
-        metadata = ThreadMetadata.model_validate_json(predecessor.thread_metadata or "")
+        metadata = ThreadMetadata.model_validate(
+            decode_json_object(predecessor.thread_metadata)
+        )
         predecessor_root = require_admitted_workspace_root(metadata.workspace_root)
     except ValueError as exc:
         raise HTTPException(
@@ -703,7 +665,7 @@ async def _commit_replay(
     canonical_body = _canonical_replay_body(existing.thread_metadata, body)
     commit_digest = request_digest(canonical_body, prepared=False)
     existing_modern = read_frozen_team_selection(existing.thread_metadata)
-    binding = _persisted_lease_binding(existing.thread_metadata)
+    binding = stored_run_lease_binding(existing.thread_metadata)
     if binding is None:
         raise HTTPException(
             status_code=409,
@@ -760,7 +722,7 @@ async def _require_commit_execution_ready(
 async def _classify_failed_commit(
     db: AsyncSession,
     run_id: str,
-    binding: _RunLeaseBinding,
+    binding: RunLeaseBinding,
     broker: AdmissionBroker,
 ) -> None:
     # A failed response may follow a durable commit. Reopen a reservation only
@@ -776,7 +738,7 @@ async def _classify_failed_commit(
         )
         return
     persisted_binding = (
-        _persisted_lease_binding(persisted.thread_metadata)
+        stored_run_lease_binding(persisted.thread_metadata)
         if persisted is not None
         else None
     )
@@ -845,7 +807,7 @@ async def _run_commit_locked(
     )
     if not outcome.committed or outcome.lease_id is None:
         raise HTTPException(status_code=409, detail=outcome.reason)
-    binding = _RunLeaseBinding(
+    binding = RunLeaseBinding(
         lease_id=outcome.lease_id,
         reservation_id=reservation_id,
         commit_digest=request_digest(prepared.canonical_body, prepared=False),
@@ -893,3 +855,44 @@ async def _run_release(request: Request, body: RunStartRequest) -> RunReleaseRes
             binding_digest=_release_binding_digest(body),
         )
     return RunReleaseResponse(reservation_id=reservation_id, released=released)
+
+
+def register(router: APIRouter) -> None:
+    """Mount the run-start verb."""
+    router.post(
+        "/runs",
+        response_model=(
+            RunStartResponse
+            | RunPrepareResponse
+            | RunCommitResponse
+            | RunReleaseResponse
+        ),
+        status_code=201,
+        responses=refusal_responses(
+            DISPATCH_FAILURES,
+            {
+                404: {
+                    "description": (
+                        "The run was gone by the time its first dispatch settled."
+                    ),
+                },
+                409: {
+                    "description": (
+                        "The run was not started as asked: its id already belongs to "
+                        "a different request, its nickname is taken, its predecessor "
+                        "cannot be continued, the commit does not match its prepared "
+                        "reservation, or the worker refused the first dispatch with "
+                        "the typed code every run action shares."
+                    ),
+                },
+                503: {
+                    "description": (
+                        "Gateway service token is not configured, the gateway is "
+                        "draining or out of admission capacity, execution or the "
+                        "provider catalog is not ready, or the worker is saturated "
+                        "or shut out by the failure breaker; retry later."
+                    ),
+                },
+            },
+        ),
+    )(run_start_endpoint)

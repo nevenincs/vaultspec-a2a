@@ -5,6 +5,7 @@ from dataclasses import asdict
 from typing import Annotated, Any, Literal
 
 from fastapi import (
+    APIRouter,
     Depends,
     Header,
     HTTPException,
@@ -16,8 +17,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...control._thread_metadata import run_lease_binding, run_lease_id
 from ...control._worker_health import worker_liveness
-from ...control.execution_authority import read_frozen_team_selection
+from ...control.execution_authority import read_frozen_team_selection_from_fields
 from ...control.run_discovery_service import discover_active_runs
 from ...control.team_service import build_team_status
 from ...control.thread_listing import list_threads_service
@@ -81,11 +83,8 @@ from ..thread_stream import (
 )
 from ..workspace import require_existing_workspace_root
 from .gateway import (
-    _decoded_lease_binding,
-    _decoded_lease_id,
     _modern_frozen_disclosure,
     _optional_enum,
-    router,
 )
 
 logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
@@ -112,31 +111,13 @@ class _ActiveRunsOptions(BaseModel):
     offset: int = Query(default=0, ge=0)
 
 
-__all__ = ["_active_role"]
+__all__ = ["_active_role", "register"]
 
 # ---------------------------------------------------------------------------
 # active-run discovery
 # ---------------------------------------------------------------------------
 
 
-@router.get(
-    "/runs",
-    # Serialization is left to the two explicit returns below: a single response
-    # model - even a union one - would re-serialize the discovery reading through
-    # a shape it does not own, and that response is certified byte for byte. The
-    # ``responses`` entry restores what turning the model off would otherwise
-    # cost: the documented 200 schema a generated client reads.
-    response_model=None,
-    responses={
-        200: {
-            "model": ActiveRunsResponse | RunSummariesResponse,
-            "description": (
-                "The discovery reading for ``state=active`` and the wider "
-                "history reading for ``state=all``."
-            ),
-        }
-    },
-)
 async def active_runs_endpoint(
     request: Request,
     options: Annotated[_ActiveRunsOptions, Query()],
@@ -251,7 +232,6 @@ def _active_role(next_nodes: list[str], agents: list[Any]) -> str | None:
     return None
 
 
-@router.get("/runs/{run_id}", response_model=RunStatusResponse)
 async def run_status_endpoint(
     run_id: PathSafeRunId,
     request: Request,
@@ -273,9 +253,9 @@ async def run_status_endpoint(
         next_nodes=snapshot.next_nodes,
         repair_status=snapshot.repair_status,
     )
-    modern_frozen = read_frozen_team_selection(capture.metadata.text)
+    modern_frozen = read_frozen_team_selection_from_fields(capture.metadata.fields)
     provenance = capture.metadata.provenance
-    lease_binding = _decoded_lease_binding(capture.metadata.fields)
+    lease_binding = run_lease_binding(capture.metadata.fields)
 
     return RunStatusResponse(
         run_id=snapshot.thread_id,
@@ -332,7 +312,7 @@ async def run_status_endpoint(
         # unreadable - recorded for nobody.
         repair_reason=snapshot.repair_reason,
         frozen_assignment=_modern_frozen_disclosure(modern_frozen),
-        lease_id=_decoded_lease_id(capture.metadata.fields),
+        lease_id=run_lease_id(capture.metadata.fields),
         reservation_id=(
             lease_binding.reservation_id if lease_binding is not None else None
         ),
@@ -357,7 +337,6 @@ async def run_status_endpoint(
 MAX_RESUME_CURSOR_CHARS = 160
 
 
-@router.get("/runs/{run_id}/stream")
 async def run_stream_endpoint(
     run_id: PathSafeRunId,
     request: Request,
@@ -436,7 +415,6 @@ _TRANSCRIPT_FAULTS: frozenset[TranscriptAvailability] = frozenset(
 )
 
 
-@router.get("/runs/{run_id}/history", response_model=RunHistoryResponse)
 async def run_history_endpoint(
     run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
@@ -517,7 +495,6 @@ async def run_history_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/runs/{run_id}/archive", response_model=RunArchiveResponse)
 async def run_archive_endpoint(
     run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
@@ -542,7 +519,6 @@ async def run_archive_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/team/status", response_model=TeamStatusV1Response)
 async def team_status_endpoint(
     request: Request,
     aggregator: RelayHub = Depends(get_aggregator),
@@ -590,24 +566,6 @@ async def team_status_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.delete(
-    "/runs/{run_id}",
-    status_code=204,
-    response_model=None,
-    responses={
-        200: {
-            "model": RunDeleteResponse,
-            "description": (
-                "Deleted, but cleanup was abandoned over permanently "
-                "unremovable state; the body names the kinds left behind."
-            ),
-        },
-        204: {"description": "Deleted; every store was cleaned."},
-        404: {"description": "No such run."},
-        409: {"description": "The run's lifecycle state refuses deletion."},
-        503: {"description": "Cleanup is unfinished but resumable; retry."},
-    },
-)
 async def run_delete_endpoint(
     run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
@@ -649,3 +607,54 @@ async def run_delete_endpoint(
         )
         return JSONResponse(status_code=200, content=body.model_dump(mode="json"))
     return Response(status_code=204)
+
+
+def register(router: APIRouter) -> None:
+    """Mount the run discovery, state, history, and lifecycle read verbs."""
+    router.get(
+        "/runs",
+        # Serialization is left to the two explicit returns below: a single response
+        # model - even a union one - would re-serialize the discovery reading through
+        # a shape it does not own, and that response is certified byte for byte. The
+        # ``responses`` entry restores what turning the model off would otherwise
+        # cost: the documented 200 schema a generated client reads.
+        response_model=None,
+        responses={
+            200: {
+                "model": ActiveRunsResponse | RunSummariesResponse,
+                "description": (
+                    "The discovery reading for ``state=active`` and the wider "
+                    "history reading for ``state=all``."
+                ),
+            }
+        },
+    )(active_runs_endpoint)
+    router.get("/runs/{run_id}", response_model=RunStatusResponse)(run_status_endpoint)
+    router.get("/runs/{run_id}/stream")(run_stream_endpoint)
+    router.get("/runs/{run_id}/history", response_model=RunHistoryResponse)(
+        run_history_endpoint
+    )
+    router.post("/runs/{run_id}/archive", response_model=RunArchiveResponse)(
+        run_archive_endpoint
+    )
+    router.get("/team/status", response_model=TeamStatusV1Response)(
+        team_status_endpoint
+    )
+    router.delete(
+        "/runs/{run_id}",
+        status_code=204,
+        response_model=None,
+        responses={
+            200: {
+                "model": RunDeleteResponse,
+                "description": (
+                    "Deleted, but cleanup was abandoned over permanently "
+                    "unremovable state; the body names the kinds left behind."
+                ),
+            },
+            204: {"description": "Deleted; every store was cleaned."},
+            404: {"description": "No such run."},
+            409: {"description": "The run's lifecycle state refuses deletion."},
+            503: {"description": "Cleanup is unfinished but resumable; retry."},
+        },
+    )(run_delete_endpoint)

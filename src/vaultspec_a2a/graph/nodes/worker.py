@@ -62,6 +62,7 @@ _logger = logging.getLogger(__name__)
 
 
 __all__ = [
+    "WorkerNodeOptions",
     "compose_worker_turn_model",
     "create_worker_node",
     "render_research_findings",
@@ -766,117 +767,81 @@ def compose_worker_turn_model(
     )
 
 
-class _WorkerNodeOptions(TypedDict, total=False):
-    autonomous: bool
-    workspace_root: Path | None
-    authoring_binding_provider: AuthoringBindingProvider | None
-    role: str | None
-    phase: str | None
-    harness_mcp_servers: list[str] | None
-    feedback_reader: FeedbackContextReader | None
-    cost_port: CostPort | None
-    context_mounter: ContextMounter | None
-    joins_research_findings: bool
-    runtime_identity_port: RuntimeIdentityPort | None
+@dataclass(frozen=True, slots=True, kw_only=True)
+class WorkerNodeOptions:
+    """How one worker node is wired beyond its model, prompt and name.
 
+    autonomous:        When True, skip permission_callback wiring (headless).
+    workspace_root:    Optional workspace root for RuleManager scoping.
+    role:              Optional role id that scopes the worker to the rules opted
+                       in to that role; a worker with no role keeps the whole
+                       corpus.
+    feedback_reader:   Optional reader of the engine feedback batch a revision
+                       run names, grounding the worker in that batch.
+    cost_port:        Optional database-backed token-accounting port; when
+                       present, each turn that reports usage persists one
+                       ``cost_tracking`` row for the running thread.
+    runtime_identity_port: Optional write-once runtime evidence port,
+                       forwarded for provider initialization recording.
+    authoring_binding_provider: Optional per-run builder of the engine's
+                       bridged authoring binding; when present, each invocation
+                       resolves this role's binding for the running thread and,
+                       if the model exposes an ACP MCP surface, the spawned CLI
+                       session advertises the authoring MCP server so the agent
+                       sees the propose/read tools and no vault-write path. The
+                       binding is built per invoke (never closed over) so the
+                       shared compiled graph carries no run-scoped tokens.
+    phase:             Optional pipeline phase this worker's role belongs to,
+                       as the compiler maps it. The worker of the EXEC phase
+                       owns the run's validation errors, so its finished turn
+                       retires them; a worker of any other phase, or one whose
+                       role maps to no phase, leaves them for their owner.
+    harness_mcp_servers: Declared team-harness MCP server names composed into
+                       the ACP session (ADD-only, unioned with any authoring
+                       servers) so the spawned CLI's session/new advertises
+                       them; ignored by non-ACP models.
+    context_mounter:   Optional expander of the phase-scoped vault documents
+                       this worker is grounded in, run at every invocation.
+    joins_research_findings: When True this worker is the join point of a
+                       research fan-out and its prompt carries every branch's
+                       accumulated finding. Off by default: a worker that is
+                       not a join point must not be handed another stage's
+                       evidence.
+    """
 
-class _WorkerNodeSettings(TypedDict):
-    autonomous: bool
-    workspace_root: Path | None
-    authoring_binding_provider: AuthoringBindingProvider | None
-    role: str | None
-    phase: str | None
-    harness_mcp_servers: list[str] | None
-    feedback_reader: FeedbackContextReader | None
-    cost_port: CostPort | None
-    context_mounter: ContextMounter | None
-    joins_research_findings: bool
-    runtime_identity_port: RuntimeIdentityPort | None
-
-
-def _bind_worker_node_settings(
-    args: tuple[object, ...], options: _WorkerNodeOptions
-) -> _WorkerNodeSettings:
-    names = tuple(_WorkerNodeSettings.__annotations__)
-    if len(args) > len(names):
-        raise TypeError("create_worker_node() received too many positional arguments")
-    bound: dict[str, object] = {
-        "autonomous": False,
-        "workspace_root": None,
-        "authoring_binding_provider": None,
-        "role": None,
-        "phase": None,
-        "harness_mcp_servers": None,
-        "feedback_reader": None,
-        "cost_port": None,
-        "context_mounter": None,
-        "joins_research_findings": False,
-        "runtime_identity_port": None,
-    }
-    for index, value in enumerate(args):
-        name = names[index]
-        if name in options:
-            raise TypeError(f"create_worker_node() got multiple values for {name!r}")
-        bound[name] = value
-    unknown = set(options).difference(names)
-    if unknown:
-        raise TypeError(
-            f"create_worker_node() got an unexpected keyword {min(unknown)!r}"
-        )
-    bound.update(options)
-    return cast("_WorkerNodeSettings", bound)
+    autonomous: bool = False
+    workspace_root: Path | None = None
+    authoring_binding_provider: AuthoringBindingProvider | None = None
+    role: str | None = None
+    phase: str | None = None
+    harness_mcp_servers: list[str] | None = None
+    feedback_reader: FeedbackContextReader | None = None
+    cost_port: CostPort | None = None
+    context_mounter: ContextMounter | None = None
+    joins_research_findings: bool = False
+    runtime_identity_port: RuntimeIdentityPort | None = None
 
 
 def create_worker_node(
     model: BaseChatModel,
     system_prompt: str,
     name: str,
-    *args: object,
-    **options: Unpack[_WorkerNodeOptions],
+    options: WorkerNodeOptions | None = None,
 ) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.
 
     Args:
-        model:             The LangChain chat model to use for this node.
-        system_prompt:     The system prompt defining the worker's behaviour.
-        name:              The name of the worker, added to the generated message.
-        autonomous:        When True, skip permission_callback wiring (headless).
-        workspace_root:    Optional workspace root for RuleManager scoping.
-        cost_port:         Optional database-backed token-accounting port; when
-                           present, each turn that reports usage persists one
-                           ``cost_tracking`` row for the running thread.
-        runtime_identity_port: Optional write-once runtime evidence port,
-                           forwarded for provider initialization recording.
-        authoring_binding_provider: Optional per-run builder of the engine's
-                           bridged authoring binding; when present, each invocation
-                           resolves this role's binding for the running thread and,
-                           if the model exposes an ACP MCP surface, the spawned CLI
-                           session advertises the authoring MCP server so the agent
-                           sees the propose/read tools and no vault-write path. The
-                           binding is built per invoke (never closed over) so the
-                           shared compiled graph carries no run-scoped tokens.
-        phase:             Optional pipeline phase this worker's role belongs to,
-                           as the compiler maps it. The worker of the EXEC phase
-                           owns the run's validation errors, so its finished turn
-                           retires them; a worker of any other phase, or one whose
-                           role maps to no phase, leaves them for their owner.
-        harness_mcp_servers: Declared team-harness MCP server names composed into
-                           the ACP session (ADD-only, unioned with any authoring
-                           servers) so the spawned CLI's session/new advertises
-                           them; ignored by non-ACP models.
-        context_mounter:   Optional expander of the phase-scoped vault documents
-                           this worker is grounded in, run at every invocation.
-        joins_research_findings: When True this worker is the join point of a
-                           research fan-out and its prompt carries every branch's
-                           accumulated finding. Off by default: a worker that is
-                           not a join point must not be handed another stage's
-                           evidence.
+        model:         The LangChain chat model to use for this node.
+        system_prompt: The system prompt defining the worker's behaviour.
+        name:          The name of the worker, added to the generated message.
+        options:       The node's wiring; the defaults run a supervised worker
+                       with no workspace scope, ports or phase.
 
     Returns:
         An async function that conforms to the LangGraph node signature.
     """
 
-    settings = _bind_worker_node_settings(args, options)
+    settings = options or WorkerNodeOptions()
 
     async def worker_node(
         state: TeamState,
@@ -891,15 +856,15 @@ def create_worker_node(
         # interrupts happened to fall in.
         permission_answers = recorded_permission_answers(state)
         feedback_grounding = await _feedback_for_state(
-            state, thread_id, settings["feedback_reader"]
+            state, thread_id, settings.feedback_reader
         )
         # Expanded per invocation, never carried in state: a resumed or retried
         # attempt re-derives it rather than finding it absent or stale.
-        mounter = settings["context_mounter"]
+        mounter = settings.context_mounter
         mounted_context = await mounter(state) if mounter is not None else None
         research_findings = (
             render_research_findings(state)
-            if settings["joins_research_findings"]
+            if settings.joins_research_findings
             else None
         )
 
@@ -910,8 +875,8 @@ def create_worker_node(
                 _build_worker_messages,
                 state=state,
                 system_prompt=system_prompt,
-                workspace_root=settings["workspace_root"],
-                role=settings["role"],
+                workspace_root=settings.workspace_root,
+                role=settings.role,
                 grounding=_WorkerGrounding(
                     feedback=feedback_grounding,
                     mounted_context=mounted_context,
@@ -925,17 +890,17 @@ def create_worker_node(
         # compiled graph holds no run-scoped tokens. Absent provider or coverage
         # yields no binding, leaving the session's MCP surface unchanged.
         authoring_binding = await _authoring_binding_for_state(
-            thread_id, name, settings["authoring_binding_provider"]
+            thread_id, name, settings.authoring_binding_provider
         )
         effective_model = compose_worker_turn_model(
             model,
             answers=permission_answers,
             thread_id=thread_id,
-            autonomous=settings["autonomous"],
-            role=settings["role"],
-            workspace_root=settings["workspace_root"],
-            harness_mcp_servers=settings["harness_mcp_servers"],
-            runtime_identity_port=settings["runtime_identity_port"],
+            autonomous=settings.autonomous,
+            role=settings.role,
+            workspace_root=settings.workspace_root,
+            harness_mcp_servers=settings.harness_mcp_servers,
+            runtime_identity_port=settings.runtime_identity_port,
             authoring_binding=authoring_binding,
         )
 
@@ -946,7 +911,7 @@ def create_worker_node(
             model_label,
             len(messages),
             compacted,
-            settings["autonomous"],
+            settings.autonomous,
         )
         # Scoped to this attempt: a retry constructs a new one, so the flag can
         # never carry a previous attempt's output into the next decision.
@@ -961,7 +926,7 @@ def create_worker_node(
                 failed_usage = _turn_token_usage(exc)
                 if failed_usage is not None:
                     await _record_turn_usage(
-                        cost_port=settings["cost_port"],
+                        cost_port=settings.cost_port,
                         thread_id=thread_id,
                         worker_name=name,
                         model=effective_model,
@@ -983,7 +948,7 @@ def create_worker_node(
         usage = _turn_token_usage(response)
         if usage is not None:
             await _record_turn_usage(
-                cost_port=settings["cost_port"],
+                cost_port=settings.cost_port,
                 thread_id=thread_id,
                 worker_name=name,
                 model=effective_model,
@@ -994,7 +959,7 @@ def create_worker_node(
             worker_name=name,
             approval_status=state.get("approval_status"),
             usage=usage,
-            clear_validation_errors=_clears_validation_errors(state, settings["phase"]),
+            clear_validation_errors=_clears_validation_errors(state, settings.phase),
         )
 
     return accepting_runnable_config(worker_node)

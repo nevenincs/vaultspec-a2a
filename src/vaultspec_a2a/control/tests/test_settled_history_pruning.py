@@ -17,7 +17,11 @@ from ...database.models import ThreadModel
 from ...testing import seed_completed_authority
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus
-from ..event_handlers import CheckpointPruneRegistry, _handle_terminal_event
+from ..event_handlers import (
+    CheckpointPruneRegistry,
+    RelayServices,
+    _handle_terminal_event,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -82,9 +86,11 @@ async def test_a_proven_completion_prunes_the_superseded_checkpoints(
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-        prune_registry=prunes,
+        services=RelayServices(
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+            prune_registry=prunes,
+        ),
     )
     # The prune runs behind the relay rather than inside it; shutdown waits for
     # it the same way before closing the store.
@@ -113,9 +119,11 @@ async def test_an_unproven_completion_keeps_the_whole_history(
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-        prune_registry=prunes,
+        services=RelayServices(
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+            prune_registry=prunes,
+        ),
     )
     await prunes.settle()
 

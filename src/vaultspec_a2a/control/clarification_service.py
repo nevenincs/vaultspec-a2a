@@ -8,7 +8,6 @@ that combines those two authorities and constructs a clarification resume.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -42,7 +41,7 @@ from ..thread.idempotency import (
     CLARIFICATION_RESPONSE_KEY_PREFIX,
     clarification_response_action_key,
 )
-from .accepted_input import AcceptedActionInput, freeze_accepted_input
+from .accepted_input import freeze_accepted_input, read_accepted_input
 from .action_lease import (
     ControlActionClaim,
     ControlActionClaimRequest,
@@ -122,11 +121,11 @@ def _stored_resolution(
     if not action.payload_json or action.request_id is None:
         return None
     try:
-        accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+        accepted = read_accepted_input(action)
         return parse_clarification_resolution(
             accepted.intent, request_id=action.request_id
         )
-    except (json.JSONDecodeError, ValueError):
+    except ValueError:
         return None
 
 

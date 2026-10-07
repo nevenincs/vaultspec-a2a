@@ -47,7 +47,7 @@ from ..accepted_input import freeze_accepted_input
 from ..circuit_breaker import WorkerCircuitBreaker
 from ..dispatch import redispatch_reconciling_threads
 from ..dispatch_receipts import prepare_graph_action_receipt
-from ..event_handlers import _handle_terminal_event
+from ..event_handlers import RelayServices, _handle_terminal_event
 from ._continuation import (
     FIRST_RECEIPT,
     RUN,
@@ -169,7 +169,9 @@ async def test_a_failed_turn_refuses_the_continuation_waiting_on_it(
     continuation = await queue_continuation(busy_run.sessions, busy_run.workspace)
 
     await _handle_terminal_event(
-        RUN, _failure_payload(busy_run), session_factory=busy_run.sessions
+        RUN,
+        _failure_payload(busy_run),
+        services=RelayServices(session_factory=busy_run.sessions),
     )
 
     async with busy_run.sessions() as reader:
@@ -188,7 +190,9 @@ async def test_a_cancelled_run_refuses_the_continuation_waiting_on_it(
     await _take_cancel_authority(busy_run)
 
     await _handle_terminal_event(
-        RUN, _cancellation_payload(), session_factory=busy_run.sessions
+        RUN,
+        _cancellation_payload(),
+        services=RelayServices(session_factory=busy_run.sessions),
     )
 
     async with busy_run.sessions() as reader:
@@ -219,8 +223,10 @@ async def test_a_settlement_that_is_refused_refuses_nothing_in_the_queue(
     await _handle_terminal_event(
         RUN,
         payload,
-        session_factory=busy_run.sessions,
-        publish_terminal=lambda: published.append("terminal"),
+        services=RelayServices(
+            session_factory=busy_run.sessions,
+            publish_terminal=lambda: published.append("terminal"),
+        ),
     )
     assert published == [], "a refused terminal must not close the live stream"
 
@@ -237,8 +243,10 @@ async def test_a_settlement_that_is_refused_refuses_nothing_in_the_queue(
     await _handle_terminal_event(
         RUN,
         _failure_payload(busy_run),
-        session_factory=busy_run.sessions,
-        publish_terminal=lambda: published.append("terminal"),
+        services=RelayServices(
+            session_factory=busy_run.sessions,
+            publish_terminal=lambda: published.append("terminal"),
+        ),
     )
     assert published == ["terminal"]
     await _assert_refused_in_place(busy_run.sessions, continuation)

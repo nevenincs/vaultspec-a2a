@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
+from dataclasses import asdict
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
     from ...team import TeamConfig
 
+from ...control._thread_metadata import RUN_LEASE_METADATA_KEY, RunLeaseBinding
 from ...control.admission import AdmissionBroker, AdmissionReadiness
 from ...control.config import settings
 from ...control.drain import DrainGate
@@ -69,8 +70,7 @@ from ...providers.team_selection import (
     freeze_team_selection,
     normalize_replay_selection,
 )
-from ...thread.constants import RUN_ID_PATTERN
-from ...utils.coercion import coerce_object_mapping, decode_json_object
+from ...utils.coercion import decode_json_object
 from ..auth import authenticate_request
 from ..run_admission import (
     replay_digest_matches,
@@ -103,8 +103,6 @@ __all__ = [
     "_bool_field",
     "_canonical_replay_body",
     "_catalog_records_within_budget",
-    "_decoded_lease_binding",
-    "_decoded_lease_id",
     "_int_field",
     "_load_preset_or_refuse",
     "_modern_frozen_disclosure",
@@ -112,7 +110,6 @@ __all__ = [
     "_persist_lease",
     "_persist_request_digest",
     "_persist_team_selection",
-    "_persisted_lease_binding",
     "_prepare_workspace_root",
     "_probe_admission_readiness",
     "_probe_harness",
@@ -481,11 +478,6 @@ async def _validate_and_freeze_selection_or_refuse(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-# The metadata key binding a run to its non-secret admission lease identity. The
-# gateway writes it at commit and the terminal handler reads it back; both restate
-# this key inline, matching the metadata convention used for frozen selection.
-_RUN_LEASE_METADATA_KEY = "run_lease"
-
 # The canonical digest of the request that created a run. Persisted on every
 # create so a later replay can be compared against what the run was actually
 # started with, rather than against the single field the check previously read.
@@ -557,61 +549,11 @@ def _replay_identity_or_conflict(
         )
 
 
-def _persist_lease(metadata_json: str | None, binding: _RunLeaseBinding) -> str:
+def _persist_lease(metadata_json: str | None, binding: RunLeaseBinding) -> str:
     """Embed the non-secret lease and exact replay binding into run metadata."""
     data = decode_json_object(metadata_json) or {}
-    data[_RUN_LEASE_METADATA_KEY] = {
-        "lease_id": binding.lease_id,
-        "reservation_id": binding.reservation_id,
-        "commit_digest": binding.commit_digest,
-    }
+    data[RUN_LEASE_METADATA_KEY] = asdict(binding)
     return json.dumps(data)
-
-
-def _legacy_lease_id(value: object) -> str | None:
-    if isinstance(value, str) and re.fullmatch(RUN_ID_PATTERN, value):
-        return value
-    return None
-
-
-def _lease_entry(data: dict[str, object] | None) -> dict[str, object] | None:
-    """Return the lease entry of decoded run metadata, or ``None`` without one."""
-    if data is None:
-        return None
-    return coerce_object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
-
-
-def _decoded_lease_id(data: dict[str, object] | None) -> str | None:
-    """Read current or legacy non-secret lease metadata from decoded run metadata."""
-    binding = _decoded_lease_binding(data)
-    if binding is not None:
-        return binding.lease_id
-    lease = _lease_entry(data)
-    if lease is None:
-        return None
-    return _legacy_lease_id(lease.get("lease_id"))
-
-
-def _decoded_lease_binding(data: dict[str, object] | None) -> _RunLeaseBinding | None:
-    """Read the exact staged-commit replay binding from decoded run metadata."""
-    lease = _lease_entry(data)
-    if lease is None:
-        return None
-    lease_id = _string_field(lease, "lease_id")
-    reservation_id = _string_field(lease, "reservation_id")
-    commit_digest = _string_field(lease, "commit_digest")
-    if not lease_id or not reservation_id or not commit_digest:
-        return None
-    return _RunLeaseBinding(
-        lease_id=lease_id,
-        reservation_id=reservation_id,
-        commit_digest=commit_digest,
-    )
-
-
-def _persisted_lease_binding(metadata_json: str | None) -> _RunLeaseBinding | None:
-    """Read the exact staged-commit replay binding from stored run metadata."""
-    return _decoded_lease_binding(decode_json_object(metadata_json))
 
 
 def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> TeamConfig:
@@ -683,15 +625,3 @@ def _modern_frozen_disclosure(
     if frozen is None:
         return None
     return FrozenTeamAssignmentSummary.model_validate(frozen.disclosure())
-
-
-# Import after the shared helpers are defined; decorators register on this router.
-# isort: off
-from ._gateway_run_start import (  # noqa: E402
-    _RunLeaseBinding,
-)
-from . import _gateway_read_endpoints as _read_router_registration  # noqa: E402
-from . import _gateway_action_endpoints as _action_router_registration  # noqa: E402
-
-# isort: on
-del _read_router_registration, _action_router_registration

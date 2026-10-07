@@ -14,7 +14,7 @@ from ....testing import (
     simulator_command,
 )
 from ....tests._write_authority import make_test_write_authority
-from ...nodes.worker import WorkerNode, create_worker_node
+from ...nodes.worker import WorkerNode, WorkerNodeOptions, create_worker_node
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -107,7 +107,9 @@ async def test_acp_worker_records_initialized_subprocess_identity(
         model=model,
         system_prompt="You are terse.",
         name="coder",
-        runtime_identity_port=SqlRuntimeIdentityPort(migrated_session_factory),
+        options=WorkerNodeOptions(
+            runtime_identity_port=SqlRuntimeIdentityPort(migrated_session_factory)
+        ),
     )
     state = _make_state()
     state["thread_id"] = "acp-worker-identity"

@@ -177,12 +177,12 @@ async def deliver_leased(
     )
     if outcome.success:
         return None
-    policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
+    should_mark_failed, failure_type = evaluate_dispatch_failure(outcome.failure_type)
     if failure_type is None:
         raise RuntimeError("failed dispatch carries no failure type")
     return DispatchFailure(
         failure_type=failure_type,
-        should_mark_failed=policy.should_mark_failed,
+        should_mark_failed=should_mark_failed,
         detail=outcome.detail or "Worker dispatch failed",
         retry_after_seconds=outcome.retry_after_seconds,
     )

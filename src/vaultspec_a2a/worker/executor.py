@@ -23,7 +23,7 @@ from ..providers.team_selection import model_assignment_digest
 # same reason: both stop a run that is not over, leaving a resumable
 # checkpoint and an open action for recovery to deliver again. Settling it as
 # FAILED instead wrote a terminal for a run nothing had failed.
-from ..streaming.ingest import INGEST_DRAINED
+from ..streaming.ingest import INGEST_DRAINED, GraphInvocation
 from ..streaming.node_metadata import node_metadata_from_graph
 from ..telemetry import operation_span
 from ..thread import PermissionAnswer
@@ -789,11 +789,13 @@ class Executor(SettlementMixin):
                 req.thread_id,
                 req.agent_id or DEFAULT_SUPERVISOR_ID,
                 run.graph,
-                graph_input,
-                run.config,
+                GraphInvocation(
+                    graph_input=graph_input,
+                    config=run.config,
+                    context=_run_context(req, action=action),
+                    control=self._run_controls.open(req.thread_id),
+                ),
                 on_graph_started=lambda: self._emit_dispatch_application_receipt(req),
-                context=_run_context(req, action=action),
-                control=self._run_controls.open(req.thread_id),
             )
             span.set_attribute("outcome", outcome)
         except asyncio.CancelledError:

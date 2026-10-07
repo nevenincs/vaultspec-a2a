@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Callable, Coroutine
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, ClassVar, TypedDict, Unpack, cast
 from uuid import uuid4
@@ -48,7 +48,11 @@ from .. import RunEventProducer as FacadeProducer
 from .. import aggregator as agg_module
 from .. import subscribers as subscribers_module
 from ..aggregator import RunEventProducer
-from ..ingest import _next_event_or_cancel, summarize_ingest_exception
+from ..ingest import (
+    GraphInvocation,
+    _next_event_or_cancel,
+    summarize_ingest_exception,
+)
 from ..subscribers import RelayHub
 from ..transformer import StreamFrame
 from ..types import SequencedEvent, StreamableGraph, StreamOptions
@@ -104,7 +108,7 @@ def _relayed_chunk(thread_id: str, content: str) -> dict[str, object]:
 
 
 class _IngestOptions(TypedDict):
-    """Typed keyword arguments forwarded to ``RunEventProducer.ingest``."""
+    """Keyword arguments naming one ``RunEventProducer.ingest`` invocation."""
 
     thread_id: str
     agent_id: str
@@ -117,16 +121,13 @@ async def _ingest(
     producer: RunEventProducer,
     **options: Unpack[_IngestOptions],
 ) -> str:
-    """Call ``RunEventProducer.ingest`` through a fully typed seam.
-
-    ``RunEventProducer.ingest`` declares ``graph_input`` against a bare,
-    unparameterized ``Command`` generic, which strict type checking treats as
-    partially unknown at every call site. This wrapper pins the type once so
-    the many call sites below get a resolved return type instead of each
-    repeating the same cast.
-    """
-    typed_ingest = cast("Callable[..., Coroutine[Any, Any, str]]", producer.ingest)
-    return await typed_ingest(**options)
+    """Call ``RunEventProducer.ingest`` with the invocation the keywords name."""
+    return await producer.ingest(
+        options["thread_id"],
+        options["agent_id"],
+        options["graph"],
+        GraphInvocation(graph_input=options["graph_input"], config=options["config"]),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -183,8 +184,9 @@ async def test_cancel_during_post_read_callback_drops_event(
         thread_id,
         "supervisor",
         graph,
-        {},
-        {"configurable": {"thread_id": thread_id}},
+        GraphInvocation(
+            graph_input={}, config={"configurable": {"thread_id": thread_id}}
+        ),
         on_graph_started=cancel_after_read,
     )
     assert outcome == ThreadStatus.CANCELLED

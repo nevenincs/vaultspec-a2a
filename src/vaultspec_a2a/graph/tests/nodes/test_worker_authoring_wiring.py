@@ -31,7 +31,7 @@ from ....thread.actor_tokens import ActorTokenBundle
 from ....worker.authoring_binding import AuthoringBindingProvider
 from ....worker.catalog_store import RunCatalogStore
 from ....worker.token_store import RunTokenStore
-from ...nodes.worker import create_worker_node
+from ...nodes.worker import WorkerNodeOptions, create_worker_node
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -146,8 +146,9 @@ async def test_binding_surfaces_authoring_server_to_real_subprocess(
         model=model,
         system_prompt="You are a coder.",
         name="coder",
-        autonomous=True,
-        authoring_binding_provider=stdio_provider(),
+        options=WorkerNodeOptions(
+            autonomous=True, authoring_binding_provider=stdio_provider()
+        ),
     )
 
     result = await node(_make_state())
@@ -225,8 +226,9 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
         model=model,
         system_prompt="You are a coder.",
         name="coder",
-        autonomous=True,
-        authoring_binding_provider=stdio_provider(),
+        options=WorkerNodeOptions(
+            autonomous=True, authoring_binding_provider=stdio_provider()
+        ),
     )
 
     await node(_make_state())
@@ -289,8 +291,9 @@ async def test_stdio_binding_hoists_actor_scope_without_machine_bearer(
         model=model,
         system_prompt="You are a coder.",
         name="coder",
-        autonomous=True,
-        authoring_binding_provider=stdio_provider(),
+        options=WorkerNodeOptions(
+            autonomous=True, authoring_binding_provider=stdio_provider()
+        ),
     )
 
     await node(_make_state())
@@ -343,7 +346,7 @@ async def test_no_binding_leaves_session_without_mcp_servers(
         model=model,
         system_prompt="You are a coder.",
         name="coder",
-        autonomous=True,
+        options=WorkerNodeOptions(autonomous=True),
     )
 
     result = await node(_make_state())

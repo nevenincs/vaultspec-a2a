@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...testing import request_permission_params
-from .._acp_rpc_handlers import _autonomous_option_id, on_request_permission
+from .._acp_rpc_handlers import on_request_permission
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
 
 if TYPE_CHECKING:
@@ -57,10 +57,16 @@ def _config(
 
 
 async def _outcome(
-    options: list[JsonObject], config: AcpModelConfig, ctx: AcpSessionContext
+    options: list[JsonObject],
+    config: AcpModelConfig,
+    ctx: AcpSessionContext,
+    *,
+    tool_call: JsonObject | None = None,
 ) -> JsonObject:
     """Drive the production handler and return the outcome object it answered with."""
-    params = request_permission_params(ctx.session_id, options=options)
+    params = request_permission_params(
+        ctx.session_id, tool_call=tool_call, options=options
+    )
     response = await on_request_permission(1, params, ctx, config)
     result = response.get("result")
     assert isinstance(result, dict)
@@ -70,9 +76,13 @@ async def _outcome(
 
 
 async def _decide(
-    options: list[JsonObject], config: AcpModelConfig, ctx: AcpSessionContext
+    options: list[JsonObject],
+    config: AcpModelConfig,
+    ctx: AcpSessionContext,
+    *,
+    tool_call: JsonObject | None = None,
 ) -> str:
-    outcome = await _outcome(options, config, ctx)
+    outcome = await _outcome(options, config, ctx, tool_call=tool_call)
     option_id = outcome.get("optionId")
     assert isinstance(option_id, str)
     return option_id
@@ -237,7 +247,10 @@ async def test_a_denial_never_slides_onto_an_approval_on_a_bad_last_option(
     assert outcome == {"outcome": "cancelled"}
 
 
-def test_the_kimi_autonomous_lane_reads_snake_case_options(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_the_kimi_autonomous_lane_reads_snake_case_options(
+    acp_session_context: AcpSessionContext, tmp_path: Path
+) -> None:
     """The Kimi read-only enforcement resolves ids through the same rule."""
     options: list[JsonObject] = [
         {"option_id": "approve", "kind": "allow_once"},
@@ -247,14 +260,20 @@ def test_the_kimi_autonomous_lane_reads_snake_case_options(tmp_path: Path) -> No
     read: JsonObject = {"path": "a.py"}
 
     assert (
-        _autonomous_option_id(
-            "ReadFile: a.py", config, options, args=read, locations=[]
+        await _decide(
+            options,
+            config,
+            acp_session_context,
+            tool_call={"title": "ReadFile: a.py", "rawInput": read},
         )
         == "approve"
     )
     assert (
-        _autonomous_option_id(
-            "WriteFile: a.py", config, options, args=read, locations=[]
+        await _decide(
+            options,
+            config,
+            acp_session_context,
+            tool_call={"title": "WriteFile: a.py", "rawInput": read},
         )
         == "reject"
     )

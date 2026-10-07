@@ -18,22 +18,21 @@ from a typed field rather than from parsing prose, which the ACP lane's
 :mod:`_acp_rpc_handlers` refuses for good reason: a title matched by its leading
 word lets an agent-chosen string canonicalise itself into an approval.
 
-The autonomous rule is the ACP lane's rule, re-expressed for this transport:
-accept EXACTLY the composed surface - the servers and tools this run itself
-declared - and decline everything else, including any approval whose tool cannot
-be named. Blanket approval is not available here.
+The decision itself is the one both lanes make, :func:`._tool_policy.decide`:
+this rung names the call, says which calls the composed surface - the servers and
+tools this run itself declared - covers, and spells the answer as an elicitation
+action. Any approval whose tool cannot be named is declined before it is asked.
+Blanket approval is not available here.
 """
 
 import logging
 from dataclasses import dataclass, field
 from typing import Final
 
-from langgraph.errors import GraphBubbleUp
-
 from ._acp_types import PermissionCallback
-from ._harness_mcp_registry import harness_tool_is_withheld
 from ._json_contract import JsonObject, lenient_json_object
-from ._project_scope import RunProjectScope, foreign_project_argument
+from ._project_scope import RunProjectScope
+from ._tool_policy import ToolPermissionRequest, decide
 
 logger = logging.getLogger(__name__)
 
@@ -181,9 +180,14 @@ class CodexPermissionRung:
 
         Every path that cannot establish an approval on the run's own terms
         returns a decline: an elicitation that is not a tool-call approval, one
-        whose tool cannot be named, one whose arguments name another project,
-        and one naming a tool outside the composed surface. A decline is a
-        refused tool call, never a stalled turn.
+        whose tool cannot be named, and every call the shared decision refuses.
+        A decline is a refused tool call, never a stalled turn.
+
+        A supervised run's human rung is handed the two offered actions in the
+        ACP option shape, so the id it returns is already the action codex
+        expects. ``GraphBubbleUp`` propagates: it is how that rung suspends the
+        graph to ask a human, and the session records it and answers the
+        still-open request with a decline, exactly as the ACP lane does.
         """
         meta = lenient_json_object(params.get("_meta"))
         kind = meta.get("codex_approval_kind")
@@ -211,99 +215,20 @@ class CodexPermissionRung:
             )
             return DECLINE_ACTION
 
-        # Scope enforcement precedes BOTH rungs, as it does on the ACP lane: a
-        # call naming another project is outside what the run was admitted to
-        # do, so neither an allowlist nor a human at the prompt is the authority
-        # that could permit it. The refused ARGUMENT is not logged - a
-        # caller-chosen path is agent-supplied payload - only the fact and the
-        # run's own bound project.
-        # Refused ahead of both rungs for the same reason as the ACP lane: the
-        # tool is served but never callable, and nobody at a prompt can see that
-        # it would send vault text off the host.
-        if harness_tool_is_withheld(f"mcp__{call.server}__{call.tool}"):
-            logger.warning(
-                "Declining a withheld harness tool call: server=%s tool=%s",
-                call.server,
-                call.tool,
-            )
-            return DECLINE_ACTION
-
-        if self._project_scope is not None and (
-            foreign_project_argument(call.arguments, self._project_scope) is not None
-        ):
-            logger.warning(
-                "Declining a cross-project Codex MCP tool call: server=%s tool=%s "
-                "named a project outside the run's bound project (bound=%s)",
-                call.server,
-                call.tool,
-                self._project_scope.bound_project_root(),
-            )
-            return DECLINE_ACTION
-
-        if self._permission_callback is not None:
-            return await self._supervised_action(call)
-        return self._autonomous_action(call)
-
-    def _autonomous_action(self, call: CodexToolCall) -> str:
-        """Decide with no human rung: accept exactly the composed surface."""
-        if (call.server, call.tool) in self._allowed_tools:
-            logger.info(
-                "Codex permission decision: server=%s tool=%s action=%s",
-                call.server,
-                call.tool,
-                ACCEPT_ACTION,
-            )
-            return ACCEPT_ACTION
-        logger.warning(
-            "Declining an undeclared Codex MCP tool call: server=%s tool=%s "
-            "is outside the run's composed surface",
-            call.server,
-            call.tool,
-        )
-        return DECLINE_ACTION
-
-    async def _supervised_action(self, call: CodexToolCall) -> str:
-        """Route the decision to the run's human rung.
-
-        The callback is handed the two offered actions in the ACP option shape,
-        so the id it returns is already the action codex expects. A callback that
-        raises is not permitted to become an approval, and an id that was never
-        offered is refused rather than guessed at.
-
-        ``GraphBubbleUp`` propagates rather than being caught: it is how a
-        supervised rung suspends the graph to ask a human, so swallowing it here
-        would turn a pending question into a silent refusal - the same class of
-        defect this module exists to close. The session records it and answers
-        the still-open request with a decline, exactly as the ACP lane does.
-        """
         callback = self._permission_callback
-        if callback is None:
-            return self._autonomous_action(call)
-        try:
-            chosen = await callback(
-                call.qualified_name,
-                dict(call.arguments),
-                [dict(option) for option in _APPROVAL_OPTIONS],
-            )
-        except GraphBubbleUp:
-            raise
-        except Exception:
-            logger.exception(
-                "Codex permission callback raised; declining (fail-closed)"
-            )
-            return DECLINE_ACTION
-        if chosen == ACCEPT_ACTION:
-            logger.info(
-                "Codex permission decision: server=%s tool=%s action=%s",
-                call.server,
-                call.tool,
-                ACCEPT_ACTION,
-            )
-            return ACCEPT_ACTION
-        if chosen != DECLINE_ACTION:
-            logger.warning(
-                "Codex permission callback returned %r, which is not an offered "
-                "action; declining",
-                chosen,
-            )
-        return DECLINE_ACTION
+        options = [dict(option) for option in _APPROVAL_OPTIONS]
+        chosen = await decide(
+            ToolPermissionRequest(
+                tool=call.qualified_name, arguments=call.arguments, options=options
+            ),
+            scope=self._project_scope,
+            covered=lambda: (call.server, call.tool) in self._allowed_tools,
+            ask=(
+                None
+                if callback is None
+                else lambda: callback(
+                    call.qualified_name, dict(call.arguments), options
+                )
+            ),
+        )
+        return DECLINE_ACTION if chosen is None else chosen

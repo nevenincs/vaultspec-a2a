@@ -15,7 +15,7 @@ from enum import StrEnum
 from time import monotonic
 from typing import Final, Protocol
 
-from ..thread import canonical_json, sha256_hex
+from ..thread import canonical_digest
 
 
 class CacheFreshness(StrEnum):
@@ -495,7 +495,7 @@ class SelectionReference:
             "provider_id": self.provider_id,
             "schema_version": self.schema_version,
         }
-        return sha256_hex(canonical_json(payload).encode())
+        return canonical_digest(payload)
 
 
 @dataclass(frozen=True, slots=True)

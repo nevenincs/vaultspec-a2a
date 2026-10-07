@@ -170,6 +170,7 @@ if TYPE_CHECKING:
         ainvoke_test_graph,
         compile_test_graph,
         new_state_graph,
+        stand_in_definition_digest,
     )
     from .harness_names import (
         COMPLETION_ENDPOINT_ENV,
@@ -592,6 +593,10 @@ _LAZY_EXPORTS = {
     "ainvoke_test_graph": ("vaultspec_a2a.testing.graph", "ainvoke_test_graph"),
     "compile_test_graph": ("vaultspec_a2a.testing.graph", "compile_test_graph"),
     "new_state_graph": ("vaultspec_a2a.testing.graph", "new_state_graph"),
+    "stand_in_definition_digest": (
+        "vaultspec_a2a.testing.graph",
+        "stand_in_definition_digest",
+    ),
     "LEASE_TTL_MS": ("vaultspec_a2a.testing.leases", "LEASE_TTL_MS"),
     "Lease": ("vaultspec_a2a.testing.leases", "Lease"),
     "LeaseAcquisitionTimeoutError": (
@@ -955,6 +960,7 @@ __all__ = [
     "spawn_logged",
     "spawn_signalled",
     "spawn_until_ready",
+    "stand_in_definition_digest",
     "status_and_json",
     "text_list",
     "unvalidated_selection",

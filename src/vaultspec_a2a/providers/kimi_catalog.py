@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from ._cleanup import CleanupStep
 
-from ..thread import canonical_json, sha256_hex
+from ..thread import canonical_digest
 from ._catalog_discovery import (
     ProviderCatalogDiscovery,
     available_catalog,
@@ -162,7 +162,7 @@ def _revision(
             for control in controls
         ],
     }
-    return sha256_hex(canonical_json(payload).encode())
+    return canonical_digest(payload)
 
 
 def _validated_model_reference(

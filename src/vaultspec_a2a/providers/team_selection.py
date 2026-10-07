@@ -9,7 +9,7 @@ from typing import Annotated, Any, Final, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from ..graph.enums import Provider
-from ..thread import canonical_json, sha256_hex
+from ..thread import canonical_digest
 from ..thread.actor_tokens import MAX_ROLES_PER_RUN
 from .provider_catalog import (
     MAX_CONTROLS,
@@ -201,10 +201,9 @@ def model_assignment_digest(assignment: dict[str, FrozenLaneAssignment]) -> str:
     Sorting every object key makes it insensitive to JSON object ordering while
     preserving every nested value and list position.
     """
-    canonical = canonical_json(
+    return canonical_digest(
         {role: _checkpoint_form(lane) for role, lane in assignment.items()}
     )
-    return sha256_hex(canonical.encode())
 
 
 def digest_record(
@@ -235,7 +234,7 @@ def digest_record(
         "fallbacks": [digest_lane(lane) for lane in fallbacks],
         "roles": list(roles),
     }
-    return sha256_hex(canonical_json(record).encode())
+    return canonical_digest(record)
 
 
 @dataclass(frozen=True, slots=True)

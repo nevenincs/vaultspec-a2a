@@ -6,7 +6,8 @@ builder, node, and compile helpers, so the irreducible langgraph typing
 diagnostic (its ``add_node``/``compile`` overloads default several parameters
 to a bare, unparametrized generic in their own shipped source) is paid in one
 place for production and tests alike, rather than at every call site across the
-test tree.
+test tree. The stand-in definition digest an injected graph's cache key binds to
+sits beside them.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from ..graph.compiler import add_graph_node, compile_graph_builder, new_graph_builder
+from ..thread import sha256_hex
 from ..thread.state import TeamState
 
 if TYPE_CHECKING:
@@ -30,6 +32,7 @@ __all__ = [
     "ainvoke_test_graph",
     "compile_test_graph",
     "new_state_graph",
+    "stand_in_definition_digest",
 ]
 
 
@@ -92,3 +95,13 @@ async def ainvoke_test_graph(
     """Invoke a compiled test graph behind one fully-typed call boundary."""
     result = await graph.ainvoke(state, config)
     return cast("dict[str, Any]", result)
+
+
+def stand_in_definition_digest(team_preset: str) -> str:
+    """Return a deterministic stand-in for a frozen graph definition's digest.
+
+    Injected graphs bypass compilation, so no ``ExecutableGraphDefinition`` is
+    ever frozen for them; the cache key still requires a digest-shaped value
+    that binds the injected entry to the preset it stands in for.
+    """
+    return sha256_hex(team_preset.encode())

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Literal, Self
 from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 
 from ..team.team_config import AgentConfig, TeamConfig, load_agent_config
-from .action_receipts import canonical_json, sha256_hex
+from .action_receipts import canonical_digest
 from .constants import DEFAULT_SUPERVISOR_ID
 
 if TYPE_CHECKING:
@@ -41,7 +41,7 @@ class FrozenGraphDefinition(BaseModel):
         self._team_config = team
         self._agent_configs = self._validated_agents(team)
         self._supervisor_config = self._validated_supervisor(team)
-        self._digest = sha256_hex(canonical_json(self.model_dump(mode="json")).encode())
+        self._digest = canonical_digest(self.model_dump(mode="json"))
         return self
 
     def _validated_team(self) -> TeamConfig:

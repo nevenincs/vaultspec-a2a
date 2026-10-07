@@ -23,6 +23,7 @@ import importlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .action_receipts import canonical_digest as canonical_digest
     from .action_receipts import canonical_json as canonical_json
     from .action_receipts import sha256_hex as sha256_hex
     from .actor_tokens import ActorTokenBundle as ActorTokenBundle
@@ -95,6 +96,7 @@ if TYPE_CHECKING:
     from .write_authority import ThreadWriteExpectation as ThreadWriteExpectation
 
 _LAZY_IMPORTS = {
+    "canonical_digest": ".action_receipts",
     "canonical_json": ".action_receipts",
     "sha256_hex": ".action_receipts",
     "ActorTokenBundle": ".actor_tokens",
@@ -217,6 +219,7 @@ __all__ = [
     "TokenUsageEntry",
     "VaultspecError",
     "WorkerExecutionError",
+    "canonical_digest",
     "canonical_json",
     "classify_message_role",
     "derive_message_id",

@@ -14,7 +14,6 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from vaultspec_core.config import env_value
@@ -35,6 +34,7 @@ from ..thread.errors import ConfigError
 from ..utils.async_cleanup import complete_cleanup
 from ..utils.process import ProcessContainmentError
 from ..workspace.environment import resolve_env_vars
+from ._catalog_discovery import ProviderCatalogDiscovery, unavailable_discovery
 from ._claude_tool_policy import claude_bypass_declined_meta
 from ._factory_commands import (
     _build_kimi_env,
@@ -76,15 +76,12 @@ from .lane_admission import PROVEN_TURN_LANES, lane_proof_accepts_version
 from .openai_catalog import discover_openai_compatible_catalog
 from .provider_catalog import (
     AuthenticationState,
-    CatalogState,
     CatalogStatus,
     HealthState,
-    ProviderCatalog,
     ProviderCatalogKey,
 )
 
 __all__ = [
-    "ProviderCatalogDiscovery",
     "ProviderCatalogRegistration",
     "ProviderFactory",
     "UnsupportedExecutionLaneError",
@@ -157,16 +154,6 @@ _SUPPORTED_PROVIDERS: frozenset[Provider] = frozenset(
         Provider.OPENAI,
     }
 )
-
-
-@dataclass(frozen=True, slots=True)
-class ProviderCatalogDiscovery:
-    """One adapter result normalized at the factory registration boundary."""
-
-    catalog: ProviderCatalog
-    authentication: AuthenticationState
-    configured: HealthState = HealthState.UNKNOWN
-    transport: HealthState = HealthState.UNKNOWN
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,30 +252,6 @@ def require_binary_proof(reason: ProviderRuntimeUnavailableReason | None) -> Non
         )
 
 
-def _unavailable_catalog_discovery(
-    key: ProviderCatalogKey,
-    *,
-    reason: str,
-    authentication: AuthenticationState = AuthenticationState.UNKNOWN,
-    configured: HealthState = HealthState.UNKNOWN,
-    transport: HealthState = HealthState.UNKNOWN,
-) -> ProviderCatalogDiscovery:
-    return ProviderCatalogDiscovery(
-        catalog=ProviderCatalog(
-            key=key,
-            state=CatalogState(
-                status=CatalogStatus.UNAVAILABLE,
-                checked_at=datetime.now(UTC),
-                reason=reason,
-            ),
-            models=(),
-        ),
-        authentication=authentication,
-        configured=configured,
-        transport=transport,
-    )
-
-
 def _transport_evidence(discovery: ProviderCatalogDiscovery) -> HealthState:
     """Return transport evidence only when discovery observed a provider response."""
     if discovery.catalog.state.status in {
@@ -334,7 +297,7 @@ async def _discover_claude_catalog(
     try:
         command, metadata = _classify_acp_command(settings.acp_backend)
     except (ConfigError, ValueError):
-        return _unavailable_catalog_discovery(
+        return unavailable_discovery(
             key,
             reason="provider catalog command is unavailable",
             transport=HealthState.UNAVAILABLE,
@@ -346,7 +309,7 @@ async def _discover_claude_catalog(
     try:
         cli_resolution = pin_claude_executable(env)
     except ProviderRuntimeUnavailableError as exc:
-        return _unavailable_catalog_discovery(
+        return unavailable_discovery(
             key,
             reason=exc.reason.value if exc.reason else str(exc),
             transport=HealthState.UNAVAILABLE,
@@ -354,7 +317,7 @@ async def _discover_claude_catalog(
     try:
         auth_env, auth_mode = claude_auth_env()
     except ProviderRuntimeUnavailableError:
-        return _unavailable_catalog_discovery(
+        return unavailable_discovery(
             key,
             reason="claude_oauth_token_unavailable",
             configured=HealthState.UNAVAILABLE,
@@ -390,8 +353,7 @@ async def _discover_claude_catalog(
             session_meta=claude_bypass_declined_meta(),
             native_authority=native,
         )
-    normalized = ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
-    return replace(normalized, transport=_transport_evidence(normalized))
+    return replace(discovered, transport=_transport_evidence(discovered))
 
 
 async def _discover_codex_catalog(
@@ -402,7 +364,7 @@ async def _discover_codex_catalog(
         if command[0] == "codex":
             raise ValueError("Codex CLI is not resolvable")
     except ValueError:
-        return _unavailable_catalog_discovery(
+        return unavailable_discovery(
             key,
             reason="provider catalog command is unavailable",
             transport=HealthState.UNAVAILABLE,
@@ -439,8 +401,7 @@ async def _discover_codex_catalog(
             from ._codex_config_home import cleanup_codex_config_home
 
             await complete_cleanup(asyncio.to_thread(cleanup_codex_config_home, home))
-    normalized = ProviderCatalogDiscovery(discovered.catalog, discovered.authentication)
-    return replace(normalized, transport=_transport_evidence(normalized))
+    return replace(discovered, transport=_transport_evidence(discovered))
 
 
 async def _discover_antigravity_catalog(
@@ -453,16 +414,15 @@ async def _discover_antigravity_catalog(
     that did not is an unreachable one. There is no separate handshake to
     distinguish the two.
     """
-    catalog, authentication = await discover_antigravity_catalog(
+    discovered = await discover_antigravity_catalog(
         key,
         workspace_root,
         cli_path=settings.antigravity_cli_path,
         home=settings.antigravity_cli_home,
     )
-    available = catalog.state.status is CatalogStatus.AVAILABLE
-    return ProviderCatalogDiscovery(
-        catalog=catalog,
-        authentication=authentication,
+    available = discovered.catalog.state.status is CatalogStatus.AVAILABLE
+    return replace(
+        discovered,
         configured=(
             HealthState.AVAILABLE
             if resolve_antigravity_command(
@@ -504,7 +464,7 @@ async def _discover_kimi_catalog(
         )
         injected.update(_kimi_home_env(settings.kimi_code_home))
     except ValueError:
-        return _unavailable_catalog_discovery(
+        return unavailable_discovery(
             key,
             reason="temporary Kimi provider configuration is incomplete",
             configured=HealthState.UNAVAILABLE,
@@ -516,7 +476,7 @@ async def _discover_kimi_catalog(
         )
     configured = HealthState.AVAILABLE if injected else HealthState.UNKNOWN
     if command is None:
-        return _unavailable_catalog_discovery(
+        return unavailable_discovery(
             key,
             reason="provider catalog command is unavailable",
             configured=configured,
@@ -532,11 +492,7 @@ async def _discover_kimi_catalog(
         key=key,
         metadata={"provider": Provider.KIMI.value, **metadata},
     )
-    normalized = ProviderCatalogDiscovery(
-        discovered.catalog,
-        discovered.authentication,
-        configured=configured,
-    )
+    normalized = replace(discovered, configured=configured)
     return replace(normalized, transport=_transport_evidence(normalized))
 
 
@@ -546,9 +502,8 @@ async def _discover_openai_catalog(key: ProviderCatalogKey) -> ProviderCatalogDi
         api_key=settings.openai_api_key,
         key=key,
     )
-    return ProviderCatalogDiscovery(
-        discovered.catalog,
-        discovered.authentication,
+    return replace(
+        discovered,
         configured=(
             HealthState.AVAILABLE
             if settings.openai_api_key
@@ -573,10 +528,8 @@ async def _discover_in_process_catalog(
     configured and its transport is a function call; it holds no credential, so
     authentication is not applicable rather than unknown.
     """
-    discovered = discover_in_process_catalog(key)
-    return ProviderCatalogDiscovery(
-        discovered.catalog,
-        discovered.authentication,
+    return replace(
+        discover_in_process_catalog(key),
         configured=HealthState.AVAILABLE,
         transport=HealthState.AVAILABLE,
     )
@@ -597,7 +550,7 @@ async def _discover_unverified_catalog(
         configured = (
             HealthState.AVAILABLE if settings.zhipu_api_key else HealthState.UNAVAILABLE
         )
-    return _unavailable_catalog_discovery(
+    return unavailable_discovery(
         key,
         reason="provider lane has no verified prompt-free model enumeration",
         configured=configured,

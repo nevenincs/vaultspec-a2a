@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from ...utils.enums import CodexWebSearchMode
 from .._codex_auth import (
+    _MAX_RETURNED_AUTH_BYTES,
     CODEX_AUTH_FILENAME,
     codex_credential_store_mode,
     forget_run_credential,
@@ -172,7 +173,7 @@ def test_oversized_returned_credential_is_not_published(tmp_path: Path) -> None:
     source = base_home / CODEX_AUTH_FILENAME
     seeded = source.read_bytes()
     run_home = _run_home(base_home)
-    (run_home / CODEX_AUTH_FILENAME).write_bytes(b" " * (1024 * 1024 + 1))
+    (run_home / CODEX_AUTH_FILENAME).write_bytes(b" " * (_MAX_RETURNED_AUTH_BYTES + 1))
     try:
         assert not write_back_refreshed_credential(run_home)
         assert source.read_bytes() == seeded

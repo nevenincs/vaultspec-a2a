@@ -11,22 +11,28 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final, TypedDict, Unpack
 
 from pydantic import TypeAdapter, ValidationError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import datetime
 
+    from ._cleanup import CleanupStep
+
+from ._catalog_discovery import (
+    ProviderCatalogDiscovery,
+    available_catalog,
+    finish_discovery,
+    unavailable_catalog,
+)
 from ._catalog_fields import (
     CatalogFieldReader,
     display_label,
     display_text,
     local_id,
 )
-from ._cleanup import CleanupStep, run_independent_cleanups
 from ._json_contract import JsonObject, JsonValue
 from ._stdio_rpc import OutputBudget, cancel_task
 from ._subprocess import kill_process_tree, spawn_acp_process
@@ -36,8 +42,6 @@ from .provider_catalog import (
     MAX_MODELS,
     MAX_OPTIONS,
     AuthenticationState,
-    CatalogState,
-    CatalogStatus,
     ControlKind,
     ModelCatalogEntry,
     NativeControl,
@@ -52,20 +56,11 @@ __all__ = [
     "discover_kimi_catalog",
 ]
 
-_CATALOG_TTL: Final = timedelta(minutes=5)
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
 
 class KimiCatalogProtocolError(RuntimeError):
     """Kimi discovery returned malformed data or exceeded a safety bound."""
-
-
-@dataclass(frozen=True, slots=True)
-class KimiCatalogDiscovery:
-    """Configured Kimi catalog plus deliberately unknown authentication evidence."""
-
-    catalog: ProviderCatalog
-    authentication: AuthenticationState = AuthenticationState.UNKNOWN
 
 
 def _protocol_error(message: str) -> KimiCatalogProtocolError:
@@ -256,28 +251,19 @@ def catalog_from_provider_list(
                 ),
             }
         )
-    now = (checked_at or datetime.now(UTC)).astimezone(UTC)
     if not models:
-        return ProviderCatalog(
-            key=key,
-            state=CatalogState(
-                status=CatalogStatus.UNAVAILABLE,
-                checked_at=now,
-                reason="Kimi CLI has no configured model aliases",
-            ),
-            models=(),
+        return unavailable_catalog(
+            key,
+            reason="Kimi CLI has no configured model aliases",
+            checked_at=checked_at,
         )
     normalized_controls = tuple(controls)
-    return ProviderCatalog(
-        key=key,
-        state=CatalogState(
-            status=CatalogStatus.AVAILABLE,
-            checked_at=now,
-            revision=_revision(key, tuple(revision_rows), normalized_controls),
-            expires_at=now + _CATALOG_TTL,
-        ),
+    return available_catalog(
+        key,
+        revision=_revision(key, tuple(revision_rows), normalized_controls),
         models=tuple(models),
         native_controls=normalized_controls,
+        checked_at=checked_at,
     )
 
 
@@ -300,60 +286,6 @@ async def _read_bounded(
     return bytes(body)
 
 
-async def _cleanup_kimi_process(
-    process: asyncio.subprocess.Process,
-    metadata: Mapping[str, object] | None,
-    stdout_task: asyncio.Task[bytes],
-    stderr_task: asyncio.Task[bytes],
-) -> list[tuple[str, Exception]]:
-    cleanup_steps: list[CleanupStep] = []
-    if process.stdin is not None:
-        cleanup_steps.append(("kimi-catalog-stdin", process.stdin.close))
-    cleanup_steps.extend(
-        [
-            ("kimi-catalog-process", lambda: kill_process_tree(process, metadata)),
-            ("kimi-catalog-stdout", lambda: cancel_task(stdout_task)),
-            ("kimi-catalog-stderr", lambda: cancel_task(stderr_task)),
-        ]
-    )
-    return await run_independent_cleanups(*cleanup_steps)
-
-
-def _finish_kimi_discovery(
-    outcome: KimiCatalogDiscovery | None,
-    failure: BaseException | None,
-    cleanup_failures: list[tuple[str, Exception]],
-) -> KimiCatalogDiscovery:
-    if failure is not None:
-        output_failure = next(
-            (
-                exc
-                for _, exc in cleanup_failures
-                if isinstance(exc, KimiCatalogProtocolError)
-            ),
-            None,
-        )
-        if output_failure is not None:
-            output_failure.add_note(
-                f"Kimi discovery also failed with {type(failure).__name__}"
-            )
-            raise output_failure
-        if cleanup_failures:
-            failure.add_note(
-                "Kimi catalog cleanup also failed: "
-                + ", ".join(name for name, _ in cleanup_failures)
-            )
-        raise failure
-    if cleanup_failures:
-        raise RuntimeError(
-            "Kimi catalog cleanup failed: "
-            + ", ".join(name for name, _ in cleanup_failures)
-        )
-    if outcome is None:
-        raise RuntimeError("Kimi catalog discovery completed without an outcome")
-    return outcome
-
-
 class _DiscoverKimiCatalogRequired(TypedDict):
     env: Mapping[str, str]
     cwd: str
@@ -368,7 +300,7 @@ class _DiscoverKimiCatalogOptions(_DiscoverKimiCatalogRequired, total=False):
 async def discover_kimi_catalog(
     command_prefix: tuple[str, ...],
     **options: Unpack[_DiscoverKimiCatalogOptions],
-) -> KimiCatalogDiscovery:
+) -> ProviderCatalogDiscovery:
     """Run the fixed prompt-free provider-list command and reap its process tree."""
     key = options["key"]
     metadata = options.get("metadata")
@@ -389,7 +321,7 @@ async def discover_kimi_catalog(
     stderr_task = asyncio.create_task(
         _read_bounded(process.stderr, process, metadata, output_budget)
     )
-    outcome: KimiCatalogDiscovery | None = None
+    outcome: ProviderCatalogDiscovery | None = None
     failure: BaseException | None = None
     try:
         returncode, stdout, _ = await asyncio.wait_for(
@@ -404,13 +336,25 @@ async def discover_kimi_catalog(
             raise KimiCatalogProtocolError(
                 "Kimi provider-list discovery returned malformed JSON"
             ) from None
-        outcome = KimiCatalogDiscovery(
-            catalog=catalog_from_provider_list(result, key=key)
+        # The provider table is configuration, not an account, so a listing
+        # proves nothing about authentication and the evidence stays unknown.
+        outcome = ProviderCatalogDiscovery(
+            catalog=catalog_from_provider_list(result, key=key),
+            authentication=AuthenticationState.UNKNOWN,
         )
     except BaseException as exc:
         failure = exc
 
-    cleanup_failures = await _cleanup_kimi_process(
-        process, metadata, stdout_task, stderr_task
+    cleanup_steps: list[CleanupStep] = []
+    if process.stdin is not None:
+        cleanup_steps.append(("kimi-catalog-stdin", process.stdin.close))
+    cleanup_steps.extend(
+        [
+            ("kimi-catalog-process", lambda: kill_process_tree(process, metadata)),
+            ("kimi-catalog-stdout", lambda: cancel_task(stdout_task)),
+            ("kimi-catalog-stderr", lambda: cancel_task(stderr_task)),
+        ]
     )
-    return _finish_kimi_discovery(outcome, failure, cleanup_failures)
+    return await finish_discovery(
+        "Kimi", outcome, failure, cleanup_steps, KimiCatalogProtocolError
+    )

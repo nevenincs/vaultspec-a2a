@@ -50,10 +50,11 @@ from pydantic import (
 
 from .constants import MAX_REQUEST_ID_CHARS, MAX_RUN_MESSAGE_CHARS
 from .enums import InterruptType
-from .snapshots import project_checkpoint_tuple
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from .snapshots import CheckpointProjection
 
 __all__ = [
     "CLARIFICATION_DECLINE_MARKER",
@@ -570,26 +571,21 @@ def render_clarification_answers(
 
 
 def pending_clarification(
-    checkpoint_tuple: object | None,
-    *,
-    thread_id: str,
+    projection: CheckpointProjection | None,
 ) -> ClarificationRequest | None:
-    """Read the clarification a run is parked on out of its checkpoint.
+    """Read the clarification a run is parked on out of its checkpoint projection.
 
     The authoritative read behind the recovery disclosure and behind the answer
-    path's scoping check. It projects through the shared checkpoint projection
-    rather than re-walking ``pending_writes``, so this and the repair surfaces
-    agree on what "parked at an interrupt" means.
+    path's scoping check. It consumes the projection the caller already made of
+    the checkpoint rather than projecting it again, so the disclosure and every
+    other field read from that projection describe the same held writes, and
+    this and the repair surfaces agree on what "parked at an interrupt" means.
 
     Answers ``None`` for a run that is not parked, is parked on a different
-    interrupt kind, or has no readable checkpoint at all - each of which is
-    honestly "no pending clarification" rather than an error.
+    interrupt kind, or has no readable checkpoint at all (no projection) - each
+    of which is honestly "no pending clarification" rather than an error.
     """
-    if checkpoint_tuple is None:
-        return None
-    try:
-        projection = project_checkpoint_tuple(checkpoint_tuple, thread_id=thread_id)
-    except (AttributeError, TypeError, ValueError):
+    if projection is None:
         return None
     for projected in projection.pending_interrupts:
         if projected.interrupt_type != InterruptType.CLARIFICATION_REQUEST:

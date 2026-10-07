@@ -60,9 +60,18 @@ if TYPE_CHECKING:
 
     from ..database.checkpoints import Checkpointer
     from ..streaming.aggregator import EventAggregator
+    from ..thread.snapshots import CheckpointProjection
 
 __all__ = [
+    "ACTIVE_FEATURE_FIELD",
+    "AUTHORING_SESSION_FIELD",
+    "CHANGESET_ID_FIELD",
+    "PROPOSAL_ID_FIELD",
+    "SemanticContext",
+    "ThreadStateCapture",
     "capture_thread_state",
+    "derive_run_authoring_ids",
+    "derive_run_semantic_context",
     "project_semantic_phase",
 ]
 
@@ -205,6 +214,11 @@ class ThreadStateCapture:
     tuple with its fully reconciled snapshot prevents a second checkpoint or
     thread read from mixing different moments of a progressing run.
 
+    ``checkpoint_projection`` is the one projection of ``checkpoint_tuple`` the
+    snapshot was built from, present exactly when the tuple is. A field read
+    from the checkpoint's pending interrupts - the pending clarification - reads
+    it rather than projecting the tuple a second time.
+
     ``transcript`` states whether the snapshot's messages are the run's record
     or an artefact of an unread checkpoint. It is carried here rather than
     re-derived by each reader because ``checkpoint_tuple`` alone cannot answer
@@ -214,6 +228,7 @@ class ThreadStateCapture:
 
     snapshot: ThreadStateData
     checkpoint_tuple: CheckpointTuple | None
+    checkpoint_projection: CheckpointProjection | None
     team_preset: str | None
     thread_metadata: str | None
     transcript: TranscriptAvailability
@@ -244,6 +259,7 @@ class _CheckpointSnapshotRead:
     present: bool
     error: bool
     captured_tuple: CheckpointTuple | None
+    captured_projection: CheckpointProjection | None
 
 
 async def _read_projected_checkpoint(
@@ -251,13 +267,13 @@ async def _read_projected_checkpoint(
     snapshot: ThreadStateData,
     aggregator: EventAggregator,
     expected_assignment_digest: str | None,
-    durable_permission_ids: set[str],
 ) -> _CheckpointSnapshotRead:
     thread_id = snapshot.thread_id
     checkpoint_loaded = False
     checkpoint_present = False
     checkpoint_error = False
     captured_tuple: CheckpointTuple | None = None
+    captured_projection: CheckpointProjection | None = None
 
     try:
         checkpoint_tuple = (
@@ -286,11 +302,11 @@ async def _read_projected_checkpoint(
             )
             snapshot = apply_checkpoint_projection(snapshot, projection)
             snapshot = reconcile_checkpoint_permissions_with_durable_state(
-                snapshot,
-                durable_request_ids=durable_permission_ids,
+                snapshot, projection
             )
             checkpoint_loaded = True
             captured_tuple = checkpoint_tuple
+            captured_projection = projection
     except TimeoutError:
         checkpoint_error = True
         mark_degraded(
@@ -321,6 +337,7 @@ async def _read_projected_checkpoint(
         present=checkpoint_present,
         error=checkpoint_error,
         captured_tuple=captured_tuple,
+        captured_projection=captured_projection,
     )
 
 
@@ -414,15 +431,11 @@ async def capture_thread_state(
     except ExecutionAuthorityError:
         expected_assignment_digest = None
         mark_degraded(snapshot, DegradedReason.INCOMPATIBLE_EXECUTION_AUTHORITY)
-    durable_permission_ids = {
-        permission.request_id for permission in snapshot.pending_permissions
-    }
     checkpoint_read = await _read_projected_checkpoint(
         checkpointer,
         snapshot,
         aggregator,
         expected_assignment_digest,
-        durable_permission_ids,
     )
     snapshot = checkpoint_read.snapshot
     checkpoint_loaded = checkpoint_read.loaded
@@ -472,6 +485,7 @@ async def capture_thread_state(
     return ThreadStateCapture(
         snapshot=finalized_snapshot,
         checkpoint_tuple=captured_tuple,
+        checkpoint_projection=checkpoint_read.captured_projection,
         team_preset=thread.team_preset,
         thread_metadata=thread.thread_metadata,
         transcript=classify_transcript_availability(

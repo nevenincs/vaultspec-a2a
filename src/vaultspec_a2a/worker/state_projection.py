@@ -30,13 +30,14 @@ from ..thread.checkpoint_evidence import (
 )
 from ..thread.enums import TERMINAL_STATUSES, DegradedReason, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
-from ..thread.snapshots import tasks_past_their_interrupt
+from ..thread.snapshots import live_interrupts, named_request_id
 from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
     from ..database.checkpoints import Checkpointer
     from ..streaming.types import StreamableGraph
     from ..thread.action_receipts import GraphActionReceipt
+    from ..thread.snapshots import LiveInterrupt
     from .graph_lifecycle import RegisteredCompiledGraph
     from .ipc import WorkerBridge
 
@@ -93,22 +94,7 @@ class ResumeAdmission:
     interrupt_id: str | None = None
 
 
-def answered_request_id(resume_value: object) -> str | None:
-    """The request a resume value names, or ``None`` when it names none.
-
-    Every typed answer this system dispatches - a tool permission, a
-    clarification resolution, a plan or document verdict - carries the
-    identifier of the request it answers. A value that carries none cannot be
-    matched against what the run is parked on, and only the weaker
-    parked-at-all check applies to it.
-    """
-    if not isinstance(resume_value, dict):
-        return None
-    named = cast("dict[str, object]", resume_value).get("request_id")
-    return named if isinstance(named, str) and named else None
-
-
-def _pending_requests(interrupts: Iterable[object]) -> dict[str, str]:
+def _pending_requests(interrupts: Iterable[LiveInterrupt]) -> dict[str, str]:
     """The request each pending interrupt asks, keyed by the request id.
 
     The value is the interrupt's own identifier, which is how an answer is
@@ -116,21 +102,11 @@ def _pending_requests(interrupts: Iterable[object]) -> dict[str, str]:
     payload names no request, or which carries no identifier, contributes
     nothing: neither can be matched to an answer.
     """
-    found: dict[str, str] = {}
-    for interrupt in interrupts:
-        payload = coerce_object_mapping(getattr(interrupt, "value", interrupt))
-        if payload is None:
-            continue
-        request_id = payload.get("request_id")
-        interrupt_id = getattr(interrupt, "id", None)
-        if (
-            isinstance(request_id, str)
-            and request_id
-            and isinstance(interrupt_id, str)
-            and interrupt_id
-        ):
-            found[request_id] = interrupt_id
-    return found
+    return {
+        interrupt.request_id: interrupt.interrupt_id
+        for interrupt in interrupts
+        if interrupt.request_id is not None and interrupt.interrupt_id is not None
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,9 +169,6 @@ class _ExecutionStateSnapshot(Protocol):
     def next(self) -> Iterable[object]: ...
 
     @property
-    def interrupts(self) -> Collection[object]: ...
-
-    @property
     def tasks(self) -> Collection[object]: ...
 
     @property
@@ -212,7 +185,6 @@ def _is_execution_state_snapshot(value: object) -> TypeGuard[_ExecutionStateSnap
     """Validate the minimal projection boundary returned by a graph adapter."""
     required_attributes = (
         "next",
-        "interrupts",
         "tasks",
         "created_at",
         "config",
@@ -224,8 +196,7 @@ def _is_execution_state_snapshot(value: object) -> TypeGuard[_ExecutionStateSnap
         attribute: getattr(value, attribute) for attribute in required_attributes
     }
     return (
-        isinstance(attributes["interrupts"], Collection)
-        and isinstance(attributes["tasks"], Collection)
+        isinstance(attributes["tasks"], Collection)
         and isinstance(attributes["config"], Mapping)
         and (
             attributes["parent_config"] is None
@@ -234,81 +205,32 @@ def _is_execution_state_snapshot(value: object) -> TypeGuard[_ExecutionStateSnap
     )
 
 
-def _interrupt_type(interrupt: object) -> str | None:
-    """Return the declared interrupt type when LangGraph supplies one."""
-    payload = coerce_object_mapping(getattr(interrupt, "value", interrupt))
-    if payload is None:
-        return None
-    raw_type = payload.get("type")
-    return str(raw_type) if raw_type is not None else None
-
-
-def _interrupt_details(interrupts: Iterable[object]) -> tuple[list[str], list[str]]:
-    """Project LangGraph interrupt objects to durable task metadata."""
-    interrupt_ids: list[str] = []
-    interrupt_types: list[str] = []
-    for interrupt in interrupts:
-        interrupt_id = getattr(interrupt, "id", None)
-        if interrupt_id is not None:
-            interrupt_ids.append(str(interrupt_id))
-        interrupt_type = _interrupt_type(interrupt)
-        if interrupt_type is not None:
-            interrupt_types.append(interrupt_type)
-    return interrupt_ids, interrupt_types
-
-
-def _task_interrupts(task: object, answered: Collection[str]) -> tuple[object, ...]:
-    """The interrupts *task* is still stopped on, dropping the ones it answered.
-
-    A snapshot lists every interrupt write the checkpoint holds against a
-    task, including one it has since run past: the superstep that would have
-    cleared it has not committed. ``answered`` is read from those held writes
-    and is the only thing that separates the two.
-    """
-    if str(getattr(task, "id", "")) in answered:
-        return ()
-    return tuple(getattr(task, "interrupts", ()) or ())
-
-
 def _task_projection(
-    task: object,
-    answered: Collection[str] = (),
-) -> tuple[ExecutionTaskProjectionPayload, list[str]]:
-    """Project one pending LangGraph task and retain its interrupt types."""
-    interrupt_ids, interrupt_types = _interrupt_details(
-        _task_interrupts(task, answered)
-    )
+    task: object, live: Iterable[LiveInterrupt]
+) -> ExecutionTaskProjectionPayload:
+    """Project one pending LangGraph task with the questions it is still asking."""
+    task_id = str(getattr(task, "id", ""))
+    asking = [interrupt for interrupt in live if interrupt.task_id == task_id]
     error = getattr(task, "error", None)
-    return (
-        ExecutionTaskProjectionPayload(
-            task_id=str(getattr(task, "id", "")),
-            name=str(getattr(task, "name", "")),
-            path=[str(item) for item in getattr(task, "path", ())],
-            has_error=error is not None,
-            error_type=type(error).__name__ if error is not None else None,
-            interrupt_ids=interrupt_ids,
-            interrupt_types=interrupt_types,
-            has_nested_state=getattr(task, "state", None) is not None,
-            has_result=getattr(task, "result", None) is not None,
-        ),
-        interrupt_types,
+    return ExecutionTaskProjectionPayload(
+        task_id=task_id,
+        name=str(getattr(task, "name", "")),
+        path=[str(item) for item in getattr(task, "path", ())],
+        has_error=error is not None,
+        error_type=type(error).__name__ if error is not None else None,
+        interrupt_ids=[
+            interrupt.interrupt_id
+            for interrupt in asking
+            if interrupt.interrupt_id is not None
+        ],
+        interrupt_types=[
+            interrupt.interrupt_type
+            for interrupt in asking
+            if interrupt.interrupt_type is not None
+        ],
+        has_nested_state=getattr(task, "state", None) is not None,
+        has_result=getattr(task, "result", None) is not None,
     )
-
-
-def _task_projections(
-    state_tasks: Iterable[object],
-    answered: Collection[str] = (),
-) -> tuple[list[ExecutionTaskProjectionPayload], list[str]]:
-    """Project every pending task while preserving first-seen interrupt order."""
-    tasks: list[ExecutionTaskProjectionPayload] = []
-    interrupt_types: list[str] = []
-    for task in state_tasks:
-        projection, task_interrupt_types = _task_projection(task, answered)
-        tasks.append(projection)
-        for interrupt_type in task_interrupt_types:
-            if interrupt_type not in interrupt_types:
-                interrupt_types.append(interrupt_type)
-    return tasks, interrupt_types
 
 
 def _parked_next_nodes(
@@ -329,27 +251,8 @@ def _parked_next_nodes(
     return next_nodes
 
 
-def _live_interrupts(
-    state: _ExecutionStateSnapshot, answered: Collection[str]
-) -> tuple[object, ...]:
-    """The interrupts the run is still stopped on, across every pending task.
-
-    ``state.interrupts`` is the union of the held interrupt writes, so it
-    keeps listing the question a fanned-out branch already answered. Each
-    interrupt is attributed to its task instead, and the tasks the held writes
-    show finished are dropped. A snapshot with no tasks to attribute to is
-    read as it stands.
-    """
-    tasks = tuple(state.tasks or ())
-    if not tasks:
-        return tuple(state.interrupts or ())
-    return tuple(
-        interrupt for task in tasks for interrupt in _task_interrupts(task, answered)
-    )
-
-
 def _addressed_admission(
-    interrupts: tuple[object, ...], resume_value: object
+    interrupts: tuple[LiveInterrupt, ...], resume_value: object
 ) -> ResumeRefusal | ResumeAdmission:
     """Which of the run's open questions this answer is admitted against.
 
@@ -366,7 +269,9 @@ def _addressed_admission(
             ),
         )
     pending = _pending_requests(interrupts)
-    named = answered_request_id(resume_value)
+    # Every typed answer this system dispatches names the request it answers;
+    # one that names none can only be checked against the run being parked.
+    named = named_request_id(resume_value)
     if named is not None and named not in pending:
         return ResumeRefusal(
             cause=ResumeRefusalCause.REQUEST_NOT_PENDING,
@@ -388,15 +293,6 @@ def _addressed_admission(
             pending_request_ids=tuple(pending),
         )
     return ResumeAdmission(interrupt_id=pending[named])
-
-
-def _state_interrupt_types(interrupts: Iterable[object]) -> list[str]:
-    """Project state-level interrupts when tasks carry no type metadata."""
-    return [
-        interrupt_type
-        for interrupt in interrupts
-        if (interrupt_type := _interrupt_type(interrupt)) is not None
-    ]
 
 
 def _snapshot_created_at_value(created_at: object) -> str | None:
@@ -608,12 +504,12 @@ class StateProjector:
             return await self._durable_resume_refusal(
                 receipt, timeout_seconds=timeout_seconds
             )
-        answered = tasks_past_their_interrupt(
-            await self._held_writes(
-                receipt.thread_id, snapshot.config, timeout_seconds=timeout_seconds
-            )
+        held_writes = await self._held_writes(
+            receipt.thread_id, snapshot.config, timeout_seconds=timeout_seconds
         )
-        return _addressed_admission(_live_interrupts(snapshot, answered), resume_value)
+        return _addressed_admission(
+            live_interrupts(snapshot, held_writes), resume_value
+        )
 
     async def _resume_snapshot(
         self,
@@ -730,24 +626,21 @@ class StateProjector:
         snapshot lists both. Omitted, every interrupt the snapshot carries is
         read as pending, which is the snapshot's own reading of itself.
         """
-        answered = tasks_past_their_interrupt(held_writes)
-        state_interrupts = state.interrupts or ()
-        tasks, interrupt_types = _task_projections(state.tasks or (), answered)
-        interrupt_count = sum(len(task.interrupt_ids) for task in tasks)
-        if state_interrupts and not tasks:
-            # No task to attribute an interrupt to, so there is nothing the
-            # held writes can narrow and the state-level list is the reading.
-            interrupt_types = _state_interrupt_types(state_interrupts)
-            interrupt_count = len(state_interrupts)
-        elif interrupt_count and not interrupt_types:
-            interrupt_types = _state_interrupt_types(state_interrupts)
+        live = live_interrupts(state, held_writes)
+        tasks = [_task_projection(task, live) for task in state.tasks or ()]
         return ExecutionStateProjectionPayload(
             checkpoint_id=_checkpoint_id(state.config),
             parent_checkpoint_id=_checkpoint_id(state.parent_config),
             snapshot_created_at=_snapshot_created_at_value(state.created_at),
             next_nodes=_parked_next_nodes(state.next, tasks),
-            interrupt_types=interrupt_types,
-            interrupt_count=interrupt_count,
+            interrupt_types=list(
+                dict.fromkeys(
+                    interrupt.interrupt_type
+                    for interrupt in live
+                    if interrupt.interrupt_type is not None
+                )
+            ),
+            interrupt_count=len(live),
             task_count=len(tasks),
             tasks=tasks,
         )

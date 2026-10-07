@@ -48,6 +48,7 @@ __all__ = [
     "ClarificationRequestData",
     "ExecutionStateProjection",
     "ExecutionTaskData",
+    "LiveInterrupt",
     "MessageData",
     "PermissionData",
     "PermissionOptionData",
@@ -67,12 +68,15 @@ __all__ = [
     "fold_pending_writes",
     "is_permission_event",
     "is_terminal_event",
+    "live_interrupts",
+    "named_request_id",
     "normalize_artifacts",
     "normalize_plan_entries",
     "normalize_wire_event_type",
     "project_checkpoint_tuple",
     "stamp_message_created_at",
     "tasks_past_their_interrupt",
+    "unanswered_interrupt_values",
     "wire_event_type",
 ]
 
@@ -267,11 +271,35 @@ def clarification_data_from_interrupt(
 
 @dataclass(slots=True)
 class ProjectedInterrupt:
-    """Normalized persisted interrupt extracted from a checkpoint tuple."""
+    """Normalized persisted interrupt extracted from a checkpoint tuple.
+
+    ``interrupt_id`` is the request id the producer named the question by, the
+    same id the stream discloses it under and an answer is addressed to.
+    """
 
     interrupt_id: str
     interrupt_type: str
     payload: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class LiveInterrupt:
+    """One question a run's live state shows it still stopped on.
+
+    Read off a LangGraph state snapshot rather than a checkpoint tuple, so it
+    keeps what only the snapshot knows: the task that asked, under its node
+    name, and LangGraph's own ``interrupt_id``, which is how an answer is
+    addressed while more than one question is pending. ``request_id`` is the id
+    the producer named the question by, ``None`` when the payload names none;
+    such a question cannot be matched to an answer.
+    """
+
+    task_id: str
+    task_name: str
+    interrupt_id: str | None
+    interrupt_type: str | None
+    request_id: str | None
+    payload: dict[str, Any] | None
 
 
 @dataclass(slots=True)
@@ -630,6 +658,22 @@ def extract_checkpoint_fields(
 _TASK_BOOKKEEPING_CHANNELS = frozenset(WRITES_IDX_MAP)
 
 
+def _held_write_entries(pending_writes: Iterable[Any]) -> list[Sequence[object]]:
+    """Return the held writes shaped as ``(task_id, channel, value)``.
+
+    Durable storage is untrusted, so a write of any other shape is skipped
+    rather than unpacked.
+    """
+    entries: list[Sequence[object]] = []
+    for write in pending_writes or ():
+        entry: Sequence[object] = (
+            cast("Sequence[object]", write) if isinstance(write, tuple | list) else ()
+        )
+        if len(entry) == 3:
+            entries.append(entry)
+    return entries
+
+
 def tasks_past_their_interrupt(pending_writes: Iterable[Any]) -> frozenset[str]:
     """Return the tasks whose held interrupt is a leftover, not a live question.
 
@@ -648,12 +692,7 @@ def tasks_past_their_interrupt(pending_writes: Iterable[Any]) -> frozenset[str]:
     disclosing a question rather than hiding one.
     """
     finished: set[str] = set()
-    for write in pending_writes or ():
-        entry: Sequence[object] = (
-            cast("Sequence[object]", write) if isinstance(write, tuple | list) else ()
-        )
-        if len(entry) != 3:
-            continue
+    for entry in _held_write_entries(pending_writes):
         task_id, channel = entry[0], entry[1]
         if (
             isinstance(task_id, str)
@@ -664,30 +703,101 @@ def tasks_past_their_interrupt(pending_writes: Iterable[Any]) -> frozenset[str]:
     return frozenset(finished)
 
 
+def unanswered_interrupt_values(pending_writes: Iterable[Any]) -> list[object]:
+    """Return the held interrupt writes of the tasks still asking their question.
+
+    The one reading of a checkpoint's held writes as questions: an interrupt
+    write whose task has since run past it (:func:`tasks_past_their_interrupt`)
+    is a leftover, not a pause. Each value is the write as held - one interrupt
+    or a sequence of them. A malformed write is skipped.
+    """
+    entries = _held_write_entries(pending_writes)
+    answered = tasks_past_their_interrupt(entries)
+    return [
+        entry[2]
+        for entry in entries
+        if entry[1] == INTERRUPT and entry[0] not in answered
+    ]
+
+
+def named_request_id(value: object) -> str | None:
+    """Return the non-empty ``request_id`` *value* names, or ``None``.
+
+    An interrupt payload names the request it asks under this key, and a resume
+    value names the request it answers under the same one. One reader keeps the
+    question and its answer from disagreeing about what counts as naming a
+    request; there is no fallback identity, because a question its producer did
+    not name cannot be matched to any answer.
+    """
+    if not isinstance(value, dict):
+        return None
+    named = cast("dict[str, object]", value).get("request_id")
+    return named if isinstance(named, str) and named else None
+
+
+def _interrupt_payload(raw_interrupt: object) -> dict[str, Any] | None:
+    """Return the mapping payload a LangGraph interrupt carries, if it has one."""
+    payload: object = getattr(raw_interrupt, "value", raw_interrupt)
+    return cast("dict[str, Any]", payload) if isinstance(payload, dict) else None
+
+
+def live_interrupts(
+    state: object, held_writes: Iterable[Any]
+) -> tuple[LiveInterrupt, ...]:
+    """Return the questions a run's live state is still stopped on, task by task.
+
+    *state* is a LangGraph state snapshot. Its tasks list every interrupt write
+    the checkpoint holds against them, including one a fanned-out branch has
+    already answered and run past: the superstep that would clear it cannot
+    commit while another branch is parked. *held_writes*, the writes the store
+    holds against the snapshot's checkpoint, are the only thing that tells the
+    two apart, so a task they show finished contributes nothing. Without them
+    every listed interrupt reads as open, which is the snapshot's own reading.
+    """
+    answered = tasks_past_their_interrupt(held_writes)
+    found: list[LiveInterrupt] = []
+    for task in getattr(state, "tasks", None) or ():
+        task_id = str(getattr(task, "id", ""))
+        if task_id in answered:
+            continue
+        task_name = str(getattr(task, "name", ""))
+        for raw_interrupt in getattr(task, "interrupts", None) or ():
+            payload = _interrupt_payload(raw_interrupt)
+            raw_id: object = getattr(raw_interrupt, "id", None)
+            raw_type: object = payload.get("type") if payload is not None else None
+            found.append(
+                LiveInterrupt(
+                    task_id=task_id,
+                    task_name=task_name,
+                    interrupt_id=raw_id if isinstance(raw_id, str) and raw_id else None,
+                    interrupt_type=raw_type if isinstance(raw_type, str) else None,
+                    request_id=named_request_id(payload),
+                    payload=payload,
+                )
+            )
+    return tuple(found)
+
+
 def _project_pending_interrupt(
-    projection: CheckpointProjection,
-    raw_interrupt: object,
-    *,
-    thread_id: str,
-    write_index: int,
+    projection: CheckpointProjection, raw_interrupt: object
 ) -> None:
-    payload_raw: object = getattr(raw_interrupt, "value", raw_interrupt)
-    if not isinstance(payload_raw, dict):
+    payload = _interrupt_payload(raw_interrupt)
+    if payload is None:
         projection.degraded_reasons.append(DegradedReason.INTERRUPT_PAYLOAD_UNREADABLE)
         return
-    payload = cast("dict[str, Any]", payload_raw)
     interrupt_type = payload.get("type")
     if not isinstance(interrupt_type, str):
         projection.degraded_reasons.append(DegradedReason.INTERRUPT_PAYLOAD_UNTYPED)
         return
-    interrupt_id = str(
-        payload.get("request_id")
-        or getattr(raw_interrupt, "id", None)
-        or f"{projection.checkpoint_id or thread_id}:interrupt:{write_index}"
-    )
+    request_id = named_request_id(payload)
+    if request_id is None:
+        # Every producer names its question; one that does not cannot be
+        # answered, so it is not disclosed as a pause anyone could resolve.
+        projection.degraded_reasons.append(DegradedReason.INTERRUPT_PAYLOAD_UNREADABLE)
+        return
     projection.pending_interrupts.append(
         ProjectedInterrupt(
-            interrupt_id=interrupt_id,
+            interrupt_id=request_id,
             interrupt_type=interrupt_type,
             payload=payload,
         )
@@ -700,13 +810,7 @@ def _record_pending_channel(projection: CheckpointProjection, channel: object) -
         projection.pending_write_channels.append(channel)
 
 
-def _project_write_interrupts(
-    projection: CheckpointProjection,
-    value: object,
-    *,
-    thread_id: str,
-    write_index: int,
-) -> None:
+def _project_write_interrupts(projection: CheckpointProjection, value: object) -> None:
     """Project every interrupt one held interrupt write carries.
 
     A single write holds either one interrupt or a sequence of them, so the
@@ -718,16 +822,11 @@ def _project_write_interrupts(
         else [value]
     )
     for raw_interrupt in raw_interrupts:
-        _project_pending_interrupt(
-            projection, raw_interrupt, thread_id=thread_id, write_index=write_index
-        )
+        _project_pending_interrupt(projection, raw_interrupt)
 
 
 def fold_pending_writes(
-    projection: CheckpointProjection,
-    checkpoint_tuple: Any,
-    *,
-    thread_id: str,
+    projection: CheckpointProjection, checkpoint_tuple: Any
 ) -> None:
     """Fold the checkpoint's pending writes onto a base projection in place.
 
@@ -742,15 +841,11 @@ def fold_pending_writes(
     )
     # Every held write is counted and its channel recorded: those describe the
     # checkpoint. Only the questions are narrowed, to the tasks still asking.
-    answered = tasks_past_their_interrupt(pending_writes)
-    for index, pending_write in enumerate(pending_writes):
-        task_id, channel, value = pending_write
+    for _task_id, channel, _value in pending_writes:
         projection.pending_write_count += 1
         _record_pending_channel(projection, channel)
-        if channel == INTERRUPT and task_id not in answered:
-            _project_write_interrupts(
-                projection, value, thread_id=thread_id, write_index=index
-            )
+    for value in unanswered_interrupt_values(pending_writes):
+        _project_write_interrupts(projection, value)
 
     if projection.pending_interrupts:
         projection.pause_cause = projection.pending_interrupts[0].interrupt_type
@@ -775,7 +870,7 @@ def project_checkpoint_tuple(
     projection = extract_checkpoint_fields(
         checkpoint_tuple, thread_id=thread_id, history_depth=history_depth
     )
-    fold_pending_writes(projection, checkpoint_tuple, thread_id=thread_id)
+    fold_pending_writes(projection, checkpoint_tuple)
     return projection
 
 

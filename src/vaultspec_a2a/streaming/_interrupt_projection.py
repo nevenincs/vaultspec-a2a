@@ -5,18 +5,25 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
+from typing import TYPE_CHECKING, Any, TypeGuard
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
+
+from ..database import read_latest_checkpoint
 from ..domain_config import domain_config
 from ..graph.acp_options import option_id_of, option_kind
 from ..graph.enums import AgentLifecycleState, PermissionOptionKind, PermissionType
 from ..thread import InterruptType
+from ..thread.snapshots import live_interrupts
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from ..thread.snapshots import LiveInterrupt
     from .emitters import EventEmitters
     from .types import StreamableGraph
+
+__all__ = ["emit_interrupt_events"]
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +39,6 @@ class _InterruptEmission:
     payload: dict[str, Any]
 
 
-class _InterruptTask(Protocol):
-    """The task fields exposed by LangGraph state snapshots."""
-
-    name: str
-    interrupts: Sequence[object]
-
-
 async def emit_interrupt_events(
     thread_id: str,
     _agent_id: str,
@@ -46,16 +46,21 @@ async def emit_interrupt_events(
     config: dict[str, Any],
     emitters: EventEmitters,
 ) -> bool:
-    """Inspect graph state after streaming and project every known interrupt."""
+    """Inspect graph state after streaming and project every open question.
+
+    A fanned-out branch that was answered and ran on keeps its interrupt in
+    the snapshot until the superstep commits, so the questions are read
+    against the checkpoint's held writes: an answered one is not asked again.
+    """
     state = await _read_graph_state(thread_id, graph, config)
     if state is None:
         return False
 
-    tasks = _interrupted_tasks(state)
-    if not tasks or not any(task.interrupts for task in tasks):
+    interrupts = live_interrupts(state, await _held_writes(thread_id, graph))
+    if not interrupts:
         return False
 
-    for emission in _interrupt_emissions(thread_id, tasks):
+    for emission in _interrupt_emissions(thread_id, interrupts):
         if not emitters.has_pending_permission(emission.request_id):
             await _emit_interrupt(emission, emitters)
     return True
@@ -82,68 +87,55 @@ async def _read_graph_state(
     return None
 
 
+async def _held_writes(thread_id: str, graph: StreamableGraph) -> tuple[object, ...]:
+    """The writes the store holds against the run's latest checkpoint.
+
+    The run's own ingest is finishing, so nothing else writes this thread
+    between the state read and this one. A store that cannot be read returns
+    nothing, which leaves every question the snapshot lists reading as open:
+    the snapshot's own reading, and the one that discloses a question rather
+    than hiding one.
+    """
+    checkpointer = getattr(graph, "checkpointer", None)
+    if not isinstance(checkpointer, BaseCheckpointSaver):
+        return ()
+    stored = await read_latest_checkpoint(checkpointer, thread_id)
+    if stored.checkpoint_tuple is None:
+        return ()
+    return tuple(stored.checkpoint_tuple.pending_writes or ())
+
+
 def _interrupt_emissions(
-    thread_id: str, tasks: Sequence[_InterruptTask]
+    thread_id: str, interrupts: Sequence[LiveInterrupt]
 ) -> list[_InterruptEmission]:
-    """Normalize recognized task interrupts while retaining their graph position."""
+    """Normalize the recognized open questions while retaining the task that asked."""
     emissions: list[_InterruptEmission] = []
-    for task_index, task in enumerate(tasks):
-        for interrupt_index, interrupt in enumerate(task.interrupts):
-            payload = _interrupt_payload(interrupt)
-            if payload is None:
-                continue
-            interrupt_type = payload.get("type")
-            if interrupt_type not in InterruptType:
-                continue
-            emissions.append(
-                _InterruptEmission(
-                    thread_id=thread_id,
-                    agent_id=task.name,
-                    request_id=_request_id(
-                        thread_id, task_index, interrupt_index, interrupt, payload
-                    ),
-                    interrupt_type=InterruptType(interrupt_type),
-                    payload=payload,
-                )
+    for interrupt in interrupts:
+        if interrupt.payload is None or interrupt.interrupt_type not in InterruptType:
+            continue
+        if interrupt.request_id is None:
+            logger.warning(
+                "Thread %s parked on a %s interrupt that names no request; it "
+                "cannot be answered, so it is not disclosed",
+                thread_id,
+                interrupt.interrupt_type,
             )
+            continue
+        emissions.append(
+            _InterruptEmission(
+                thread_id=thread_id,
+                agent_id=interrupt.task_name,
+                request_id=interrupt.request_id,
+                interrupt_type=InterruptType(interrupt.interrupt_type),
+                payload=interrupt.payload,
+            )
+        )
     return emissions
-
-
-def _interrupt_payload(interrupt: object) -> dict[str, Any] | None:
-    """Return a LangGraph interrupt payload when it has the expected mapping shape."""
-    payload: object = getattr(interrupt, "value", interrupt)
-    return payload if _is_payload(payload) else None
-
-
-def _interrupted_tasks(state: object) -> Sequence[_InterruptTask]:
-    """Return the sequence of pending LangGraph tasks, if a snapshot supplies one."""
-    tasks: object = getattr(state, "tasks", None)
-    return tasks if _is_task_sequence(tasks) else ()
-
-
-def _is_task_sequence(value: object) -> TypeGuard[Sequence[_InterruptTask]]:
-    """Recognize the list/tuple task collection used by graph state snapshots."""
-    return isinstance(value, list | tuple)
 
 
 def _is_payload(value: object) -> TypeGuard[dict[str, Any]]:
     """Narrow an untrusted graph payload to the mapping shape we project."""
     return isinstance(value, dict)
-
-
-def _request_id(
-    thread_id: str,
-    task_index: int,
-    interrupt_index: int,
-    interrupt: object,
-    payload: dict[str, Any],
-) -> str:
-    """Resolve the durable request identity in the established precedence order."""
-    return str(
-        payload.get("request_id")
-        or getattr(interrupt, "id", None)
-        or f"{thread_id}:task{task_index}:int{interrupt_index}"
-    )
 
 
 async def _emit_interrupt(

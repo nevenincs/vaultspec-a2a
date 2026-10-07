@@ -11,7 +11,7 @@ from ..database import (
     get_pending_permission_requests,
     get_thread_execution_state,
 )
-from ..utils.coercion import coerce_object_list, coerce_object_mapping
+from ..utils.coercion import coerce_object_mapping
 from .permission_options import decode_allowed_options
 from .repositories.continuation_queue import count_queued_continuations
 
@@ -27,25 +27,24 @@ if TYPE_CHECKING:
     )
 
 from ..graph.acp_options import option_id_of, option_kind, valid_option_ids
-from ..graph.enums import PermissionOptionKind, PermissionType
+from ..graph.enums import PermissionType
 from ..ipc.schemas import ExecutionTaskProjectionPayload
 from ..streaming.types import classify_tool_kind
 from ..thread.enums import (
     TERMINAL_STATUS_VALUES,
     ApprovalStatus,
     DegradedReason,
-    InterruptType,
     RepairStatus,
     ThreadStatus,
 )
 from ..thread.snapshots import (
+    PERMISSION_REQUEST_EVENT_TYPES,
     PLAN_APPROVAL_PAUSE_CAUSES,
     CheckpointProjection,
     ExecutionStateProjection,
     ExecutionTaskData,
     PermissionData,
     PermissionOptionData,
-    ProjectedInterrupt,
     ThreadStateData,
     clarification_data_from_interrupt,
 )
@@ -243,110 +242,10 @@ def _permission_data_from_model(
     )
 
 
-def _permission_data_from_interrupt(
-    interrupt: ProjectedInterrupt,
-) -> PermissionData | None:
-    payload = coerce_object_mapping(interrupt.payload)
-    if payload is None:
-        return None
-    if interrupt.interrupt_type == InterruptType.PERMISSION_REQUEST:
-        tool_name = str(payload.get("tool_name", "unknown"))
-        raw_options = coerce_object_list(payload.get("options", []))
-        options: list[PermissionOptionData] = []
-        if raw_options is not None:
-            for option in raw_options:
-                typed_option = coerce_object_mapping(option)
-                if typed_option is None:
-                    continue
-                option_id = option_id_of(typed_option) or "allow_once"
-                options.append(
-                    PermissionOptionData(
-                        option_id=option_id,
-                        name=str(
-                            typed_option.get(
-                                "name", typed_option.get("label", option_id)
-                            )
-                        ),
-                        kind=str(option_kind(typed_option)),
-                    )
-                )
-        return PermissionData(
-            request_id=interrupt.interrupt_id,
-            description=f"Approval required for tool '{tool_name}'",
-            options=options,
-            tool_call=tool_name,
-            tool_kind=str(classify_tool_kind(tool_name)),
-        )
-
-    if interrupt.interrupt_type == InterruptType.PLAN_APPROVAL_REQUEST:
-        feature = str(payload.get("feature", "unknown"))
-        plan_paths = coerce_object_list(payload.get("plan_paths", []))
-        exec_worker = str(payload.get("exec_worker", "unknown"))
-        plan_summary = (
-            f"{len(plan_paths)} plan document(s)" if plan_paths else "no plan documents"
-        )
-        return PermissionData(
-            request_id=interrupt.interrupt_id,
-            description=(
-                f"Approve plan for feature '{feature}' before routing to "
-                f"{exec_worker} ({plan_summary})"
-            ),
-            options=[
-                PermissionOptionData(
-                    option_id="approve",
-                    name="Approve Plan",
-                    kind=str(PermissionOptionKind.ALLOW_ONCE),
-                ),
-                PermissionOptionData(
-                    option_id="reject",
-                    name="Reject - Revise Plan",
-                    kind=str(PermissionOptionKind.REJECT_ONCE),
-                ),
-            ],
-            tool_call=PermissionType.PLAN_APPROVAL.value,
-            tool_kind="other",
-        )
-
-    if interrupt.interrupt_type == InterruptType.DOCUMENT_APPROVAL_REQUEST:
-        phase = str(payload.get("phase", "document"))
-        feature = str(payload.get("feature", "unknown"))
-        return PermissionData(
-            request_id=interrupt.interrupt_id,
-            description=(
-                f"Approve the {phase} document for feature '{feature}' "
-                f"before the run proceeds"
-            ),
-            options=[
-                PermissionOptionData(
-                    option_id="approve",
-                    name="Approve Document",
-                    kind=str(PermissionOptionKind.ALLOW_ONCE),
-                ),
-                PermissionOptionData(
-                    option_id="reject",
-                    name="Reject - Revise Document",
-                    kind=str(PermissionOptionKind.REJECT_ONCE),
-                ),
-            ],
-            tool_call=PermissionType.PLAN_APPROVAL.value,
-            tool_kind="other",
-        )
-
-    return None
-
-
-def _merge_checkpoint_interrupts(
+def _merge_checkpoint_clarification(
     snapshot: ThreadStateData, projection: CheckpointProjection
 ) -> None:
-    """Add checkpoint permissions and the first parked clarification."""
-    existing = {permission.request_id for permission in snapshot.pending_permissions}
-    for interrupt in projection.pending_interrupts:
-        permission = _permission_data_from_interrupt(interrupt)
-        if permission is None or permission.request_id in existing:
-            continue
-        snapshot.pending_permissions.append(permission)
-        existing.add(permission.request_id)
-
+    """Add the first parked clarification the checkpoint holds."""
     # Mid-run clarification: checkpoint-truth disclosure only. A parked
     # clarification is read from this projection on every reload.
     if snapshot.pending_clarification is None:
@@ -374,7 +273,7 @@ def apply_checkpoint_projection(
     if snapshot.pause_cause is None:
         snapshot.pause_cause = projection.pause_cause
 
-    _merge_checkpoint_interrupts(snapshot, projection)
+    _merge_checkpoint_clarification(snapshot, projection)
 
     for reason in projection.degraded_reasons:
         mark_degraded(snapshot, reason)
@@ -384,29 +283,35 @@ def apply_checkpoint_projection(
 
 def reconcile_checkpoint_permissions_with_durable_state(
     snapshot: ThreadStateData,
-    *,
-    durable_request_ids: set[str],
+    projection: CheckpointProjection,
 ) -> ThreadStateData:
-    """Fail closed when checkpoint-only interrupts are not durably actionable."""
-    filtered_permissions: list[PermissionData] = []
-    dropped_request_ids: set[str] = set()
-    for permission in snapshot.pending_permissions:
-        if permission.request_id in durable_request_ids:
-            filtered_permissions.append(permission)
-            continue
-        dropped_request_ids.add(permission.request_id)
+    """Fail closed when the checkpoint is parked on a permission with no durable row.
 
-    if not dropped_request_ids:
+    The durable row is the only source of a pending permission's content, so
+    ``snapshot.pending_permissions`` holds exactly the readable durable rows and
+    the checkpoint contributes nothing but the request ids it is parked on. A
+    parked request with no row is a pause the respond route cannot act on: it
+    demands reconciliation and withdraws any approval it names.
+    """
+    durable_request_ids = {
+        permission.request_id for permission in snapshot.pending_permissions
+    }
+    orphaned_request_ids = {
+        interrupt.interrupt_id
+        for interrupt in projection.pending_interrupts
+        if interrupt.interrupt_type in PERMISSION_REQUEST_EVENT_TYPES
+        and interrupt.interrupt_id not in durable_request_ids
+    }
+    if not orphaned_request_ids:
         return snapshot
 
-    snapshot.pending_permissions = filtered_permissions
     mark_degraded(
         snapshot,
         DegradedReason.CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW,
         repair=RepairStatus.NEEDS_RECONCILIATION,
     )
 
-    if snapshot.approval_request_id in dropped_request_ids:
+    if snapshot.approval_request_id in orphaned_request_ids:
         snapshot.approval_status = None
         snapshot.approval_request_id = None
     _clear_non_actionable_pause_state(snapshot)

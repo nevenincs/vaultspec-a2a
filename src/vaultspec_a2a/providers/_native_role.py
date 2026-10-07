@@ -28,6 +28,15 @@ if TYPE_CHECKING:
 
     from ..desktop._filesystem_authority import DirectoryAuthority
 
+__all__ = [
+    "bind_model_native_workspace",
+    "capture_native_workspace",
+    "prepare_acp_role",
+    "prepare_native_version_probe",
+    "require_native_workspace",
+    "role_environment",
+]
+
 
 @runtime_checkable
 class _NativeBindable(Protocol):
@@ -80,8 +89,9 @@ def require_native_workspace(
 
 def role_environment(authority: NativeLaunchAuthority) -> dict[str, str]:
     """Provider configuration resolves only within this prepared home."""
-    home = str(authority.home.path)
-    return {"HOME": home, "USERPROFILE": home, "CLAUDE_CONFIG_DIR": home}
+    environment = authority.home_environment()
+    home = environment["HOME"]
+    return {**environment, "USERPROFILE": home, "CLAUDE_CONFIG_DIR": home}
 
 
 def _new_home(authority: NativeWorkspaceAuthority) -> DirectoryAuthority:

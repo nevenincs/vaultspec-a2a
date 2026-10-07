@@ -8,7 +8,6 @@ import hashlib
 import json
 import os
 import re
-import stat
 import sys
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -28,12 +27,28 @@ from ._filesystem_authority import (
     directory_lease,
     resolve_directory_authority,
 )
-from ._linux_helper import anonymous_arguments, anonymous_data, require_static_helper
+from ._linux_helper import (
+    anonymous_arguments,
+    anonymous_data,
+    require_unprivileged_static_helper,
+)
 from ._linux_resolver import RESOLVER_TARGET, host_resolver_data
 from .profile import derive_state_paths
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+__all__ = [
+    "LinuxRuntimeClosure",
+    "NativeLaunch",
+    "NativeLaunchAuthority",
+    "NativeWorkspaceAuthority",
+    "RuntimeFile",
+    "RuntimeMount",
+    "decode_launch_environment",
+    "exec_linux_isolated",
+    "linux_isolated_launch",
+]
 
 _MANIFEST = "isolation/runtime.json"
 _MAX_METADATA_BYTES = 64 * 1024
@@ -187,6 +202,16 @@ class NativeLaunchAuthority:
         homes = derive_state_paths(self.app_home.path).temp_homes_dir
         if self.home.path == homes or not self.home.path.is_relative_to(homes):
             raise ValueError("native auth home must be one selected role home")
+
+    def home_environment(self) -> dict[str, str]:
+        """Confine home-relative lookups to the prepared role home."""
+        home = self.home.path
+        return {
+            "HOME": str(home),
+            "XDG_CONFIG_HOME": str(home / ".config"),
+            "XDG_CACHE_HOME": str(home / ".cache"),
+            "XDG_DATA_HOME": str(home / ".local" / "share"),
+        }
 
     def canonical_cwd(self, value: str) -> str:
         path = Path(value).resolve(strict=True)
@@ -422,11 +447,7 @@ def exec_linux_isolated(
         helper_fd = _attested_file(
             stack, authority.capsule, closure.helper, prefix=prefix
         )
-        require_static_helper(helper_fd)
-        helper_mode = os.fstat(helper_fd).st_mode
-        if helper_mode & (stat.S_ISUID | stat.S_ISGID):
-            raise ValueError("native helper cannot have privileged mode bits")
-        os.lseek(helper_fd, 0, os.SEEK_SET)
+        require_unprivileged_static_helper(helper_fd)
         argv = [
             "bubblewrap",
             "--unshare-user",
@@ -495,13 +516,7 @@ def exec_linux_isolated(
             for name, value in environment.items()
             if name.upper() in relay_names
         )
-        env.update(
-            HOME=str(authority.home.path),
-            XDG_CONFIG_HOME=str(authority.home.path / ".config"),
-            XDG_CACHE_HOME=str(authority.home.path / ".cache"),
-            XDG_DATA_HOME=str(authority.home.path / ".local" / "share"),
-            TMPDIR="/tmp",
-        )
+        env.update(authority.home_environment(), TMPDIR="/tmp")
         argv.append("--clearenv")
         for name, value in env.items():
             argv.extend(["--setenv", name, value])

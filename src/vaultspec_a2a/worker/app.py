@@ -468,7 +468,9 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
 
     # Instrument incoming requests so the worker's spans participate
     # in distributed traces started by the gateway (W3C traceparent extraction).
-    app.add_middleware(cast("Any", BoundedHttpBodyMiddleware), limit=worker_body_limit)
+    app.add_middleware(
+        cast("Any", BoundedHttpBodyMiddleware), limit=worker_body_limit(settings)
+    )
     app.add_middleware(cast("Any", TelemetryMiddleware))
 
     @app.post(
@@ -570,7 +572,7 @@ def main() -> None:
 def _serve() -> None:
     """Configure the process and run the worker's server until shutdown."""
     reconfigure_console_utf8()
-    configure_logging("service", service_name="worker")
+    configure_logging("service", settings=settings, service_name="worker")
     logger.info(
         "Worker main config: gateway_port=%d worker_host=%s"
         " worker_port=%d worker_url=%s",

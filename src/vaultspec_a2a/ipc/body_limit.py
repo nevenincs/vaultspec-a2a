@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Final
-
-from ..control.config import settings
+from typing import TYPE_CHECKING, Final, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -16,31 +14,55 @@ __all__ = ["BoundedHttpBodyMiddleware", "gateway_body_limit", "worker_body_limit
 
 _MAX_V1_WRITE_BODY_BYTES: Final = 1024 * 1024
 
+#: The allowance for one write, with the detail its refusal carries.
+type _BodyLimit = Callable[[Scope], tuple[int, str]]
 
-def worker_body_limit(_scope: Scope) -> tuple[int, str]:
+
+class _BodyLimitSettings(Protocol):
+    """The configured allowances, handed in by the application factory.
+
+    Read on each request rather than copied at construction, so the allowance an
+    app enforces is always the configuration's current one.
+    """
+
+    @property
+    def internal_max_http_body_bytes(self) -> int: ...
+
+    @property
+    def internal_max_event_batch_bytes(self) -> int: ...
+
+
+def worker_body_limit(settings: _BodyLimitSettings) -> _BodyLimit:
     """Use the configured internal allowance for worker writes."""
-    limit = settings.internal_max_http_body_bytes
-    return limit, f"Internal request body exceeds {limit} bytes"
+
+    def limit(_scope: Scope) -> tuple[int, str]:
+        max_bytes = settings.internal_max_http_body_bytes
+        return max_bytes, f"Internal request body exceeds {max_bytes} bytes"
+
+    return limit
 
 
-def gateway_body_limit(scope: Scope) -> tuple[int, str]:
+def gateway_body_limit(settings: _BodyLimitSettings) -> _BodyLimit:
     """Preserve the versioned allowance and the larger event-batch allowance."""
-    path = str(scope.get("path", ""))
-    if path.startswith("/v1/"):
-        limit = _MAX_V1_WRITE_BODY_BYTES
-        return limit, f"v1 request body exceeds {limit} bytes"
-    if path.rstrip("/") == "/internal/events/batch":
-        limit = settings.internal_max_event_batch_bytes
-        return limit, f"Payload too large (max {limit} bytes)"
-    return worker_body_limit(scope)
+    internal = worker_body_limit(settings)
+
+    def limit(scope: Scope) -> tuple[int, str]:
+        path = str(scope.get("path", ""))
+        if path.startswith("/v1/"):
+            max_bytes = _MAX_V1_WRITE_BODY_BYTES
+            return max_bytes, f"v1 request body exceeds {max_bytes} bytes"
+        if path.rstrip("/") == "/internal/events/batch":
+            max_bytes = settings.internal_max_event_batch_bytes
+            return max_bytes, f"Payload too large (max {max_bytes} bytes)"
+        return internal(scope)
+
+    return limit
 
 
 class BoundedHttpBodyMiddleware:
     """Count received bytes on every HTTP write before handing its body onward."""
 
-    def __init__(
-        self, app: ASGIApp, *, limit: Callable[[Scope], tuple[int, str]]
-    ) -> None:
+    def __init__(self, app: ASGIApp, *, limit: _BodyLimit) -> None:
         self.app = app
         self.limit = limit
 

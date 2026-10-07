@@ -855,7 +855,7 @@ def main() -> None:
     (``cli.main:main``) defined in ``[project.scripts]``.
     """
     reconfigure_console_utf8()
-    configure_logging("service", service_name="gateway")
+    configure_logging("service", settings=settings, service_name="gateway")
     app = create_app()
     config = uvicorn.Config(
         app,
@@ -908,7 +908,9 @@ def create_app(lifespan: Any | None = None) -> FastAPI:
         # mint the worker IPC secret. Fails closed if a dashboard file is absent.
         _load_desktop_credentials(app)
 
-    app.add_middleware(cast("Any", BoundedHttpBodyMiddleware), limit=gateway_body_limit)
+    app.add_middleware(
+        cast("Any", BoundedHttpBodyMiddleware), limit=gateway_body_limit(settings)
+    )
     app.add_middleware(cast("Any", TelemetryMiddleware))
 
     register_routes(app)

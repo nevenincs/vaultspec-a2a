@@ -33,7 +33,7 @@ def _real_adapter_inputs(
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> tuple[tuple[str, ...], dict[str, str], Mapping[str, object]]:
     external_prerequisite("claude-acp-adapter")
-    command, metadata = _classify_acp_command(settings.acp_backend)
+    command = _classify_acp_command(settings.acp_backend)
     workspace = Path.cwd()
     environment = resolve_env_vars(workspace)
     auth_environment, _auth_mode = claude_auth_env()
@@ -42,7 +42,7 @@ def _real_adapter_inputs(
     if claude := resolve_provider_cli_executable(Provider.CLAUDE):
         environment["CLAUDE_CODE_EXECUTABLE"] = claude
     environment.pop("CLAUDECODE", None)
-    return tuple(command), environment, metadata
+    return command.argv, environment, command.metadata()
 
 
 @pytest.mark.service

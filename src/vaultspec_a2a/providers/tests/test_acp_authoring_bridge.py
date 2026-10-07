@@ -127,7 +127,7 @@ async def test_real_agent_connects_to_authoring_bridge(
     if resolve_provider_cli_executable(Provider.CLAUDE) is None:
         pytest.fail("claude CLI unavailable; start it per the ACP runbook")
 
-    command, meta = _classify_acp_command(settings.acp_backend)
+    command = _classify_acp_command(settings.acp_backend)
     workspace = str(Path.cwd())
     env = resolve_env_vars(Path(workspace))
     auth_environment, _auth_mode = claude_auth_env()
@@ -139,7 +139,11 @@ async def test_real_agent_connects_to_authoring_bridge(
     env.pop("CLAUDECODE", None)
 
     proc = await spawn_acp_process(
-        command, env, workspace, use_exec=False, metadata=meta
+        list(command.argv),
+        env,
+        workspace,
+        use_exec=False,
+        metadata=command.metadata(),
     )
     try:
         init_frame = await exchange_acp_request(
@@ -183,4 +187,4 @@ async def test_real_agent_connects_to_authoring_bridge(
             "real agent did not connect to the authoring MCP server"
         )
     finally:
-        await kill_process_tree(proc, metadata=meta)
+        await kill_process_tree(proc, metadata=command.metadata())

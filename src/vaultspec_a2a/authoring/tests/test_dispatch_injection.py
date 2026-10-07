@@ -438,14 +438,14 @@ async def test_claude_native_turn_supplies_logical_call_identity(
     served, reason = await declared_lane_model_value(Provider.CLAUDE.value, tmp_path)
     if served is None:
         external_prerequisite.absent("provider-catalog-live-selection", reason)
-    command, metadata = _classify_acp_command(settings.acp_backend)
+    command = _classify_acp_command(settings.acp_backend)
     environment, auth_mode = claude_auth_env()
     model = AcpChatModel(
-        command=command,
+        command=list(command.argv),
         env_vars=environment,
         desired_model=served,
         workspace_root=str(tmp_path),
-        use_exec=metadata["acp_backend"] == "binary",
+        use_exec=command.acp_backend == "binary",
         provider=Provider.CLAUDE.value,
         auth_mode=auth_mode,
     )

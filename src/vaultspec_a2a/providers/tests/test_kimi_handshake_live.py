@@ -20,7 +20,7 @@ import pytest
 from ...graph.enums import Provider
 from ...testing import ACP_PROTOCOL_VERSION, exchange_acp_request, initialize_request
 from ...workspace.environment import resolve_env_vars
-from .._factory_commands import _classify_kimi_command
+from .._factory_commands import classify_provider_command
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
 
@@ -31,7 +31,7 @@ async def test_kimi_acp_keyless_handshake_surface() -> None:
     if resolve_provider_cli_executable(Provider.KIMI) is None:
         pytest.fail("kimi CLI unavailable; install with 'uv tool install kimi-cli'")
 
-    command, meta = _classify_kimi_command()
+    command = classify_provider_command(Provider.KIMI)
     workspace = str(Path.cwd())
     # A real base env (PATH etc.) is required: the Kimi CLI resolves its Git-Bash
     # shell from PATH and exits at startup without it. Secrets are scrubbed and no
@@ -39,7 +39,11 @@ async def test_kimi_acp_keyless_handshake_surface() -> None:
     env = resolve_env_vars(Path(workspace))
 
     proc = await spawn_acp_process(
-        command, env, workspace, use_exec=False, metadata=meta
+        list(command.argv),
+        env,
+        workspace,
+        use_exec=False,
+        metadata=command.metadata(),
     )
     try:
         frame = await exchange_acp_request(
@@ -68,4 +72,4 @@ async def test_kimi_acp_keyless_handshake_surface() -> None:
         assert isinstance(auth_meta, dict)
         assert "terminal-auth" in auth_meta
     finally:
-        await kill_process_tree(proc, metadata=meta)
+        await kill_process_tree(proc, metadata=command.metadata())

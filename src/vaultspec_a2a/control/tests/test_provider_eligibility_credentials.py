@@ -24,7 +24,7 @@ from vaultspec_a2a.providers._factory_commands import classify_provider_command
 from vaultspec_a2a.providers.provider_readiness import probe_provider_readiness
 
 try:
-    origin = classify_provider_command(Provider.KIMI)["command_origin"]
+    origin = classify_provider_command(Provider.KIMI).command_origin
 except Exception as exc:
     origin = "RAISED %s" % type(exc).__name__
 

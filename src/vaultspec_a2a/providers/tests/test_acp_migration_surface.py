@@ -236,7 +236,7 @@ async def test_migrated_adapter_preserves_handshake_surface(
 ) -> None:
     external_prerequisite("claude-acp-adapter")
 
-    command, meta = _classify_acp_command(settings.acp_backend)
+    command = _classify_acp_command(settings.acp_backend)
     workspace = str(Path.cwd())
     # Exactly the production env assembly: ambient environment passthrough, no
     # credential injected or scrubbed (the no-auth contract).
@@ -247,7 +247,11 @@ async def test_migrated_adapter_preserves_handshake_surface(
     env.pop("CLAUDECODE", None)
 
     proc = await spawn_acp_process(
-        command, env, workspace, use_exec=False, metadata=meta
+        list(command.argv),
+        env,
+        workspace,
+        use_exec=False,
+        metadata=command.metadata(),
     )
     try:
         await _assert_initialize_surface(proc)
@@ -266,4 +270,4 @@ async def test_migrated_adapter_preserves_handshake_surface(
         )
         assert pinned.get("currentValue") == AUTONOMOUS_PERMISSION_MODE
     finally:
-        await kill_process_tree(proc, metadata=meta)
+        await kill_process_tree(proc, metadata=command.metadata())

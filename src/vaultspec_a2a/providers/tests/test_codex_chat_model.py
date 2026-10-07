@@ -40,7 +40,7 @@ from .._codex_protocol import (
     _completed_action_chunk,
     _messages_to_prompt,
 )
-from .._factory_commands import _classify_codex_command, classify_provider_command
+from .._factory_commands import classify_provider_command
 from .._project_scope import RunProjectScope
 from .._runtime_identity import bind_model_runtime_identity
 from .._subprocess import STDERR_TAIL_LINES, spawn_acp_process
@@ -520,9 +520,9 @@ def test_the_codex_model_declares_a_permission_callback() -> None:
 
 def test_classify_codex_command_shape() -> None:
     """The classifier returns the app-server command and codex_cli metadata."""
-    command, meta = _classify_codex_command()
-    assert command[-1] == "app-server"
-    assert meta["command_kind"] == "codex_cli"
+    command = classify_provider_command(Provider.CODEX)
+    assert command.argv[-1] == "app-server"
+    assert command.command_kind == "codex_cli"
 
 
 def test_classify_provider_command_resolves_codex(
@@ -530,9 +530,10 @@ def test_classify_provider_command_resolves_codex(
 ) -> None:
     """When codex is installed, the provider command classifier resolves it."""
     external_prerequisite("codex-cli")
-    meta = classify_provider_command(Provider.CODEX)
-    assert meta["command_kind"] == "codex_cli"
-    assert meta["command_origin"] == "system_path_executable"
+    command = classify_provider_command(Provider.CODEX)
+    assert command.resolved is True
+    assert command.command_kind == "codex_cli"
+    assert command.command_origin == "system_path_executable"
 
 
 def test_codex_readiness_ready_when_installed(

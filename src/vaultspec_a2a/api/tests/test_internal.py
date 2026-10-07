@@ -513,8 +513,8 @@ class TestInternalEvents:
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
         assert aggregator.subscriber_count() == 0
-        assert aggregator.subscription_count() == 0
-        assert aggregator.sequence_count() == 0
+        assert aggregator.get_active_thread_ids() == []
+        assert aggregator.get_sequence("t-invalid-projection-clock") == 0
 
         async with session_factory() as session:
             rows = list(
@@ -717,7 +717,7 @@ class TestInternalEvents:
                 },
             )
         assert resp.status_code == 422
-        assert aggregator.sequence_count() == 0
+        assert not aggregator._emitters._sequences
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_batch_without_events_is_rejected(self) -> None:

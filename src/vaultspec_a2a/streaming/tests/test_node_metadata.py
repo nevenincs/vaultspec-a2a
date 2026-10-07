@@ -181,7 +181,7 @@ async def test_team_status_defaults_every_field_but_keeps_caller_values() -> Non
     aggregator.subscribe("client-1", ["thread-1"])
     aggregator.register_graph("thread-1", cast("StreamableGraph", _graph()))
 
-    await aggregator.emit_team_status(
+    await aggregator._emitters.emit_team_status(
         thread_id="thread-1",
         agents=[
             {

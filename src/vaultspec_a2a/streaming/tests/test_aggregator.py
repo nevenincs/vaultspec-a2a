@@ -43,6 +43,7 @@ from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
 from ..aggregator import EventAggregator
 from ..ingest import _next_event_or_cancel, summarize_ingest_exception
+from ..transformer import StreamFrame
 from ..types import SequencedEvent, StreamableGraph, StreamOptions
 from ._error_injecting_graph import (
     ERROR_INJECTION_NODE,
@@ -168,9 +169,9 @@ class TestSequenceManagement:
         assert aggregator.get_sequence("thread-1") == 0
 
     def test_sequence_increments(self, aggregator: EventAggregator) -> None:
-        """advance_sequence returns 1 then 2 on successive calls."""
-        seq1 = aggregator.advance_sequence("thread-1")
-        seq2 = aggregator.advance_sequence("thread-1")
+        """next_sequence returns 1 then 2 on successive calls."""
+        seq1 = aggregator._emitters.next_sequence("thread-1")
+        seq2 = aggregator._emitters.next_sequence("thread-1")
         expected_first = 1
         expected_second = 2
         assert seq1 == expected_first
@@ -178,9 +179,9 @@ class TestSequenceManagement:
 
     def test_sequences_are_per_thread(self, aggregator: EventAggregator) -> None:
         """Sequence counters are independent across threads."""
-        aggregator.advance_sequence("thread-a")
-        aggregator.advance_sequence("thread-a")
-        aggregator.advance_sequence("thread-b")
+        aggregator._emitters.next_sequence("thread-a")
+        aggregator._emitters.next_sequence("thread-a")
+        aggregator._emitters.next_sequence("thread-b")
         expected_a = 2
         expected_b = 1
         assert aggregator.get_sequence("thread-a") == expected_a
@@ -220,14 +221,16 @@ class TestSubscriberManagement:
         """Subscribe records thread_ids for the given client."""
         aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-a", "thread-b"])
-        assert aggregator.get_subscriptions("client-1") == {"thread-a", "thread-b"}
+        assert aggregator.get_active_thread_ids() == ["thread-a", "thread-b"]
 
-    def test_unsubscribe_from_threads(self, aggregator: EventAggregator) -> None:
-        """Unsubscribe removes the specified thread_id from the subscription set."""
+    def test_clear_thread_state_drops_the_thread_from_subscriptions(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """Purging a thread removes it from every subscription set it was in."""
         aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-a", "thread-b"])
-        aggregator.unsubscribe("client-1", ["thread-a"])
-        assert aggregator.get_subscriptions("client-1") == {"thread-b"}
+        aggregator.clear_thread_state("thread-a")
+        assert aggregator.get_active_thread_ids() == ["thread-b"]
 
     def test_get_active_thread_ids(self, aggregator: EventAggregator) -> None:
         """get_active_thread_ids returns a sorted union of all subscribed threads."""
@@ -339,7 +342,7 @@ class TestEventEmission:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.emit_message_chunk(
+        await aggregator._emitters.emit_message_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="Hello",
@@ -358,7 +361,7 @@ class TestEventEmission:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.emit_thought_chunk(
+        await aggregator._emitters.emit_thought_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="thinking...",
@@ -376,7 +379,7 @@ class TestEventEmission:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.emit_tool_call_start(
+        await aggregator._emitters.emit_tool_call_start(
             thread_id="thread-1",
             agent_id="agent-1",
             tool_call_id="tc-1",
@@ -398,7 +401,7 @@ class TestEventEmission:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.emit_permission_request(
+        await aggregator._emitters.emit_permission_request(
             thread_id="thread-1",
             agent_id="agent-1",
             request_id="perm-1",
@@ -431,7 +434,7 @@ class TestEventEmission:
         self, aggregator: EventAggregator
     ) -> None:
         """A new permission request should replace older pending ones."""
-        await aggregator.emit_permission_request(
+        await aggregator._emitters.emit_permission_request(
             thread_id="thread-1",
             agent_id="agent-1",
             request_id="perm-old",
@@ -439,7 +442,7 @@ class TestEventEmission:
             options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
         )
 
-        await aggregator.emit_permission_request(
+        await aggregator._emitters.emit_permission_request(
             thread_id="thread-1",
             agent_id="agent-1",
             request_id="perm-new",
@@ -447,7 +450,7 @@ class TestEventEmission:
             options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
         )
 
-        pending = aggregator.get_pending_permissions("thread-1")
+        pending = aggregator._emitters.get_pending_permissions("thread-1")
         assert [event.request_id for event in pending] == ["perm-new"]
 
     @pytest.mark.asyncio
@@ -459,14 +462,14 @@ class TestEventEmission:
         A request recorded moments ago is not yet stale, but is already
         unanswerable once its thread reaches a terminal state.
         """
-        await aggregator.emit_permission_request(
+        await aggregator._emitters.emit_permission_request(
             thread_id="thread-1",
             agent_id="agent-1",
             request_id="perm-fresh",
             description="Fresh request",
             options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
         )
-        await aggregator.emit_permission_request(
+        await aggregator._emitters.emit_permission_request(
             thread_id="thread-2",
             agent_id="agent-1",
             request_id="perm-other-thread",
@@ -477,11 +480,12 @@ class TestEventEmission:
         # The age-based janitor cannot touch a request this young.
         assert aggregator.prune_stale_permissions() == 0
 
-        assert aggregator.expire_thread_permissions("thread-1") == 1
-        assert aggregator.get_pending_permissions("thread-1") == []
+        assert aggregator._emitters.expire_thread_permissions("thread-1") == 1
+        assert aggregator._emitters.get_pending_permissions("thread-1") == []
         # A sibling thread's pending request is untouched.
         assert [
-            event.request_id for event in aggregator.get_pending_permissions("thread-2")
+            event.request_id
+            for event in aggregator._emitters.get_pending_permissions("thread-2")
         ] == ["perm-other-thread"]
 
     @pytest.mark.asyncio
@@ -509,7 +513,7 @@ class TestEventEmission:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.emit_team_status(
+        await aggregator._emitters.emit_team_status(
             thread_id="thread-1",
             agents=[
                 {
@@ -556,7 +560,7 @@ class TestEventEmission:
 
         aggregator.register_graph("thread-1", cast("StreamableGraph", _MinimalGraph()))
 
-        await aggregator.emit_team_status(
+        await aggregator._emitters.emit_team_status(
             thread_id="thread-1",
             agents=[
                 {
@@ -596,7 +600,7 @@ class TestThreadIsolation:
         aggregator.subscribe("client-1", ["thread-a"])
         aggregator.subscribe("client-2", ["thread-b"])
 
-        await aggregator.emit_message_chunk(
+        await aggregator._emitters.emit_message_chunk(
             thread_id="thread-a",
             agent_id="agent-1",
             content="for client-1 only",
@@ -616,7 +620,7 @@ class TestThreadIsolation:
         aggregator.subscribe("client-1", ["thread-1"])
         aggregator.subscribe("client-2", ["thread-1"])
 
-        await aggregator.emit_message_chunk(
+        await aggregator._emitters.emit_message_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="shared event",
@@ -643,13 +647,13 @@ class TestSequenceOnEvents:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.emit_message_chunk(
+        await aggregator._emitters.emit_message_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="first",
             message_id="msg-1",
         )
-        await aggregator.emit_message_chunk(
+        await aggregator._emitters.emit_message_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="second",
@@ -671,19 +675,19 @@ class TestSequenceOnEvents:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-a", "thread-b"])
 
-        await aggregator.emit_message_chunk(
+        await aggregator._emitters.emit_message_chunk(
             thread_id="thread-a",
             agent_id="agent-1",
             content="a-1",
             message_id="msg-1",
         )
-        await aggregator.emit_message_chunk(
+        await aggregator._emitters.emit_message_chunk(
             thread_id="thread-b",
             agent_id="agent-1",
             content="b-1",
             message_id="msg-2",
         )
-        await aggregator.emit_message_chunk(
+        await aggregator._emitters.emit_message_chunk(
             thread_id="thread-a",
             agent_id="agent-1",
             content="a-2",
@@ -706,24 +710,20 @@ class TestSequenceOnEvents:
 # ---------------------------------------------------------------------------
 
 
-def _messages_frame(
-    chunk: AIMessageChunk, node: str | None = None
-) -> tuple[tuple[str, ...], str, object]:
+def _messages_frame(chunk: AIMessageChunk, node: str | None = None) -> StreamFrame:
     """One frame of the ``messages`` stream mode, as astream yields it."""
     metadata: dict[str, object] = {}
     if node is not None:
         metadata["langgraph_node"] = node
-    return ((), "messages", (chunk, metadata))
+    return StreamFrame(namespace=(), mode="messages", payload=(chunk, metadata))
 
 
-def _task_start(
-    name: str, namespace: tuple[str, ...] = ()
-) -> tuple[tuple[str, ...], str, object]:
+def _task_start(name: str, namespace: tuple[str, ...] = ()) -> StreamFrame:
     """One node's start, as the ``tasks`` stream mode reports it."""
-    return (
-        namespace,
-        "tasks",
-        {"id": f"task-{name}", "name": name, "input": {}, "triggers": ()},
+    return StreamFrame(
+        namespace=namespace,
+        mode="tasks",
+        payload={"id": f"task-{name}", "name": name, "input": {}, "triggers": ()},
     )
 
 
@@ -732,12 +732,12 @@ def _task_result(
     result: object = None,
     error: object = None,
     namespace: tuple[str, ...] = (),
-) -> tuple[tuple[str, ...], str, object]:
+) -> StreamFrame:
     """One node's result, as the ``tasks`` stream mode reports it."""
-    return (
-        namespace,
-        "tasks",
-        {
+    return StreamFrame(
+        namespace=namespace,
+        mode="tasks",
+        payload={
             "id": f"task-{name}",
             "name": name,
             "error": error,
@@ -758,8 +758,8 @@ class TestLangGraphStreamProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            *_messages_frame(AIMessageChunk(content="Hello world", id="msg-123")),
+        await aggregator._ingest.project_frame(
+            _messages_frame(AIMessageChunk(content="Hello world", id="msg-123")),
             thread_id="thread-1",
             agent_id="agent-1",
         )
@@ -786,8 +786,8 @@ class TestLangGraphStreamProcessing:
 
         large_content = "x" * (domain_config.chunk_buffer_max_bytes + 100)
 
-        await aggregator.process_stream_frame(
-            *_messages_frame(AIMessageChunk(content=large_content, id="msg-big")),
+        await aggregator._ingest.project_frame(
+            _messages_frame(AIMessageChunk(content=large_content, id="msg-big")),
             thread_id="thread-1",
             agent_id="agent-1",
         )
@@ -804,8 +804,8 @@ class TestLangGraphStreamProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            *_messages_frame(AIMessageChunk(content="from the coder"), node="coder"),
+        await aggregator._ingest.project_frame(
+            _messages_frame(AIMessageChunk(content="from the coder"), node="coder"),
             thread_id="thread-1",
             agent_id="agent-1",
         )
@@ -822,7 +822,7 @@ class TestLangGraphStreamProcessing:
         """A tool's lifecycle arrives on the callback surface, not the stream."""
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
-        callbacks = aggregator.run_lifecycle_callbacks("thread-1", "agent-1")
+        callbacks = aggregator._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
 
         await callbacks.on_tool_start(
             {"name": "search_code"},
@@ -851,7 +851,7 @@ class TestLangGraphStreamProcessing:
         """
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
-        callbacks = aggregator.run_lifecycle_callbacks("thread-1", "agent-1")
+        callbacks = aggregator._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
         run_id = uuid4()
 
         await callbacks.on_tool_start(
@@ -896,7 +896,7 @@ class TestLangGraphStreamProcessing:
     ) -> None:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
-        callbacks = aggregator.run_lifecycle_callbacks("thread-1", "agent-1")
+        callbacks = aggregator._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
         run_id = uuid4()
 
         await callbacks.on_tool_start(
@@ -928,7 +928,7 @@ class TestLangGraphStreamProcessing:
         """Artifact updates must not expose hostile absolute file paths."""
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
-        callbacks = aggregator.run_lifecycle_callbacks("thread-1", "agent-1")
+        callbacks = aggregator._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
         run_id = uuid4()
 
         await callbacks.on_tool_start(
@@ -962,7 +962,7 @@ class TestLangGraphStreamProcessing:
     ) -> None:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
-        callbacks = aggregator.run_lifecycle_callbacks("thread-1", "agent-1")
+        callbacks = aggregator._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
 
         await callbacks.on_llm_end(
             LLMResult(
@@ -1000,7 +1000,7 @@ class TestLangGraphStreamProcessing:
         """
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
-        callbacks = aggregator.run_lifecycle_callbacks("thread-1", "agent-1")
+        callbacks = aggregator._ingest.run_lifecycle_callbacks("thread-1", "agent-1")
 
         await callbacks.on_llm_end(
             LLMResult(
@@ -1029,8 +1029,8 @@ class TestLangGraphStreamProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            *_task_start("coder"), thread_id="thread-1", agent_id="agent-1"
+        await aggregator._ingest.project_frame(
+            _task_start("coder"), thread_id="thread-1", agent_id="agent-1"
         )
 
         event = queue.get_nowait().event
@@ -1045,8 +1045,8 @@ class TestLangGraphStreamProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            *_task_result("coder", result={}),
+        await aggregator._ingest.project_frame(
+            _task_result("coder", result={}),
             thread_id="thread-1",
             agent_id="agent-1",
         )
@@ -1063,8 +1063,8 @@ class TestLangGraphStreamProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            *_task_result("coder", error=RuntimeError("node blew up")),
+        await aggregator._ingest.project_frame(
+            _task_result("coder", error=RuntimeError("node blew up")),
             thread_id="thread-1",
             agent_id="agent-1",
         )
@@ -1088,13 +1088,13 @@ class TestLangGraphStreamProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            *_task_start("inner", namespace=("team:abc",)),
+        await aggregator._ingest.project_frame(
+            _task_start("inner", namespace=("team:abc",)),
             thread_id="thread-1",
             agent_id="agent-1",
         )
-        await aggregator.process_stream_frame(
-            *_task_result(
+        await aggregator._ingest.project_frame(
+            _task_result(
                 "inner",
                 result={"current_plan": [{"content": "inner plan"}]},
                 namespace=("team:abc",),
@@ -1112,8 +1112,8 @@ class TestLangGraphStreamProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            *_task_result(
+        await aggregator._ingest.project_frame(
+            _task_result(
                 "planner",
                 result={"current_plan": [{"content": "ship it", "status": "pending"}]},
             ),
@@ -1138,10 +1138,12 @@ class TestLangGraphStreamProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            (),
-            "custom",
-            {"content": "Let me think about this..."},
+        await aggregator._ingest.project_frame(
+            StreamFrame(
+                namespace=(),
+                mode="custom",
+                payload={"content": "Let me think about this..."},
+            ),
             thread_id="thread-1",
             agent_id="agent-1",
         )
@@ -1164,8 +1166,10 @@ class TestLangGraphStreamProcessing:
         aggregator.subscribe("client-1", ["thread-1"])
 
         for payload in ("a bare string", ["a", "list"], 42):
-            await aggregator.process_stream_frame(
-                (), "custom", payload, thread_id="thread-1", agent_id="agent-1"
+            await aggregator._ingest.project_frame(
+                StreamFrame(namespace=(), mode="custom", payload=payload),
+                thread_id="thread-1",
+                agent_id="agent-1",
             )
 
         relayed: list[DomainEvent] = []
@@ -1187,10 +1191,12 @@ class TestLangGraphStreamProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            (),
-            "custom",
-            {"content": "an un-stamped thought"},
+        await aggregator._ingest.project_frame(
+            StreamFrame(
+                namespace=(),
+                mode="custom",
+                payload={"content": "an un-stamped thought"},
+            ),
             thread_id="thread-1",
             agent_id="supervisor",
         )
@@ -1214,10 +1220,12 @@ class TestLangGraphStreamProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            (),
-            "custom",
-            {"node": "coder", "content": "a stamped thought"},
+        await aggregator._ingest.project_frame(
+            StreamFrame(
+                namespace=(),
+                mode="custom",
+                payload={"node": "coder", "content": "a stamped thought"},
+            ),
             thread_id="thread-1",
             agent_id="supervisor",
         )
@@ -1235,8 +1243,10 @@ class TestLangGraphStreamProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            (), "debug", {"anything": True}, thread_id="thread-1", agent_id="agent-1"
+        await aggregator._ingest.project_frame(
+            StreamFrame(namespace=(), mode="debug", payload={"anything": True}),
+            thread_id="thread-1",
+            agent_id="agent-1",
         )
 
         assert queue.empty()
@@ -1249,8 +1259,8 @@ class TestLangGraphStreamProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            *_messages_frame(AIMessageChunk(content="", id="msg-empty")),
+        await aggregator._ingest.project_frame(
+            _messages_frame(AIMessageChunk(content="", id="msg-empty")),
             thread_id="thread-1",
             agent_id="agent-1",
         )
@@ -1271,15 +1281,15 @@ class TestLangGraphStreamProcessing:
 
 def _action_chunk_frame(
     run_id: str, tool_call_id: str, item_type: str, detail: dict[str, Any]
-) -> tuple[tuple[str, ...], str, object]:
+) -> StreamFrame:
     """Build a model token frame shaped like a provider action chunk.
 
     Mirrors what ``codex_chat_model._completed_action_chunk`` actually
     constructs: a chunk with empty ``content`` and one ``tool_call_chunks``
     entry whose ``args`` is the JSON-encoded action detail (carrying its own
     ``status``), driven through the real production seam
-    (``EventAggregator.process_stream_frame``) rather than calling the
-    transformer's private helpers directly.
+    (``IngestManager.project_frame``, which the ingest loop calls for every
+    frame) rather than calling the transformer's private helpers directly.
     """
     return _messages_frame(
         AIMessageChunk(
@@ -1347,8 +1357,8 @@ class TestProviderActionToolCallChunks:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            *_action_chunk_frame(
+        await aggregator._ingest.project_frame(
+            _action_chunk_frame(
                 run_id="run-cmd",
                 tool_call_id="call_1",
                 item_type="commandExecution",
@@ -1397,8 +1407,8 @@ class TestProviderActionToolCallChunks:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            *_action_chunk_frame(
+        await aggregator._ingest.project_frame(
+            _action_chunk_frame(
                 run_id="run-cmd-rejected",
                 tool_call_id="call_2",
                 item_type="commandExecution",
@@ -1436,8 +1446,8 @@ class TestProviderActionToolCallChunks:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            *_action_chunk_frame(
+        await aggregator._ingest.project_frame(
+            _action_chunk_frame(
                 run_id="run-cmd-unknown",
                 tool_call_id="call_3",
                 item_type="commandExecution",
@@ -1469,8 +1479,8 @@ class TestProviderActionToolCallChunks:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.process_stream_frame(
-            *_action_chunk_frame(
+        await aggregator._ingest.project_frame(
+            _action_chunk_frame(
                 run_id="run-file",
                 tool_call_id="call_4",
                 item_type="fileChange",
@@ -1519,11 +1529,11 @@ class TestProviderActionToolCallChunks:
                 ],
             )
         )
-        await aggregator.process_stream_frame(
-            *raw_input_frame, thread_id="thread-1", agent_id="agent-1"
+        await aggregator._ingest.project_frame(
+            raw_input_frame, thread_id="thread-1", agent_id="agent-1"
         )
-        await aggregator.process_stream_frame(
-            *raw_input_frame, thread_id="thread-1", agent_id="agent-1"
+        await aggregator._ingest.project_frame(
+            raw_input_frame, thread_id="thread-1", agent_id="agent-1"
         )
 
         sequenced_all: list[SequencedEvent] = []
@@ -1551,8 +1561,8 @@ class TestTokenChunkBatching:
         aggregator.subscribe("client-1", ["thread-1"])
 
         for token in ["Hello", " ", "world"]:
-            await aggregator.process_stream_frame(
-                *_messages_frame(AIMessageChunk(content=token, id="run-batch")),
+            await aggregator._ingest.project_frame(
+                _messages_frame(AIMessageChunk(content=token, id="run-batch")),
                 thread_id="thread-1",
                 agent_id="agent-1",
             )
@@ -1574,8 +1584,8 @@ class TestTokenChunkBatching:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        # Buffer a chunk via the public API
-        await aggregator.buffer_message_chunk(
+        # Buffer a chunk through the buffering manager
+        await aggregator._buffering.buffer_message_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="pending data",
@@ -1584,8 +1594,8 @@ class TestTokenChunkBatching:
 
         assert queue.empty()
 
-        # Explicit flush via public API
-        await aggregator.flush_chunk_buffer("thread-1")
+        # Explicit flush, as the ingest loop and model-end callback issue it
+        await aggregator._buffering.flush_chunk_buffer("thread-1")
 
         sequenced = queue.get_nowait()
         event = sequenced.event
@@ -1609,7 +1619,7 @@ class TestToolCallUpdateDebouncing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        await aggregator.emit_tool_call_update(
+        await aggregator._emitters.emit_tool_call_update(
             thread_id="thread-1",
             agent_id="agent-1",
             tool_call_id="tc-1",
@@ -1642,7 +1652,7 @@ class TestBackpressure:
 
         # Fill the queue to capacity with distinct content
         for i in range(domain_config.event_queue_maxsize):
-            await aggregator.emit_message_chunk(
+            await aggregator._emitters.emit_message_chunk(
                 thread_id="thread-1",
                 agent_id="agent-1",
                 content=f"msg-{i}",
@@ -1652,7 +1662,7 @@ class TestBackpressure:
         assert queue.full()
 
         # One more event: should drop the oldest (msg-0) and enqueue this one
-        await aggregator.emit_message_chunk(
+        await aggregator._emitters.emit_message_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="newest",
@@ -1692,7 +1702,7 @@ class TestBackpressure:
         assert q_slow.full()
 
         # Broadcast one more event — must not block
-        await aggregator.emit_message_chunk(
+        await aggregator._emitters.emit_message_chunk(
             thread_id="thread-1",
             agent_id="agent-1",
             content="new-event",
@@ -1720,7 +1730,7 @@ def _make_sequenced_event(aggregator: EventAggregator, content: str) -> Sequence
             content=content,
             message_id="helper",
         ),
-        sequence=aggregator.advance_sequence("thread-1"),
+        sequence=aggregator._emitters.next_sequence("thread-1"),
     )
 
 
@@ -1734,16 +1744,16 @@ class TestShutdown:
 
     @pytest.mark.asyncio
     async def test_shutdown_clears_state(self, aggregator: EventAggregator) -> None:
-        """shutdown() drains all internal state tables to zero length."""
+        """shutdown() drops every subscriber, subscription and sequence counter."""
         aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
-        aggregator.advance_sequence("thread-1")
+        aggregator._emitters.next_sequence("thread-1")
 
         await aggregator.shutdown()
 
         assert aggregator.subscriber_count() == 0
-        assert aggregator.subscription_count() == 0
-        assert aggregator.sequence_count() == 0
+        assert aggregator.get_active_thread_ids() == []
+        assert aggregator.get_sequence("thread-1") == 0
 
 
 # ---------------------------------------------------------------------------

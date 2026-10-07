@@ -134,8 +134,9 @@ async def test_a_refused_cursor_takes_no_slot_and_releases_nobody_elses(
 
     assert aggregator.subscriber_count() == limit - 1
     assert aggregator.get_active_thread_ids() == []
+    registered = aggregator._subscribers_mgr._subscribers
     for index in range(limit - 1):
-        assert aggregator.get_subscriber_queue(f"held-{index}") is not None
+        assert f"held-{index}" in registered
 
     aggregator.add_subscriber("newcomer")
     assert aggregator.subscriber_count() == limit

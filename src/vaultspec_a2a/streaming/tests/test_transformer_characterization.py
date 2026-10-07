@@ -21,6 +21,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 
 from ...streaming.aggregator import EventAggregator
+from ...streaming.transformer import StreamFrame
 
 _THREAD = "t-char"
 _AGENT = "a-char"
@@ -37,11 +38,13 @@ async def _drive(
     aggregator = EventAggregator()
     queue = aggregator.add_subscriber("client")
     aggregator.subscribe("client", [_THREAD])
-    handler = aggregator.run_lifecycle_callbacks(_THREAD, _AGENT)
+    handler = aggregator._ingest.run_lifecycle_callbacks(_THREAD, _AGENT)
 
     for namespace, mode, payload in frames:
-        await aggregator.process_stream_frame(
-            namespace, mode, payload, thread_id=_THREAD, agent_id=_AGENT
+        await aggregator._ingest.project_frame(
+            StreamFrame(namespace=namespace, mode=mode, payload=payload),
+            thread_id=_THREAD,
+            agent_id=_AGENT,
         )
     for name, kwargs in callbacks or []:
         await getattr(handler, name)(**kwargs)

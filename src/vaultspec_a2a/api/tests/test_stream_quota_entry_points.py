@@ -112,5 +112,6 @@ async def test_a_served_stream_gives_its_slot_back_and_spares_the_held_ones(
     assert "stream_snapshot" in frames[0].decode("utf-8")
     assert "thread_terminal" in frames[1].decode("utf-8")
     assert aggregator.subscriber_count() == before
-    assert aggregator.get_subscriber_queue("held-0") is not None
-    assert aggregator.get_subscriber_queue("held-1") is not None
+    registered = aggregator._subscribers_mgr._subscribers
+    assert "held-0" in registered
+    assert "held-1" in registered

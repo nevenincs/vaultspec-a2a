@@ -236,7 +236,7 @@ async def test_team_status_broadcast_carries_the_resolved_assignment(
                 # Only agent_id/node_name/state, exactly as the lifecycle
                 # emitter supplies them; the assignment must be merged in from
                 # the registered node metadata.
-                await executor.aggregator.emit_team_status(
+                await executor.aggregator._emitters.emit_team_status(
                     thread_id,
                     [
                         {

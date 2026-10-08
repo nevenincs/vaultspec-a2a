@@ -245,6 +245,7 @@ def test_the_driven_lanes_straddle_the_declaration() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("lane", DRIVEN_LANES)
+@pytest.mark.usefixtures("isolated_harness_home")
 async def test_the_compiled_run_tells_each_role_what_its_lane_may_claim(
     checkpointer: AsyncSqliteSaver, tmp_path: Path, lane: str
 ) -> None:

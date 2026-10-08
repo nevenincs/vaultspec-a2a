@@ -38,6 +38,8 @@ from ...team.team_config import (
 from ...testing import deterministic_model_assignment, simulator_command
 from ..compiler import compile_team_graph
 
+pytestmark = pytest.mark.usefixtures("isolated_harness_home")
+
 if TYPE_CHECKING:
     from pathlib import Path
 

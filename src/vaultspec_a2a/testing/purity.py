@@ -51,6 +51,8 @@ SERVICE_MARKER: Final = "service"
 
 IMPURE_FIXTURES: Final = frozenset(
     {
+        # Owns a private user home and resolves package-runner locations.
+        "isolated_harness_home",
         # Spawns a real Python child and hands over its actual stdio streams.
         "acp_session_context",
         # Spawns a real echoing Python child and round-trips frames through it.

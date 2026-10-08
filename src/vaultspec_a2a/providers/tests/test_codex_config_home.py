@@ -754,6 +754,7 @@ def test_build_self_cleans_on_copy_failure(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("isolated_harness_home")
 async def test_spawn_failure_cleans_credential_home(
     tmp_path: Path, private_home_root: Path
 ) -> None:
@@ -782,6 +783,7 @@ async def test_spawn_failure_cleans_credential_home(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("isolated_harness_home")
 async def test_turn_failure_after_build_cleans_credential_home(
     tmp_path: Path, private_home_root: Path
 ) -> None:

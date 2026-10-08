@@ -37,6 +37,8 @@ def _harness_names() -> set[str]:
         ALLOW_EMPTY_ENV,
         JSON_ENV,
         FORCE_ENV,
+        # Explicit packaging checks read this outside TestSessionSettings.
+        "VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE",
         *LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
         *LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON,
         *session,

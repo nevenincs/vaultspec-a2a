@@ -122,6 +122,10 @@ _DIRECTORY_RULES: Final[Mapping[str, LayerRule]] = {
                 "test_acp_mcp.py",
                 "test_acp_stderr_tail.py",
                 "test_harness_interpreter_pin.py",
+                "test_mcp_contract.py",
+                "test_mcp_probe_security.py",
+                "test_native_launch_context.py",
+                "test_registry_launch_identity.py",
                 "test_acp_model_selection.py",
                 "test_acp_turn_deadline.py",
                 "test_acp_vault_deny.py",
@@ -183,6 +187,7 @@ _DIRECTORY_RULES: Final[Mapping[str, LayerRule]] = {
         impure_files=frozenset(
             {
                 "test_harness_topology_reach.py",
+                "test_harness_mcp_wiring.py",
                 # Live AsyncSqliteSaver against a real database file.
                 "test_action_completion.py",
                 "test_checkpointed_value_types.py",

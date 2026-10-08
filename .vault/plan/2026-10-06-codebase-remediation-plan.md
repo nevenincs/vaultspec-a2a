@@ -46,7 +46,7 @@ related:
   - '[[2026-10-04-engine-discovery-security-adr]]'
   - '[[2026-10-04-workspace-root-authority-desktop-native-admission-adr]]'
   - '[[2026-10-04-workspace-root-authority-desktop-workspace-boundary-adr]]'
-modified: '2026-10-07'
+modified: '2026-10-08'
 body_schema: body-v2
 body_hash: 'sha256:0faa1445c3bba5b2c9bf8c9dbf1a254382ecf902580d759f8a18ff91efcf8a8d'
 ---

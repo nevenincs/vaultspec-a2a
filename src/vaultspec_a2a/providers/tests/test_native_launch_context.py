@@ -215,6 +215,7 @@ def test_isolated_version_cache_cannot_reuse_changed_authority(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("isolated_harness_home")
 async def test_mcp_cached_surface_cannot_bypass_profile_refusal(tmp_path: Path) -> None:
     authority = _authority(tmp_path)
     spec = resolve_harness_mcp_servers(["vaultspec-rag"])[0]

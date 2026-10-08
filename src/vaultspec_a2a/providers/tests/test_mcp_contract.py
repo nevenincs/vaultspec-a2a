@@ -25,6 +25,8 @@ from .._mcp_contract import (
     verify_harness_mcp_contract,
 )
 
+pytestmark = pytest.mark.usefixtures("isolated_harness_home")
+
 if TYPE_CHECKING:
     from pathlib import Path
 

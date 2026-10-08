@@ -36,6 +36,7 @@ _CONTROL_ENV_NAMES = (
 )
 
 
+@pytest.mark.usefixtures("isolated_harness_home")
 def test_workspace_uvx_and_python_never_supply_the_contract_probe(
     tmp_path: Path,
 ) -> None:
@@ -78,6 +79,7 @@ print('trusted MCP contract verified')
 
 
 @pytest.mark.parametrize("explicit_environment", [False, True])
+@pytest.mark.usefixtures("isolated_harness_home")
 def test_real_mcp_probe_receives_no_infrastructure_credentials(
     tmp_path: Path, explicit_environment: bool
 ) -> None:

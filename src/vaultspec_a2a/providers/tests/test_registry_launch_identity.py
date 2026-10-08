@@ -275,6 +275,7 @@ async def test_a_serving_impostor_is_refused_before_it_is_ever_probed(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("isolated_harness_home")
 async def test_the_probe_seam_still_verifies_a_registry_resolved_spec() -> None:
     """The admitted case at the same seam, against the real harness server."""
     await verify_harness_mcp_contract([_registry_spec()], env=dict(os.environ))

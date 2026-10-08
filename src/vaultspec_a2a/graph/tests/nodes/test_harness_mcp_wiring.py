@@ -23,6 +23,8 @@ from ....testing import simulator_command
 from ..._compiler_research import _make_research_producer
 from ...nodes.worker import WorkerNodeOptions, create_worker_node
 
+pytestmark = pytest.mark.usefixtures("isolated_harness_home")
+
 if TYPE_CHECKING:
     from pathlib import Path
 

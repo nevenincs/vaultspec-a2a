@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:1abcc65b3f86a4d40c3e7601348f9266d761736986b0715add00d2b7863b5d99'
+body_hash: 'sha256:2b0e677a0008b2e3f06fed8278b14da48b482f4ebf34e7876a729b8761e189ec'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -1669,3 +1669,98 @@ for those skipped assertions. Log:
 `.pytest-tmp/green-20261008/nonservice-current.log`. No shared RAG service was
 upgraded or stopped; the shared-service/private-service choice remains pending.
 This result is not an all-green claim.
+
+### green-20261008-rag-test-home | medium | Harness wiring proofs discovered the operator's RAG service
+
+Status: fixed in S116; integrated verification pending. Type: test isolation.
+This finding supersedes the environment-blocker diagnosis in
+`green-20261008-integrated-rerun`: changing the shared daemon is not a prerequisite
+for these non-service tests. The real registry MCP client discovers a machine lock
+and status record beneath the user home. Tests inherited that home, so unrelated
+shared-service version drift failed wiring and provider cleanup assertions.
+
+The common `isolated_harness_home` fixture supplies private HOME and USERPROFILE
+values while retaining resolved uv cache and managed interpreter paths. A missing
+RAG discovery record prevents daemon HTTP; the real MCP schema and compatibility
+probe still run. Production environment scrubbing, mismatch refusal, registry
+launch policy and unpinned RAG package policy are unchanged. No shared service was
+stopped, restarted or upgraded, and no test was hidden behind a service marker.
+The credential-sanitization and profile-refusal tests retain their real assertions.
+
+Focused evidence: eight first-probe/wiring cases passed in 25.30s, 156 affected
+module/purity cases passed in 59.25s, and three review follow-up cases passed in
+22.20s. Reports are `rag-isolation-first.xml`, `rag-isolation.xml` and
+`rag-isolation-review.xml` under `.pytest-tmp/green-20261008/`. Independent review
+found two additional test locations needing the fixture; both were fixed and
+covered by the three-case follow-up. These prove wiring without an ambient daemon,
+not completed RAG retrieval against a compatible live backend.
+
+### green-20261008-probe-purity | low | Subprocess probe tests were selected as pure unit tests
+
+Status: fixed in S116. Type: test classification. The MCP contract, probe security,
+registry identity, native launch context and graph MCP wiring files are classified
+as impure, and the isolated-home fixture itself forfeits unit purity. Review found
+the native launch context omission; its remaining filesystem/process cases now
+also belong to the integration population. All remain in the non-service suite.
+Collection confirms the eight first-probe/wiring cases are excluded by `-m unit`;
+the final full unit collection contains 2,192 of 6,075 collected cases. Collection
+is classification evidence, not execution evidence.
+
+### green-20261008-frozen-harness-declaration | low | Release artifact input was absent from the development harness example
+
+Status: fixed in S116. Type: documentation contract drift. The release content
+gate introduced under S83 spells `VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE` in
+`release.yml` and `justfile`; the explicit packaging checks already read it,
+but the development harness example and its owned-name inventory omitted it.
+Both now document that existing artifact input. No service setting or new
+runtime behavior was added. The environment drift module and harness-name
+module pass together: 12 cases, 12.14s, `env-harness-final.xml`.
+
+### green-20261008-isolated-suite-result | low | Full run removed RAG failures and exposed two gateway startup timeouts
+
+Status: measured; startup reliability investigation remains under S116.
+Type: verification evidence. The full non-service run at 84f785b7 plus the
+isolation working diff completed 5,886 cases in 1340.12s: 5,872 passed, three
+failed and 11 skipped. None of the sixteen prior RAG mismatches recurred.
+The failures were the harness declaration above and two worker-provenance
+gateway readiness timeouts before their assertions. The complete provenance
+module subsequently passed all five cases in 68.87s, without timeout changes,
+assertion changes or service maintenance. Reports: `nonservice-isolated.xml`
+and `provenance-post-isolation.xml` under `.pytest-tmp/green-20261008/`.
+The three-case review follow-up separately covers fixture marks added after
+the broad run started. Final unit classification changes do not alter the
+non-service population.
+
+Exact node identity matching from the final `-m unit --collect-only -q`
+selection to the broad JUnit report matched all 2,192 unique unit cases:
+2,187 passed, five skipped, zero failed and zero missing matches. This is a
+subset of the broad execution, not a separately executed unit run. The broad
+11 skips comprise nine platform checks, one loopback-engine acceptance proof
+and one opted-in second-provider selection proof; none was introduced here.
+Targeted passing reruns do not turn the original full-run failure into a
+single all-green integrated run or prove every live provider capability.
+
+Integrated lint completed with only one formatting failure in the new fixture;
+the formatter corrected it, and final `python -m dev lint python` passes.
+The unchanged dimensions of that same integrated run passed, including strict
+cross-platform types, dependency/import/export checks, workflow and shell
+checks, storage anchors, and duplication (four baseline clones, zero new or
+stale). Feature-wide vault validation passes. S116 and the owning plan remain
+open for their broader integrated closure obligations.
+
+### green-20261008-isolation-final-review | low | Isolation repair passes; historical startup cause remains unproven
+
+Status: PASS for the isolation and declaration repairs; PENDING for broad S116
+closure. Type: integrated review. Independent actual-diff review found no remaining
+isolation, credential-scrubbing, assertion-masking or portability defect. Its two
+missed fixture locations and adjacent native-launch purity finding are fixed.
+The final environment example names the existing packaging reader and the
+bidirectional name checks pass without relaxing either assertion.
+
+Historical startup logs from session `20261008T154140-62304` contain no diagnostic
+for the failed listener: blank-pairing's gateway log is empty, and the two-gateway
+case's B log is empty while A emitted 21,101 bytes. Both failed on connection-refused
+readiness after 60.7-60.8s, before provenance assertions. Resource contention is
+plausible but unproven. The complete isolated module rerun passes; no timeout or
+production behavior was changed on that evidence. Retain startup reliability as
+an open S116 follow-up, not a diagnosed/fixed defect or a shared-RAG prerequisite.

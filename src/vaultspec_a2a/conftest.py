@@ -22,6 +22,7 @@ from .testing import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON,
     apply_layer_markers,
+    armed_environment,
     live_provider_catalog_selector_is_configured,
     live_provider_override_selector_is_configured,
     seated_lanes,
@@ -50,6 +51,41 @@ def _seated_fixture_lanes() -> Iterator[None]:
     """
     with seated_lanes():
         yield
+
+
+@pytest.fixture(scope="session")
+def _harness_uv_paths() -> dict[str, str]:
+    """Keep package caches and managed interpreters when a probe changes home."""
+    uv = shutil.which("uv")
+    assert uv is not None, "harness contract tests require uv"
+    locations: dict[str, str] = {}
+    for variable, arguments in (
+        ("UV_CACHE_DIR", ("cache", "dir")),
+        ("UV_PYTHON_INSTALL_DIR", ("python", "dir")),
+    ):
+        result = subprocess.run(
+            [uv, *arguments], capture_output=True, text=True, check=True, timeout=30
+        )
+        locations[variable] = result.stdout.strip()
+    return locations
+
+
+@pytest.fixture
+def isolated_harness_home(
+    tmp_path: Path, _harness_uv_paths: dict[str, str]
+) -> Iterator[Path]:
+    """Run real MCP clients without discovering the operator's RAG daemon.
+
+    RAG discovers both its machine lock and status record below the user home.
+    Its absence is valid for wiring proofs: the MCP client serves its schema,
+    but cannot send a status request to an ambient daemon. Ordinary home variables
+    survive production environment scrubbing; no credential override is allowed
+    through it and no contract check is replaced.
+    """
+    home = tmp_path / "harness-user-home"
+    home.mkdir()
+    with armed_environment(HOME=str(home), USERPROFILE=str(home), **_harness_uv_paths):
+        yield home
 
 
 # ---------------------------------------------------------------------------

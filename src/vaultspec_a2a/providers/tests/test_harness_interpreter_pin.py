@@ -72,6 +72,7 @@ def test_both_transports_render_the_same_pinned_launch() -> None:
     assert "--python" in _args(codex)
 
 
+@pytest.mark.usefixtures("isolated_harness_home")
 def test_the_pinned_launch_resolves_with_no_interpreter_in_the_environment(
     tmp_path: Path,
 ) -> None:

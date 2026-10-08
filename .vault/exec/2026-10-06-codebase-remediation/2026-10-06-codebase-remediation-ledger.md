@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:c199c9ec31d552aa83462766a2fb94036e772d52f44dc55933040c57390401f0'
+body_hash: 'sha256:0e3357e241c17c12124b4694a06f221860dd4cd96ba8a352faa3e5af4077c16b'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -69,6 +69,27 @@ related:
 - `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python .pytest-tmp/green-20261008/engine_verdict_probe.py` -> `pass`
 - `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m dev test parallel` -> `fail`
 - `S15` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- src/vaultspec_a2a/control/tests/test_worker_provenance.py --junitxml=.pytest-tmp/green-20261008/worker-provenance-s15.xml --no-showlocals` -> `pass`
+- `S116` `M` `.env.example`
+- `S116` `M` `.vault/plan/2026-10-06-codebase-remediation-plan.md`
+- `S116` `M` `dev/tests/test_harness_env_names.py`
+- `S116` `M` `src/vaultspec_a2a/conftest.py`
+- `S116` `M` `src/vaultspec_a2a/graph/tests/nodes/test_harness_mcp_wiring.py`
+- `S116` `M` `src/vaultspec_a2a/graph/tests/test_harness_topology_reach.py`
+- `S116` `M` `src/vaultspec_a2a/graph/tests/test_persona_web_composition.py`
+- `S116` `M` `src/vaultspec_a2a/providers/tests/test_codex_config_home.py`
+- `S116` `M` `src/vaultspec_a2a/providers/tests/test_harness_interpreter_pin.py`
+- `S116` `M` `src/vaultspec_a2a/providers/tests/test_mcp_contract.py`
+- `S116` `M` `src/vaultspec_a2a/providers/tests/test_mcp_probe_security.py`
+- `S116` `M` `src/vaultspec_a2a/providers/tests/test_native_launch_context.py`
+- `S116` `M` `src/vaultspec_a2a/providers/tests/test_registry_launch_identity.py`
+- `S116` `M` `src/vaultspec_a2a/testing/markers.py`
+- `S116` `M` `src/vaultspec_a2a/testing/purity.py`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m not-service -n auto --dist=loadgroup (actual marker: not service; nonservice-isolated.xml; 5872 passed, 3 failed, 11 skipped)` -> `fail`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- src/vaultspec_a2a/control/tests/test_env_example_drift.py dev/tests/test_harness_env_names.py --junitxml=.pytest-tmp/green-20261008/env-harness-final.xml --no-showlocals` -> `pass`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- src/vaultspec_a2a/desktop_tests/test_worker_provenance.py --junitxml=.pytest-tmp/green-20261008/provenance-post-isolation.xml --no-showlocals` -> `pass`
+- `S116` `verify:` `uv run --no-sync python -m dev lint python` -> `pass`
+- `S116` `verify:` `uv run --no-sync vaultspec-core vault check all --feature codebase-remediation` -> `pass`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m "not service" -n auto --dist=loadgroup --junitxml=.pytest-tmp/green-20261008/nonservice-isolated.xml --no-showlocals` -> `fail`
 
 ## Notes
 
@@ -79,3 +100,5 @@ related:
 - `S83` Corrected real Windows onedir excludes Core test fixtures; build smoke and actual bundled Core help pass. Independent review PASS. Broader S83 historical closure is not inferred from this correction.
 - `S116` Contained local engine probe: live verdict and receipt-role tests 2 passed. Full nonservice 5859 passed/16 RAG-version failures/11 skipped. Independent review PASS with low mutable-buffer observation queued. Engine source pin/CI provisioning remains open S115; shared RAG choice pending.
 - `S15` Fresh verification at ca0a690a: 10 passed in 12.87s, including no requests/credentials to a foreign subprocess and no unarmed eviction. Original implementation c401d7bf is on main. Current source review confirms ancestry precedes credentialed readiness and eviction. S15 remains unchecked: reconcile B5 pre-spawn unauthenticated wording against accepted descendant-first behavior and full audit/closure requirements; do not invent historical verification.
+- `S116` Isolated real MCP tests from ambient RAG discovery; 156 focused plus 8 first-probe plus 3 review cases passed. Production compatibility checks and shared RAG service unchanged. Full run failures: frozen harness documentation fixed (12 passed); two gateway readiness timeouts passed full provenance rerun (5 passed), root cause still under investigation. Unit collection/JUnit identity join: 2192 matched, 2187 passed, 5 skipped. Broader S116 remains open; see rolling audit for evidence and review findings.
+- `S116` Command transcription correction: the preceding nonservice-isolated verification label used the shorthand not-service and an explanatory parenthesis; the actual executed command is the quoted not service marker command recorded immediately above. Result unchanged: 5872 passed, 3 failed, 11 skipped.

@@ -30,6 +30,7 @@ from .._harness_mcp_registry import (
     withheld_harness_tools,
 )
 from .._mcp_contract import verify_declared_tool_contract
+from .._project_scope import RunProjectScope
 from .test_project_confinement import _config, _decide
 
 if TYPE_CHECKING:
@@ -150,7 +151,9 @@ async def test_a_supervised_acp_run_never_asks_a_human_about_a_withheld_tool(
 
 
 @pytest.mark.asyncio
-async def test_codex_declines_a_withheld_tool_even_when_allowlisted() -> None:
+async def test_codex_declines_a_withheld_tool_even_when_allowlisted(
+    tmp_path: Path,
+) -> None:
     asked: list[str] = []
 
     async def human(tool: str, args: JsonObject, options: list[JsonObject]) -> str:
@@ -160,6 +163,7 @@ async def test_codex_declines_a_withheld_tool_even_when_allowlisted() -> None:
 
     rung = CodexPermissionRung(
         allowed_tools=frozenset({(_CORE, "search")}),
+        project_scope=RunProjectScope(str(tmp_path)),
         permission_callback=human,
     )
     rung.observe(

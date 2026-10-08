@@ -143,17 +143,31 @@ def elicitation_response(rpc_id: int, action: str) -> JsonObject:
 class CodexPermissionRung:
     """Decides ``mcpServer/elicitation/request`` approvals for one Codex session.
 
-    Holds the run's composed surface and, on a supervised run, the same
-    ``permission_callback`` the ACP lane routes to. One instance per session: the
-    observed tool calls it correlates against are session state.
+    Holds the run's composed surface, the project that run is bound to, and - on
+    a supervised run - the same ``permission_callback`` the ACP lane routes to.
+    One instance per session: the observed tool calls it correlates against are
+    session state.
+
+    ``project_scope`` is REQUIRED, and that is the whole difference between a
+    wiring defect and a run whose every tool call mysteriously fails. The project
+    scan is the first authority the shared decision consults, so a rung holding
+    no project can permit nothing: it would accept construction and then refuse
+    every call it was handed, unmeasured. The scope is derived from the run's own
+    workspace, which a Codex turn already requires, so there is no caller that
+    legitimately has none - and a missing one is a mistake the interpreter should
+    refuse rather than a posture.
+
+    ``permission_callback`` keeps its default, because its absence IS a posture:
+    an unattended run has no human rung, and the decision falls to the composed
+    surface.
     """
 
     def __init__(
         self,
         *,
         allowed_tools: frozenset[tuple[str, str]],
+        project_scope: RunProjectScope,
         permission_callback: PermissionCallback | None = None,
-        project_scope: RunProjectScope | None = None,
     ) -> None:
         self._allowed_tools = allowed_tools
         self._permission_callback = permission_callback

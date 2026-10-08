@@ -85,7 +85,10 @@ from .provider_catalog import (
     HealthState,
     ProviderCatalogKey,
 )
-from .provider_readiness import probe_provider_configuration
+from .provider_readiness import (
+    KIMI_NO_TEMPORARY_MODEL_REASON,
+    probe_provider_configuration,
+)
 
 __all__ = [
     "ProviderCatalogRegistration",
@@ -899,13 +902,10 @@ def _create_kimi_model(
         # A served run reads an isolated home that carries no persisted login,
         # so there is no configuration for a run to authenticate from. Refused
         # before spawn rather than left to fail inside the child, and never by
-        # handing the child the operator's own home back.
-        raise ProviderRuntimeUnavailableError(
-            "the Kimi lane runs in a per-run configuration home, which carries "
-            "no persisted login: configure the temporary model definition "
-            "(KIMI_MODEL_NAME, KIMI_MODEL_API_KEY, KIMI_MODEL_BASE_URL) for this "
-            "lane to authenticate"
-        )
+        # handing the child the operator's own home back. Same reason text
+        # readiness reports for the identical absence (provider_readiness.py
+        # ``_kimi_configuration``), so the two never read differently.
+        raise ProviderRuntimeUnavailableError(KIMI_NO_TEMPORARY_MODEL_REASON)
     # Per-run isolation: the operator's home holds their own provider table and
     # every ambient MCP server they configured, and an agent's tool surface must
     # be exactly the declared set.

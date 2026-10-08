@@ -6,10 +6,11 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeIs, cast
 
-from ..database import decode_allowed_options
+from ..database import decode_allowed_options, get_control_action_by_idempotency_key
 from ..graph.acp_options import APPROVAL_OPTIONS, valid_option_ids
 from ..graph.enums import PermissionType
 from ..thread.enums import ApprovalStatus
+from ..thread.idempotency import MAX_PERMISSION_ASKS, permission_response_action_key
 from ..thread.snapshots import (
     PERMISSION_REQUEST_EVENT_TYPES,
     PLAN_APPROVAL_PAUSE_CAUSES,
@@ -18,7 +19,9 @@ from ..utils.coercion import coerce_nonempty_str
 from .permission_options import answer_is_rejection
 
 if TYPE_CHECKING:
-    from ..database import PermissionRequestModel, ThreadModel
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from ..database import ControlActionModel, PermissionRequestModel, ThreadModel
     from ..ipc.schemas import DispatchRequest
     from ..thread import CheckpointProjection, ProjectedInterrupt
     from .action_lease import ControlActionClaim
@@ -26,6 +29,7 @@ if TYPE_CHECKING:
 __all__ = [
     "AuthorizedPermission",
     "ParkedPermission",
+    "PermissionAsk",
     "PermissionInput",
     "PermissionTransition",
     "RejectedResponse",
@@ -33,6 +37,7 @@ __all__ = [
     "audited_tool_name",
     "existing_rejection_error",
     "held_interrupt",
+    "journaled_permission_asks",
     "rejected_payload",
     "rejected_permission_error",
     "response_payload",
@@ -42,6 +47,77 @@ __all__ = [
 
 def response_payload(option_id: str, notes: str | None) -> dict[str, object]:
     return {"option_id": option_id, "notes": notes}
+
+
+@dataclass(frozen=True, slots=True)
+class PermissionAsk:
+    """One ask of a permission request, and the answer journaled under it.
+
+    ``generation`` is which ask of the request this is, counted from the first.
+    ``accepted`` is the response action journaled under it, or ``None`` when the
+    ask has no answer yet.
+    """
+
+    generation: int
+    accepted: ControlActionModel | None
+
+
+@dataclass(frozen=True, slots=True)
+class JournaledAsks:
+    """The asks of one permission request, as its journal records them.
+
+    ``unanswered`` is the first ask whose answer has not been applied: either an
+    answer still in flight, or - when it carries none - the ask a run holding
+    the request again has just made. ``answered`` is the last answer that did
+    land, which is what an answer to a request the run is NOT holding is judged
+    against.
+    """
+
+    unanswered: PermissionAsk
+    answered: ControlActionModel | None
+
+    def addressed(self, *, held: bool) -> PermissionAsk:
+        """Which ask an answer arriving now is addressed to.
+
+        A run whose checkpoint still holds the request after an earlier answer
+        landed has asked it AGAIN, so the answer arriving now belongs to that
+        new ask and takes a journal identity of its own. A request the
+        checkpoint does not hold has no open ask, so the answer is judged
+        against the last one journaled - as the replay, duplicate or
+        conflicting second body it is.
+        """
+        if held or self.unanswered.accepted is not None or self.answered is None:
+            return self.unanswered
+        return PermissionAsk(self.unanswered.generation - 1, self.answered)
+
+
+async def journaled_permission_asks(
+    db: AsyncSession, *, thread_id: str, request_id: str
+) -> JournaledAsks | None:
+    """Read every ask of *request_id* the journal records, in order.
+
+    The walk stops at the first ask with no answer, or whose answer has not been
+    applied: every ask before it is closed. Nothing here reads which relayed
+    frame arrived first - the journal's own settled state is the same whether
+    the relay handled a re-ask's park frame before or after the receipt that
+    proved the previous answer landed.
+
+    ``None`` says the request has been asked more times than
+    :data:`~vaultspec_a2a.thread.idempotency.MAX_PERMISSION_ASKS` keys, which
+    the caller refuses rather than reusing an identity and replaying an older
+    answer.
+    """
+    answered: ControlActionModel | None = None
+    for generation in range(MAX_PERMISSION_ASKS):
+        action = await get_control_action_by_idempotency_key(
+            db,
+            thread_id=thread_id,
+            idempotency_key=permission_response_action_key(request_id, generation),
+        )
+        if action is None or action.applied_at is None:
+            return JournaledAsks(PermissionAsk(generation, action), answered)
+        answered = action
+    return None
 
 
 def accepted_answer_option(intent: dict[str, object]) -> str | None:
@@ -250,12 +326,17 @@ class AuthorizedPermission:
     so those stages never re-read or re-validate. Produced by
     :func:`_authorize_permission_response` only when the response is admitted;
     any rejection or dedup outcome is a :class:`ControlActionOutcome` instead.
+
+    ``ask`` is the ask of the request this response answers, resolved once
+    inside the write transaction so the dedup read and the claim the transition
+    takes can never key on two different asks.
     """
 
     permission: ParkedPermission
     thread_record: ThreadModel
     thread_id: str
     resolved_idempotency_key: str
+    ask: PermissionAsk
 
 
 @dataclass(frozen=True, slots=True)

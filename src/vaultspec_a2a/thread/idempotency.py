@@ -34,6 +34,7 @@ from .action_receipts import sha256_hex
 __all__ = [
     "CLARIFICATION_RESPONSE_KEY_PREFIX",
     "IDEMPOTENCY_KEY_MAX_LENGTH",
+    "MAX_PERMISSION_ASKS",
     "ResumeIntent",
     "authoring_verdict_action_key",
     "clarification_response_action_key",
@@ -56,8 +57,33 @@ how much of it will be stored and compared. Bounding it at the request edge
 keeps an unbounded header out of a durable uniqueness constraint.
 """
 
+MAX_PERMISSION_ASKS = 64
+"""How many times one permission request may be asked and answered.
+
+A worker that parks again under a request id a run has already answered is
+asking the SAME question a second time, and each ask takes a response key of
+its own. The count is bounded because the respond verb walks the asks to find
+the one an answer belongs to, and because a request asked this many times is a
+loop rather than a conversation: the verb refuses past the bound instead of
+reusing a key and replaying an older answer.
+"""
+
 CLARIFICATION_RESPONSE_KEY_PREFIX = "clarification-response:"
 """Prefix the clarification restart-recovery sweep matches unapplied rows by."""
+
+_PERMISSION_RESPONSE_KEY_PREFIX = "permission-response:"
+"""Prefix of the key that holds one accepted answer to one ask."""
+
+_PERMISSION_APPLICATION_KEY_PREFIX = "permission-response-applied:"
+"""Prefix of the key that records one accepted answer having been applied."""
+
+_PERMISSION_ASK_SEPARATOR = "#"
+"""What separates a request id from the ask of it a response key answers.
+
+Outside the grammar of every handle this service mints
+(``thread.constants.REQUEST_ID_PATTERN``), so a suffixed key can never collide
+with the unsuffixed key of some other request.
+"""
 
 _AUTHORING_VERDICT_KEY_PREFIX = "authoring-verdict:"
 """Prefix that tells a verdict resume from the other resumes on its wire verb.
@@ -135,9 +161,29 @@ def permission_request_action_key(request_id: str) -> str:
     return f"permission-request:{request_id}"
 
 
-def permission_response_action_key(request_id: str) -> str:
-    """Return the single journal identity shared by every client retry."""
-    return f"permission-response:{request_id}"
+def permission_response_action_key(request_id: str, generation: int = 0) -> str:
+    """Return the single journal identity shared by every client retry of one ask.
+
+    *generation* names which ask of *request_id* the answer belongs to. A
+    worker that parks again under a request id the run has already answered is
+    asking the same question a second time, and the answer to that ask is a row
+    of its own: keying every answer to a request under one identity made the
+    second answer replay the first instead of resuming the run.
+
+    Generation 0 renders to the unsuffixed key every stored row carries, byte
+    for byte, because no builder may change a value it has produced.
+
+    Raises:
+        ValueError: *generation* is negative or past :data:`MAX_PERMISSION_ASKS`.
+    """
+    return f"{_PERMISSION_RESPONSE_KEY_PREFIX}{request_id}{_ask_suffix(generation)}"
+
+
+def _ask_suffix(generation: int) -> str:
+    """Render the ask a permission-response key answers, bounded and canonical."""
+    if generation < 0 or generation >= MAX_PERMISSION_ASKS:
+        raise ValueError(f"permission ask {generation} is outside the bound")
+    return "" if generation == 0 else f"{_PERMISSION_ASK_SEPARATOR}{generation}"
 
 
 def permission_rejection_action_key(idempotency_key: str) -> str:
@@ -150,9 +196,22 @@ def permission_duplicate_action_key(idempotency_key: str) -> str:
     return f"permission-duplicate:{idempotency_key}"
 
 
-def permission_response_applied_action_key(request_id: str) -> str:
-    """Return the key recording that the worker applied a permission response."""
-    return f"permission-response-applied:{request_id}"
+def permission_response_applied_action_key(response_action_key: str) -> str:
+    """Return the key recording that the worker applied one accepted answer.
+
+    Derived from the answer's own key rather than from the request id, so one
+    application row belongs to one accepted response row however many times the
+    request was asked: deriving both from the request id alone would make the
+    application of a re-asked request's answer collide with the application of
+    the answer before it. The key of the first ask is unchanged, byte for byte.
+
+    Raises:
+        ValueError: *response_action_key* is not a permission-response key.
+    """
+    if not response_action_key.startswith(_PERMISSION_RESPONSE_KEY_PREFIX):
+        raise ValueError("not the journal key of a permission response")
+    answered = response_action_key[len(_PERMISSION_RESPONSE_KEY_PREFIX) :]
+    return f"{_PERMISSION_APPLICATION_KEY_PREFIX}{answered}"
 
 
 def authoring_verdict_action_key(proposal_id: str) -> str:

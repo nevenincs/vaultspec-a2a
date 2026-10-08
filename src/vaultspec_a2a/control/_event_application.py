@@ -128,7 +128,9 @@ async def _apply_permission_resolution(
         thread_id=thread_id,
         action_type=fx_res.last_applied_action,
         request_id=request_id,
-        idempotency_key=permission_response_applied_action_key(request_id),
+        idempotency_key=permission_response_applied_action_key(
+            submitted.idempotency_key
+        ),
         payload={"request_id": request_id},
         result_status=ControlActionResultStatus.APPLIED,
     )
@@ -154,24 +156,22 @@ async def apply_relayed_permission_resolution(
     """Settle the accepted response a relayed resolution event names.
 
     The event names a request; the accepted response action for it is what
-    carries the answer, so this resolves that action and settles from it. A
-    resolution naming a request with no accepted response settles nothing:
-    there is no decision to apply.
+    carries the answer, so this resolves that action and settles from it. One
+    request can have been asked more than once, so the answer settled is the one
+    that is still awaiting application. A resolution naming a request with no
+    such answer settles nothing: there is no decision left to apply.
     """
-    from ..database import get_control_action_by_idempotency_key
-    from ..thread.idempotency import permission_response_action_key
+    from ._permission_response_contract import journaled_permission_asks
 
     request_id = named_request_id(payload)
     if request_id is None:
         return
-    submitted = await get_control_action_by_idempotency_key(
-        db,
-        thread_id=thread_id,
-        idempotency_key=permission_response_action_key(request_id),
+    asks = await journaled_permission_asks(
+        db, thread_id=thread_id, request_id=request_id
     )
-    if submitted is None:
+    if asks is None or asks.unanswered.accepted is None:
         return
-    await _apply_permission_resolution(db, submitted)
+    await _apply_permission_resolution(db, asks.unanswered.accepted)
 
 
 def validated_application_receipt(

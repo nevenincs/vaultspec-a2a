@@ -49,7 +49,7 @@ from ._permission_response_contract import (
 from ._permission_response_contract import (
     ParkedPermission as _ParkedPermission,
 )
-from ._permission_response_contract import PermissionInput
+from ._permission_response_contract import PermissionAsk, PermissionInput
 from ._permission_response_contract import (
     PermissionTransition as _PermissionTransition,
 )
@@ -64,6 +64,9 @@ from ._permission_response_contract import (
 )
 from ._permission_response_contract import (
     held_interrupt as _held_interrupt,
+)
+from ._permission_response_contract import (
+    journaled_permission_asks as _journaled_permission_asks,
 )
 from ._permission_response_contract import (
     rejected_payload as _rejected_payload,
@@ -256,6 +259,7 @@ async def _deduplicate_permission_response(
     thread_record: ThreadModel,
     response: PermissionInput,
     resolved_idempotency_key: str,
+    ask: PermissionAsk,
 ) -> ControlActionOutcome | _AuthorizedPermission | None:
     request_id = response.request_id
     option_id = response.option_id
@@ -297,22 +301,20 @@ async def _deduplicate_permission_response(
             approval_status=thread_record.approval_status,
         )
 
-    # The request, not a caller-selected retry header, owns the accepted body.
+    # The ASK, not a caller-selected retry header, owns the accepted body.
     # This check deliberately precedes permission-status rejection so an
     # identical retry can replay or redrive an answered/applied request. The
     # claim the transition takes decides which: a competing body conflicts, an
     # applied or freshly leased action replays, and an expired lease redrives.
-    winning_action = await get_control_action_by_idempotency_key(
-        db,
-        thread_id=thread_id,
-        idempotency_key=permission_response_action_key(request_id),
-    )
-    if winning_action is not None:
+    # A re-ask has no accepted answer of its own yet, so it falls through to
+    # the parked checks instead of replaying the answer to the ask before it.
+    if ask.accepted is not None:
         return _AuthorizedPermission(
             permission=permission,
             thread_record=thread_record,
             thread_id=thread_id,
             resolved_idempotency_key=resolved_idempotency_key,
+            ask=ask,
         )
     return None
 
@@ -424,8 +426,25 @@ async def _authorize_permission_response(
         response.idempotency_key
         or default_permission_response_key(request_id, response.option_id)
     )
+    # Which ask of the request this answers, read once inside the write
+    # transaction: a run still holding the request after an earlier answer
+    # landed has asked it again, and that ask takes an identity of its own.
+    asks = await _journaled_permission_asks(
+        db, thread_id=thread_id, request_id=request_id
+    )
+    if asks is None:
+        return ControlActionOutcome(
+            request_id=request_id,
+            thread_id=thread_id,
+            idempotency_key=resolved_idempotency_key,
+            approval_status=thread_record.approval_status,
+            error_detail="Permission request has been asked too many times",
+            error_status_code=409,
+            failure_type=FailureType.INCOMPATIBLE_STATE,
+        )
+    ask = asks.addressed(held=permission.pending)
     replay = await _deduplicate_permission_response(
-        db, permission, thread_record, response, resolved_idempotency_key
+        db, permission, thread_record, response, resolved_idempotency_key, ask
     )
     if replay is not None:
         return replay
@@ -436,6 +455,7 @@ async def _authorize_permission_response(
         thread_record,
         response,
         resolved_idempotency_key,
+        ask,
         checkpoint_unconfirmed=checkpoint_unconfirmed,
     )
 
@@ -518,6 +538,7 @@ async def _authorize_parked_permission(
     thread_record: ThreadModel,
     response: PermissionInput,
     resolved_idempotency_key: str,
+    ask: PermissionAsk,
     *,
     checkpoint_unconfirmed: bool,
 ) -> ControlActionOutcome | _AuthorizedPermission:
@@ -569,6 +590,7 @@ async def _authorize_parked_permission(
         thread_record=thread_record,
         thread_id=thread_id,
         resolved_idempotency_key=resolved_idempotency_key,
+        ask=ask,
     )
 
 
@@ -682,7 +704,9 @@ async def _record_permission_transition(
             thread_id=context.thread_id,
             action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
             request_id=context.request_id,
-            idempotency_key=permission_response_action_key(context.request_id),
+            idempotency_key=permission_response_action_key(
+                context.request_id, authorized.ask.generation
+            ),
             payload=freeze_accepted_input(
                 dispatch, intent=_response_payload(context.option_id, context.notes)
             ),

@@ -11,6 +11,11 @@ from ...context.metadata import (
     generate_nickname,
 )
 from ...domain_config import domain_config
+from ...thread.constants import (
+    MAX_CALLEE_CHARS,
+    MAX_FEEDBACK_BATCH_ID_CHARS,
+    MAX_SOURCE_BRANCH_CHARS,
+)
 
 # ---------------------------------------------------------------------------
 # ContextRef validation
@@ -118,6 +123,63 @@ class TestThreadMetadata:
         )
         assert meta.source_repo == "github.com/org/vaultspec"
         assert len(meta.context_refs) == 1
+
+    def test_source_branch_at_max_length_accepted(self, tmp_path: Path) -> None:
+        """A source_branch exactly at the bound is accepted (PV30)."""
+        branch = "b" * MAX_SOURCE_BRANCH_CHARS
+        meta = ThreadMetadata(workspace_root=str(tmp_path), source_branch=branch)
+        assert meta.source_branch == branch
+
+    def test_source_branch_rejects_over_max_length(self, tmp_path: Path) -> None:
+        """A source_branch past the bound is refused on intake (PV30).
+
+        ``RunSummaryRecord.source_branch`` (``api/schemas/gateway.py``) already
+        refuses a value over :data:`MAX_SOURCE_BRANCH_CHARS` on the way out;
+        ``ThreadMetadata`` must refuse the same width on the way in, or an
+        over-long value fails only at serialization, long after intake.
+        """
+        with pytest.raises(ValueError, match="source_branch"):
+            ThreadMetadata(
+                workspace_root=str(tmp_path),
+                source_branch="b" * (MAX_SOURCE_BRANCH_CHARS + 1),
+            )
+
+    def test_callee_at_max_length_accepted(self, tmp_path: Path) -> None:
+        """A callee exactly at the bound is accepted (PV30)."""
+        callee = "c" * MAX_CALLEE_CHARS
+        meta = ThreadMetadata(workspace_root=str(tmp_path), callee=callee)
+        assert meta.callee == callee
+
+    def test_callee_rejects_over_max_length(self, tmp_path: Path) -> None:
+        """A callee past the bound is refused on intake (PV30).
+
+        Mirrors the source_branch case against
+        :data:`...thread.constants.MAX_CALLEE_CHARS`.
+        """
+        with pytest.raises(ValueError, match="callee"):
+            ThreadMetadata(
+                workspace_root=str(tmp_path),
+                callee="c" * (MAX_CALLEE_CHARS + 1),
+            )
+
+    def test_feedback_batch_id_at_max_length_accepted(self, tmp_path: Path) -> None:
+        """A feedback_batch_id exactly at the bound is accepted (PV30)."""
+        batch_id = "f" * MAX_FEEDBACK_BATCH_ID_CHARS
+        meta = ThreadMetadata(workspace_root=str(tmp_path), feedback_batch_id=batch_id)
+        assert meta.feedback_batch_id == batch_id
+
+    def test_feedback_batch_id_rejects_over_max_length(self, tmp_path: Path) -> None:
+        """A feedback_batch_id past the bound is refused on intake (PV30).
+
+        ``ipc.schemas``' dispatch field already refuses a value over
+        :data:`MAX_FEEDBACK_BATCH_ID_CHARS`; ``ThreadMetadata`` must refuse the
+        same width before it ever reaches that dispatch.
+        """
+        with pytest.raises(ValueError, match="feedback_batch_id"):
+            ThreadMetadata(
+                workspace_root=str(tmp_path),
+                feedback_batch_id="f" * (MAX_FEEDBACK_BATCH_ID_CHARS + 1),
+            )
 
 
 # ---------------------------------------------------------------------------

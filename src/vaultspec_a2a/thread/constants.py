@@ -23,6 +23,7 @@ __all__ = [
     "DEFAULT_SUPERVISOR_ID",
     "MAX_AGENT_ID_CHARS",
     "MAX_APPROVAL_REQUEST_ID_CHARS",
+    "MAX_CALLEE_CHARS",
     "MAX_DISCOVERY_RESULTS",
     "MAX_FEATURE_TAG_LENGTH",
     "MAX_FEEDBACK_BATCH_ID_CHARS",
@@ -34,6 +35,7 @@ __all__ = [
     "MAX_RUN_MESSAGE_CHARS",
     "MAX_RUN_TITLE_CHARS",
     "MAX_SEED_TRANSCRIPT_MESSAGES",
+    "MAX_SOURCE_BRANCH_CHARS",
     "MAX_TEAM_PRESET_CHARS",
     "MAX_TOOL_CALL_CHARS",
     "MAX_WORKSPACE_ROOT_LENGTH",
@@ -112,6 +114,24 @@ MAX_FEEDBACK_BATCH_ID_CHARS: int = 256
 
 The id is opaque engine data the run only transports: the edge accepts it and
 the dispatch forwards it unchanged, so both admit the same length.
+"""
+
+MAX_SOURCE_BRANCH_CHARS: int = 256
+"""Longest source-branch label a thread's provenance carries.
+
+``ThreadMetadata.source_branch`` is caller-supplied free text persisted into
+``metadata_json`` and later replayed into the run-history record
+(``RunSummaryRecord.source_branch``). Both ends must share this bound: a
+narrower intake than the outbound limit would merely let an over-long value
+fail later, at serialization, instead of at the edge that received it.
+"""
+
+MAX_CALLEE_CHARS: int = 128
+"""Longest callee label a thread's provenance carries.
+
+The sibling of :data:`MAX_SOURCE_BRANCH_CHARS` for ``ThreadMetadata.callee``,
+replayed into ``RunSummaryRecord.callee``: one declaration bounds the value on
+intake and on the way out so the two cannot disagree.
 """
 
 MAX_REQUEST_ID_CHARS: int = 128

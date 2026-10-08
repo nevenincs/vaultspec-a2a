@@ -187,7 +187,9 @@ async def test_a_row_offering_no_usable_option_is_hidden_by_every_surface(
 
     assert snapshot.checkpoint_id is not None, "the run must have checkpoint truth"
     assert snapshot.pending_permissions == []
-    assert DegradedReason.PERMISSION_PROJECTION_UNREADABLE in snapshot.degraded_reasons
+    assert (
+        DegradedReason.PERMISSION_OFFERS_NO_USABLE_OPTION in snapshot.degraded_reasons
+    )
     assert snapshot.repair_status == RepairStatus.OPERATOR_INTERVENTION_REQUIRED
 
     assert summary.repair_status == RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value

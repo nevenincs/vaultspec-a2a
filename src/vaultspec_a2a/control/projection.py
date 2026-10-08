@@ -16,7 +16,7 @@ from ..database import (
 from ..utils.coercion import coerce_object_mapping
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -385,6 +385,8 @@ def apply_checkpoint_projection(
 def reconcile_checkpoint_permissions_with_durable_state(
     snapshot: ThreadStateSnapshot,
     projection: CheckpointProjection,
+    *,
+    durable_permission_ids: Collection[str] | None = None,
 ) -> ThreadStateSnapshot:
     """Fail closed when the checkpoint is parked on a permission with no durable row.
 
@@ -393,10 +395,22 @@ def reconcile_checkpoint_permissions_with_durable_state(
     the checkpoint contributes nothing but the request ids it is parked on. A
     parked request with no row is a pause the respond route cannot act on: it
     demands reconciliation and withdraws any approval it names.
+
+    *durable_permission_ids*, when supplied, is the FULL set of permission
+    request ids that have a durable row - including one withheld from
+    disclosure because it offered nothing answerable, which
+    ``snapshot.pending_permissions`` alone cannot tell apart from a row that
+    never existed. A caller that already collected this set from
+    :func:`enrich_snapshot_from_durable_state` should pass it, so a withheld
+    row is not ALSO reported as having no durable row at all. Omitted, the
+    check falls back to the disclosed set alone, which is the historical
+    (narrower) behaviour.
     """
-    durable_request_ids = {
-        permission.request_id for permission in snapshot.pending_permissions
-    }
+    durable_request_ids = (
+        {permission.request_id for permission in snapshot.pending_permissions}
+        if durable_permission_ids is None
+        else set(durable_permission_ids)
+    )
     orphaned_request_ids = {
         interrupt.interrupt_id
         for interrupt in projection.pending_interrupts
@@ -546,24 +560,32 @@ def _merge_durable_permissions(
     and disclosing it as pending invites an answer that is refused.
 
     An offer that cannot be READ at all and one that reads as nothing usable are
-    withheld alike, and both degrade this read. The tool-permission model refuses
-    a request with no usable option at the worker, so neither row should exist: a
-    run parked on one is a fault in the record, and dropping it silently would
-    leave the run looking idle while it is held.
+    withheld alike, and both degrade this read, but under DIFFERENT reasons: an
+    unreadable offer (``entry.offered is None``, the column itself did not
+    decode) says the row is corrupt, while a readable offer with no usable
+    option says the row is intact but unanswerable. Conflating the two under
+    one reason would tell an operator reading ``degraded_reasons`` that a row
+    is corrupt when it is actually sitting there, readable, just withheld - the
+    tool-permission model refuses a request with no usable option at the
+    worker, so neither row should exist, but they are not the same fault.
     """
     existing = {permission.request_id for permission in snapshot.pending_permissions}
     disclosed_cause: str | None = None
     for entry in pending:
         if entry.request.request_id not in existing:
-            projected = (
-                _permission_snapshot_from_pending(entry)
-                if pending_option_ids(entry)
-                else None
-            )
+            if pending_option_ids(entry):
+                projected = _permission_snapshot_from_pending(entry)
+            else:
+                projected = None
             if projected is None:
+                reason = (
+                    DegradedReason.PERMISSION_PROJECTION_UNREADABLE
+                    if entry.offered is None
+                    else DegradedReason.PERMISSION_OFFERS_NO_USABLE_OPTION
+                )
                 mark_degraded(
                     snapshot,
-                    DegradedReason.PERMISSION_PROJECTION_UNREADABLE,
+                    reason,
                     repair=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
                 )
                 continue
@@ -582,8 +604,17 @@ async def enrich_snapshot_from_durable_state(
     *,
     thread: ThreadModel,
     snapshot: ThreadStateSnapshot,
+    durable_permission_ids: set[str] | None = None,
 ) -> ThreadStateSnapshot:
-    """Merge durable gateway-owned state into a reconnect snapshot."""
+    """Merge durable gateway-owned state into a reconnect snapshot.
+
+    *durable_permission_ids*, when supplied, is filled with every permission
+    request id this read found a durable row for - disclosed or withheld
+    alike. A caller that also calls
+    :func:`reconcile_checkpoint_permissions_with_durable_state` should pass the
+    same set there, so a row withheld here (it offered nothing answerable) is
+    not also reported there as having no durable row at all.
+    """
     try:
         record_repair_posture(snapshot, thread.repair_status)
     except ValueError:
@@ -631,6 +662,8 @@ async def enrich_snapshot_from_durable_state(
     # a read - and a corrupt legacy value made that dead coercion raise and
     # take the whole read down with it.
     pending = await actionable_pending_permissions(session, thread_id=thread.id)
+    if durable_permission_ids is not None:
+        durable_permission_ids.update(entry.request.request_id for entry in pending)
     _merge_durable_permissions(snapshot, pending)
     snapshot.approval_status, snapshot.approval_request_id = durable_approval(pending)
     _clear_non_actionable_pause_state(snapshot)

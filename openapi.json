@@ -3063,6 +3063,7 @@
           "interrupt_payload_untyped",
           "missing_assignment_digest",
           "pending_permission_without_checkpoint_truth",
+          "permission_offers_no_usable_option",
           "permission_projection_unreadable",
           "settlement_store_contended",
           "terminal_thread_pending_permission_residue"

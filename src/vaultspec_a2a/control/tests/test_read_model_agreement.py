@@ -190,6 +190,14 @@ async def test_a_row_offering_no_usable_option_is_hidden_by_every_surface(
     assert (
         DegradedReason.PERMISSION_OFFERS_NO_USABLE_OPTION in snapshot.degraded_reasons
     )
+    # ONE reason for one fault. The checkpoint parks on the very request id this
+    # withheld row answers for, so claiming the row has no durable copy would be
+    # a second, untrue account of the same thing - and it is the account that
+    # sends an operator looking for lost data.
+    assert (
+        DegradedReason.CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW
+        not in snapshot.degraded_reasons
+    )
     assert snapshot.repair_status == RepairStatus.OPERATOR_INTERVENTION_REQUIRED
 
     assert summary.repair_status == RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value

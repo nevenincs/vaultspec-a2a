@@ -72,6 +72,8 @@ from .snapshot import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database import Checkpointer
@@ -315,6 +317,7 @@ async def _read_projected_checkpoint(
     snapshot: ThreadStateSnapshot,
     mirror: RunLiveStateMirror,
     expected_assignment_digest: str | None,
+    durable_permission_ids: Collection[str],
 ) -> _CheckpointSnapshotRead:
     thread_id = snapshot.thread_id
     checkpoint_loaded = False
@@ -349,7 +352,9 @@ async def _read_projected_checkpoint(
             )
             snapshot = apply_checkpoint_projection(snapshot, projection)
             snapshot = reconcile_checkpoint_permissions_with_durable_state(
-                snapshot, projection
+                snapshot,
+                projection,
+                durable_permission_ids=durable_permission_ids,
             )
             checkpoint_loaded = True
             captured_projection = projection
@@ -455,8 +460,17 @@ async def capture_thread_state(
         ),
         repair_reason=thread.repair_reason,
     )
+    # Collects every request id a durable row exists for, disclosed or withheld
+    # alike, so the checkpoint reconciliation below never reports a row that
+    # exists but was withheld as having no durable row at all. Without it the
+    # withholding reason and the orphan reason both fired for one fault, and
+    # only the second one sends an operator looking for lost data.
+    durable_permission_ids: set[str] = set()
     snapshot = await enrich_snapshot_from_durable_state(
-        db, thread=thread, snapshot=snapshot
+        db,
+        thread=thread,
+        snapshot=snapshot,
+        durable_permission_ids=durable_permission_ids,
     )
     if observation.condition == STORE_CONTENDED:
         # The read's product is the truth about the run, and the row above is
@@ -487,6 +501,7 @@ async def capture_thread_state(
         snapshot,
         relay_hub.mirror,
         expected_assignment_digest,
+        durable_permission_ids,
     )
     snapshot = checkpoint_read.snapshot
     checkpoint_loaded = checkpoint_read.loaded

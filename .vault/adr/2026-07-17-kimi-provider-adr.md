@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#kimi-provider'
 date: '2026-07-17'
-modified: '2026-10-01'
-body_hash: 'sha256:c8c79bf10b7ced81dec1970588a7a9a2de0ee9590f06dea01b22d436416cc5cd'
+modified: '2026-10-08'
+body_hash: 'sha256:0f2df3b3d135d30b5e047355d8a5c43b864161ee7f5ddfc8e62d0edaefde7a90'
 related:
   - '[[2026-07-17-kimi-provider-research]]'
   - '[[2026-07-17-tool-cores-adr]]'
@@ -123,3 +123,14 @@ approved at the rung only when the call's own path arguments lie inside the run'
 project; a bare native read name no longer approves a host-wide read. The allowlist itself
 is no longer assembled here but rendered from the run's compiled tool policy
 (`2026-10-01-tool-permission-model-adr`).
+
+## Amendment (2026-10-08): per-run isolation is a redirected Kimi home, not a config-file flag
+
+Accepted 2026-10-08 under the owner's 2026-10-07 delegation of ADR work for `2026-10-06-codebase-remediation-plan` (plan Step W05.P14.S81, L.6). Grounding: R5-F10 in `2026-10-06-codebase-remediation-audit`.
+
+The isolation commitment in Implementation stands: a served Kimi run carries only its own auth and flags and never reads the operator's Kimi configuration, which also suppresses any ambient Kimi MCP. The mechanism named for it does not exist on the installed generation. Kimi Code `0.36.1` (`kimi --version`) offers no `--config` or `--config-file` option (`kimi --help`), and `KIMI_CODE_HOME=<dir> kimi doctor` reports the config file under that directory with built-in defaults applying, which is the redirect the commitment needs.
+
+- **Mechanism.** The factory builds a per-run Kimi home (`providers/kimi_config_home.py`) and launches `kimi acp` with `KIMI_CODE_HOME` pointing at it, the same per-run-home pattern as Codex `CODEX_HOME`. An isolated home carries no operator login, so a served Kimi run authenticates only through the temporary-model definition (`KIMI_MODEL_NAME`, `KIMI_API_KEY`, `KIMI_BASE_URL`); `persisted_config` auth is refused at construction.
+- **Launcher and proof.** The launcher is an absolute resolved path only (the bare-name fallback is gone), and while Kimi is unenrolled it is servable only with an admitted binary identity, per D2 of `2026-10-01-provider-binary-policy-adr`.
+
+**Replaces.** In Implementation, "launches `kimi acp` with `--config-file <per-run>` (or inline `--config`)" now reads "launches `kimi acp` with `KIMI_CODE_HOME` pointing at a per-run home". The Considerations bullet's "Per-run isolation is `--config <inline>` ... or `--config-file <path>`" and the Consequences "Opens" clause's "`--config-file` per-run isolation" become historical for the `kimi-cli` generation the research read; the reconsideration they name now applies to the home redirect.

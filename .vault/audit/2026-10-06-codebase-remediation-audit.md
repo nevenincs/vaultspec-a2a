@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#codebase-remediation'
 date: '2026-10-06'
-modified: '2026-10-07'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:511da00ea9bde80b0c5ddae1fe18b4bfaad7c3cfe086a275b7ed8bccdae0b811'
+body_hash: 'sha256:244b161eac9f165081e58f8cc729d079d186d9f068c55231ed4b2a7f3231d152'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -871,79 +871,79 @@ Each probe settles a question that only a run can answer, and gates the named St
 
 ### p2-terminal-disclosure | medium | Decide whether a cancelled parked run still discloses its clarification
 
-P2. Status: open. Settles: R2-F4 reachability. Gates: FX.2/S07. Run by: PR.1/S01. Command: write `api/tests/test_terminal_interrupt_disclosure.py` (R2 T2(b)) in scratch and run it.
+P2. Status: confirmed 2026-10-07 (PVA, refactor/centralize). `api/tests/test_terminal_interrupt_disclosure.py` on the unfixed tree: `AssertionError: assert {'type': 'clarification_request', ...} is None` (the clarification half was red, the permission half green). Gate: go; FX.2/S07 landed (62ce37ab, integrated). Settles: R2-F4 reachability. Gates: FX.2/S07. Run by: PR.1/S01. Command: write `api/tests/test_terminal_interrupt_disclosure.py` (R2 T2(b)) in scratch and run it.
 
 ### p3-sequence-gap | high | Measure the gap between served last_sequence and stream ids
 
-P3. Status: open. Settles: R2-F1 gap size. Gates: FX.3/S08. Run by: PR.1/S01. Command: write `api/tests/test_run_status_sequence_agreement.py` (R2 T1) in scratch and run it.
+P3. Status: confirmed 2026-10-07 (PVC). `api/tests/test_run_status_sequence_agreement.py`: `last_sequence=2, terminal id=sequence-agreement-run:3`, a gap of exactly one. Gate: go; FX.3 residue landed as PV37 (reserve the terminal's number at settle; DECISIONS Q32 (b)). Settles: R2-F1 gap size. Gates: FX.3/S08. Run by: PR.1/S01. Command: write `api/tests/test_run_status_sequence_agreement.py` (R2 T1) in scratch and run it.
 
 ### p4-run-start-201 | medium | Decide whether run-start answers 201 on a worker-classified refusal
 
-P4. Status: open. Settles: R1-F5 live reachability. Gates: FX.6/S12. Run by: PR.1/S01. Command: extend `api/tests/test_run_action_refusal_vocabulary.py` to `POST /v1/runs` against its saturated worker and run it.
+P4. Status: refuted 2026-10-07 (PVC). Run-start answers 503 on a worker-classified refusal (one real dispatch recorded), never 201. Gate: no fix needed for the run-start half of FX.6/S12. Settles: R1-F5 live reachability. Gates: FX.6/S12. Run by: PR.1/S01. Command: extend `api/tests/test_run_action_refusal_vocabulary.py` to `POST /v1/runs` against its saturated worker and run it.
 
 ### p5-second-resume | medium | Decide whether a clarification RESUME is dispatched twice
 
-P5. Status: open. Settles: R4-F3. Gates: FX.12/S11 against C.4/S102. Run by: PR.1/S01. Command: `uv run --no-sync pytest src/vaultspec_a2a/service_tests/test_clarification_loop_stitched.py -k parks_discloses_answers_and_resumes -x`, then query `control_actions` (`clarification-response:%`) and `recovery_attempts`.
+P5. Status: moot. The D11 amendment rules the clarification RESUME settlement owner; FX.12 folded into C.4 (landed as PV18, 01e13c45 on the PVG branch). Settles: R4-F3. Gates: FX.12/S11 against C.4/S102. Run by: PR.1/S01. Command: `uv run --no-sync pytest src/vaultspec_a2a/service_tests/test_clarification_loop_stitched.py -k parks_discloses_answers_and_resumes -x`, then query `control_actions` (`clarification-response:%`) and `recovery_attempts`.
 
 ### p6-malformed-request-id | low | Decide whether a malformed clarification id answers 500 or 422
 
-P6. Status: open. Settles: R4-F29. Gates: FX.6/S12. Run by: PR.1/S01. Command: post `/v1/runs/{id}/clarifications/a!b/respond` in `api/tests/test_clarification_endpoint.py`.
+P6. Status: confirmed 2026-10-07 (PVC). `POST /v1/runs/{id}/clarifications/a!b/respond` answered 500. Gate: go; now 422 (PV15). Settles: R4-F29. Gates: FX.6/S12. Run by: PR.1/S01. Command: post `/v1/runs/{id}/clarifications/a!b/respond` in `api/tests/test_clarification_endpoint.py`.
 
 ### p7-host-eligibility | high | Show which providers readiness lists as eligible on a real host
 
-P7. Status: open. Settles: R5-F1 on host. Gates: FX.4/S13. Run by: PR.1/S01. Command: `uv run --no-sync python -c "from vaultspec_a2a.control.health import _eligible_provider_names as f; print(f())"`.
+P7. Status: confirmed 2026-10-07 (PVE, this Windows host). `_eligible_provider_names()` = `['claude', 'codex', 'kimi']` against `PROVEN_TURN_LANES` = `['codex']`; claude and kimi were served without completed-turn proof. Gate: go; FX.4/S13 landed (served eligibility = proof and an admitted binary). Settles: R5-F1 on host. Gates: FX.4/S13. Run by: PR.1/S01. Command: `uv run --no-sync python -c "from vaultspec_a2a.control.health import _eligible_provider_names as f; print(f())"`.
 
 ### p8-gate-one-strand | high | Show the research_adr park at research_gate with default env
 
-P8. Status: open. Settles: R4-F12. Gates: FX.8/S14. Run by: PR.1/S01. Command: boot with default env; `GET /v1/presets`; start `vaultspec-adr-research`; observe the park at `research_gate`.
+P8. Status: pending: run by PVM against the D9 amendment (2026-10-08). Settles: R4-F12. Gates: FX.8/S14. Run by: PR.1/S01. Command: boot with default env; `GET /v1/presets`; start `vaultspec-adr-research`; observe the park at `research_gate`.
 
 ### p9-no-gateway-sequenced-event | high | Prove no gateway SequencedEvent, internal WebSocket or single-event client exists
 
-P9. Status: open. Settles: R1-F2 and R1-F6 deletion safety. Gates: DL.2/S18 and DL.3/S19. Run by: PR.1/S01. Command: in scratch delete the branches at `api/thread_stream.py:177-183`, `api/_replay_writer_seat.py:53-56` and the WS route; `uv run --no-sync pytest src/vaultspec_a2a/api src/vaultspec_a2a/acceptance src/vaultspec_a2a/service_tests -x -q`; grep gateway INFO logs for `Worker connected to internal WS` and `POST /internal/events` without `/batch`.
+P9. Status: moot. DL.2 and DL.3 merged as round-1 dead-internal and dead-edge with zero-caller proof. Settles: R1-F2 and R1-F6 deletion safety. Gates: DL.2/S18 and DL.3/S19. Run by: PR.1/S01. Command: in scratch delete the branches at `api/thread_stream.py:177-183`, `api/_replay_writer_seat.py:53-56` and the WS route; `uv run --no-sync pytest src/vaultspec_a2a/api src/vaultspec_a2a/acceptance src/vaultspec_a2a/service_tests -x -q`; grep gateway INFO logs for `Worker connected to internal WS` and `POST /internal/events` without `/batch`.
 
 ### p10-websockets-holders | medium | Find any direct runtime holder of the websockets package
 
-P10. Status: open. Settles: R1-F6 dependency half (D22). Gates: DL.12/S29. Run by: PR.2/S02. Command: `uv tree --invert --package websockets`; `uv run --no-sync --group tooling deptry .` with the pin removed.
+P10. Status: settled by V6 (2026-10-07). The runtime `websockets` pin was removed and relocked; `deptry .` reports no dependency issues on the integrated head. Settles: R1-F6 dependency half (D22). Gates: DL.12/S29. Run by: PR.2/S02. Command: `uv tree --invert --package websockets`; `uv run --no-sync --group tooling deptry .` with the pin removed.
 
 ### p11-onedir-contents | high | List what the frozen onedir actually carries
 
-P11. Status: open. Settles: R6-F4 and R6-F17. Gates: F.5/S83 and F.2/S85. Run by: PR.2/S02. Command: R6 scratch build command (`scripts/build_binary.py --dist tmp/r6-bin` plus an `fd` filter).
+P11. Status: confirmed clean 2026-10-08 (orchestrator). The release build (`uv sync --locked --no-default-groups --group freeze`; `scripts/build_binary.py --dist dist/binary`) produced a onedir whose PYZ lists 350 `vaultspec_a2a` modules and none under `testing`, `tests` or `testing/lanes`, and whose bundled presets are the seven product agents and three product teams only. Note: F.5/S83 merged after F.2/S85, against the fixture-lanes ADR's order; this probe shows the end state ships no fixture. Settles: R6-F4 and R6-F17. Gates: F.5/S83 and F.2/S85. Run by: PR.2/S02. Command: R6 scratch build command (`scripts/build_binary.py --dist tmp/r6-bin` plus an `fd` filter).
 
 ### p12-impure-unit-tests | medium | List impure streaming tests collected under the unit marker
 
-P12. Status: open. Settles: R6-F12. Gates: FX.11/S16. Run by: PR.2/S02. Command: `uv run --no-sync python -m pytest --collect-only -q -m unit src/vaultspec_a2a/streaming/tests`.
+P12. Status: moot. ts-markers merged; the streaming conftest is routed through `apply_layer_markers`. Settles: R6-F12. Gates: FX.11/S16. Run by: PR.2/S02. Command: `uv run --no-sync python -m pytest --collect-only -q -m unit src/vaultspec_a2a/streaming/tests`.
 
 ### p13-unc-canonicaliser | medium | Show the UNC canonicaliser divergence on a long UNC path
 
-P13. Status: open. Settles: R7-F15. Gates: H.6/S91. Run by: PR.2/S02. Command: R7 U4 one-liner.
+P13. Status: moot. H06 merged the UNC-correct canonicaliser. Settles: R7-F15. Gates: H.6/S91. Run by: PR.2/S02. Command: R7 U4 one-liner.
 
 ### p14-double-kill | low | Decide whether a production double kill_process_tree occurs
 
-P14. Status: open. Settles: R7-F6. Gates: H.1/S88. Run by: PR.2/S02. Command: R7 U6 runner command; search for duplicate `ACP subprocess termination starting` per pid.
+P14. Status: confirmed, log-only 2026-10-07 (PVD). One ACP teardown logs `ACP subprocess termination starting` three times for one pid; `ProcessContainment.terminate` clears its pid, so the repeats kill nothing. Gate: go; the per-pid fallback is gone; the repeated log line is residue (PVP). Settles: R7-F6. Gates: H.1/S88. Run by: PR.2/S02. Command: R7 U6 runner command; search for duplicate `ACP subprocess termination starting` per pid.
 
 ### p15-threads-column-drop | medium | Check a threads column drop keeps the DESC partial indexes
 
-P15. Status: open. Settles: migration 0026 safety (R3-F4, R3-F5, K3). Gates: S.5/S74. Run by: PR.2/S02. Command: draft 0026 in scratch; `pytest src/vaultspec_a2a/database/tests/test_schema_integrity.py src/vaultspec_a2a/database/tests/test_migrations.py`.
+P15. Status: settled by V2 (2026-10-07). `database/tests` (schema integrity, migrations, schema parity) and the 0026 round trip passed on the integrated head (387 tests). Settles: migration 0026 safety (R3-F4, R3-F5, K3). Gates: S.5/S74. Run by: PR.2/S02. Command: draft 0026 in scratch; `pytest src/vaultspec_a2a/database/tests/test_schema_integrity.py src/vaultspec_a2a/database/tests/test_migrations.py`.
 
 ### p16-fingerprint-inputs | low | Decide which payload fingerprint input is canonical
 
-P16. Status: open. Settles: R3-F16. Gates: A.4/S67. Run by: PR.2/S02. Command: the R3 unresolved test in `control/tests/test_dispatch_receipts.py`.
+P16. Status: confirmed agreeing 2026-10-07 (PVG). The raw decoded payload (`control/dispatch_receipts.py`) and `model_dump(mode="json")` (`control/graph_definition.py`) give identical fingerprints for ASCII, non-ASCII, control characters, float and large-int payloads; the raw payload is canonical. No persisted digest changed. Settles: R3-F16. Gates: A.4/S67. Run by: PR.2/S02. Command: the R3 unresolved test in `control/tests/test_dispatch_receipts.py`.
 
 ### p17-commit-double-freeze | medium | Show commit double-freeze divergence under a short catalog TTL
 
-P17. Status: open. Settles: R5-F4. Gates: G.1/S75. Run by: PR.2/S02. Command: `uv run --no-sync pytest src/vaultspec_a2a/desktop_tests/test_run_admission.py -q` with a short catalog TTL.
+P17. Status: confirmed structurally 2026-10-07 (PVE). Commit freezes twice (`_run_prepare`, then `_run_commit_locked` -> `_prepare_run_admission`); the short-TTL run could not be made without patching a module constant. Gate: go; the single freeze is PVM's G.1 residue item. Settles: R5-F4. Gates: G.1/S75. Run by: PR.2/S02. Command: `uv run --no-sync pytest src/vaultspec_a2a/desktop_tests/test_run_admission.py -q` with a short catalog TTL.
 
 ### p18-openapi-names | medium | Check OpenAPI component names survive serving thread dataclasses
 
-P18. Status: open. Settles: R2-F14 (D6 name preservation). Gates: M.6/S63. Run by: PR.2/S02. Command: scratch: swap `ThreadStateSnapshot` for `ThreadStateData`; regenerate; `git diff --stat openapi.json`.
+P18. Status: settled by V5 (2026-10-07). Serving the Layer-1 dataclasses under their published `*Snapshot` names keeps every OpenAPI component name; the artifact regenerated with no component renamed. Settles: R2-F14 (D6 name preservation). Gates: M.6/S63. Run by: PR.2/S02. Command: scratch: swap `ThreadStateSnapshot` for `ThreadStateData`; regenerate; `git diff --stat openapi.json`.
 
 ### p19-descendant-listener | medium | Check psutil descendant-listener detection without elevation
 
-P19. Status: open. Settles: R7-F3 and D13 per OS. Gates: H.2/S92. Run by: PR.2/S02. Command: scratch script: spawn a child HTTP listener; `psutil.Process(child).net_connections(kind="tcp")` on the Windows and Linux CI runners, and macOS if supported (O9).
+P19. Status: passed on win32 2026-10-07 (PVD, unelevated): descendant listener inside our tree -> confirmed; listener outside our tree -> outside; our port read from a stranger root -> outside. Linux and macOS remain owner-run: `python -m pytest src/vaultspec_a2a/utils/tests/test_process.py -k ownership_classification -q`. Settles: R7-F3 and D13 per OS. Gates: H.2/S92. Run by: PR.2/S02. Command: scratch script: spawn a child HTTP listener; `psutil.Process(child).net_connections(kind="tcp")` on the Windows and Linux CI runners, and macOS if supported (O9).
 
 ### p20-bounds-ci-skip | medium | Confirm the bounds agreement test skips in CI
 
-P20. Status: open. Settles: R1-F10. Gates: Q.5/S112. Run by: PR.2/S02. Command: in the `test` job log, `pytest src/vaultspec_a2a/api/tests/test_engine_edge_bounds_agreement.py -rs` shows 5 SKIPPED.
+P20. Status: confirmed 2026-10-07 (PVC). With `VAULTSPEC_A2A_ENGINE_SOURCE` absent, `test_engine_edge_bounds_agreement.py` reports 5 skipped. Gate: go; replaced by the structural published-bounds test that runs everywhere (PV15). Settles: R1-F10. Gates: Q.5/S112. Run by: PR.2/S02. Command: in the `test` job log, `pytest src/vaultspec_a2a/api/tests/test_engine_edge_bounds_agreement.py -rs` shows 5 SKIPPED.
 
 ### p21-store-census | medium | Count legacy lease, r1 digest and repair rows on real desktop stores
 
@@ -955,7 +955,11 @@ P22. Status: open. Settles: R7-F14 and D26 (owner-run, O8). Gates: Y.2/S96. Run 
 
 ### p23-zai-catalog-live | medium | Show the live Z.ai catalog failure with a credential
 
-P23. Status: open. Settles: R5-F9 (credential-run). Gates: L.5/S80. Run by: PR.3/S03. Command: `uv run --no-sync pytest -m service src/vaultspec_a2a/providers/tests/test_zai_catalog_live.py --require-prerequisite=zai-credential -q`.
+P23. Status: open. Settles: R5-F9 (credential-run). Gates: L.5/S80. Run by: PR.3/S03. Command: `uv run --no-sync pytest -m service src/vaultspec_a2a/providers/tests/test_zai_catalog_live.py --require-prerequisite=zai-credential -q`. The Z.ai catalog now discovers through the shared ACP lifecycle (PV05); the live test skips loudly without `ZAI_AUTH_TOKEN`, and running it with the credential is the owner's.
+
+### p24-document-approval-journaling | high | Decide whether a document approval is journaled under its own pause kind
+
+P24. Status: confirmed 2026-10-07 (PVB, stage-4 addition). A real document approval parked by the real phase gate and relayed through the real producer chain was journaled as `plan_approval_request`, and `database.pending_document_approval_thread` returned `None`. Settles: the C09a residue (SCHEDULE PV34). Gate: go; the journal now takes the pause kind from the interrupt the checkpoint holds (PV34).
 
 ## Recommendations
 
@@ -1227,3 +1231,63 @@ Status: recorded. Type: environment. Service tier on refactor/centralize@2cb4fdc
 ### v5-openapi-doc-residue | low | Three published-description defects found while regenerating openapi.json
 
 Status: open; owners PVC (403) and PVA (descriptions). Type: contract-drift. Permission-respond serves 403 for document-approval pauses (`control/permission_service.py`) but `openapi.json` does not declare it, on `main` either; the published `AgentSnapshot` description says "`model` carry the real enums" while the field is `model_name: str | None`; the published `ThreadStateSnapshot` description carries developer-facing implementation notes.
+
+### pv1-fixture-lane-order | low | The onedir exclusion landed after the fixture-lane seam, against the fixture-lanes ADR's order
+
+Status: recorded; end state verified by P11. Type: process. F.5/S83 merged at `856b464e` after F.2/S85 at `875634bd`; the fixture-lanes ADR requires F.5 first so no build between them can carry fixtures. No release was cut in between, and P11 shows the onedir carries no fixture module or preset.
+
+### pv1-worker-stop-timeout | high | The gateway's worker shutdown raises TimeoutExpired after the tree is reaped
+
+Status: open; owner PVP (wave 2). Type: correctness. `control/_worker_process_stop.py` ~:40 awaits `process.wait(0.1)` in a `finally` with no handling; reproduced three times in loaded batches of `control/tests/test_unready_worker_reap.py`.
+
+### pv1-request-path-worker-bearer | medium | The gateway's request-path worker probes send the bearer without an ownership gate
+
+Status: open; owner PVP (wave 2). Type: security. `api/routes/gateway.py` ~:235 and `control/health.py` ~:733 probe `settings.worker_url` with the bearer-carrying pooled client and no listener-ownership check (the R7-F1 class PV04 closed on the spawn, eviction and stop paths). X19 (`auto_spawn_worker=False` attach) stays recorded as out of the D13 scope.
+
+### pv1-atomic-write-windows-sharing | medium | The atomic writer fails on a transient Windows sharing violation
+
+Status: open; owner PVP (wave 2). Type: correctness. `utils/atomic_write.atomic_write_text`'s `os.replace` raises `PermissionError [WinError 5]` while a reader holds the target; intermittent in `lifecycle/tests/test_discovery_desktop.py::test_publication_is_atomic_under_a_racing_reader`.
+
+### pv1-sqlite-contention-under-load | high | Gateway and worker SQLite writers fail runs and stall reads under load
+
+Status: open; owner PVQ (wave 2). Type: correctness. PVB observed `Graph event stream failed unexpectedly: OperationalError: database is locked` failing a worker run and a 500 on permission respond after a long suite; ties to `v3-gateway-history-read-hang`.
+
+### pv1-acp-refusal-remembers | high | An ACP refusal falls back to a remembering refusal option
+
+Status: open; owner PVO (wave 2, with D12). Type: correctness. `providers/_acp_rpc_handlers.py` `_refused_outcome` spells a refusal with `narrowest_option_id(approving=False)`, which picks `reject_always` when it is the only refusal offered, so the refusal becomes a durable CLI rule; DECISIONS Q20 cannot be fully delivered from `_tool_policy`.
+
+### pv1-permission-apply-second-copy | high | The permission apply path reads the decision from a second copy
+
+Status: open; owner PVT (wave 2). Type: correctness. PV10 (b)+(c): `control/_event_application.py` ~:79-81 reads the answered option from `permission_requests` instead of the accepted dispatch envelope, so `permission_logs` is not yet the single decision record (D18).
+
+### pv1-repark-unanswerable | medium | A re-parked permission request under an answered id is not answerable
+
+Status: open; owner PVT (wave 2); orchestrator ruling 2026-10-08: reading B (a re-ask generation derived from the applied responses, generation 0 keeping the legacy key). Type: correctness, latent after PV11 and PV29 (no shipped preset reaches it). Trace: `control/permission_service.py:303-314`, `:704-724`.
+
+### pv1-admission-double-freeze | medium | Run-start commit freezes the selection twice
+
+Status: open; owner PVM (wave 2). Type: duplication. R5-F4 (G.1/S75 residue): `_run_prepare` freezes, then `_run_commit_locked` calls `_prepare_run_admission`, which freezes again (`api/routes/_gateway_run_start.py` ~:594,:788,:336).
+
+### pv1-kimi-readiness-disagrees | medium | Kimi readiness reports configured where the factory refuses
+
+Status: open; owner PVR (wave 2). Type: correctness. `providers/provider_readiness.py` `_kimi_configuration` reads `kimi_code_home` presence as configured, but under per-run isolation (PV06) only the temporary-model definition authenticates a served run. Also: no per-run ACP config-home teardown (`providers/acp_chat_model.py`), and the Claude binary-proof entry is private and workspace-bound (`providers/factory.py`).
+
+### pv1-listing-enum-500 | medium | A corrupt durable enum column makes the run listing answer 500
+
+Status: open; owner PVS (wave 2). Type: correctness. `api/routes/gateway.py` ~:160 `_optional_enum` raises on an out-of-vocabulary `repair_status` / `approval_status`.
+
+### pv1-literal-bounds-residue | medium | About 25 literal bounds remain outside their named homes
+
+Status: open; owner PVS (wave 2). Type: duplication (E.1/S52 residue). `api/schemas`, `ipc/schemas.py` and `streaming/sse_frames.py` carry literal widths; `ipc/schemas.py` `team_preset` 128 against `MAX_TEAM_PRESET_CHARS` 64 waits on the DECISIONS Q7 persisted-row census. Also `RunStatusResponse.approval_request_id` publishes no width, `MAX_ROLES_PER_RUN` is enforced but unpublished, and the lifecycle capability header on `/admin/shutdown` is unbounded.
+
+### pv1-duplication-baseline-brittle | medium | The blocking duplication baseline identifies clones by start line
+
+Status: open; owner PVL. Type: tooling. The integrated head failed `lint all` with `6 new, 5 stale`, five of them baseline entries shifted by unrelated edits; the `owed-test-fixture-fold` category baselines known duplication instead of folding it.
+
+### pv1-low-residue | low | Low-severity residue reported by the wave-1 agents
+
+Status: open unless noted. Type: debt. `control/reconciliation.py` `repair_backlog` counts `paused_resumable` runs as damage (PVT); `control/graph_definition.py` fingerprints `model_dump` rather than the raw payload, equal today per P16 (PVT); the listing counts queued continuations per row for an unserved field (PVS); `WorkerBridge(internal_token=None)` keeps a defaulted credential (PVP); the repeated ACP teardown log line (PVP); `api/tests/test_stream_sequence_restart.py` 401 under session load; `control/tests/test_terminal_sequence_capture.py` drives the terminal handler without a held terminal; a reserved-then-released terminal leaves `last_sequence` one above the last published frame on a promoted turn until the next frame; `ipc/body_limit.py`'s 400 is shadowed by h11 under uvicorn; `streaming/_interrupt_projection.py` relays a document approval with `tool_call=plan_approval` (display only); load-sensitive timing in `providers/tests/test_model_stack_warmup.py`, `database/tests/test_active_run_discovery_performance.py`, `control/tests/test_worker_provenance.py`, `testing/tests/test_default_safety.py`, `testing/tests/test_runner.py`; `desktop/migration.py` has no test for a blocked WAL checkpoint (unreachable from outside the verb); `providers/provider_catalog_service.py` has no catalog TTL setting (PVM); `providers/_tool_policy.py` forwards a remembered approval when no once-only approval is offered (owner question, not ruled).
+
+### pv1-kimi-adr-mechanism | medium | The Kimi ADR's per-run config mechanism names a flag the installed CLI does not have
+
+Status: fixed 2026-10-08 (amendment to `2026-07-17-kimi-provider-adr`). Type: doc. `2026-07-17-kimi-provider-adr` names `--config-file <per-run>`; Kimi Code 0.36.1 has no such flag, and the per-run isolation commitment is met by `KIMI_CODE_HOME` (PV06, verified credential-free with `kimi doctor`).

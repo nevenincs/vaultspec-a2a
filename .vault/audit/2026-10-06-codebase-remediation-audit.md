@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:a796e0b0be53ae988b12a561fe1f8428cab01e1d689aba37f0c9c21086c53014'
+body_hash: 'sha256:68a382dbc43df6d1cace8d1a90df2cdd5155195ae631c7a5f209c7d5f18b603e'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -1336,3 +1336,20 @@ docstrings still promise no temporary residue. Follow-up should state the
 best-effort cleanup contract and assess an owner-scoped later cleanup policy;
 this consolidation preserves the tested implementation rather than changing
 that policy.
+
+### consolidation-vault-evidence | medium | Vault validation reports a closed Step without a ledger row
+
+Status: open; owner tool-cores. Type: verification evidence. After integration,
+`uv run --no-sync vaultspec-core vault check all` reports that S15 in
+`2026-08-01-tool-cores-plan` is closed without a corresponding ledger row.
+Recover the actual Step execution evidence before logging or changing its state.
+The consolidation does not manufacture a ledger row to clear this error.
+
+### consolidation-vault-hygiene | low | Existing vault formatting and attestation warnings remain
+
+Status: open. Type: documentation metadata. The same vault check reports extra
+blank lines in `2026-07-18-desktop-product-profile-adr`,
+`2026-10-05-desktop-native-isolation-linux-namespace-backend-adr`, and this rolling
+audit, plus a stale modified stamp and body fingerprint on
+`2026-10-04-container-release-audit`. These warnings remain for the owning vault
+maintenance pass; the Git consolidation is complete independently of that work.

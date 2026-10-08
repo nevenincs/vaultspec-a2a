@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:68a382dbc43df6d1cace8d1a90df2cdd5155195ae631c7a5f209c7d5f18b603e'
+body_hash: 'sha256:ec9f108ea2663413f8db4ec28fb3044ec83ea69d09cbf22bd2424db7b5bdcb4f'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -1292,7 +1292,6 @@ Status: open unless noted. Type: debt. `control/reconciliation.py` `repair_backl
 
 Status: fixed 2026-10-08 (amendment to `2026-07-17-kimi-provider-adr`). Type: doc. `2026-07-17-kimi-provider-adr` names `--config-file <per-run>`; Kimi Code 0.36.1 has no such flag, and the per-run isolation commitment is met by `KIMI_CODE_HOME` (PV06, verified credential-free with `kimi doctor`).
 
-
 ### consolidation-2026-10-08 | low | Branch integration preserves completed work without closing pending plans
 
 Status: fixed by the main consolidation. Type: integration review. The user's
@@ -1353,3 +1352,43 @@ blank lines in `2026-07-18-desktop-product-profile-adr`,
 audit, plus a stale modified stamp and body fingerprint on
 `2026-10-04-container-release-audit`. These warnings remain for the owning vault
 maintenance pass; the Git consolidation is complete independently of that work.
+
+### green-20261008-strict-types | medium | Strict typing stopped canonical CI before the test gates
+
+Status: fixed in the resumed verification pass for S116. Type: verification
+correctness. Full Validation run 37751381955 at 1ff26244 reported four
+basedpyright diagnostics in `api/tests/test_harness_gateway.py` and
+`control/tests/test_direct_control_leases.py`. A fresh locked `python -m dev
+lint all` reproduced exactly those diagnostics; all other lint targets passed.
+The final printed storage-anchors command was not the failing target: lint-all
+continues after failures. Complexity, limits, and size are advisory sentinels
+under the accepted staged-quality decision, not the cause of this CI failure.
+
+The harness test now reads the refusal through the shared validating JSON
+readers, preserving both string and typed-object refusals. The cancellation
+contention test asserts that its result and elapsed time were assigned before
+reading them outside AnyIO's cancellation scope. The actual diff was reviewed:
+the assertions still exercise the real gateway, worker, and database; no
+production behavior, test double, suppression, or gate threshold changed.
+Review verdict: PASS for this correction; S116 remains open for full-suite and
+functional verification. Ruff lint/format and targeted basedpyright passed;
+the resource-aware runner passed all 16 tests in the two edited modules on
+Windows. The broad non-service run started from 1ff26244 and had already
+collected the old test definitions; the separate focused run verifies the
+edited definitions. Its report is `.pytest-tmp/green-20261008/type-fix-tests.xml`.
+
+### green-20261008-plan-checkpoints | medium | Implemented remediation lacks corresponding execution checkpoints
+
+Status: open; owner codebase-remediation S116. Type: workflow evidence. The
+owning CLI reports 0/116 Steps complete and no historical remediation ledger,
+despite the integrated centralization and correctness commits. The audit's
+open tokens are not sufficient evidence that each defect remains present.
+Read-only reconciliation found current fixes and regressions for worker-stop
+timeouts (c5ddf012), request-path worker bearer ownership (3bc6ba74), atomic
+publication (cfa337c5), remembering ACP refusals (6f13970e), single-copy
+permission application (677e7c52 and 75579608), permission re-asks (d5be1db5),
+Kimi readiness (adc14b97), corrupt listing enums (56b678d1), and the admission
+double-freeze (dd210bee). Record fresh verification before closing their owning
+Steps; do not fabricate historical test results or infer completion from an
+unchecked plan. PV29's service rejection/reapproval reproduction and the
+paired history/SQLite service-load case still need post-fix evidence.

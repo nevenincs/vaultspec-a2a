@@ -6,9 +6,10 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:62f3c8c2ff257f2d569c6698c806dfa4764aa59c7ae9285f24b0740be5a26489'
+body_hash: 'sha256:ceadba61eb22a7db656387f63b666237f806db22649807aa1261a45931edcd50'
 related:
   - '[[2026-10-06-codebase-remediation-audit]]'
+  - '[[2026-10-06-codebase-remediation-ledger]]'
   - '[[2026-10-06-codebase-remediation-plan]]'
   - '[[2026-10-07-codebase-remediation-fixture-lanes-adr]]'
   - '[[2026-10-07-codebase-remediation-process-introspection-adr]]'
@@ -34,6 +35,10 @@ Auto-generated index of all documents tagged with `#codebase-remediation`.
 ### audit
 
 - `2026-10-06-codebase-remediation-audit` - `codebase-remediation` audit: `remediation finding ledger`
+
+### exec
+
+- `2026-10-06-codebase-remediation-ledger` - `codebase-remediation` ledger
 
 ### plan
 

@@ -352,6 +352,8 @@ async def test_cancel_retries_sqlite_lock_before_claim(
             await anyio.sleep(0.3)
             await locker.commit()
 
+    result: ControlActionOutcome | None = None
+    elapsed: float | None = None
     async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
         async with anyio.create_task_group() as tg:
             tg.start_soon(_hold_write_lock)
@@ -370,6 +372,8 @@ async def test_cancel_retries_sqlite_lock_before_claim(
                 )
             elapsed = time.monotonic() - started
 
+        assert result is not None
+        assert elapsed is not None
         assert result.accepted
         # A lucky immediate claim finishes in milliseconds; this bound only holds
         # if the claim genuinely waited out the lock and retried.

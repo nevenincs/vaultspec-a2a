@@ -26,6 +26,9 @@ from ...testing import (
     DEFAULT_TEAM_PRESET,
     actor_tokens_body,
     async_catalog_run_fields,
+    json_object,
+    json_text,
+    required_text,
     role_tokens,
     serve_on_loopback,
 )
@@ -165,8 +168,12 @@ async def test_provisioned_workspace_clears_the_harness_gate_at_run_start(
         # A refusal a consumer branches on carries a typed object instead of a
         # sentence, so the reason is read out of whichever shape arrived.
         if resp.status_code != 201:
-            detail = resp.json()["detail"]
-            reason = detail["message"] if isinstance(detail, dict) else detail
+            detail = json_object(resp.json(), at="run-start refusal")["detail"]
+            reason = (
+                required_text(detail, "message", at="run-start refusal.detail")
+                if isinstance(detail, dict)
+                else json_text(detail, at="run-start refusal.detail")
+            )
             assert "harness" not in reason.lower()
 
 

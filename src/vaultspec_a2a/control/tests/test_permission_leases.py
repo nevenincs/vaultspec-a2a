@@ -34,6 +34,14 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+# The park below writes a checkpoint from INSIDE an open, uncommitted
+# application transaction, which the one file production serves both stores
+# from cannot admit: the saver's write upgrades a read transaction and SQLite
+# refuses it outright. The shape is the test's, not production's - the worker
+# writes checkpoints on its own connection - so the two stores are separated
+# here until the seed commits before it parks.
+pytestmark = pytest.mark.separate_checkpoint_store
+
 _OPTIONS: list[dict[str, object]] = [
     {"optionId": "allow_once", "name": "Allow once"},
     {"optionId": "reject_once", "name": "Reject once"},

@@ -662,6 +662,12 @@ def pytest_configure(config: pytest.Config) -> None:
         f"{SQLITE_ENGINE_MARK}(posture, *, timeout=None): the SqlitePosture and "
         "driver lock wait in seconds the root `engine` fixture opens with.",
     )
+    config.addinivalue_line(
+        "markers",
+        f"{SEPARATE_CHECKPOINT_STORE_MARK}: give the `checkpointer` fixture a "
+        "file of its own instead of the application store production shares "
+        "with it.",
+    )
     _declared = frozenset(config.getoption("required_prerequisites") or [])
     unknown = sorted(_declared - _BY_ID.keys())
     if unknown:
@@ -930,11 +936,17 @@ def materialize_schema(db_path: Path, *, migrated: bool = False) -> Path:
 # Every suite reaches a store through these rather than building its own:
 # ``engine`` is a real per-test SQLite file carrying the model schema,
 # ``migrated_engine`` a real per-test file at the head of the Alembic chain, and
-# ``checkpointer`` a real per-test ``AsyncSqliteSaver``. A suite whose claim
-# depends on the connection posture says so with the ``sqlite_engine`` mark,
-# which is data the one ``engine`` fixture reads, never a second engine builder.
+# ``checkpointer`` a real per-test ``AsyncSqliteSaver`` in the served posture,
+# over the SAME file as ``engine`` because production defaults both stores to
+# one. A suite whose claim depends on the connection posture or needs two files
+# says so with the ``sqlite_engine`` or ``separate_checkpoint_store`` mark,
+# which is data the one fixture reads, never a second engine builder.
 
 SQLITE_ENGINE_MARK = "sqlite_engine"
+
+#: How a test declares that its claim needs the checkpoint store in a file of
+#: its own, rather than the single file production serves both stores from.
+SEPARATE_CHECKPOINT_STORE_MARK = "separate_checkpoint_store"
 
 
 class SqlitePosture(Enum):
@@ -1053,16 +1065,48 @@ def migrated_template() -> Path:
 
 
 @pytest.fixture
-def checkpoint_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Where :func:`checkpointer` keeps its per-test SQLite store."""
-    return tmp_path_factory.mktemp("checkpoints") / "checkpoints.db"
+def checkpoint_file(
+    request: pytest.FixtureRequest,
+    database_file: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    """Where :func:`checkpointer` keeps its store: the application file.
+
+    Production defaults both stores to ONE file -
+    ``settings.checkpoint_connection_string`` falls back to ``database_url`` -
+    so the run's durable rows and its checkpoints share a single write lock.
+    Pointed at a file of its own, a suite could never meet that lock, and the
+    whole class of defects it produces (a read failing over a settlement, a
+    graph event stream failing a run) was invisible to every tier.
+
+    A test whose claim genuinely needs two stores says so with the
+    ``separate_checkpoint_store`` mark on itself, its class or its module.
+    """
+    # pytest leaves ``FixtureRequest.node`` unannotated; for a function-scoped
+    # fixture it is the requesting test item.
+    node = cast("pytest.Item", request.node)
+    if node.get_closest_marker(SEPARATE_CHECKPOINT_STORE_MARK) is not None:
+        return tmp_path_factory.mktemp("checkpoints") / "checkpoints.db"
+    return database_file
 
 
 @pytest_asyncio.fixture
 async def checkpointer(checkpoint_file: Path) -> AsyncIterator[AsyncSqliteSaver]:
-    """A real ``AsyncSqliteSaver`` over :func:`checkpoint_file`, set up."""
+    """A real ``AsyncSqliteSaver`` over :func:`checkpoint_file`, set up.
+
+    In the posture ``open_checkpointer`` gives the served saver, from the one
+    statement source both production checkpoint writers consume, and applied
+    BEFORE ``setup()`` for the same reason production applies it there: the DDL
+    is the saver's first write and the configured lock wait has to be in force
+    for it.
+    """
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+    from .control.config import settings
+    from .database import checkpoint_pragmas
+
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_file)) as saver:
+        for statement in checkpoint_pragmas(settings.sqlite_busy_timeout_ms):
+            await saver.conn.execute(statement)
         await saver.setup()
         yield saver

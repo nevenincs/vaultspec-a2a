@@ -617,6 +617,40 @@ class RunPermissionDecision(BaseModel):
     responded_at: datetime
 
 
+class RunTokenUsage(BaseModel):
+    """Token counts a run's provider lanes reported, summed as recorded.
+
+    Counts, and only counts a lane actually declared. Nothing here is priced or
+    derived: no served lane is metered per token and the project holds no rate
+    table, so a cost field could only ever carry a number nobody measured.
+
+    ``input_tokens`` and ``output_tokens`` are the two counts every lane
+    reports. The other three are the breakdown a lane may or may not report,
+    and they are ``null`` when no recorded turn reported them - which is a
+    different fact from a measured zero and is served as a different value.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
+
+
+class RunUsage(BaseModel):
+    """One run's token accounting, totalled and split by role.
+
+    ``by_role`` is keyed by the role id that spent the tokens, and is scoped to
+    the run being read: a role id names a seat in a team preset rather than one
+    run's agent, so these are this run's rows grouped by seat, never that
+    seat's tokens across every run it ever took. A seat that took no turn is
+    absent rather than present with zeros.
+    """
+
+    total: RunTokenUsage
+    by_role: dict[str, RunTokenUsage] = Field(default_factory=dict)
+
+
 class RunHistoryResponse(BaseModel):
     """The full read of one run, including terminal and archived ones.
 
@@ -640,6 +674,13 @@ class RunHistoryResponse(BaseModel):
     run ends, so without this the record of a decision a human actually made was
     durable in the audit log and readable nowhere - a run could be reviewed whole
     with no trace that anyone had approved anything.
+
+    ``usage`` is the run's token accounting, and is the same kind of disclosure
+    for the same reason: the counts were recorded on every turn and served on no
+    surface at all. It is ``null`` when the run recorded no accounting rows,
+    rather than a zeroed object a reviewer would read as a run that spent
+    nothing. Run-status stays the bounded recovery snapshot and carries none of
+    this, so counts are a cost of the wide read by design.
     """
 
     api_version: Literal["v1"] = _API_VERSION
@@ -649,6 +690,7 @@ class RunHistoryResponse(BaseModel):
     transcript_available: bool
     transcript_status: TranscriptAvailability
     permission_decisions: list[RunPermissionDecision] = Field(default_factory=list)
+    usage: RunUsage | None = None
 
 
 class RunArchiveResponse(BaseModel):

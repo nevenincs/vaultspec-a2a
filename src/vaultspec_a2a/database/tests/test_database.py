@@ -46,7 +46,7 @@ from .. import (
     record_permission_request,
     save_model,
     set_thread_approval_state,
-    sum_cost_by_agent,
+    sum_cost_by_role,
     sum_cost_by_thread,
     supersede_permission_requests,
 )
@@ -790,59 +790,79 @@ class TestCostTrackingCRUD:
         await append_cost_record(session, r2)
 
         totals = await sum_cost_by_thread(session, thread.id)
-        expected_input = r1.input_tokens + r2.input_tokens
-        expected_output = r1.output_tokens + r2.output_tokens
-        assert totals["input_tokens"] == expected_input
-        assert totals["output_tokens"] == expected_output
+        assert totals is not None
+        assert totals.input_tokens == r1.input_tokens + r2.input_tokens
+        assert totals.output_tokens == r1.output_tokens + r2.output_tokens
 
     @pytest.mark.asyncio
     async def test_sum_cost_by_thread_empty(self, session: AsyncSession) -> None:
-        """sum_cost_by_thread for an empty thread should return zeros."""
+        """A thread with no accounting rows reads back as no accounting.
+
+        Not as zeros: a reviewer told a run spent zero tokens has been told
+        something the system never measured.
+        """
         thread = await create_thread(
             session, write_authority=make_test_write_authority(), title="Empty Cost"
         )
-        totals = await sum_cost_by_thread(session, thread.id)
-        assert totals["input_tokens"] == 0
-        assert totals["output_tokens"] == 0
+        assert await sum_cost_by_thread(session, thread.id) is None
 
     @pytest.mark.asyncio
-    async def test_sum_cost_by_agent(self, session: AsyncSession) -> None:
-        """sum_cost_by_agent should aggregate across threads."""
-        t1 = await create_thread(
+    async def test_sum_cost_by_role_groups_within_the_thread(
+        self, session: AsyncSession
+    ) -> None:
+        """Per-role totals cover the read thread's rows and no other thread's.
+
+        The role id is the same in both threads, which is the hazard: it names a
+        seat in a team preset rather than one run's agent, so an aggregate keyed
+        on the role alone would fold the other run's tokens into this answer.
+        """
+        read = await create_thread(
             session, write_authority=make_test_write_authority(), title="Thread 1"
         )
-        t2 = await create_thread(
+        other = await create_thread(
             session, write_authority=make_test_write_authority(), title="Thread 2"
         )
-
-        r1 = self._make_cost_record(
-            thread_id=t1.id,
-            agent_id="coder-1",
-            input_tokens=500,
-            output_tokens=200,
+        await append_cost_record(
+            session,
+            self._make_cost_record(
+                thread_id=read.id,
+                agent_id="coder-1",
+                input_tokens=500,
+                output_tokens=200,
+            ),
         )
-        r2 = self._make_cost_record(
-            thread_id=t2.id,
-            agent_id="coder-1",
-            model="high",
-            input_tokens=700,
-            output_tokens=300,
+        await append_cost_record(
+            session,
+            self._make_cost_record(
+                thread_id=read.id,
+                agent_id="reviewer-1",
+                input_tokens=40,
+                output_tokens=9,
+            ),
         )
-        await append_cost_record(session, r1)
-        await append_cost_record(session, r2)
+        await append_cost_record(
+            session,
+            self._make_cost_record(
+                thread_id=other.id,
+                agent_id="coder-1",
+                model="high",
+                input_tokens=700,
+                output_tokens=300,
+            ),
+        )
 
-        totals = await sum_cost_by_agent(session, "coder-1")
-        expected_input = r1.input_tokens + r2.input_tokens
-        expected_output = r1.output_tokens + r2.output_tokens
-        assert totals["input_tokens"] == expected_input
-        assert totals["output_tokens"] == expected_output
+        per_role = await sum_cost_by_role(session, read.id)
+        assert sorted(per_role) == ["coder-1", "reviewer-1"]
+        coder, reviewer = per_role["coder-1"], per_role["reviewer-1"]
+        assert (coder.input_tokens, coder.output_tokens) == (500, 200)
+        assert (reviewer.input_tokens, reviewer.output_tokens) == (40, 9)
 
     @pytest.mark.asyncio
-    async def test_sum_cost_by_agent_empty(self, session: AsyncSession) -> None:
-        """sum_cost_by_agent for unknown agent should return zeros."""
-        totals = await sum_cost_by_agent(session, "nonexistent-agent")
-        assert totals["input_tokens"] == 0
-        assert totals["output_tokens"] == 0
+    async def test_sum_cost_by_role_is_empty_for_a_thread_with_no_rows(
+        self, session: AsyncSession
+    ) -> None:
+        """A seat that took no turn is absent rather than present with zeros."""
+        assert await sum_cost_by_role(session, "nonexistent-thread") == {}
 
 
 # ---------------------------------------------------------------------------

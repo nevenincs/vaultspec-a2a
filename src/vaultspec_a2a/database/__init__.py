@@ -115,8 +115,9 @@ from .control_action_repository import (
 from .control_action_repository import (
     settle_control_action_lease as settle_control_action_lease,
 )
+from .cost_repository import TokenUsageTotals as TokenUsageTotals
 from .cost_repository import append_cost_record as append_cost_record
-from .cost_repository import sum_cost_by_agent as sum_cost_by_agent
+from .cost_repository import sum_cost_by_role as sum_cost_by_role
 from .cost_repository import sum_cost_by_thread as sum_cost_by_thread
 from .deletion_saga_repository import (
     claim_deletion_saga_row as claim_deletion_saga_row,
@@ -321,6 +322,7 @@ __all__ = [
     "ThreadModel",
     "ThreadStatusElectionOutcome",
     "ThreadStatusElectionResult",
+    "TokenUsageTotals",
     "WriteContentionError",
     "acquire_control_action_lease",
     "actionable_pending_permissions",
@@ -423,7 +425,7 @@ __all__ = [
     "settle_control_action_lease",
     "settle_expired_recovery_attempt",
     "settle_recovery_claim",
-    "sum_cost_by_agent",
+    "sum_cost_by_role",
     "sum_cost_by_thread",
     "supersede_permission_requests",
     "supported_migration_head",

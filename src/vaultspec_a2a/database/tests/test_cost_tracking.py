@@ -56,7 +56,7 @@ from ...thread.models import TokenUsageEntry
 from ...thread.state import merge_token_usage
 from ...worker.cost_port import SqlCostPort
 from ..cost_repository import (
-    sum_cost_by_agent,
+    sum_cost_by_role,
     sum_cost_by_thread,
 )
 from ..models import (
@@ -408,8 +408,8 @@ class TestUsageReachesAPersistedRow:
             usage=usage,
         )
         totals = await sum_cost_by_thread(session, "t-failed-acp")
-        assert totals["input_tokens"] == 8
-        assert totals["output_tokens"] == 2
+        assert totals is not None
+        assert (totals.input_tokens, totals.output_tokens) == (8, 2)
         row = (
             await session.execute(
                 select(CostTrackingModel).where(
@@ -460,8 +460,13 @@ class TestUsageReachesAPersistedRow:
         )
 
         totals = await sum_cost_by_thread(session, "t-e2e")
-        assert totals["input_tokens"] == 880
-        assert totals["output_tokens"] == 120
+        assert totals is not None
+        assert (totals.input_tokens, totals.output_tokens) == (880, 120)
+        # The aggregate carries the breakdown too, so what explains a surprising
+        # bill survives the read and not only the write.
+        assert totals.cache_read_tokens == 700
+        assert totals.cache_write_tokens == 30
+        assert totals.reasoning_tokens == 64
         # The breakdown that explains a surprising bill reaches the row too.
         row = (
             await session.execute(
@@ -481,7 +486,7 @@ class TestUsageReachesAPersistedRow:
         assert row.agent_id == "coder-1"
 
     @pytest.mark.asyncio
-    async def test_repeated_turns_accumulate_for_an_agent(
+    async def test_repeated_turns_accumulate_for_a_role(
         self, session_factory: async_sessionmaker[AsyncSession], session: AsyncSession
     ) -> None:
         """Repeated turns accumulate rather than overwrite."""
@@ -500,9 +505,17 @@ class TestUsageReachesAPersistedRow:
                 cache_write_tokens=None,
                 reasoning_tokens=None,
             )
-        totals = await sum_cost_by_agent(session, "coder-1")
-        assert totals["input_tokens"] == 300
-        assert totals["output_tokens"] == 75
+        totals = await sum_cost_by_thread(session, "t-multi")
+        assert totals is not None
+        assert (totals.input_tokens, totals.output_tokens) == (300, 75)
+        # Three turns reported no breakdown at all, so the summed breakdown is
+        # unknown rather than a measured zero.
+        assert totals.cache_read_tokens is None
+        assert totals.cache_write_tokens is None
+        assert totals.reasoning_tokens is None
+        # And the run's one seat carries the whole total.
+        per_role = await sum_cost_by_role(session, "t-multi")
+        assert per_role == {"coder-1": totals}
 
 
 class TestStateChannelIsFedNotBypassed:
@@ -727,7 +740,8 @@ class TestDegradedLaneIsStoredAsUnknown:
         assert row.reasoning_tokens is None
 
         totals = await sum_cost_by_thread(session, "t-degraded")
-        assert totals["input_tokens"] == 210
+        assert totals is not None
+        assert totals.input_tokens == 210
 
     def test_the_migrated_schema_permits_the_unknown_lane(
         self, runtime_dir: Path

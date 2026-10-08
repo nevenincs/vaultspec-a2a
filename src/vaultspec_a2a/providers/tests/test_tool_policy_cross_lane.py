@@ -23,12 +23,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing import request_permission_params
-from .._acp_rpc_handlers import on_request_permission
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
 from .._codex_permission import DECLINE_ACTION, CodexPermissionRung
 from .._project_scope import RunProjectScope
 from .._tool_policy import ToolPermissionRequest, decide
+from ._permission_outcome import acp_permission_outcome
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -85,25 +84,6 @@ def _answering(answer: str) -> Callable[[], Awaitable[str]]:
         return answer
 
     return ask
-
-
-async def _acp_outcome(
-    ctx: AcpSessionContext,
-    config: AcpModelConfig,
-    *,
-    tool_call: JsonObject,
-    options: list[JsonObject],
-) -> JsonObject:
-    """Drive the production ACP handler and return the outcome it answered with."""
-    params = request_permission_params(
-        ctx.session_id, tool_call=tool_call, options=options
-    )
-    response = await on_request_permission(1, params, ctx, config)
-    result = response.get("result")
-    assert isinstance(result, dict)
-    outcome = result.get("outcome")
-    assert isinstance(outcome, dict)
-    return outcome
 
 
 async def _codex_action(
@@ -165,7 +145,7 @@ async def test_both_lanes_run_the_project_guard_before_the_withheld_guard(
     arguments: JsonObject = {"project_root": str(foreign)}
 
     with caplog.at_level("WARNING"):
-        acp_outcome = await _acp_outcome(
+        acp_outcome = await acp_permission_outcome(
             acp_session_context,
             # A human rung that would approve, so a guard that did not run first
             # would show as an approval rather than a quieter refusal.
@@ -206,7 +186,7 @@ async def test_a_withheld_harness_tool_is_refused_over_a_human_approval_on_both_
     """The second guard also precedes the human rung on both lanes."""
     qualified = f"mcp__{_WITHHELD_SERVER}__{_WITHHELD_TOOL}"
 
-    acp_outcome = await _acp_outcome(
+    acp_outcome = await acp_permission_outcome(
         acp_session_context,
         _config(str(tmp_path), permission_callback=_returning("allow")),
         tool_call={"title": qualified, "rawInput": {"query": "anything"}},
@@ -298,7 +278,7 @@ async def test_a_remembered_refusal_is_narrowed_where_a_single_use_one_is_offere
     acp_session_context: AcpSessionContext, tmp_path: Path
 ) -> None:
     """Refusing is the fallback, not the answer: narrowing still comes first."""
-    outcome = await _acp_outcome(
+    outcome = await acp_permission_outcome(
         acp_session_context,
         _config(str(tmp_path), permission_callback=_returning("reject_always")),
         tool_call={"title": "Edit", "rawInput": {}},
@@ -351,7 +331,7 @@ async def test_an_autonomous_covered_call_offered_no_approval_fails_closed(
     it had listed; the call is refused instead, and with nothing refusable either
     the lane answers the protocol's own cancelled outcome.
     """
-    outcome = await _acp_outcome(
+    outcome = await acp_permission_outcome(
         acp_session_context,
         _config(str(tmp_path), allowed_tools=["Read"]),
         tool_call={"title": "Read", "rawInput": {}},
@@ -366,7 +346,7 @@ async def test_an_autonomous_covered_call_offered_nothing_at_all_fails_closed(
     acp_session_context: AcpSessionContext, tmp_path: Path
 ) -> None:
     """An empty option list is a malformed request, never a licence to approve."""
-    outcome = await _acp_outcome(
+    outcome = await acp_permission_outcome(
         acp_session_context,
         _config(str(tmp_path), allowed_tools=["Read"]),
         tool_call={"title": "Read", "rawInput": {}},
@@ -381,7 +361,7 @@ async def test_an_autonomous_covered_call_still_takes_the_narrowest_approval(
     acp_session_context: AcpSessionContext, tmp_path: Path
 ) -> None:
     """Failing closed where nothing is offered must not refuse the normal case."""
-    outcome = await _acp_outcome(
+    outcome = await acp_permission_outcome(
         acp_session_context,
         _config(str(tmp_path), allowed_tools=["Read"]),
         tool_call={"title": "Read", "rawInput": {}},

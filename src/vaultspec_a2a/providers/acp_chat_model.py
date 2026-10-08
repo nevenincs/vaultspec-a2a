@@ -99,6 +99,11 @@ from .acp_exceptions import AcpError
 from .binary_version import probe_binary_version
 from .cli_resolution import pin_claude_executable
 from .execution_modes import NODE_BACKEND
+from .kimi_config_home import (
+    KIMI_CODE_HOME_ENV,
+    build_kimi_config_home,
+    cleanup_kimi_config_home,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -573,12 +578,6 @@ class AcpChatModel(ProcessChatModel):
                 # breaking the next turn's isolation. Building and cleaning up
                 # within the same session call keeps every turn isolated and
                 # leaves nothing for the 24h orphan sweep to reclaim.
-                from .kimi_config_home import (
-                    KIMI_CODE_HOME_ENV,
-                    build_kimi_config_home,
-                    cleanup_kimi_config_home,
-                )
-
                 kimi_config_home = build_kimi_config_home()
                 env[KIMI_CODE_HOME_ENV] = str(kimi_config_home)
             process = await _spawn_acp_process(

@@ -15,9 +15,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing import request_permission_params
-from .._acp_rpc_handlers import on_request_permission
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
+from ._permission_outcome import acp_permission_outcome
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -51,25 +50,6 @@ def _config(
     )
 
 
-async def _outcome(
-    options: list[JsonObject],
-    config: AcpModelConfig,
-    ctx: AcpSessionContext,
-    *,
-    tool_call: JsonObject | None = None,
-) -> JsonObject:
-    """Drive the production handler and return the outcome object it answered with."""
-    params = request_permission_params(
-        ctx.session_id, tool_call=tool_call, options=options
-    )
-    response = await on_request_permission(1, params, ctx, config)
-    result = response.get("result")
-    assert isinstance(result, dict)
-    outcome = result.get("outcome")
-    assert isinstance(outcome, dict)
-    return outcome
-
-
 async def _decide(
     options: list[JsonObject],
     config: AcpModelConfig,
@@ -77,7 +57,9 @@ async def _decide(
     *,
     tool_call: JsonObject | None = None,
 ) -> str:
-    outcome = await _outcome(options, config, ctx, tool_call=tool_call)
+    outcome = await acp_permission_outcome(
+        ctx, config, options=options, tool_call=tool_call
+    )
     option_id = outcome.get("optionId")
     assert isinstance(option_id, str)
     return option_id
@@ -106,8 +88,10 @@ async def test_an_empty_option_id_is_never_serialised_into_the_outcome(
     """
     options: list[JsonObject] = [{"optionId": "approve"}, _MALFORMED]
 
-    outcome = await _outcome(
-        options, _config(permission_callback=_returning("")), acp_session_context
+    outcome = await acp_permission_outcome(
+        acp_session_context,
+        _config(permission_callback=_returning("")),
+        options=options,
     )
 
     assert outcome == {"outcome": "cancelled"}
@@ -242,8 +226,8 @@ async def test_a_denial_never_slides_onto_an_approval_on_a_bad_last_option(
     ) -> str:
         raise RuntimeError("the human hung up")
 
-    outcome = await _outcome(
-        options, _config(permission_callback=callback), acp_session_context
+    outcome = await acp_permission_outcome(
+        acp_session_context, _config(permission_callback=callback), options=options
     )
 
     assert outcome == {"outcome": "cancelled"}
@@ -359,10 +343,10 @@ async def test_an_unoffered_answer_cancels_when_every_option_is_an_approval(
         {"optionId": "allow", "kind": "allow_once"},
     ]
 
-    outcome = await _outcome(
-        options,
-        _config(permission_callback=_returning("no-such-option")),
+    outcome = await acp_permission_outcome(
         acp_session_context,
+        _config(permission_callback=_returning("no-such-option")),
+        options=options,
     )
 
     assert outcome == {"outcome": "cancelled"}
@@ -383,6 +367,8 @@ async def test_an_uncovered_autonomous_call_is_never_granted_by_position(
         {"optionId": "allow_always", "kind": "allow_always"},
     ]
 
-    outcome = await _outcome(options, _config(), acp_session_context)
+    outcome = await acp_permission_outcome(
+        acp_session_context, _config(), options=options
+    )
 
     assert outcome == {"outcome": "cancelled"}

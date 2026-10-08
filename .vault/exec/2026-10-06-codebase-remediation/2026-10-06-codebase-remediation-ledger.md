@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:b6c133dcb3a9a9d265e731551d0daa7d6e5903e90d38ca6ccf240cc11db8b2c4'
+body_hash: 'sha256:5e7436d2a29c0b7e43124f5339f2d95a5008c6e890a785bc4de589be28e3e4b3'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -32,6 +32,11 @@ related:
 - `S116` `verify:` `just audit-deps` -> `pass`
 - `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- packaging/tests/test_build_artifact_contents.py -k not_frozen_placeholder -q` -> `pass`
 - `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- packaging/tests/test_build_artifact_contents.py -k 'not frozen_onedir' -q` -> `pass`
+- `S116` `M` `Justfile`
+- `S116` `M` `src/vaultspec_a2a/control/tests/test_provider_eligibility_credentials.py`
+- `S116` `verify:` `just test-provider-gates --junitxml=.pytest-tmp/green-20261008/provider-gates-current.xml` -> `pass`
+- `S116` `verify:` `just check-workflow` -> `pass`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling basedpyright src/vaultspec_a2a/control/tests/test_provider_eligibility_credentials.py` -> `pass`
 
 ## Notes
 

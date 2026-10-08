@@ -1,12 +1,13 @@
 """Credential readiness is necessary but never sufficient for served eligibility.
 
-A lane whose credential is present and whose launch command resolves is READY.
+A lane whose required credential is present and whose launch command resolves is READY.
 Readiness is not admission: the lane is served for execution only once a live
 test has completed a real turn on it and the resolved launcher reports a version
 the recorded proof admits. Kimi is the installed lane that proves the two
 verdicts stay apart - it resolves, it configures, it has handshake coverage
-only - so a run of the production readiness path must report it ready and refuse
-it as ineligible, under both of its configuration modes.
+only - so a complete temporary model definition must report ready and still be
+refused as ineligible. An operator config home alone cannot authenticate the
+lane's isolated per-run home and must fail readiness too.
 
 The readiness path runs in a real child interpreter over a real Kimi install so
 the settings it reads are the ones a served gateway would read, with the lane's
@@ -22,6 +23,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
+from ...providers.provider_readiness import KIMI_NO_TEMPORARY_MODEL_REASON
 from ...testing import inherited_environment
 
 if TYPE_CHECKING:
@@ -132,17 +134,17 @@ def test_a_credentialed_resolvable_lane_without_turn_proof_is_ineligible(
 
 
 @pytest.mark.middleware
-def test_persisted_config_mode_is_ready_and_still_unproven(
+def test_config_home_without_temporary_definition_is_not_ready(
     tmp_path: Path,
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
-    """The persisted-config mode reaches command readiness and no further."""
+    """An installed command and operator home do not configure an isolated run."""
     result = _run_probe(tmp_path, {}, external_prerequisite)
 
     assert result["temporary_key_configured"] is False
     assert result["command_origin"] == "system_path_executable"
-    assert result["probe_ready"] is True
-    assert result["probe_reason"] is None
+    assert result["probe_ready"] is False
+    assert result["probe_reason"] == KIMI_NO_TEMPORARY_MODEL_REASON
     assert result["served_eligible"] is False
     assert "kimi" not in result["eligible"]
 

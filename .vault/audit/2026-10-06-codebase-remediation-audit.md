@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:4f05e288ac5bcb5c0a95636d53f21d99c420d85e85634179d5ee2cc5f4c48656'
+body_hash: 'sha256:9706e9f65f0055f235e1c2ec505604777fdb311b0079fb3462529874ce85703a'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -1451,3 +1451,40 @@ checks passed, including inspection of a freshly built wheel. The frozen onedir
 check was not selected because this checkout has no newly built runtime artifact.
 `just deps-check` passed and `just audit-deps` found no unaccepted advisories
 across 120 Node and 182 Python dependencies. Full-suite outcome remains pending.
+### green-20261008-provider-gate | medium | CI selected retired test names and asserted obsolete Kimi readiness
+
+Status: fixed in resumed S116 verification. Type: verification correctness.
+`just test-provider-gates` failed collection because three selected credential
+readiness tests had been renamed. Restoring their current selectors exposed an
+old expectation that an operator Kimi home alone was ready. The accepted
+2026-10-08 Kimi ADR amendment requires a per-run home with a temporary model
+definition; persisted operator login cannot authenticate it. The test now checks
+that the real installed command resolves but readiness refuses with the shared
+missing-definition reason and served eligibility remains false. The complete
+model definition still proves ready-but-unproven refusal; partial definition
+still refuses. No production admission behavior changed. Actual-diff review:
+PASS for this correction. All six recipe tests pass (13.60s), focused strict
+basedpyright and Ruff pass, and the workflow contract check passes.
+
+### green-20261008-local-service-failures | high | Fresh local service run exposed continuation and attachment failures
+
+Status: open pending diagnosis. Type: functional verification. The 34-test
+local deterministic service selection ended with 31 passed, two failed and one
+missing-engine skip. The queued-turn test completed its first turn unattended,
+but its queued second turn parked at a deterministic permission and never met
+the terminal predicate. The worker attachment test attached a matching live
+worker but found `spawner.spawned` false. Establish the intended contracts before
+changing either production behavior or the assertions. The receipt-role test
+skipped because no live dashboard engine resolved. Report and traces:
+`.pytest-tmp/green-20261008/deterministic-service.xml` and `.log`.
+
+### green-20261008-verdict-ci-gap | medium | Live verdict-loop acceptance lacks CI provisioning
+
+Status: open; owner codebase-remediation S115. Type: verification coverage.
+The real verdict-loop test exists, but no checked-in workflow provisions its
+dashboard engine and selects it. `just ci` excludes service tests; the native
+and provider recipes do not include this test. A sibling developer binary is
+not a pinned CI prerequisite. This acceptance cannot be inferred from green
+unit, deterministic service, or provider readiness results. CI needs a compatible
+engine revision or artifact, a temporary engine workspace and discovery record,
+and a required-prerequisite invocation of the existing live verdict proof.

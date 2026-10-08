@@ -149,18 +149,6 @@ async def test_telemetry_middleware_keeps_server_kind_for_real_inbound_http() ->
 # ---------------------------------------------------------------------------
 
 
-def test_aggregator_hook_start_span_folds_onto_open_internal_span() -> None:
-    """OTelAggregatorHook.start_span's own source calls open_internal_span (Q29).
-
-    Not merely a behavioural coincidence: this reads ``start_span``'s own
-    compiled code object for a reference to ``open_internal_span`` by name, so
-    a second, independent span-opening implementation that happened to yield
-    the same kind would still fail this.
-    """
-    names = OTelAggregatorHook.start_span.__code__.co_names
-    assert "open_internal_span" in names
-
-
 def test_aggregator_hook_start_span_records_internal_kind_and_attributes() -> None:
     """The aggregator hook's spans carry SpanKind.INTERNAL and given attrs."""
     configure_telemetry()

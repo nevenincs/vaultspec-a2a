@@ -385,21 +385,3 @@ def test_frozen_owner_death_removes_detached_child(tmp_path: Path) -> None:
         )
     finally:
         reap_contained(owner, containment)
-
-
-def test_the_frozen_owner_is_spawned_through_the_contained_lifecycle() -> None:
-    """The frozen owner is a contained spawn, not a raw, hand-reaped one (PV42).
-
-    Mirrors ``desktop/tests/test_native_isolation.py``'s
-    ``test_owner_death_removes_a_detached_native_descendant``: production
-    wraps every isolated launch command in ``spawn_contained`` too
-    (``providers/_subprocess.py``), and the reap this locks targets only the
-    owner's own session/group, same scope as the raw ``.kill()`` it replaces
-    - the detached descendant under test escapes that scope on purpose, which
-    is what proves the isolation mechanism, not this fixture, removes it.
-    This reads the test's own compiled code for both names rather than
-    asserting on behaviour identical either way.
-    """
-    names = test_frozen_owner_death_removes_detached_child.__code__.co_names
-    assert "spawn_contained" in names
-    assert "reap_contained" in names

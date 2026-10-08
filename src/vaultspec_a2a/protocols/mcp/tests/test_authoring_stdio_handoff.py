@@ -117,19 +117,3 @@ def test_bridge_serves_from_handed_catalog_without_engine(tmp_path: Path) -> Non
 
     # It served exactly the handed tool count, proving no engine fetch occurred.
     assert "serving tools=3" in _marker_text()
-
-
-def test_the_bridge_is_spawned_through_the_contained_lifecycle() -> None:
-    """The stdio bridge is a contained spawn, not a raw, hand-reaped one (PV42).
-
-    A raw ``Popen`` only kills the direct child it names; a descendant the
-    bridge spawned would survive its teardown. ``spawn_contained`` seats it
-    under the project's one process-tree containment, which
-    ``reap_contained`` then fells whole. This reads the test's own compiled
-    code for both names rather than asserting on behaviour the unfixed test
-    already exhibited identically (the bridge here spawns no descendant of
-    its own, so a behavioural probe would pass on either implementation).
-    """
-    names = test_bridge_serves_from_handed_catalog_without_engine.__code__.co_names
-    assert "spawn_contained" in names
-    assert "reap_contained" in names

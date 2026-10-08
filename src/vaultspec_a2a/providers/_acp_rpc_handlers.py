@@ -214,11 +214,15 @@ def _vault_write_denial(rpc_id: AcpRpcId, path: str) -> JsonObject:
     )
 
 
-# Kimi's native READ tools that mirror the read floor (Claude's Read/Grep/Glob),
-# enumerated from the installed kimi-cli 1.49.0 source and cross-checked against
-# the executor service's own verification:
-#   ReadFile (tools/file/read.py:64), Grep (tools/file/grep_local.py:386),
-#   Glob (tools/file/glob.py:56)
+# Kimi's native READ tools that mirror the read floor (Claude's Read/Grep/Glob).
+# The names were enumerated from the kimi-cli 1.49.0 Python source
+# (ReadFile: tools/file/read.py:64, Grep: tools/file/grep_local.py:386,
+# Glob: tools/file/glob.py:56) and cross-checked against the executor service's
+# own verification. That generation is NOT what runs here any more: the lane is
+# now the renumbered Kimi Code line, which reports `0.36.1` for `kimi --version`
+# and ships as a compiled launcher with no readable source to re-read those
+# locators against. The floor is therefore held by this project's own permission
+# tests rather than by that citation, and a renamed built-in shows up there.
 # NOTE the name divergence from Claude: Kimi's read tool is `ReadFile`, not `Read`.
 # The write tools WriteFile/StrReplaceFile, the bash/shell exec tool, and every
 # plan/dmail/agent/todo mutator are NOT listed and are rejected in autonomous mode.

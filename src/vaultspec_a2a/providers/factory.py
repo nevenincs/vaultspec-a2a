@@ -910,18 +910,26 @@ def _create_kimi_model(
     api_key = (
         settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
     )
-    env_vars = _build_kimi_env(
-        kimi_api_key=api_key,
-        kimi_base_url=settings.kimi_base_url,
-        kimi_temporary_model_name=settings.kimi_temporary_model_name,
-        kimi_temporary_model_max_context_size=(
-            settings.kimi_temporary_model_max_context_size
-        ),
-        kimi_temporary_model_capabilities=settings.kimi_temporary_model_capabilities,
-        kimi_thinking_effort=_native_control_fields(selected_controls).get(
-            "thinking_effort"
-        ),
-    )
+    try:
+        env_vars = _build_kimi_env(
+            kimi_api_key=api_key,
+            kimi_base_url=settings.kimi_base_url,
+            kimi_temporary_model_name=settings.kimi_temporary_model_name,
+            kimi_temporary_model_max_context_size=(
+                settings.kimi_temporary_model_max_context_size
+            ),
+            kimi_temporary_model_capabilities=settings.kimi_temporary_model_capabilities,
+            kimi_thinking_effort=_native_control_fields(selected_controls).get(
+                "thinking_effort"
+            ),
+        )
+    except ValueError as exc:
+        # A partial temporary-model definition is the same refusal the absent one
+        # below is - this lane has no configuration to authenticate from - so it
+        # leaves by the same door, carrying the builder's own sentence. A bare
+        # ValueError here reached the caller as an unclassified fault instead of a
+        # provider lane reporting itself unavailable.
+        raise ProviderRuntimeUnavailableError(str(exc)) from exc
     if KIMI_API_KEY_ENV not in env_vars:
         # A served run reads an isolated home that carries no persisted login,
         # so there is no configuration for a run to authenticate from. Refused

@@ -76,6 +76,7 @@ if TYPE_CHECKING:
     from ._dispatch_settlement import TerminalArbitration
     from ._run_registry import RunScopedRegistry
     from .catalog_store import RunCatalogStore
+    from .graph_lifecycle import EngineResolver
     from .ipc import WorkerBridge
     from .token_store import RunTokenStore
 
@@ -223,6 +224,7 @@ class Executor(SettlementMixin):
         bridge: WorkerBridge,
         *,
         checkpoint_read_timeout_seconds: float | None = None,
+        engine_resolver: EngineResolver | None = None,
     ) -> None:
         self._checkpoint = CheckpointAccess(
             checkpointer=checkpointer,
@@ -254,6 +256,7 @@ class Executor(SettlementMixin):
             token_store=self._token_store,
             catalog_store=self._catalog_store,
             checkpoint_read_timeout_seconds=checkpoint_read_timeout_seconds,
+            engine_resolver=engine_resolver,
         )
         self._state_projector = StateProjector(
             checkpointer=checkpointer,

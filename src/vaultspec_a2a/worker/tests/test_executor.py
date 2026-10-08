@@ -1700,39 +1700,35 @@ class TestAuthoringBridgeFailClosed:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_engine_discovery_retry_is_offloaded_not_blocking_the_worker(
-        self, monkeypatch: pytest.MonkeyPatch, checkpointer: AsyncSqliteSaver
+        self, checkpointer: AsyncSqliteSaver
     ) -> None:
-        """resolve_engine_with_retry's blocking time.sleep must not freeze the
-        worker's event loop while it runs.
+        """A blocking engine resolver must not freeze the worker's event loop.
 
-        Run directly on the worker's single event loop, the call would freeze
-        heartbeats and every other thread's dispatch for the full retry window
-        on every first compile of a preset+workspace cache key. Proven here by
-        racing a fast
-        asyncio.sleep task against a stand-in for the blocking discovery
-        call: if the call is genuinely offloaded (asyncio.to_thread), the
-        fast task finishes first; if it were still blocking the loop
-        in-place, the fast task could not even be scheduled until the slow
-        call returned.
+        Run directly on the worker's single event loop, ``resolve_engine_with_retry``'s
+        ``time.sleep`` would freeze heartbeats and every other thread's dispatch for
+        the full retry window on every first compile of a preset+workspace cache key.
+        Proven here by racing a fast asyncio.sleep task against a real, bounded,
+        officially-injected stand-in for the blocking discovery call (``Executor``'s
+        ``engine_resolver`` seam, never the production resolver itself): if the call
+        is genuinely offloaded (asyncio.to_thread), the fast task finishes first; if
+        it were still blocking the loop in-place, the fast task could not even be
+        scheduled until the slow call returned.
         """
         import asyncio
         import time as time_module
 
-        from ... import authoring as authoring_pkg
         from ...authoring import EngineUnavailableError
 
-        def _slow_blocking_resolve(*args: object, **kwargs: object) -> None:
+        def _slow_blocking_resolve() -> None:
             time_module.sleep(0.3)
             return None
-
-        monkeypatch.setattr(
-            authoring_pkg, "resolve_engine_with_retry", _slow_blocking_resolve
-        )
 
         bridge = _make_bridge()
         try:
             manager = Executor(
-                checkpointer=checkpointer, bridge=bridge
+                checkpointer=checkpointer,
+                bridge=bridge,
+                engine_resolver=_slow_blocking_resolve,
             )._graph_lifecycle
 
             events: list[str] = []

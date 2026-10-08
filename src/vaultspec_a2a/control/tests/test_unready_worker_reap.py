@@ -45,6 +45,7 @@ from ...utils import (
     ProcessContainment,
     ProcessContainmentError,
     kill_pid_tree_async,
+    reap_contained,
     spawn_contained,
 )
 from ...utils._process_tree import pid_is_live, port_has_listener_async, wait_pid_gone
@@ -277,6 +278,76 @@ async def test_spawner_shutdown_clears_crashed_tree_before_replacement() -> None
         containment.close()
         if process.stdout is not None:
             process.stdout.close()
+
+
+def _spawn_sleeper(
+    containment: ProcessContainment,
+) -> subprocess.Popen[bytes]:
+    """Spawn a contained root that outlives any reap window the gateway allows."""
+    return spawn_contained(
+        [_base_interpreter(), "-c", "import time; time.sleep(300)"],
+        containment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+@pytest.mark.asyncio
+async def test_shutdown_of_a_reaped_tree_survives_a_root_that_outlives_the_wait() -> (
+    None
+):
+    """A completed containment reap must not fail on the root-handle wait.
+
+    The containment is the authority for the tree. Once it reports the tree
+    gone it releases its owned identity, so a later terminate is the documented
+    no-op that returns ``True`` without touching a process. The root handle's
+    own wait is bounded far below that reap, and it exists only to collect an
+    exit status, so a root still in the process table when it runs - a loaded
+    host, a root whose tree an earlier pass already reaped - must not turn a
+    successful shutdown into a raised one.
+
+    The sleeping root is what makes this discriminating: it is guaranteed to be
+    in the window, so a wait that propagates ``TimeoutExpired`` fails here
+    instead of only in a loaded batch.
+    """
+    owner = ProcessContainment.create()
+    process = _spawn_sleeper(owner)
+    # The state a completed reap leaves behind: no owned process identity.
+    reaped = ProcessContainment.create()
+    try:
+        assert await reaped.terminate(term_timeout=0.0, kill_timeout=0.0)
+
+        await _shutdown_worker_process(process, reaped)
+
+        assert process.poll() is None, (
+            "the root exited by itself; the reap window was never exceeded"
+        )
+    finally:
+        assert reap_contained(process, owner, term_timeout=2.0, kill_timeout=2.0)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Job accounting proof")
+@pytest.mark.asyncio
+async def test_shutdown_reports_the_containment_failure_not_the_handle_wait() -> None:
+    """A reap that cannot be verified raises its own diagnostic, not a timeout.
+
+    Closing the Job is the last termination backstop; afterwards descendant
+    quiescence can no longer be verified through that closed handle, so every
+    later terminate reports failure. The caller must see that failure, so the
+    best-effort root wait may not stand in for it with a ``TimeoutExpired``
+    that names no tree.
+    """
+    containment = ProcessContainment.create()
+    process = _spawn_sleeper(containment)
+    try:
+        containment.close()
+
+        with pytest.raises(ProcessContainmentError, match="did not terminate"):
+            await _shutdown_worker_process(process, containment)
+    finally:
+        await _force_cleanup([process.pid])
+        process.wait(timeout=5)
 
 
 @pytest.mark.asyncio

@@ -70,6 +70,7 @@ from ...utils.coercion import coerce_object_mapping
 from .._dispatch_refusals import (
     CODED_REFUSALS,
     DISPATCH_FAILURES,
+    RUN_START_REFUSALS,
     refusal_responses,
     refused_outcome,
 )
@@ -275,8 +276,9 @@ __all__ = ["register", "route_signature", "summarize_preset"]
 
 
 # What a follow-up offer can be refused with. The verb queues the turn rather
-# than dispatching it, so no worker or transport condition can reach it.
-_FOLLOWUP_REFUSALS: frozenset[FailureType] = CODED_REFUSALS | {
+# than dispatching it, so no worker or transport condition can reach it, and
+# neither can a condition only run start decides.
+_FOLLOWUP_REFUSALS: frozenset[FailureType] = (CODED_REFUSALS - RUN_START_REFUSALS) | {
     FailureType.NOT_FOUND,
     FailureType.NO_ACTIVE_PROJECT,
 }

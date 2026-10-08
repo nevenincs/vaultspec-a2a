@@ -755,13 +755,15 @@ class RunMessageResponse(BaseModel):
 class RunMessageRefusalCode(StrEnum):
     """The conditions a run action can be refused for.
 
-    A closed subset of the dispatch failure vocabulary, so the published
-    contract names only what this refusal can carry rather than every failure
-    the gateway knows. Each value is spelled as its failure-type counterpart.
+    A closed subset of the typed refusal vocabulary, so the published contract
+    names only what a refusal can carry rather than every failure the gateway
+    knows. Each value is spelled as its failure-type counterpart.
 
     Shared by every verb that reaches the worker through a run dispatch, not
     only the follow-up turn: the same worker refusal must mean the same thing
-    whichever verb met it.
+    whichever verb met it. One member instead names a condition run start
+    settles before any dispatch, so a client branches on one code set per verb
+    rather than on a second vocabulary for the pre-dispatch half.
     """
 
     INPUT_REQUIRED = FailureType.INPUT_REQUIRED.value
@@ -773,6 +775,13 @@ class RunMessageRefusalCode(StrEnum):
     # continuation queue, or the service-wide one, is already spent. Distinct
     # from RUN_BUSY, which says the run admits no continuation at all.
     QUEUE_FULL = FailureType.QUEUE_FULL.value
+    # Raised by run start alone: a document-authoring topology on a gateway
+    # that discovered no engine and therefore runs no verdict subscriber. The
+    # run's gates would park on a proposal nothing could resume, so the request
+    # is refused instead of admitted.
+    AUTHORING_SUBSCRIBER_UNAVAILABLE = (
+        FailureType.AUTHORING_SUBSCRIBER_UNAVAILABLE.value
+    )
 
 
 class RunMessageRefusalDetail(BaseModel):

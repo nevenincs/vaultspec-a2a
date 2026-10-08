@@ -2,25 +2,19 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
 
-from ...desktop._platform_acl import harden_credential_path
+from ._engine_peer import private_engine_dir
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 
 @pytest.fixture
 def secure_engine_dir() -> Iterator[Path]:
     """Isolate trusted producer state outside the repository under a private ACL."""
-    # storage-anchor-ok: trusted producer fixtures must be outside any repository.
-    with TemporaryDirectory(  # storage-anchor-ok
-        prefix="vaultspec-engine-security-"
-    ) as directory:
-        path = Path(directory)
-        harden_credential_path(path)
+    with private_engine_dir() as path:
         yield path

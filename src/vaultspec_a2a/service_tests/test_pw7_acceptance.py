@@ -19,9 +19,10 @@ missing credential, never a faked pass.
 
 Infrastructure gate, not a masked failure: the test skips with a runbook pointer
 when no loopback engine is reachable (resolved through the discovery contract) or
-the a2a gateway is not up. Boot the stack per the runbook - a workspace-
-local ``vaultspec serve --no-seat`` engine plus the a2a gateway/worker with
-``VAULTSPEC_A2A_AUTHORING_SUBSCRIBER_ENABLED=true`` - then select ``-m service``.
+the a2a gateway is not up. Boot the stack per the runbook - a workspace-local
+``vaultspec serve --no-seat`` engine whose discovery record the a2a gateway can
+read (that record is what runs the verdict subscriber), plus the a2a
+gateway/worker - then select ``-m service``.
 
 The one stack-free test here pins the lane matrix's own timeout marking against the
 harness's runtime budget.

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 __all__ = [
     "CODED_REFUSALS",
     "DISPATCH_FAILURES",
+    "RUN_START_REFUSALS",
     "refusal_responses",
     "refused_dispatch",
     "refused_outcome",
@@ -58,6 +59,14 @@ _REFUSED = _ServedRefusal(
 # so one rule reads identically at every entry point.
 _UNSITED = _ServedRefusal(
     422, "The run carries no active project, so the action cannot be sited."
+)
+# The request is well formed and the gateway cannot serve it: the same status as
+# the other run-start preconditions, because a client cannot retry its way out
+# of it either. Nothing was created and nothing was dispatched.
+_UNSERVEABLE_TOPOLOGY = _ServedRefusal(
+    422,
+    "This gateway cannot run a document-authoring topology: no engine record is "
+    "discoverable, so no verdict subscriber is running to resume its gates.",
 )
 # The same status an oversized request body meets at the edge, for the same
 # reason: a payload larger than its receiver admits. Here the gateway built it,
@@ -92,6 +101,13 @@ CODED_REFUSALS: frozenset[FailureType] = frozenset(
     FailureType(code.value) for code in RunMessageRefusalCode
 )
 
+#: The coded conditions RUN START alone decides, before anything is dispatched.
+#: Named so a verb that can only be refused by a dispatch can subtract them and
+#: still declare what it serves truthfully.
+RUN_START_REFUSALS: frozenset[FailureType] = frozenset(
+    {FailureType.AUTHORING_SUBSCRIBER_UNAVAILABLE}
+)
+
 
 def _served(failure_type: FailureType) -> _ServedRefusal:
     """Return the one served status for *failure_type*."""
@@ -110,6 +126,8 @@ def _served(failure_type: FailureType) -> _ServedRefusal:
             return _REFUSED
         case FailureType.NO_ACTIVE_PROJECT:
             return _UNSITED
+        case FailureType.AUTHORING_SUBSCRIBER_UNAVAILABLE:
+            return _UNSERVEABLE_TOPOLOGY
         case FailureType.ENVELOPE_TOO_LARGE:
             return _TOO_LARGE
         case (

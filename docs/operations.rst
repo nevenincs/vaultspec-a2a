@@ -199,6 +199,29 @@ Authentication is implemented by
 :func:`vaultspec_a2a.api.app.create_app`, which takes no option that disables
 the requirement.
 
+Document-authoring runs and the verdict subscriber
+--------------------------------------------------
+
+A document-authoring preset (the ``research_adr`` topology and its kin) submits
+every document to the vaultspec engine as a proposal and parks at a gate until a
+reviewer decides it. Only the authoring verdict subscriber resumes a parked
+gate, and it can run only against an engine.
+
+So the subscriber is not a switch. The gateway starts it at startup whenever an
+engine discovery record resolves - the same record, with the same provenance and
+proof-of-possession rules, that every other authoring call attaches through -
+and runs none when no record resolves. ``VAULTSPEC_A2A_ENGINE_SERVICE_JSON``
+names that record; unset, the default per-project location applies. A record
+that is repository-controlled, a link, world-readable, of an older version,
+stale, or unproven is not an engine, so it starts no subscriber.
+
+A gateway running no subscriber REFUSES a document-authoring run instead of
+accepting it: ``POST /v1/runs`` answers ``422`` with the typed code
+``authoring_subscriber_unavailable`` and creates nothing. Coding presets are
+unaffected. Two consequences for an operator: start the engine before the
+gateway, or restart the gateway after it, and read that refusal as "this gateway
+has no engine", never as a fault in the request.
+
 Semantic search server
 ----------------------
 

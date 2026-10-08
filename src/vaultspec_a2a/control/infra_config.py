@@ -628,16 +628,10 @@ class InfraConfig(ProjectSettings):
         default=True,
         description=("Auto-spawn worker as child process on gateway startup."),
     )
-    # Authoring verdict subscriber
-    authoring_subscriber_enabled: bool = Field(
-        default=False,
-        description=(
-            "Run the engine authoring-verdict subscriber as a gateway background "
-            "task. Consumes GET /authoring/v1/events and resumes parked runs with "
-            "reviewer verdicts. Off by default; enable when a live engine is "
-            "available to review agent-authored proposals."
-        ),
-    )
+    # Authoring verdict subscriber. Whether it RUNS is not configurable: the
+    # gateway starts it when an engine record resolves at startup, because a
+    # document-authoring run parks on an engine proposal that only the
+    # subscriber resumes. These knobs shape the loop, never whether it exists.
     authoring_subscriber_poll_interval_seconds: float = Field(
         default=3.0,
         description=(

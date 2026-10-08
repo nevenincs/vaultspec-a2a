@@ -3,7 +3,10 @@
 Pure logic over real ``TeamConfig`` objects loaded from the bundled presets and a
 real ``ActorTokenBundle`` - no mocks. The document-authoring preset is
 ``vaultspec-adr-research`` (research_adr topology); the default test preset is a
-non-authoring coder preset.
+non-authoring coder preset. Every case states the gateway's verdict-subscriber
+condition, because a document-authoring run is refused without one: the cases
+about the REQUEST therefore declare a subscriber present, so what they prove is
+the request gate and not that condition.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from ...control.run_start_policy import (
 from ...team.team_config import load_team_config
 from ...testing import DEFAULT_TEAM_PRESET, role_tokens
 from ...thread.actor_tokens import ActorTokenBundle
+from ...thread.dispatch_policy import FailureType
 
 _AUTHORING = "vaultspec-adr-research"
 
@@ -68,6 +72,7 @@ def test_authoring_preset_is_eligible_with_feature_and_full_bundle() -> None:
         load_team_config(_AUTHORING),
         feature_tag="my-feature",
         actor_tokens=_full_bundle(),
+        verdict_subscriber_running=True,
     )
     assert result.eligible is True
     assert result.reason is None
@@ -78,6 +83,7 @@ def test_authoring_preset_without_feature_is_ineligible() -> None:
         load_team_config(_AUTHORING),
         feature_tag=None,
         actor_tokens=_full_bundle(),
+        verdict_subscriber_running=True,
     )
     assert result.eligible is False
     assert "target feature" in (result.reason or "")
@@ -91,6 +97,7 @@ def test_authoring_preset_with_incomplete_bundle_is_ineligible() -> None:
         load_team_config(_AUTHORING),
         feature_tag="my-feature",
         actor_tokens=partial,
+        verdict_subscriber_running=True,
     )
     assert result.eligible is False
     assert "missing a token" in (result.reason or "")
@@ -103,6 +110,7 @@ def test_authoring_preset_with_no_bundle_is_ineligible() -> None:
         load_team_config(_AUTHORING),
         feature_tag="my-feature",
         actor_tokens=None,
+        verdict_subscriber_running=True,
     )
     assert result.eligible is False
     assert "missing a token" in (result.reason or "")
@@ -113,6 +121,7 @@ def test_coder_preset_is_eligible_without_feature_or_tokens() -> None:
         load_team_config(DEFAULT_TEAM_PRESET),
         feature_tag=None,
         actor_tokens=None,
+        verdict_subscriber_running=True,
     )
     assert result.eligible is True
 
@@ -122,6 +131,7 @@ def test_incomplete_harness_refuses_an_otherwise_eligible_authoring_run() -> Non
         load_team_config(_AUTHORING),
         feature_tag="my-feature",
         actor_tokens=_full_bundle(),
+        verdict_subscriber_running=True,
         harness=HarnessReadiness(
             ready=False,
             reasons=["rules corpus is empty or absent (.vaultspec/rules)"],
@@ -137,6 +147,7 @@ def test_ready_harness_leaves_authoring_run_eligible() -> None:
         load_team_config(_AUTHORING),
         feature_tag="my-feature",
         actor_tokens=_full_bundle(),
+        verdict_subscriber_running=True,
         harness=HarnessReadiness(ready=True),
     )
     assert result.eligible is True
@@ -149,6 +160,7 @@ def test_harness_is_not_enforced_on_non_authoring_presets() -> None:
         load_team_config(DEFAULT_TEAM_PRESET),
         feature_tag=None,
         actor_tokens=None,
+        verdict_subscriber_running=True,
         harness=HarnessReadiness(ready=False, reasons=["rules corpus absent"]),
     )
     assert result.eligible is True
@@ -168,6 +180,7 @@ def test_authoring_bridge_preset_refuses_without_role_token_coverage() -> None:
         load_team_config(_BRIDGE),
         feature_tag=None,
         actor_tokens=None,
+        verdict_subscriber_running=True,
     )
     assert result.eligible is False
     assert "authoring_bridge" in (result.reason or "")
@@ -182,6 +195,92 @@ def test_authoring_bridge_preset_eligible_with_role_token() -> None:
         actor_tokens=ActorTokenBundle(
             tokens={"vaultspec-coder": "tok"}, engine_bearer="b"
         ),
+        verdict_subscriber_running=True,
     )
     assert result.eligible is True
     assert result.reason is None
+
+
+def test_authoring_preset_without_a_verdict_subscriber_is_ineligible() -> None:
+    """A complete request is still refused by a gateway that cannot finish it."""
+    result = evaluate_run_start_eligibility(
+        load_team_config(_AUTHORING),
+        feature_tag="my-feature",
+        actor_tokens=_full_bundle(),
+        verdict_subscriber_running=False,
+        harness=HarnessReadiness(ready=True),
+    )
+    assert result.eligible is False
+    assert result.failure is FailureType.AUTHORING_SUBSCRIBER_UNAVAILABLE
+    assert "verdict" in (result.reason or "")
+
+
+def test_a_request_gap_is_reported_before_the_subscriber_condition() -> None:
+    """What the caller can fix is named first, and the typed code stays precise.
+
+    Both conditions hold at once here. The typed code means "this request is
+    fine and this gateway cannot serve it", so serving it for a request that is
+    also incomplete would tell a consumer the gateway has no engine when the
+    body was the problem too - and would make the request-side refusals
+    unreachable on every gateway without an engine.
+    """
+    result = evaluate_run_start_eligibility(
+        load_team_config(_AUTHORING),
+        feature_tag=None,
+        actor_tokens=None,
+        verdict_subscriber_running=False,
+        harness=HarnessReadiness(ready=False, reasons=["rules corpus absent"]),
+    )
+    assert result.failure is None
+    assert "target feature" in (result.reason or "")
+
+
+def test_an_incomplete_harness_is_reported_before_the_subscriber_condition() -> None:
+    """The harness refusal stays reachable on a gateway that runs no subscriber."""
+    result = evaluate_run_start_eligibility(
+        load_team_config(_AUTHORING),
+        feature_tag="my-feature",
+        actor_tokens=_full_bundle(),
+        verdict_subscriber_running=False,
+        harness=HarnessReadiness(ready=False, reasons=["templates missing"]),
+    )
+    assert result.failure is None
+    assert "agent harness incomplete" in (result.reason or "")
+
+
+def test_the_subscriber_condition_does_not_bind_a_coding_preset() -> None:
+    """A coding run authors no proposal, so it needs no verdict subscriber."""
+    result = evaluate_run_start_eligibility(
+        load_team_config(DEFAULT_TEAM_PRESET),
+        feature_tag=None,
+        actor_tokens=None,
+        verdict_subscriber_running=False,
+    )
+    assert result.eligible is True
+    assert result.failure is None
+
+
+def test_the_subscriber_condition_does_not_bind_an_authoring_bridge_preset() -> None:
+    """An armed CLI-coder preset routes tools; it never parks on a document gate."""
+    result = evaluate_run_start_eligibility(
+        load_team_config(_BRIDGE),
+        feature_tag=None,
+        actor_tokens=ActorTokenBundle(
+            tokens={"vaultspec-coder": "tok"}, engine_bearer="b"
+        ),
+        verdict_subscriber_running=False,
+    )
+    assert result.eligible is True
+    assert result.failure is None
+
+
+def test_a_request_refusal_carries_no_typed_failure() -> None:
+    """A gap the caller can close stays a sentence, not a branchable code."""
+    result = evaluate_run_start_eligibility(
+        load_team_config(_AUTHORING),
+        feature_tag=None,
+        actor_tokens=_full_bundle(),
+        verdict_subscriber_running=True,
+    )
+    assert result.eligible is False
+    assert result.failure is None

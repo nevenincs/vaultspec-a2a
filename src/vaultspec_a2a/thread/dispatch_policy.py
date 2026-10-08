@@ -12,11 +12,15 @@ __all__ = [
 
 
 class FailureType(StrEnum):
-    """Typed dispatch failure categories.
+    """Typed run-refusal categories.
 
-    Each value corresponds to a ``_DispatchOutcome.failure_type`` string
+    Most values correspond to a ``_DispatchOutcome.failure_type`` string
     produced by :func:`safe_dispatch`.  Route handlers use these to map
-    failures to HTTP status codes without string parsing.
+    failures to HTTP status codes without string parsing. A few name a
+    condition the gateway settles BEFORE any dispatch, where nothing was
+    attempted and no worker was involved; each says so where it is declared.
+    They live in the same vocabulary because a consumer branches on one code
+    set per verb, not one per layer.
     """
 
     CIRCUIT_OPEN = "circuit_open"
@@ -45,6 +49,11 @@ class FailureType(StrEnum):
     # so it carries the same status as the equivalent refusal at run creation
     # rather than a transport error.
     NO_ACTIVE_PROJECT = "no_active_project"
+    # A document-authoring topology asked of a gateway that runs no authoring
+    # verdict subscriber. Decided at run start, before any dispatch: the run's
+    # gates park on an engine proposal and only the subscriber can resume them,
+    # so admitting the run would accept work nothing could finish.
+    AUTHORING_SUBSCRIBER_UNAVAILABLE = "authoring_subscriber_unavailable"
     INCOMPATIBLE_STATE = "incompatible_state"
     CREDENTIALS_REQUIRED = "credentials_required"
     DEADLINE_EXCEEDED = "deadline_exceeded"

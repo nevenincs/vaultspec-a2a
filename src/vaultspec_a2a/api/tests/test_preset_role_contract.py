@@ -82,6 +82,10 @@ def test_a_bundle_minted_from_discovery_is_never_refused_for_missing_roles(
         tc,
         feature_tag="role-contract",
         actor_tokens=bundle,
+        # A subscriber is declared present for the same reason a feature tag is:
+        # the subject is the TOKEN gate, and the gateway's own conditions would
+        # answer an authoring preset before it is ever reached.
+        verdict_subscriber_running=True,
         harness=None,
     )
 

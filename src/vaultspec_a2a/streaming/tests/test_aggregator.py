@@ -17,6 +17,7 @@ from ...domain_config import domain_config
 from ...graph.enums import (
     AgentLifecycleState,
     PermissionOptionKind,
+    ProviderCondition,
     ToolCallStatus,
     ToolKind,
 )
@@ -33,7 +34,7 @@ from ...graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
-from ...providers import AcpPromptError, ProviderCondition
+from ...providers import AcpPromptError
 from ...testing import (
     add_test_node,
     compile_test_graph,

@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from ...providers.conditions import ProviderCondition
+from ...graph.enums import ProviderCondition
 from ...thread.actor_tokens import MAX_ROLES_PER_RUN
 from ...thread.clarification import MAX_ANSWER_CHARS
 from ...thread.constants import (

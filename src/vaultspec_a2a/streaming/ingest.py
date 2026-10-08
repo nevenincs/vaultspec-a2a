@@ -16,9 +16,8 @@ from langgraph.errors import GraphDrained, GraphRecursionError, NodeTimeoutError
 from langgraph.types import Command
 
 from ..domain_config import domain_config
-from ..graph.enums import AgentLifecycleState
+from ..graph.enums import AgentLifecycleState, ProviderCondition
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
-from ..providers import ProviderCondition
 from ..providers.acp_exceptions import AcpPromptCancelledError
 from ..providers.conditions import condition_is_retryable
 from ..thread.enums import ThreadStatus

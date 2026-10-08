@@ -14,9 +14,9 @@ from __future__ import annotations
 import hashlib
 
 from ..idempotency import (
-    AUTHORING_VERDICT_KEY_PREFIX,
     CLARIFICATION_RESPONSE_KEY_PREFIX,
     IDEMPOTENCY_KEY_MAX_LENGTH,
+    ResumeIntent,
     authoring_verdict_action_key,
     clarification_response_action_key,
     default_cancel_key,
@@ -26,6 +26,7 @@ from ..idempotency import (
     permission_request_action_key,
     permission_response_action_key,
     permission_response_applied_action_key,
+    resume_intent,
     thread_create_action_key,
 )
 
@@ -59,8 +60,7 @@ def test_authoring_verdict_key_keeps_its_queryable_prefix() -> None:
     """The verdict receipt matches this exact prefix with ``str.startswith``."""
     key = authoring_verdict_action_key("prop-1")
     assert key == "authoring-verdict:prop-1"
-    assert key == f"{AUTHORING_VERDICT_KEY_PREFIX}prop-1"
-    assert AUTHORING_VERDICT_KEY_PREFIX == "authoring-verdict:"
+    assert resume_intent(key) is ResumeIntent.AUTHORING_VERDICT
 
 
 def test_default_cancel_key_is_the_digest_of_thread_id_and_cancel() -> None:

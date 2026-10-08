@@ -140,12 +140,13 @@ async def test_a_200_that_is_not_a_worker_readiness_answer_is_unhealthy() -> Non
     not a health object at all, and a worker reporting a non-ok status is the
     worker itself saying it is not ready.
     """
-    for body in (
+    bodies: tuple[object, ...] = (
         [],
         {"service": "gateway", "ready": True},
         {"status": "degraded", "service": "worker"},
         {"status": "ok"},
-    ):
+    )
+    for body in bodies:
         with _health_server(200, body) as url:
             own, injected = await _both_client_paths(url)
         assert own.healthy is False, body

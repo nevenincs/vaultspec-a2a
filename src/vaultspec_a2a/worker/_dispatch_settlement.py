@@ -38,8 +38,8 @@ if TYPE_CHECKING:
 
     from opentelemetry.trace import Span
 
+    from ..graph.enums import ProviderCondition
     from ..ipc.schemas import DispatchRequest
-    from ..providers import ProviderCondition
     from ..streaming import RunEventProducer
     from ..streaming.types import StreamableGraph
     from ._run_registry import RunScopedRegistry

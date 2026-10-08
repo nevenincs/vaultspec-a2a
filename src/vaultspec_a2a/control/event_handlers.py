@@ -20,11 +20,10 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 
-from ..graph.enums import ServerEventType
+from ..graph.enums import ProviderCondition, ServerEventType
 from ..ipc.schemas import (
     ExecutionStateProjectionPayload,
 )
-from ..providers import ProviderCondition
 from ..thread import named_request_id
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS

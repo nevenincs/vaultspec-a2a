@@ -15,9 +15,8 @@ The gateway side of the stream is :class:`vaultspec_a2a.streaming.RelayHub`.
 import logging
 from collections.abc import Awaitable, Callable
 
-from ..graph.enums import AgentLifecycleState
+from ..graph.enums import AgentLifecycleState, ProviderCondition
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
-from ..providers import ProviderCondition
 from ._run_state import RunLiveState
 from .buffering import BufferingManager
 from .emitters import BroadcastChannel, EventEmitters

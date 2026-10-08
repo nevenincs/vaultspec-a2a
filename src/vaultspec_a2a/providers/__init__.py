@@ -16,7 +16,6 @@ Providers implement :mod:`vaultspec_a2a.graph.protocols` for
 import importlib
 from typing import TYPE_CHECKING
 
-from ..graph.enums import ProviderCondition as ProviderCondition
 from ._json_contract import JsonObject as JsonObject
 from ._json_contract import JsonValue as JsonValue
 from .acp_exceptions import AcpAuthError as AcpAuthError
@@ -74,7 +73,6 @@ __all__ = [
     "LanePluginError",
     "LaneRegistration",
     "LaneRegistry",
-    "ProviderCondition",
     "ProviderFactory",
     "proof_cli_name",
     "warm_model_imports",

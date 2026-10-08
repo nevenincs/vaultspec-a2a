@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..providers import ProviderCondition
+from ..graph.enums import ProviderCondition
 from ..thread.failure_evidence import (
     GraphFailureEvidence,
     failure_detail_fingerprint,

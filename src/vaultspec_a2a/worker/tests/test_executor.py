@@ -32,8 +32,9 @@ from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
 from ...domain_config import domain_config
 from ...graph.compiler import compile_team_graph
+from ...graph.enums import ProviderCondition
 from ...ipc.schemas import DispatchRequest
-from ...providers import ProviderCondition, ProviderFactory
+from ...providers import ProviderFactory
 from ...providers.acp_exceptions import AcpPromptError
 from ...providers.conditions import condition_from_acp_error
 from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest

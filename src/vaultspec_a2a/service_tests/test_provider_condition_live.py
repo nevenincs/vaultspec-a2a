@@ -54,7 +54,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 
-from ..providers.conditions import ProviderCondition
+from ..graph.enums import ProviderCondition
 from ..testing import (
     GATEWAY_AUTH_HEADERS,
     async_fetch_provider_catalog,

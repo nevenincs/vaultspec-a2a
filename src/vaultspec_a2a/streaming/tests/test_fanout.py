@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 
-from ...providers.conditions import ProviderCondition
+from ...graph.enums import ProviderCondition
 from ..fanout import deliver_bounded
 
 

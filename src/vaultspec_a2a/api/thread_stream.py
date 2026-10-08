@@ -44,8 +44,7 @@ from ..control.action_lease import RUN_NOT_FOUND
 from ..control.config import settings
 from ..database import get_thread
 from ..domain_config import domain_config
-from ..graph.enums import ServerEventType, StreamFrameKind
-from ..providers.conditions import ProviderCondition
+from ..graph.enums import ProviderCondition, ServerEventType, StreamFrameKind
 from ..streaming.sse_frames import encode_sse_frame, transport_frame
 from ..thread.enums import TERMINAL_STATUS_VALUES, ThreadStatus
 from ..thread.errors import StreamSubscriptionError

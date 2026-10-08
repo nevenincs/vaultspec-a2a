@@ -349,7 +349,7 @@ async def test_codex_native_turn_supplies_logical_call_identity(
     from langchain_core.messages import HumanMessage
 
     from ...control.config import settings
-    from ...graph.enums import Provider
+    from ...graph.enums import Provider, ProviderCondition
     from ...providers._acp_authoring import (
         AuthoringToolBinding,
         codex_authoring_mcp_server_spec,
@@ -358,7 +358,6 @@ async def test_codex_native_turn_supplies_logical_call_identity(
     from ...providers.acp_exceptions import AcpError
     from ...providers.cli_resolution import resolve_provider_cli_executable
     from ...providers.codex_chat_model import CodexChatModel
-    from ...providers.conditions import ProviderCondition
     from ...testing import declared_lane_model_value
 
     external_prerequisite("codex-cli")
@@ -424,7 +423,7 @@ async def test_claude_native_turn_supplies_logical_call_identity(
     from langchain_core.messages import HumanMessage
 
     from ...control.config import settings
-    from ...graph.enums import Provider
+    from ...graph.enums import Provider, ProviderCondition
     from ...providers._acp_authoring import AuthoringToolBinding, attach_authoring_tools
     from ...providers._factory_commands import (
         _classify_acp_command,
@@ -432,7 +431,6 @@ async def test_claude_native_turn_supplies_logical_call_identity(
     )
     from ...providers.acp_chat_model import AcpChatModel
     from ...providers.acp_exceptions import AcpError
-    from ...providers.conditions import ProviderCondition
     from ...providers.factory import claude_auth_env
     from ...testing import declared_lane_model_value
 

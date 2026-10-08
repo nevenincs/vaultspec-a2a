@@ -15,7 +15,7 @@ from langgraph.graph import END, START
 from langgraph.types import Command, Interrupt, PregelTask, interrupt
 from pydantic import BaseModel, ConfigDict
 
-from ...providers import ProviderCondition
+from ...graph.enums import ProviderCondition
 from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence

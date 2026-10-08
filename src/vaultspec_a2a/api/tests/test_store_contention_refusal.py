@@ -31,7 +31,7 @@ from ...thread.enums import ControlActionType
 from .conftest import make_app
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
     from pathlib import Path
 
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -47,7 +47,7 @@ pytestmark = pytest.mark.sqlite_engine(SqlitePosture.APPLICATION)
 
 
 @contextmanager
-def _competing_writer(database_file: Path, run_id: str) -> Iterator[None]:
+def _competing_writer(database_file: Path, run_id: str) -> Generator[None]:
     """Hold the store's write lock from another connection for the block.
 
     A real second SQLite connection in its own ``BEGIN IMMEDIATE``, with a write

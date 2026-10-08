@@ -31,10 +31,10 @@ import pytest
 from ...control.worker_status import WorkerConnectionStatus
 from ...graph.enums import (
     RESEARCH_ADR_NODE_PHASE,
+    ProviderCondition,
     SemanticPhase,
     research_adr_semantic_phase,
 )
-from ...providers.conditions import ProviderCondition
 from ...team.preset_origin import PresetOrigin
 from ...team.team_config import TopologyType
 from ...thread.enums import (

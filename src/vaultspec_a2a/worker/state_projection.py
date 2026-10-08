@@ -16,9 +16,8 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, cast
 
 from ..database import read_latest_checkpoint
 from ..domain_config import domain_config
-from ..graph.enums import StreamFrameKind
+from ..graph.enums import ProviderCondition, StreamFrameKind
 from ..ipc.schemas import ExecutionStateProjectionPayload
-from ..providers import ProviderCondition
 from ..thread import live_interrupts, named_request_id
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.checkpoint_evidence import (

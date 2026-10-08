@@ -27,8 +27,7 @@ from ...database import (
     get_thread_execution_state,
     set_thread_repair_state,
 )
-from ...graph.enums import AgentLifecycleState
-from ...providers import ProviderCondition
+from ...graph.enums import AgentLifecycleState, ProviderCondition
 from ...streaming import RelayHub
 from ...testing import (
     park_plan_approval,
@@ -1003,7 +1002,7 @@ class TestTerminalEventProviderConditionPersistence:
         """The lane's own verdict survives the relay hop into the column."""
         from ...control.event_handlers import RelayServices, _handle_terminal_event
         from ...database import ThreadModel
-        from ...providers import ProviderCondition
+        from ...graph.enums import ProviderCondition
 
         async with session_factory() as session:
             _, receipt = await seed_accepted_thread(
@@ -1039,7 +1038,7 @@ class TestTerminalEventProviderConditionPersistence:
         """
         from ...control.event_handlers import RelayServices, _handle_terminal_event
         from ...database import ThreadModel
-        from ...providers import ProviderCondition
+        from ...graph.enums import ProviderCondition
 
         async with session_factory() as session:
             _, receipt = await seed_accepted_thread(
@@ -1148,7 +1147,7 @@ class TestConditionSurvivesAReload:
         session_factory: SessionFactory,
         checkpointer: AsyncSqliteSaver,
     ) -> None:
-        from ...providers import ProviderCondition
+        from ...graph.enums import ProviderCondition
         from .conftest import make_app
 
         app, _aggregator, _worker, _checkpointer = make_app(

@@ -25,8 +25,8 @@ if TYPE_CHECKING:
     from ..protocols import ProviderFactoryProtocol
 
 from ...control.config import settings
-from ...graph.enums import Provider
-from ...providers import AcpPromptError, ProviderCondition
+from ...graph.enums import Provider, ProviderCondition
+from ...providers import AcpPromptError
 from ...providers._codex_protocol import _turn_failure
 from ...providers.cli_resolution import (
     ProviderRuntimeUnavailableError,

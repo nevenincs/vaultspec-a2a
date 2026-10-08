@@ -5,7 +5,8 @@ from __future__ import annotations
 from langgraph.errors import GraphRecursionError, NodeTimeoutError
 from langgraph.types import RetryPolicy
 
-from ..providers.conditions import ProviderCondition, condition_is_retryable
+from ..graph.enums import ProviderCondition
+from ..providers.conditions import condition_is_retryable
 from ..thread.errors import (
     DocumentConformanceError,
     ProviderSessionError,

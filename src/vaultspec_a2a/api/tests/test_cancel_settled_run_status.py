@@ -32,11 +32,11 @@ import httpx
 import pytest
 from langgraph.graph import END, START
 
+from ...graph.enums import ProviderCondition
 from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
     record_graph_completion,
 )
-from ...providers import ProviderCondition
 from ...testing import (
     DEFAULT_TEAM_PRESET,
     add_test_node,

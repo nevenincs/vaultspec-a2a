@@ -1332,12 +1332,12 @@ async def test_a_request_answered_before_its_relay_lands_journals_no_pending_row
 
     # The run parks, is answered, and runs on - all before the frame is relayed.
     config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+
+    def _gate(_state: object) -> dict[str, str]:
+        return {"active_agent": str(interrupt(payload))}
+
     builder = new_state_graph()
-    add_test_node(
-        builder,
-        "gate",
-        lambda _state: {"active_agent": str(interrupt(payload))},
-    )
+    add_test_node(builder, "gate", _gate)
     builder.add_edge("__start__", "gate")
     builder.add_edge("gate", "__end__")
     graph = compile_test_graph(builder, checkpointer=checkpointer)

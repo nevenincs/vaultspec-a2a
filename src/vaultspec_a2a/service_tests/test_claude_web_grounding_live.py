@@ -74,9 +74,9 @@ import httpx
 import pytest
 
 from ..control.run_start_policy import required_role_ids
-from ..graph.enums import Provider
+from ..graph.enums import Provider, ProviderCondition
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND
-from ..providers.conditions import ProviderCondition, condition_from_acp_error
+from ..providers.conditions import condition_from_acp_error
 from ..team.team_config import load_team_config
 from ..testing import (
     GATEWAY_AUTH_HEADERS,

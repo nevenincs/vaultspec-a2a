@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 import pytest
 from langchain_core.messages import AIMessage
 
+from ...graph.enums import ProviderCondition
 from .._acp_prompt_outcomes import raise_prompt_error
 from .._codex_app_server_client import _CodexAppServerClient
 from .._codex_protocol import _CodexProtocolError
@@ -38,7 +39,6 @@ from .._subprocess import spawn_acp_process
 from ..acp_exceptions import AcpErrorCode, AcpPromptError
 from ..codex_chat_model import CodexChatModel
 from ..conditions import (
-    ProviderCondition,
     condition_from_acp_error,
     condition_from_codex_error_info,
     condition_from_codex_turn_error,

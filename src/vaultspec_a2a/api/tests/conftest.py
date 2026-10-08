@@ -34,7 +34,7 @@ from ...testing import LaneInventoryFactory, adopted_spawner
 from ...tests._write_authority import make_test_write_authority
 from ...utils import bearer_header
 from ...worker._dispatch_contract import CAPACITY_FULL
-from ...worker.app import capacity_refusal, verify_dispatch_token
+from ...worker.app import capacity_refusal, verify_dispatch_token, worker_health_body
 from ..app import create_app
 from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ..internal import internal_router
@@ -129,8 +129,12 @@ class _InProcessWorker:
                 thread_id = ""
             return {"status": "dispatched", "thread_id": thread_id}
 
-        async def _health() -> dict[str, str]:
-            return {"status": "ok"}
+        async def _health() -> dict[str, object]:
+            # The production body, not a hand-written stub: the gateway's
+            # readiness verdict reads the role name and the status out of it, so a
+            # shorter body makes this worker permanently un-ready while still
+            # answering 200.
+            return worker_health_body(gateway_pairing_warning=None)
 
         _app.add_api_route(
             "/dispatch",

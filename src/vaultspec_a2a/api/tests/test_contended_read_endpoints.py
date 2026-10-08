@@ -18,8 +18,6 @@ The competing writer is a real second connection to the same file holding a real
 
 from __future__ import annotations
 
-import sqlite3
-from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import httpx
@@ -28,7 +26,7 @@ from httpx import ASGITransport
 
 from ...conftest import SqlitePosture
 from ...database import get_thread
-from ...testing import seed_completed_authority, settings_override
+from ...testing import held_write_lock, seed_completed_authority, settings_override
 from ...thread.enums import DegradedReason, ThreadStatus
 from .conftest import make_app
 
@@ -58,20 +56,6 @@ def _short_lock_wait() -> Generator[None]:
     """
     with settings_override(sqlite_busy_timeout_ms=_BUSY_TIMEOUT_MS):
         yield
-
-
-@contextmanager
-def _competing_writer(database_file: Path, run_id: str) -> Generator[None]:
-    """Hold the store's write lock from another real connection for the block."""
-    holder = sqlite3.connect(database_file, isolation_level=None, timeout=10.0)
-    try:
-        holder.execute("PRAGMA busy_timeout=10000")
-        holder.execute("BEGIN IMMEDIATE")
-        holder.execute("UPDATE threads SET title = ? WHERE id = ?", ("held", run_id))
-        yield
-    finally:
-        holder.rollback()
-        holder.close()
 
 
 async def _seed_proven_terminal(
@@ -105,7 +89,11 @@ async def test_run_status_answers_the_durable_record_under_a_held_lock(
         session_factory, checkpointer, "contended run-status"
     )
     async with _client(session_factory, checkpointer) as client:
-        with _competing_writer(database_file, run_id):
+        with held_write_lock(
+            database_file,
+            statement="UPDATE threads SET title = ? WHERE id = ?",
+            parameters=("held", run_id),
+        ):
             answered = await client.get(f"/v1/runs/{run_id}")
 
     assert answered.status_code == 200, answered.text
@@ -130,7 +118,11 @@ async def test_run_history_answers_the_durable_record_under_a_held_lock(
         session_factory, checkpointer, "contended run-history"
     )
     async with _client(session_factory, checkpointer) as client:
-        with _competing_writer(database_file, run_id):
+        with held_write_lock(
+            database_file,
+            statement="UPDATE threads SET title = ? WHERE id = ?",
+            parameters=("held", run_id),
+        ):
             answered = await client.get(f"/v1/runs/{run_id}/history")
         freed = await client.get(f"/v1/runs/{run_id}/history")
 

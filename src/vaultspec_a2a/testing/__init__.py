@@ -16,11 +16,13 @@ boot and its peers (``boot``), the loopback listeners a test points code at
 built around it (``gateway_verbs``), the acceptance harness that drives a
 document-authoring run end to end (``acceptance``), the readers that check a
 decoded JSON response's shape (``payloads``), the inputs a test chooses for a
-production constructor (``factories``, ``catalog_authority``), and the in-process
-fixture lanes a test gateway or test process holds (``lanes``). The control plane's
-test peers sit with them: the production worker served in-process over a real
-executor (``worker_app``), the run rows a test seats through the repositories
-(``seeding``), and the runs it parks on a real interrupt (``parking``).
+production constructor (``factories``, ``catalog_authority``), the real SQLite
+write lock a store-contention test contends against (``contention``), and the
+in-process fixture lanes a test gateway or test process holds (``lanes``). The
+control plane's test peers sit with them: the production worker served in-process
+over a real executor (``worker_app``), the run rows a test seats through the
+repositories (``seeding``), and the runs it parks on a real interrupt
+(``parking``).
 
 The plugin is loaded by the repository-root ``conftest.py``, which is the one
 channel that neither an ``addopts`` override can strip nor a consumer
@@ -151,6 +153,7 @@ if TYPE_CHECKING:
         inherited_environment,
         run_cli,
     )
+    from .contention import HOLDER_LOCK_WAIT_MS, held_write_lock
     from .endpoints import ResolvedService, resolve_gateway_url, resolve_service
     from .environment import (
         armed_desktop_app_home,
@@ -532,6 +535,11 @@ _LAZY_EXPORTS = {
     "combined_output": ("vaultspec_a2a.testing.cli", "combined_output"),
     "inherited_environment": ("vaultspec_a2a.testing.cli", "inherited_environment"),
     "run_cli": ("vaultspec_a2a.testing.cli", "run_cli"),
+    "HOLDER_LOCK_WAIT_MS": (
+        "vaultspec_a2a.testing.contention",
+        "HOLDER_LOCK_WAIT_MS",
+    ),
+    "held_write_lock": ("vaultspec_a2a.testing.contention", "held_write_lock"),
     "ResolvedService": ("vaultspec_a2a.testing.endpoints", "ResolvedService"),
     "resolve_gateway_url": (
         "vaultspec_a2a.testing.endpoints",
@@ -792,6 +800,7 @@ __all__ = [
     "FIRST_DEMAND_TIMEOUT",
     "FOREIGN_WORKER_PROGRAM",
     "GATEWAY_AUTH_HEADERS",
+    "HOLDER_LOCK_WAIT_MS",
     "IMPURE_FIXTURES",
     "LANES",
     "LEASE_TTL_MS",
@@ -906,6 +915,7 @@ __all__ = [
     "gateway_script",
     "health_listener",
     "held_turns",
+    "held_write_lock",
     "hold_for_process_lifetime",
     "hold_lease",
     "in_process_lane_required",

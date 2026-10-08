@@ -34,14 +34,6 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-# The park below writes a checkpoint from INSIDE an open, uncommitted
-# application transaction, which the one file production serves both stores
-# from cannot admit: the saver's write upgrades a read transaction and SQLite
-# refuses it outright. The shape is the test's, not production's - the worker
-# writes checkpoints on its own connection - so the two stores are separated
-# here until the seed commits before it parks.
-pytestmark = pytest.mark.separate_checkpoint_store
-
 _OPTIONS: list[dict[str, object]] = [
     {"optionId": "allow_once", "name": "Allow once"},
     {"optionId": "reject_once", "name": "Reject once"},
@@ -61,20 +53,30 @@ async def _run_case(
             status=ThreadStatus.INPUT_REQUIRED.value,
             metadata=current_execution_metadata(runtime_dir),
         )
-        request_id = await park_permission(
-            checkpointer, thread_id=thread.id, options=_OPTIONS
-        )
+        await session.commit()
+        thread_id = thread.id
+
+    # The park runs a real graph, which writes a checkpoint, with NO application
+    # transaction of this test's open across it - the ordering production has,
+    # where the worker checkpoints on its own connection while the gateway's
+    # journal writes are already committed. Parked from inside the session above,
+    # the checkpoint write contends with that session's own transaction on the
+    # single file the service serves both stores from.
+    request_id = await park_permission(
+        checkpointer, thread_id=thread_id, options=_OPTIONS
+    )
+
+    async with sessions() as session:
         await record_permission_request(
             session,
             request_id=request_id,
-            thread_id=thread.id,
+            thread_id=thread_id,
             pause_reason_type="tool_permission_request",
             description="Allow the operation?",
             allowed_options=_OPTIONS,
         )
-        await seed_create_action(session, thread.id, workspace=runtime_dir)
+        await seed_create_action(session, thread_id, workspace=runtime_dir)
         await session.commit()
-        thread_id = thread.id
 
     start = asyncio.Event()
 

@@ -16,7 +16,7 @@ node will read.
 from __future__ import annotations
 
 import itertools
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
@@ -68,16 +68,15 @@ def _question_set(request_id: str) -> ClarificationRequest:
     )
 
 
-async def _park_on_clarification(
-    checkpointer: AsyncSqliteSaver, *, thread_id: str, request_id: str
-) -> None:
-    """Park a real graph on a real clarification interrupt in the real store.
+def _clarification_test_graph(
+    checkpointer: AsyncSqliteSaver, request: ClarificationRequest
+) -> Any:
+    """Compile the minimal clarification-node-pair graph this module parks on.
 
-    Writes through the app's own checkpointer, so what the gateway later reads is
-    literally what a parked run left behind - not a hand-built row shaped to
-    resemble one.
+    Shared by both the fresh-park helper below and the resume path in
+    ``test_the_answered_questionnaire_stops_being_disclosed``, which must
+    build the identical graph to resume it rather than invoke it fresh.
     """
-    request = _question_set(request_id)
 
     async def _producer(state: TeamState) -> ClarificationRequest | None:
         del state
@@ -103,7 +102,19 @@ async def _park_on_clarification(
     add_test_node(builder, "proceed", _proceed)
     builder.add_edge("__start__", "clarification_request")
     builder.add_edge("proceed", "__end__")
-    graph = compile_test_graph(builder, checkpointer=checkpointer)
+    return compile_test_graph(builder, checkpointer=checkpointer)
+
+
+async def _park_on_clarification(
+    checkpointer: AsyncSqliteSaver, *, thread_id: str, request_id: str
+) -> None:
+    """Park a real graph on a real clarification interrupt in the real store.
+
+    Writes through the app's own checkpointer, so what the gateway later reads is
+    literally what a parked run left behind - not a hand-built row shaped to
+    resemble one.
+    """
+    graph = _clarification_test_graph(checkpointer, _question_set(request_id))
 
     await graph.ainvoke(
         {
@@ -428,33 +439,7 @@ async def test_the_answered_questionnaire_stops_being_disclosed(
         parked = await client.get(f"/v1/runs/{run_id}")
         assert parked.json()["pending_clarification"] is not None
 
-        request = _question_set("clarify-settle")
-
-        async def _producer(state: TeamState) -> ClarificationRequest | None:
-            del state
-            return request
-
-        def _proceed(state: TeamState) -> dict[str, object]:
-            del state
-            return {}
-
-        builder = new_state_graph()
-        add_test_node(
-            builder,
-            "clarification_request",
-            create_clarification_request_node(
-                _producer, gate_target="clarification_gate", proceed_target="proceed"
-            ),
-        )
-        add_test_node(
-            builder,
-            "clarification_gate",
-            create_clarification_gate_node(proceed_target="proceed"),
-        )
-        add_test_node(builder, "proceed", _proceed)
-        builder.add_edge("__start__", "clarification_request")
-        builder.add_edge("proceed", "__end__")
-        graph = compile_test_graph(builder, checkpointer=cp)
+        graph = _clarification_test_graph(cp, _question_set("clarify-settle"))
 
         await graph.ainvoke(
             Command(

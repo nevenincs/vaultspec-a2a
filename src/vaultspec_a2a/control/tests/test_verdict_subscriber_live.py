@@ -470,6 +470,32 @@ async def test_live_verdict_round_trip_parks_and_resumes(
         )
 
 
+async def _reconcile_parked_runs_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    worker_client: httpx.AsyncClient,
+    live_engine: EngineEndpoint,
+) -> None:
+    """Build the subscriber against *live_engine* and run one reconcile pass.
+
+    Shared by the missed-reject and clobbered-run recovery tests, which differ
+    only in what they assert about the one action the pass dispatches.
+    """
+    subscriber = VerdictSubscriber(
+        VerdictSubscriberConfig(
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+            worker_client=worker_client,
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=3, recovery_timeout=30.0
+            ),
+            worker_spawner=adopted_spawner(),
+            endpoint_provider=lambda: live_engine,
+        )
+    )
+    await subscriber._reconcile_parked_runs(live_engine)
+
+
 async def _seed_parked_gate(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
@@ -647,20 +673,9 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
     async with served_worker(
         checkpointer, token=_TEST_INTERNAL_TOKEN, receipt_threads=(thread_id,)
     ) as worker:
-        subscriber = VerdictSubscriber(
-            VerdictSubscriberConfig(
-                session_factory=session_factory,
-                checkpointer=checkpointer,
-                worker_client=worker.client,
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=3, recovery_timeout=30.0
-                ),
-                worker_spawner=adopted_spawner(),
-                endpoint_provider=lambda: live_engine,
-            )
+        await _reconcile_parked_runs_once(
+            session_factory, checkpointer, worker.client, live_engine
         )
-
-        await subscriber._reconcile_parked_runs(live_engine)
 
         assert len(worker.app.state.dispatch_ids) == 1
         async with session_factory() as db:
@@ -760,20 +775,9 @@ async def _run_clobbered_reconcile(
     async with served_worker(
         checkpointer, token=_TEST_INTERNAL_TOKEN, receipt_threads=(seed.thread_id,)
     ) as worker:
-        subscriber = VerdictSubscriber(
-            VerdictSubscriberConfig(
-                session_factory=session_factory,
-                checkpointer=checkpointer,
-                worker_client=worker.client,
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=3, recovery_timeout=30.0
-                ),
-                worker_spawner=adopted_spawner(),
-                endpoint_provider=lambda: live_engine,
-            )
+        await _reconcile_parked_runs_once(
+            session_factory, checkpointer, worker.client, live_engine
         )
-
-        await subscriber._reconcile_parked_runs(live_engine)
 
         assert len(worker.app.state.dispatch_ids) == 1
         async with session_factory() as db:

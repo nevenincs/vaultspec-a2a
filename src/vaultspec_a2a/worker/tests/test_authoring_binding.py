@@ -228,14 +228,14 @@ class TestAuthoringBindingProvider:
         )
 
 
-@pytest.mark.service
-@pytest.mark.asyncio
-async def test_binding_for_fetches_catalog_once_per_run_live(
-    live_engine: EngineEndpoint,
-) -> None:
-    """Live: binding_for fetches the engine catalog once and caches it per run."""
-    run_id = f"binding-live-{uuid.uuid4().hex[:8]}"
-    # Mint a real actor token for the run and register it, as the executor does.
+async def _live_coder_provider(
+    live_engine: EngineEndpoint, run_id: str
+) -> tuple[AuthoringBindingProvider, RunCatalogStore]:
+    """Mint a real actor token for *run_id* and build a live-engine provider.
+
+    Shared by the once-per-run and concurrent-fetch live proofs below, which
+    differ only in how they call ``binding_for`` after this arrangement.
+    """
     from ...authoring import AuthoringClient
 
     async with AuthoringClient(
@@ -257,6 +257,17 @@ async def test_binding_for_fetches_catalog_once_per_run_live(
         token_store=token_store,
         catalog_store=catalog_store,
     )
+    return provider, catalog_store
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_binding_for_fetches_catalog_once_per_run_live(
+    live_engine: EngineEndpoint,
+) -> None:
+    """Live: binding_for fetches the engine catalog once and caches it per run."""
+    run_id = f"binding-live-{uuid.uuid4().hex[:8]}"
+    provider, catalog_store = await _live_coder_provider(live_engine, run_id)
 
     assert catalog_store.get(run_id) is None
     first = await provider.binding_for(run_id, "vaultspec-coder")
@@ -287,27 +298,7 @@ async def test_binding_for_concurrent_fetches_share_one_snapshot_live(
     import asyncio as _asyncio
 
     run_id = f"binding-conc-{uuid.uuid4().hex[:8]}"
-    from ...authoring import AuthoringClient
-
-    async with AuthoringClient(
-        live_engine.base_url, live_engine.bearer_token
-    ) as client:
-        raw_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
-
-    token_store = RunTokenStore()
-    token_store.register(
-        run_id,
-        ActorTokenBundle(
-            tokens={"vaultspec-coder": raw_token},
-            engine_bearer=live_engine.bearer_token,
-        ),
-    )
-    catalog_store = RunCatalogStore()
-    provider = AuthoringBindingProvider(
-        engine_base_url=live_engine.base_url,
-        token_store=token_store,
-        catalog_store=catalog_store,
-    )
+    provider, catalog_store = await _live_coder_provider(live_engine, run_id)
     first, second = await _asyncio.gather(
         provider.binding_for(run_id, "vaultspec-coder"),
         provider.binding_for(run_id, "vaultspec-coder"),

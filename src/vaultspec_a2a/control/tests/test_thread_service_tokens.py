@@ -53,6 +53,8 @@ from ...thread.enums import ControlActionType, ThreadStatus
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+    from ...control.worker_management import LazyWorkerSpawner
+
 _CODER_TOKEN = "secret-coder-xyz"
 _REVIEWER_TOKEN = "secret-reviewer-xyz"
 _BEARER = "secret-bearer-xyz"
@@ -235,6 +237,41 @@ def _cancelling_capacity_worker(
     return app
 
 
+def _initial_dispatch_request(
+    *, thread_id: str, title: str, initial_message: str, tmp_path: Path
+) -> ThreadCreationRequest:
+    """The initial-dispatch creation request the races below share.
+
+    Every field but *thread_id*, *title* and *initial_message* is fixed: the
+    team preset, autonomy, and workspace are what every race below dispatches
+    against, varying only which run and which worker behaviour it provokes.
+    """
+    return ThreadCreationRequest(
+        thread_id=thread_id,
+        title=title,
+        initial_message=initial_message,
+        team_preset=DEFAULT_TEAM_PRESET,
+        autonomous=True,
+        nickname=None,
+        metadata=None,
+        metadata_json=None,
+        workspace_root=tmp_path,
+        team_config=load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
+    )
+
+
+def _fresh_circuit_transport(
+    spawner: LazyWorkerSpawner, worker_client: httpx.AsyncClient
+) -> DispatchTransport:
+    """The fresh-circuit-breaker transport the races below share."""
+    return DispatchTransport(
+        circuit_breaker=WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=1.0),
+        worker_spawner=spawner,
+        worker_client=worker_client,
+        trace_headers=None,
+    )
+
+
 @pytest.mark.asyncio
 async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
     session_factory: async_sessionmaker[AsyncSession],
@@ -334,28 +371,13 @@ async def test_early_terminal_initial_dispatch_cannot_be_reopened(
     ):
         result = await create_and_dispatch_thread(
             session,
-            ThreadCreationRequest(
+            _initial_dispatch_request(
                 thread_id=thread_id,
                 title="early terminal",
                 initial_message="finish immediately",
-                team_preset=DEFAULT_TEAM_PRESET,
-                autonomous=True,
-                nickname=None,
-                metadata=None,
-                metadata_json=None,
-                workspace_root=tmp_path,
-                team_config=load_team_config(
-                    DEFAULT_TEAM_PRESET, workspace_root=tmp_path
-                ),
+                tmp_path=tmp_path,
             ),
-            transport=DispatchTransport(
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=1, recovery_timeout=1.0
-                ),
-                worker_spawner=spawner,
-                worker_client=worker_client,
-                trace_headers=None,
-            ),
+            transport=_fresh_circuit_transport(spawner, worker_client),
         )
     assert result.dispatched is True
     assert result.status == ThreadStatus.COMPLETED.value
@@ -384,28 +406,13 @@ async def test_initial_dispatch_reports_missing_row_without_refresh_failure(
     ):
         result = await create_and_dispatch_thread(
             session,
-            ThreadCreationRequest(
+            _initial_dispatch_request(
                 thread_id=thread_id,
                 title="deleted before ack",
                 initial_message="start",
-                team_preset=DEFAULT_TEAM_PRESET,
-                autonomous=True,
-                nickname=None,
-                metadata=None,
-                metadata_json=None,
-                workspace_root=tmp_path,
-                team_config=load_team_config(
-                    DEFAULT_TEAM_PRESET, workspace_root=tmp_path
-                ),
+                tmp_path=tmp_path,
             ),
-            transport=DispatchTransport(
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=1, recovery_timeout=1.0
-                ),
-                worker_spawner=spawner,
-                worker_client=worker_client,
-                trace_headers=None,
-            ),
+            transport=_fresh_circuit_transport(spawner, worker_client),
         )
     assert result.dispatched is True
     assert result.status == ""
@@ -435,28 +442,13 @@ async def test_lost_initial_ack_yields_to_early_terminal_authority(
     ):
         result = await create_and_dispatch_thread(
             session,
-            ThreadCreationRequest(
+            _initial_dispatch_request(
                 thread_id=thread_id,
                 title="terminal before lost ack",
                 initial_message="finish",
-                team_preset=DEFAULT_TEAM_PRESET,
-                autonomous=True,
-                nickname=None,
-                metadata=None,
-                metadata_json=None,
-                workspace_root=tmp_path,
-                team_config=load_team_config(
-                    DEFAULT_TEAM_PRESET, workspace_root=tmp_path
-                ),
+                tmp_path=tmp_path,
             ),
-            transport=DispatchTransport(
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=1, recovery_timeout=1.0
-                ),
-                worker_spawner=spawner,
-                worker_client=worker_client,
-                trace_headers=None,
-            ),
+            transport=_fresh_circuit_transport(spawner, worker_client),
         )
     assert result.status == ThreadStatus.COMPLETED.value
     assert result.dispatched is True
@@ -480,28 +472,13 @@ async def test_definite_initial_rejection_survives_a_different_winning_action(
     ):
         result = await create_and_dispatch_thread(
             session,
-            ThreadCreationRequest(
+            _initial_dispatch_request(
                 thread_id=thread_id,
                 title="cancel wins before capacity response",
                 initial_message="start",
-                team_preset=DEFAULT_TEAM_PRESET,
-                autonomous=True,
-                nickname=None,
-                metadata=None,
-                metadata_json=None,
-                workspace_root=tmp_path,
-                team_config=load_team_config(
-                    DEFAULT_TEAM_PRESET, workspace_root=tmp_path
-                ),
+                tmp_path=tmp_path,
             ),
-            transport=DispatchTransport(
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=1, recovery_timeout=1.0
-                ),
-                worker_spawner=spawner,
-                worker_client=worker_client,
-                trace_headers=None,
-            ),
+            transport=_fresh_circuit_transport(spawner, worker_client),
         )
 
     assert result.status == ThreadStatus.CANCELLING.value
@@ -626,28 +603,13 @@ async def test_ambiguous_initial_dispatch_retains_its_fresh_lease(
     ):
         result = await create_and_dispatch_thread(
             session,
-            ThreadCreationRequest(
+            _initial_dispatch_request(
                 thread_id=thread_id,
                 title="ambiguous delivery",
                 initial_message="do not acknowledge",
-                team_preset=DEFAULT_TEAM_PRESET,
-                autonomous=True,
-                nickname=None,
-                metadata=None,
-                metadata_json=None,
-                workspace_root=tmp_path,
-                team_config=load_team_config(
-                    DEFAULT_TEAM_PRESET, workspace_root=tmp_path
-                ),
+                tmp_path=tmp_path,
             ),
-            transport=DispatchTransport(
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=1, recovery_timeout=1.0
-                ),
-                worker_spawner=spawner,
-                worker_client=worker_client,
-                trace_headers=None,
-            ),
+            transport=_fresh_circuit_transport(spawner, worker_client),
         )
     assert result.failure_type is FailureType.UNREACHABLE
     async with session_factory() as observer:

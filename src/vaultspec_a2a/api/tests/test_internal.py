@@ -114,6 +114,34 @@ def _batch_of(thread_id: str, payload: dict[str, object]) -> dict[str, object]:
     return {"events": [{"thread_id": thread_id, "payload": payload}]}
 
 
+def _execution_state_projection_payload(
+    checkpoint_id: str, *, parent_checkpoint_id: str
+) -> dict[str, object]:
+    """A healthy execution-state projection naming one running supervisor task."""
+    return {
+        "type": "execution_state_projection",
+        "checkpoint_id": checkpoint_id,
+        "parent_checkpoint_id": parent_checkpoint_id,
+        "next_nodes": ["supervisor"],
+        "interrupt_count": 1,
+        "task_count": 1,
+        "tasks": [
+            {
+                "task_id": "task-1",
+                "name": "supervisor",
+                "path": ["supervisor"],
+                "has_error": False,
+                "error_type": None,
+                "interrupt_ids": ["interrupt-1"],
+                "interrupt_types": ["permission_request"],
+                "has_nested_state": False,
+                "has_result": False,
+            }
+        ],
+        "degraded_reasons": [],
+    }
+
+
 # ---------------------------------------------------------------------------
 # /internal/health
 # ---------------------------------------------------------------------------
@@ -347,28 +375,9 @@ class TestInternalEvents:
                 "/internal/events/batch",
                 json=_batch_of(
                     "t-84",
-                    {
-                        "type": "execution_state_projection",
-                        "checkpoint_id": "cp-1",
-                        "parent_checkpoint_id": "cp-0",
-                        "next_nodes": ["supervisor"],
-                        "interrupt_count": 1,
-                        "task_count": 1,
-                        "tasks": [
-                            {
-                                "task_id": "task-1",
-                                "name": "supervisor",
-                                "path": ["supervisor"],
-                                "has_error": False,
-                                "error_type": None,
-                                "interrupt_ids": ["interrupt-1"],
-                                "interrupt_types": ["permission_request"],
-                                "has_nested_state": False,
-                                "has_result": False,
-                            }
-                        ],
-                        "degraded_reasons": [],
-                    },
+                    _execution_state_projection_payload(
+                        "cp-1", parent_checkpoint_id="cp-0"
+                    ),
                 ),
             )
 
@@ -536,28 +545,9 @@ class TestInternalEvents:
                 "/internal/events/batch",
                 json=_batch_of(
                     "t-84-degraded",
-                    {
-                        "type": "execution_state_projection",
-                        "checkpoint_id": "cp-good",
-                        "parent_checkpoint_id": "cp-parent",
-                        "next_nodes": ["supervisor"],
-                        "interrupt_count": 1,
-                        "task_count": 1,
-                        "tasks": [
-                            {
-                                "task_id": "task-1",
-                                "name": "supervisor",
-                                "path": ["supervisor"],
-                                "has_error": False,
-                                "error_type": None,
-                                "interrupt_ids": ["interrupt-1"],
-                                "interrupt_types": ["permission_request"],
-                                "has_nested_state": False,
-                                "has_result": False,
-                            }
-                        ],
-                        "degraded_reasons": [],
-                    },
+                    _execution_state_projection_payload(
+                        "cp-good", parent_checkpoint_id="cp-parent"
+                    ),
                 ),
             )
             degraded = await client.post(

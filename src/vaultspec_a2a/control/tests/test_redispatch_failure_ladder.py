@@ -125,6 +125,69 @@ def _current_metadata(workspace_root: str | None) -> dict[str, object]:
     return metadata
 
 
+async def _run_redispatch_sweep_with_open_circuit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Run one redispatch sweep against a forced-open circuit breaker.
+
+    Shared by the per-thread refusal tests below, which only care about the
+    thread rows and log messages the sweep leaves behind, not the worker-
+    contact timing :func:`_run_redispatch_sweep_and_classify_records` captures.
+    """
+    spawner = adopted_spawner()
+    circuit_breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=999.0)
+    circuit_breaker.force_open()
+
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client:
+        with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
+            await redispatch_reconciling_threads(
+                client,
+                circuit_breaker,
+                spawner,
+                record_worker_contact=lambda _when: None,
+            )
+
+
+async def _run_redispatch_sweep_and_classify_records(
+    caplog: pytest.LogCaptureFixture,
+) -> tuple[list[float], list[logging.LogRecord], list[logging.LogRecord]]:
+    """Run one redispatch sweep and split its log records by what they report.
+
+    Shared by the dedup-ladder test and its single-failure control, which
+    differ only in how many threads they seed and what they assert about the
+    counts returned here.
+    """
+    spawner = adopted_spawner()
+    circuit_breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=999.0)
+    circuit_breaker.force_open()
+    worker_contacts: list[float] = []
+
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client:
+        with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
+            await redispatch_reconciling_threads(
+                client,
+                circuit_breaker,
+                spawner,
+                record_worker_contact=worker_contacts.append,
+            )
+
+    circuit_open_warnings = [
+        r
+        for r in caplog.records
+        if r.name == _LOGGER_NAME
+        and r.levelno == logging.WARNING
+        and "Circuit breaker open" in r.getMessage()
+    ]
+    summaries = [
+        r
+        for r in caplog.records
+        if r.name == _LOGGER_NAME
+        and r.levelno == logging.INFO
+        and "Re-dispatch failure ladder" in r.getMessage()
+    ]
+    return worker_contacts, circuit_open_warnings, summaries
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "retired_key",
@@ -331,22 +394,7 @@ async def test_a_thread_with_no_active_project_fails_alone_and_the_sweep_continu
             )
             await session.commit()
 
-        spawner = adopted_spawner()
-        circuit_breaker = WorkerCircuitBreaker(
-            failure_threshold=1, recovery_timeout=999.0
-        )
-        circuit_breaker.force_open()
-
-        async with httpx.AsyncClient(
-            base_url="http://127.0.0.1:9", timeout=0.2
-        ) as client:
-            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
-                await redispatch_reconciling_threads(
-                    client,
-                    circuit_breaker,
-                    spawner,
-                    record_worker_contact=lambda _when: None,
-                )
+        await _run_redispatch_sweep_with_open_circuit(caplog)
 
         async with session_factory() as session:
             projectless = await get_thread(session, "projectless")
@@ -405,22 +453,7 @@ async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
             )
             await session.commit()
 
-        spawner = adopted_spawner()
-        circuit_breaker = WorkerCircuitBreaker(
-            failure_threshold=1, recovery_timeout=999.0
-        )
-        circuit_breaker.force_open()
-
-        async with httpx.AsyncClient(
-            base_url="http://127.0.0.1:9", timeout=0.2
-        ) as client:
-            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
-                await redispatch_reconciling_threads(
-                    client,
-                    circuit_breaker,
-                    spawner,
-                    record_worker_contact=lambda _when: None,
-                )
+        await _run_redispatch_sweep_with_open_circuit(caplog)
 
         async with session_factory() as session:
             relative = await get_thread(session, "relative-project")
@@ -455,44 +488,18 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
                 )
             await session.commit()
 
-        spawner = adopted_spawner()
-        circuit_breaker = WorkerCircuitBreaker(
-            failure_threshold=1, recovery_timeout=999.0
-        )
-        circuit_breaker.force_open()
-        worker_contacts: list[float] = []
-
-        async with httpx.AsyncClient(
-            base_url="http://127.0.0.1:9", timeout=0.2
-        ) as client:
-            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
-                await redispatch_reconciling_threads(
-                    client,
-                    circuit_breaker,
-                    spawner,
-                    record_worker_contact=worker_contacts.append,
-                )
+        (
+            worker_contacts,
+            circuit_open_warnings,
+            summaries,
+        ) = await _run_redispatch_sweep_and_classify_records(caplog)
 
         assert worker_contacts == []
 
-        circuit_open_warnings = [
-            r
-            for r in caplog.records
-            if r.name == _LOGGER_NAME
-            and r.levelno == logging.WARNING
-            and "Circuit breaker open" in r.getMessage()
-        ]
         # occurrence 1 and every Nth (5, 10) out of 12 -> exactly 3 full lines,
         # never one per thread.
         assert len(circuit_open_warnings) == 3
 
-        summaries = [
-            r
-            for r in caplog.records
-            if r.name == _LOGGER_NAME
-            and r.levelno == logging.INFO
-            and "Re-dispatch failure ladder" in r.getMessage()
-        ]
         assert len(summaries) == 1
         summary_message = summaries[0].getMessage()
         assert f"{thread_count} occurrences" in summary_message
@@ -523,42 +530,14 @@ async def test_redispatch_logs_once_for_a_single_failure_with_no_summary(
             )
             await session.commit()
 
-        spawner = adopted_spawner()
-        circuit_breaker = WorkerCircuitBreaker(
-            failure_threshold=1, recovery_timeout=999.0
-        )
-        circuit_breaker.force_open()
-        worker_contacts: list[float] = []
-
-        async with httpx.AsyncClient(
-            base_url="http://127.0.0.1:9", timeout=0.2
-        ) as client:
-            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
-                await redispatch_reconciling_threads(
-                    client,
-                    circuit_breaker,
-                    spawner,
-                    record_worker_contact=worker_contacts.append,
-                )
+        (
+            worker_contacts,
+            circuit_open_warnings,
+            summaries,
+        ) = await _run_redispatch_sweep_and_classify_records(caplog)
 
         assert worker_contacts == []
-
-        circuit_open_warnings = [
-            r
-            for r in caplog.records
-            if r.name == _LOGGER_NAME
-            and r.levelno == logging.WARNING
-            and "Circuit breaker open" in r.getMessage()
-        ]
         assert len(circuit_open_warnings) == 1
-
-        summaries = [
-            r
-            for r in caplog.records
-            if r.name == _LOGGER_NAME
-            and r.levelno == logging.INFO
-            and "Re-dispatch failure ladder" in r.getMessage()
-        ]
         assert summaries == []
     finally:
         await close_db()

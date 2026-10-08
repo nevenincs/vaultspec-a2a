@@ -104,29 +104,7 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
 ) -> None:
     """Worker scheduling ACK is not permission application truth."""
     thread_id = "permission-ack-only-thread"
-    request_id = await park_permission(checkpointer, thread_id=thread_id)
-    async with session_factory() as db:
-        await _create_current_thread(
-            db,
-            thread_id=thread_id,
-            status=ThreadStatus.INPUT_REQUIRED,
-        )
-        await record_permission_request(
-            db,
-            request_id=request_id,
-            thread_id=thread_id,
-            pause_reason_type="bash",
-            description="Allow the command?",
-            allowed_options=[
-                {
-                    "option_id": "allow_once",
-                    "name": "Allow once",
-                    "kind": "allow_once",
-                }
-            ],
-            tool_call="bash",
-        )
-        await db.commit()
+    request_id = await _parked_permission(session_factory, checkpointer, thread_id)
 
     # The real worker accepts and schedules the dispatch, but no graph is
     # registered for this thread. Executor therefore produces no first graph

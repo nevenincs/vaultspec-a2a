@@ -22,12 +22,6 @@ from ..subscribers import RelayHub
 from ._metric_reader import counter_total, metered_hook
 
 
-@pytest.fixture
-def aggregator() -> RelayHub:
-    """Return a fresh RelayHub for each test."""
-    return RelayHub()
-
-
 def _fill(aggregator: RelayHub, count: int, *, prefix: str = "client") -> None:
     for index in range(count):
         aggregator.add_subscriber(f"{prefix}-{index}")

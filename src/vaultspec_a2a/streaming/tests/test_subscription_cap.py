@@ -20,12 +20,6 @@ from ..subscribers import RelayHub
 from ._metric_reader import counter_total, metered_hook
 
 
-@pytest.fixture
-def aggregator() -> RelayHub:
-    """Return a fresh RelayHub for each test."""
-    return RelayHub()
-
-
 def _threads(start: int, count: int) -> list[str]:
     return [f"thread-{n}" for n in range(start, start + count)]
 

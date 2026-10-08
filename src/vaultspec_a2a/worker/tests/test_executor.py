@@ -603,6 +603,31 @@ class TestIngestGating:
 # ---------------------------------------------------------------------------
 
 
+async def _refusal_record_for(
+    checkpointer: AsyncSqliteSaver,
+    caplog: pytest.LogCaptureFixture,
+    req: DispatchRequest,
+) -> logging.LogRecord:
+    """Dispatch *req* with no accepted graph authority and return its refusal record.
+
+    Shared by the ingest and resume variants of the no-authority refusal test,
+    which differ only in the request they build and which field they check.
+    """
+    bridge = _make_bridge()
+    try:
+        executor = Executor(checkpointer=checkpointer, bridge=bridge)
+        with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.worker.executor"):
+            await executor.handle_dispatch(req)
+        return next(
+            rec
+            for rec in caplog.records
+            if "Refusing terminal settlement without accepted graph authority"
+            in rec.message
+        )
+    finally:
+        await bridge.close()
+
+
 class TestHandleDispatch:
     """Verify dispatch routing exercises real code paths."""
 
@@ -759,69 +784,39 @@ class TestHandleDispatch:
         self, caplog: pytest.LogCaptureFixture, checkpointer: AsyncSqliteSaver
     ) -> None:
         """An ingest lacking accepted graph authority cannot settle a run."""
-        bridge = _make_bridge()
-        try:
-            executor = Executor(checkpointer=checkpointer, bridge=bridge)
-            req = DispatchRequest(
-                action="ingest",
-                workspace_root=_WORKSPACE,
-                thread_id="t-no-graph",
-                content="Hello",
-                recursion_limit=25,
-                model_assignment=_current_assignment(),
-            )
-            with caplog.at_level(
-                logging.WARNING, logger="vaultspec_a2a.worker.executor"
-            ):
-                await executor.handle_dispatch(req)
-
-            record = next(
-                rec
-                for rec in caplog.records
-                if "Refusing terminal settlement without accepted graph authority"
-                in rec.message
-            )
-            assert record.__dict__["thread_id"] == "t-no-graph"
-            assert record.__dict__["dispatch_id"] == req.dispatch_id
-            assert record.__dict__["dispatch_action"] == "ingest"
-            assert record.__dict__["worker_id"] == "test-worker"
-            assert record.__dict__["action"] == "dispatch_rejected_without_authority"
-        finally:
-            await bridge.close()
+        req = DispatchRequest(
+            action="ingest",
+            workspace_root=_WORKSPACE,
+            thread_id="t-no-graph",
+            content="Hello",
+            recursion_limit=25,
+            model_assignment=_current_assignment(),
+        )
+        record = await _refusal_record_for(checkpointer, caplog, req)
+        assert record.__dict__["thread_id"] == "t-no-graph"
+        assert record.__dict__["dispatch_id"] == req.dispatch_id
+        assert record.__dict__["dispatch_action"] == "ingest"
+        assert record.__dict__["worker_id"] == "test-worker"
+        assert record.__dict__["action"] == "dispatch_rejected_without_authority"
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_resume_without_graph_authority_logs_refusal(
         self, caplog: pytest.LogCaptureFixture, checkpointer: AsyncSqliteSaver
     ) -> None:
         """A resume lacking accepted graph authority cannot settle a run."""
-        bridge = _make_bridge()
-        try:
-            executor = Executor(checkpointer=checkpointer, bridge=bridge)
-            req = DispatchRequest(
-                action="resume",
-                thread_id="t-no-graph",
-                option_id="opt-1",
-                recursion_limit=25,
-                model_assignment=_current_assignment(),
-            )
-            with caplog.at_level(
-                logging.WARNING, logger="vaultspec_a2a.worker.executor"
-            ):
-                await executor.handle_dispatch(req)
-
-            record = next(
-                rec
-                for rec in caplog.records
-                if "Refusing terminal settlement without accepted graph authority"
-                in rec.message
-            )
-            assert record.__dict__["thread_id"] == "t-no-graph"
-            assert record.__dict__["dispatch_id"] == req.dispatch_id
-            assert record.__dict__["dispatch_action"] == "resume"
-            assert record.__dict__["worker_id"] == "test-worker"
-            assert record.__dict__["action"] == "dispatch_rejected_without_authority"
-        finally:
-            await bridge.close()
+        req = DispatchRequest(
+            action="resume",
+            thread_id="t-no-graph",
+            option_id="opt-1",
+            recursion_limit=25,
+            model_assignment=_current_assignment(),
+        )
+        record = await _refusal_record_for(checkpointer, caplog, req)
+        assert record.__dict__["thread_id"] == "t-no-graph"
+        assert record.__dict__["dispatch_id"] == req.dispatch_id
+        assert record.__dict__["dispatch_action"] == "resume"
+        assert record.__dict__["worker_id"] == "test-worker"
+        assert record.__dict__["action"] == "dispatch_rejected_without_authority"
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_ingest_prevents_concurrent_same_thread(

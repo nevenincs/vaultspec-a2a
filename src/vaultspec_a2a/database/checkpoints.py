@@ -302,6 +302,12 @@ async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
         # serializer, so the posture is set on the saver it yields; the
         # saver derives nothing from ``serde`` at construction.
         checkpointer.serde = strict_checkpoint_serde()
+        # Before ``setup()``, because setup's DDL is the saver's FIRST WRITE and
+        # the configured lock wait has to be in force for it. Applied after, the
+        # connection spent that write at whatever default the driver opened it
+        # with, so an operator who widened or narrowed the budget had no say
+        # over the one write that creates the store.
+        await _apply_sqlite_concurrency_pragmas(checkpointer)
         # Desktop profile boot must not mutate schema: ``setup()`` creates the
         # checkpointer tables, so it is suppressed when the profile is armed.
         # The staged-generation migration entrypoint runs setup instead, and
@@ -315,7 +321,6 @@ async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
             checkpointer.is_setup = True
         else:
             await checkpointer.setup()
-        await _apply_sqlite_concurrency_pragmas(checkpointer)
         yield checkpointer
 
 

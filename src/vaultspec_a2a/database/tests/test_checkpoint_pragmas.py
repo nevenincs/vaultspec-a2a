@@ -139,6 +139,48 @@ async def test_installer_waits_for_the_configured_busy_timeout(
 
 
 @pytest.mark.asyncio
+async def test_the_saver_waits_the_configured_timeout_on_its_first_write(
+    runtime_dir: Path,
+) -> None:
+    """The configured budget covers the saver's FIRST write, not only later ones.
+
+    ``setup()``'s DDL is the first thing the saver writes, and the posture was
+    applied after it: the connection spent that write at the lock wait the
+    driver happened to open it with. Timed against a real held write lock the
+    saver waited the stdlib's five seconds while the configured budget was
+    300ms, so an operator widening or narrowing the budget had no say over the
+    one write that creates the store.
+    """
+    checkpoint = runtime_dir / "first-write-contention.db"
+    # A real occupant of the file holding the write lock with a real write
+    # behind it. The store exists and is already in WAL, but holds none of the
+    # saver's tables, so ``setup()`` has to take the lock to create them.
+    holder = sqlite3.connect(str(checkpoint), isolation_level=None, timeout=10.0)
+    try:
+        holder.execute("PRAGMA journal_mode=WAL")
+        holder.execute("CREATE TABLE occupied (i INTEGER)")
+        holder.execute("PRAGMA busy_timeout=10000")
+        holder.execute("BEGIN IMMEDIATE")
+        holder.execute("INSERT INTO occupied VALUES (1)")
+        with _settings_override(
+            checkpoint_database_url=f"sqlite+aiosqlite:///{checkpoint}",
+            sqlite_busy_timeout_ms=300,
+        ):
+            started = time.monotonic()
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                async with open_checkpointer():
+                    pass
+            elapsed = time.monotonic() - started
+    finally:
+        holder.rollback()
+        holder.close()
+
+    # Lower bound: it waited, so a budget was in force at all. Upper bound: the
+    # configured 300ms rather than the driver's five seconds.
+    assert 0.2 <= elapsed < 3.0, elapsed
+
+
+@pytest.mark.asyncio
 async def test_read_only_connection_carries_the_configured_busy_timeout(
     runtime_dir: Path,
 ) -> None:

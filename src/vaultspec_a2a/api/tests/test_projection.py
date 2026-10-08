@@ -1,6 +1,6 @@
 """Tests for repair-aware checkpoint projection helpers."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
@@ -17,12 +17,19 @@ from ...control.projection import (
 )
 from ...database import (
     ThreadExecutionStateModel,
+    create_control_action,
     create_thread,
     record_permission_request,
     record_thread_execution_state,
 )
 from ...tests._write_authority import make_test_write_authority
-from ...thread.enums import DegradedReason, RepairStatus, ThreadStatus
+from ...thread.enums import (
+    ControlActionResultStatus,
+    ControlActionType,
+    DegradedReason,
+    RepairStatus,
+    ThreadStatus,
+)
 from ...thread.snapshots import (
     CheckpointProjection,
     ExecutionStateProjection,
@@ -612,6 +619,65 @@ async def test_a_withheld_permission_row_is_not_also_reported_as_absent(
         DegradedReason.CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW
         not in reconciled.degraded_reasons
     )
+
+
+@pytest.mark.asyncio
+async def test_report_queued_messages_false_skips_the_queue_depth_read(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A caller whose served shape has no field for it skips the read.
+
+    The listing summary never had a ``queued_messages`` field to put this
+    in, so the per-row read ran for a number nothing downstream served. With
+    the flag off, the field stays at its unread default even though a real
+    continuation is waiting; with it on (the default), the real count comes
+    through.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-queued-continuation",
+        )
+        action = await create_control_action(
+            session,
+            thread_id=thread.id,
+            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+            idempotency_key="queued-continuation-1",
+            dispatch_id="dispatch-queued-continuation-1",
+            recovery_deadline_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+        # Mutated in place after the accepted-row insert above validated the
+        # recovery deadline it shares with every dispatchable outcome - the
+        # same route the continuation-queue schema tests seed a queued row
+        # through, since create_control_action has no queue_position
+        # parameter of its own.
+        action.result_status = ControlActionResultStatus.QUEUED.value
+        action.queue_position = 1
+        await session.commit()
+
+        skipped = await enrich_snapshot_from_durable_state(
+            session,
+            thread=thread,
+            snapshot=ThreadStateSnapshot(
+                thread_id=thread.id,
+                status=ThreadStatus(thread.status),
+                last_sequence=0,
+            ),
+            report_queued_messages=False,
+        )
+        read = await enrich_snapshot_from_durable_state(
+            session,
+            thread=thread,
+            snapshot=ThreadStateSnapshot(
+                thread_id=thread.id,
+                status=ThreadStatus(thread.status),
+                last_sequence=0,
+            ),
+        )
+
+    assert skipped.queued_messages == 0
+    assert read.queued_messages == 1
 
 
 def test_apply_execution_state_projection_merges_normalized_fields() -> None:

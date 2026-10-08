@@ -8,17 +8,23 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 
     from langchain_core.runnables import RunnableConfig
-    from langgraph.checkpoint.base import CheckpointTuple
+    from langgraph.checkpoint.base import (
+        ChannelVersions,
+        Checkpoint,
+        CheckpointMetadata,
+        CheckpointTuple,
+    )
     from langgraph.checkpoint.serde.base import SerializerProtocol
 
 from ..control.config import settings
@@ -26,6 +32,7 @@ from ..domain_config import domain_config
 from ..thread import checkpoint_tuple_id
 from ..utils.coercion import coerce_object_mapping
 from .checkpoint_schema import checkpoint_pragmas
+from .session import retry_contended_write
 
 logger = logging.getLogger(__name__)
 
@@ -195,19 +202,102 @@ def strict_checkpoint_serde() -> SerializerProtocol:
 # lets ty verify structural compatibility without manual casting.
 Checkpointer = BaseCheckpointSaver[Any]
 
+_CHECKPOINT_STORE = "the checkpoint store"
+"""The store a contention refusal from the checkpoint saver names."""
+
+
+class _ContendedCheckpointSaver(AsyncSqliteSaver):
+    """The SQLite saver with the store's write-contention policy on its writes.
+
+    The saver it extends lets a refused write out as the bare driver error and
+    leaves its own transaction open behind it. Both halves are hazards, and the
+    second is the worse one.
+
+    The error alone fails a whole run over a condition the store recovers from by
+    itself - another writer held the lock for a moment - where every ``/v1`` verb
+    already refuses the same condition as retryable. So each write is retried
+    under the one policy both stores share.
+
+    The open transaction outlives the write that left it. The connection is
+    shared by every read and write this saver makes, so the next READ joins that
+    transaction and pins a write-ahead-log snapshot nothing ever commits: the log
+    can no longer be checkpointed, and every later write on the connection is
+    refused the instant it asks, without ``busy_timeout`` being consulted at all.
+    One moment of contention becomes a store this process can never write again.
+    :mod:`vaultspec_a2a.database.checkpoint_retention` rolls its own prune
+    statements back for exactly that reason; these are the saver's own writes
+    under the same discipline.
+    """
+
+    async def _retry[T](self, attempt: Callable[[], Awaitable[T]]) -> T:
+        return await retry_contended_write(
+            attempt, reset=self._discard_refused_transaction, store=_CHECKPOINT_STORE
+        )
+
+    async def _discard_refused_transaction(self) -> None:
+        """Leave the shared connection with no transaction after a refusal.
+
+        Taken under the saver's own lock, which is what makes the rollback safe:
+        every write the saver makes is serialised by that lock, so inside it
+        there is no other write's transaction to discard. Shielded because a
+        cancellation that skipped the rollback would leave behind exactly the
+        pinned snapshot this exists to prevent.
+        """
+        async with self.lock:
+            await asyncio.shield(self.conn.rollback())
+
+    @override
+    async def aput(
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+    ) -> RunnableConfig:
+        """Save a checkpoint, retrying while a competing writer refuses it."""
+
+        async def attempt() -> RunnableConfig:
+            return await AsyncSqliteSaver.aput(
+                self, config, checkpoint, metadata, new_versions
+            )
+
+        return await self._retry(attempt)
+
+    @override
+    async def aput_writes(
+        self,
+        config: RunnableConfig,
+        writes: Sequence[tuple[str, Any]],
+        task_id: str,
+        task_path: str = "",
+    ) -> None:
+        """Save a task's writes, retrying while a competing writer refuses them."""
+
+        async def attempt() -> None:
+            await AsyncSqliteSaver.aput_writes(self, config, writes, task_id, task_path)
+
+        await self._retry(attempt)
+
+    @override
+    async def adelete_thread(self, thread_id: str) -> None:
+        """Delete a run's checkpoints, retrying while a writer refuses the delete."""
+
+        async def attempt() -> None:
+            await AsyncSqliteSaver.adelete_thread(self, thread_id)
+
+        await self._retry(attempt)
+
 
 @asynccontextmanager
 async def open_checkpointer() -> AsyncGenerator[Checkpointer]:
     """Open the SQLite checkpoint store with the concurrency posture it needs."""
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-
     connection = settings.checkpoint_connection_string
     if connection != ":memory:":
         # The store's directory is part of the state layout, not something an
         # operator creates first - the same courtesy the application database
         # engine extends to its own file.
         settings.prepare_state_dir(Path(connection).parent)
-    async with AsyncSqliteSaver.from_conn_string(connection) as checkpointer:
+    async with _ContendedCheckpointSaver.from_conn_string(connection) as checkpointer:
         # ``from_conn_string`` owns the connection but forwards no
         # serializer, so the posture is set on the saver it yields; the
         # saver derives nothing from ``serde`` at construction.

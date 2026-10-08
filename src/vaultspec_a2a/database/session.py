@@ -45,6 +45,7 @@ __all__ = [
     "init_db",
     "inspect_sqlite_database",
     "resolve_session_factory",
+    "retry_contended_write",
     "retry_write_contention",
     "seat_sqlite_posture",
     "verify_wal_mode",
@@ -146,12 +147,21 @@ async def begin_write_transaction(session: AsyncSession) -> None:
 _WRITE_CONTENTION_ATTEMPTS = 4
 _WRITE_CONTENTION_BACKOFF_SECONDS = 0.05
 
+#: The store named in a contention refusal when the caller names none.
+_APPLICATION_STORE = "the application store"
 
-def _is_write_contention(exc: OperationalError) -> bool:
-    """Whether SQLite refused the statement because another writer holds a lock."""
+
+def _is_write_contention(exc: BaseException) -> bool:
+    """Whether SQLite refused the statement because another writer holds a lock.
+
+    Accepts the driver error either bare or wrapped: a pooled session raises
+    SQLAlchemy's ``OperationalError`` around it, while a connection no engine
+    owns - the LangGraph checkpoint saver's - raises ``sqlite3``'s own.
+    """
+    driver_error = exc.orig if isinstance(exc, OperationalError) else exc
     return (
-        isinstance(exc.orig, sqlite3.OperationalError)
-        and "locked" in str(exc.orig).lower()
+        isinstance(driver_error, sqlite3.OperationalError)
+        and "locked" in str(driver_error).lower()
     )
 
 
@@ -164,27 +174,41 @@ class WriteContentionError(RuntimeError):
     retryable rather than report an internal failure. Nothing was applied.
     """
 
-    def __init__(self, attempts: int) -> None:
+    def __init__(self, attempts: int, *, store: str = _APPLICATION_STORE) -> None:
         self.attempts = attempts
+        self.store = store
         super().__init__(
-            f"the application store held its write lock against this write for "
+            f"{store} held its write lock against this write for "
             f"all {attempts} attempts; nothing was applied"
         )
 
 
-async def retry_write_contention[T](
-    session: AsyncSession,
+async def retry_contended_write[T](
     attempt: Callable[[], Awaitable[T]],
     *,
-    after_rollback: Callable[[], Awaitable[T | None]] | None = None,
+    reset: Callable[[], Awaitable[None]],
+    settled: Callable[[], Awaitable[T | None]] | None = None,
+    store: str = _APPLICATION_STORE,
 ) -> T:
     """Run one write *attempt*, re-running it while SQLite refuses it as contended.
 
-    Each refusal rolls *session* back, so the next attempt opens a transaction of
-    its own and re-reads whatever it decides on. *after_rollback* runs after each
-    rollback and may settle the call with a result of its own instead of another
-    attempt: the durable winner of a race the refused attempt lost. An error that
-    is not write contention propagates at once as itself.
+    The one declaration of this store's write-contention policy: how many
+    attempts a single write gets, how the pauses between them grow, and which
+    driver errors count as contention at all. Every SQLite connection this
+    package writes through retries here - the application engine's pooled
+    sessions and the checkpoint saver's own connection alike - so the two cannot
+    come to disagree about what a contended store means.
+
+    *reset* runs after every refusal and must leave the connection with NO
+    transaction open. That is the load-bearing half: a deferred SQLite
+    transaction left behind by a refusal is joined by the connection's next
+    statement, and a write inside a transaction that has already read is refused
+    at once without ``busy_timeout`` being consulted at all - so a retry on an
+    unreset connection cannot succeed however long the lock has been free.
+
+    *settled* runs after each reset and may end the call with a result of its own
+    instead of another attempt: the durable winner of a race the refused attempt
+    lost. An error that is not write contention propagates at once as itself.
 
     Raises:
         WriteContentionError: When every attempt was refused as contended. The
@@ -196,21 +220,44 @@ async def retry_write_contention[T](
     while True:
         try:
             return await attempt()
-        except OperationalError as exc:
+        except Exception as exc:
             if not _is_write_contention(exc):
                 raise
             if retries + 1 >= _WRITE_CONTENTION_ATTEMPTS:
                 # The refusal leaves nothing open: the verb that serves it reads
                 # the run again to describe it.
-                await session.rollback()
-                raise WriteContentionError(_WRITE_CONTENTION_ATTEMPTS) from exc
-        await session.rollback()
-        if after_rollback is not None:
-            settled = await after_rollback()
-            if settled is not None:
-                return settled
+                await reset()
+                raise WriteContentionError(
+                    _WRITE_CONTENTION_ATTEMPTS, store=store
+                ) from exc
+        await reset()
+        if settled is not None:
+            decided = await settled()
+            if decided is not None:
+                return decided
         retries += 1
         await asyncio.sleep(_WRITE_CONTENTION_BACKOFF_SECONDS * retries)
+
+
+async def retry_write_contention[T](
+    session: AsyncSession,
+    attempt: Callable[[], Awaitable[T]],
+    *,
+    after_rollback: Callable[[], Awaitable[T | None]] | None = None,
+) -> T:
+    """Retry one contended *attempt* on *session*, rolling it back between tries.
+
+    :func:`retry_contended_write` bound to a pooled ORM session: each refusal
+    rolls *session* back, so the next attempt opens a transaction of its own and
+    re-reads whatever it decides on, and *after_rollback* is that function's
+    ``settled`` hook.
+
+    Raises:
+        WriteContentionError: When every attempt was refused as contended.
+    """
+    return await retry_contended_write(
+        attempt, reset=session.rollback, settled=after_rollback
+    )
 
 
 def configure_sqlite_transactions(engine: AsyncEngine) -> None:

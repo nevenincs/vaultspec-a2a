@@ -238,6 +238,56 @@ def _stored_money(db_path: Path) -> list[int]:
         conn.close()
 
 
+def _insert_answered_permission_row(db_path: Path) -> None:
+    """Write one answered request carrying the retired copies of its answer."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT INTO permission_requests (request_id, thread_id,"
+            " pause_reason_type, tool_call, description, allowed_options_json,"
+            " request_status, response_option_id, idempotency_key, created_at,"
+            " responded_at)"
+            " VALUES ('perm-answer-copy','answer-copy-run','bash','bash',"
+            "'Allow action?','[{\"optionId\":\"allow_once\"}]',"
+            "'answered_pending_apply','allow_once',"
+            "'permission-response:perm-answer-copy:0','2026-10-08 00:00:00',"
+            "'2026-10-08 00:00:01')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _permission_request_lifecycle(db_path: Path) -> tuple[str, str, str]:
+    """Return the stored request's offer, state and answered instant."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT allowed_options_json, request_status, responded_at"
+            " FROM permission_requests WHERE request_id = ?",
+            ("perm-answer-copy",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "the permission request did not survive the migration"
+    return (str(row[0]), str(row[1]), str(row[2]))
+
+
+def _restored_answer_copy(db_path: Path) -> tuple[str | None, str | None]:
+    """Return what a downgraded store holds in the restored answer columns."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT response_option_id, idempotency_key FROM permission_requests"
+            " WHERE request_id = ?",
+            ("perm-answer-copy",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "the permission request did not survive the downgrade"
+    return (row[0], row[1])
+
+
 def _stored_sql(db_path: Path, kind: str, name: str) -> str:
     conn = sqlite3.connect(str(db_path))
     try:
@@ -431,6 +481,45 @@ class TestAlembicUpgradeDowngrade:
 
         command.upgrade(cfg, "0028")
         assert "estimated_cost" not in _get_columns(db, "cost_tracking")
+
+    def test_the_answer_copy_columns_are_dropped_and_restored(
+        self, runtime_dir: Path
+    ) -> None:
+        """0029 retires the request row's copy of its answer and steps back.
+
+        The two columns held a second copy of a decision the accepted response
+        action and the decision log already own, and nothing read them. The
+        request's OWN record - the offer it made, the state of the ask and when
+        it was answered - must survive in both directions: a schema operation may
+        not destroy the lifecycle a pending-permission surface reads.
+
+        The downgrade restores exactly the storage 0002 installed, nullable and
+        defaultless, and holds NULL rather than back-filling a value from the
+        response journal it never removed anything from.
+        """
+        db = runtime_dir / "permission-answer-copy.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0028")
+        retired = {"response_option_id", "idempotency_key"}
+        assert retired <= _get_columns(db, "permission_requests")
+        _insert_answered_permission_row(db)
+        lifecycle = _permission_request_lifecycle(db)
+
+        command.upgrade(cfg, "0029")
+        assert not (retired & _get_columns(db, "permission_requests"))
+        assert _permission_request_lifecycle(db) == lifecycle
+
+        command.downgrade(cfg, "0028")
+        for column in sorted(retired):
+            assert _column_declaration(db, "permission_requests", column) == (
+                "VARCHAR",
+                0,
+            ), column
+        assert _permission_request_lifecycle(db) == lifecycle
+        assert _restored_answer_copy(db) == (None, None)
+
+        command.upgrade(cfg, "0029")
+        assert not (retired & _get_columns(db, "permission_requests"))
 
     def test_upgrade_head_creates_all_app_tables(self, runtime_dir: Path) -> None:
         db = runtime_dir / "test.db"

@@ -52,12 +52,7 @@ async def test_a_submitted_response_does_not_release_a_still_parked_checkpoint(
     )
 
     async with session_factory() as session:
-        await record_permission_response_submission(
-            session,
-            request_id=request_id,
-            option_id="allow_once",
-            idempotency_key="submitted-not-applied",
-        )
+        await record_permission_response_submission(session, request_id=request_id)
         await session.commit()
 
     async with session_factory() as session:

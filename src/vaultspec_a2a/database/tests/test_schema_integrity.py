@@ -23,6 +23,8 @@ each one a decision that would otherwise survive only as a comment:
   repeated in the test.
 * That the accounting table records provider-reported counts and nothing
   priced or derived, in the model and in the migrated database alike.
+* That the permission request table records the request's lifecycle and nothing
+  about the answer, which the response journal owns.
 
 Everything drives real SQLite databases, the real revision chain, the real
 Pydantic models, and the real stream catalog.
@@ -260,6 +262,69 @@ class TestAccountingRecordsOnlyWhatAProviderReported:
         assert migrated == set(_ACCOUNTING_COLUMNS), (
             "the migrated cost_tracking table is no longer exactly the "
             f"provider-reported record: {sorted(migrated ^ _ACCOUNTING_COLUMNS)}"
+        )
+
+
+#: Every column ``permission_requests`` is allowed to carry: the request's
+#: identity, the run it belongs to, the question as it was asked, the lifecycle
+#: state of the ask, and the three instants that state moved through.
+_PERMISSION_REQUEST_COLUMNS = frozenset(
+    {
+        "request_id",
+        "thread_id",
+        "pause_reason_type",
+        "tool_call",
+        "description",
+        "allowed_options_json",
+        "request_status",
+        "created_at",
+        "responded_at",
+        "applied_at",
+    }
+)
+
+
+class TestThePermissionRequestRowHoldsNoCopyOfTheAnswer:
+    """``permission_requests`` records the ask; the answer lives elsewhere.
+
+    Two columns here used to hold a second copy of a decision: the option the
+    responder chose and the journal key its response action was filed under. The
+    settlement reads neither - it reads the answer off the frozen envelope of the
+    accepted response action, deliberately, so a row rewritten after acceptance
+    cannot change which option a run is settled under - and ``permission_logs``
+    is the durable record of the decision itself. What remained was write-only
+    storage of a fact with an owner elsewhere: a reader that trusted it could be
+    told a different answer than the one the run was resumed with.
+
+    Asserted as an EXACT column set rather than as the absence of two names, so a
+    second copy re-added under any spelling fails here. Asserted against the
+    migrated database as well as the model, because the model alone cannot prove
+    the columns left the stores that already have them.
+    """
+
+    def test_the_model_declares_only_the_request_lifecycle(self) -> None:
+        """The mapped table carries no column about the answer."""
+        declared = set(Base.metadata.tables["permission_requests"].columns.keys())
+
+        assert declared == set(_PERMISSION_REQUEST_COLUMNS), (
+            "permission_requests' mapped columns are no longer exactly the "
+            f"request's own record: {sorted(declared ^ _PERMISSION_REQUEST_COLUMNS)}"
+        )
+
+    def test_the_migrated_table_declares_only_the_request_lifecycle(
+        self, migrated_connection: Connection
+    ) -> None:
+        """Head agrees, so the chain dropped them rather than stopping writing."""
+        migrated = {
+            column["name"]
+            for column in inspect(migrated_connection).get_columns(
+                "permission_requests"
+            )
+        }
+
+        assert migrated == set(_PERMISSION_REQUEST_COLUMNS), (
+            "the migrated permission_requests table is no longer exactly the "
+            f"request's own record: {sorted(migrated ^ _PERMISSION_REQUEST_COLUMNS)}"
         )
 
 

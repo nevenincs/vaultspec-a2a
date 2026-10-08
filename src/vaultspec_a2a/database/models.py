@@ -355,7 +355,15 @@ class PermissionLogModel(Base):
 
 
 class PermissionRequestModel(Base):
-    """Durable record of a pending or resolved permission request."""
+    """Durable record of a permission request's lifecycle, never of its answer.
+
+    The question as it was asked, and how far the ask has got. What was ANSWERED
+    is not here: the settlement reads the chosen option off the frozen envelope of
+    the accepted response action, so that a row rewritten after acceptance cannot
+    change which option a run is settled under, and ``permission_logs`` is the
+    durable record of the decision. A copy of either here would be a second
+    source for a fact that already has an owner.
+    """
 
     __tablename__ = "permission_requests"
 
@@ -366,8 +374,6 @@ class PermissionRequestModel(Base):
     description: Mapped[str] = mapped_column(Text)
     allowed_options_json: Mapped[str] = mapped_column(Text)
     request_status: Mapped[str] = mapped_column(default=PermissionRequestStatus.PENDING)
-    response_option_id: Mapped[str | None] = mapped_column(default=None)
-    idempotency_key: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     responded_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
     applied_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)

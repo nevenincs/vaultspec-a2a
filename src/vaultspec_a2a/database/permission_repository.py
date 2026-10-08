@@ -107,8 +107,6 @@ async def record_permission_request(
         existing.allowed_options_json = allowed_options_json
         existing.tool_call = tool_call
         existing.request_status = PermissionRequestStatus.PENDING.value
-        existing.response_option_id = None
-        existing.idempotency_key = None
         existing.responded_at = None
         existing.applied_at = None
         await session.flush()
@@ -300,14 +298,17 @@ async def record_permission_response_submission(
     session: AsyncSession,
     *,
     request_id: str,
-    option_id: str,
-    idempotency_key: str,
 ) -> PermissionRequestModel | None:
+    """Move a request to awaiting-application, because an answer was accepted.
+
+    The row records that the ask has been answered and when, never WHAT was
+    answered: the accepted response action's frozen envelope is the one record of
+    the chosen option, and ``permission_logs`` is the durable record of the
+    decision. ``None`` says the request has no row.
+    """
     permission = await session.get(PermissionRequestModel, request_id)
     if permission is None:
         return None
-    permission.response_option_id = option_id
-    permission.idempotency_key = idempotency_key
     permission.request_status = PermissionRequestStatus.ANSWERED_PENDING_APPLY.value
     permission.responded_at = utcnow()
     await session.flush()
@@ -343,8 +344,6 @@ async def reopen_reasked_permission_request(
         return None
     permission.allowed_options_json = json.dumps(allowed_options)
     permission.request_status = PermissionRequestStatus.PENDING.value
-    permission.response_option_id = None
-    permission.idempotency_key = None
     permission.responded_at = None
     permission.applied_at = None
     await session.flush()
@@ -378,8 +377,6 @@ async def reset_permission_response_submission(
     if permission is None:
         return None
     permission.request_status = PermissionRequestStatus.PENDING.value
-    permission.response_option_id = None
-    permission.idempotency_key = None
     permission.responded_at = None
     await session.flush()
     return permission

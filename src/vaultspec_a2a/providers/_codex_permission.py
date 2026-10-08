@@ -49,6 +49,7 @@ from ._tool_policy import ToolPermissionRequest, decide
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "CANCEL_ACTION",
     "DECLINE_ACTION",
     "ELICITATION_METHOD",
     "CodexPermissionRung",

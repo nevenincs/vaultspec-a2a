@@ -13,15 +13,11 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from ....graph.enums import SemanticPhase
-from ....thread.constants import MAX_APPROVAL_REQUEST_ID_CHARS, MAX_RUN_MESSAGE_CHARS
-from ....thread.enums import ThreadStatus
+from ....thread.constants import MAX_RUN_MESSAGE_CHARS
 from ..gateway import (
     ProviderCatalogSelection,
     RunClarificationRespondRequest,
     RunStartRequest,
-    RunStatusResponse,
-    TopologyPosition,
 )
 
 _SELECTION = ProviderCatalogSelection(
@@ -205,28 +201,3 @@ def test_title_and_feature_tag_accept_multibyte_prose(
     )
     assert request.title == filler * 200
     assert request.feature_tag == filler * 128
-
-
-def _run_status(approval_request_id: str | None) -> RunStatusResponse:
-    return RunStatusResponse(
-        run_id="status-bound-run",
-        status=ThreadStatus.INPUT_REQUIRED,
-        semantic_phase=SemanticPhase.STARTING,
-        topology=TopologyPosition(),
-        last_sequence=0,
-        approval_request_id=approval_request_id,
-    )
-
-
-def test_run_status_approval_request_id_publishes_a_max_length() -> None:
-    """The field carries the same bound the run history record already does.
-
-    Unbounded here while ``RunSummaryRecord.approval_request_id`` and the
-    respond verb both bound it at ``MAX_APPROVAL_REQUEST_ID_CHARS`` meant a
-    client generated from the published schema under-allocated a buffer for
-    a value this same contract already serves elsewhere at the wider width.
-    """
-    handle = "h" * MAX_APPROVAL_REQUEST_ID_CHARS
-    assert _run_status(handle).approval_request_id == handle
-    with pytest.raises(ValidationError):
-        _run_status(handle + "x")

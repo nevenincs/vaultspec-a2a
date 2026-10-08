@@ -5563,8 +5563,7 @@
           "approval_request_id": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 256
+                "type": "string"
               },
               {
                 "type": "null"

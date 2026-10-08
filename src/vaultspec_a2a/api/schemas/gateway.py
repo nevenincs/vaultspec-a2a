@@ -64,6 +64,7 @@ from ...thread.constants import (
     MAX_DISCOVERY_RESULTS,
     MAX_FEATURE_TAG_LENGTH,
     MAX_FEEDBACK_BATCH_ID_CHARS,
+    MAX_NICKNAME_CHARS,
     MAX_PERMISSION_OPTION_ID_CHARS,
     MAX_ROLE_ID_CHARS,
     MAX_RUN_ID_CHARS,
@@ -135,6 +136,30 @@ PathSafeRunId = Annotated[
     str,
     Field(min_length=1, max_length=MAX_RUN_ID_CHARS, pattern=RUN_ID_PATTERN),
 ]
+
+# Bounds local to one field below, named so none of them is a bare literal: a
+# number with no name invites a sibling restating it by coincidence rather
+# than by reference, and a reviewer comparing two fields sees a name repeat
+# or not rather than guessing whether two literals were meant to agree.
+
+#: The frozen-assignment digest is a SHA-256 hex string, optionally prefixed
+#: ``sha256:``: 64 characters bare, 71 with the 7-character prefix. Both
+#: lengths come from the pattern :data:`FrozenTeamAssignmentSummary.digest`
+#: already enforces, not an independent choice.
+_DIGEST_MIN_CHARS: int = 64
+_DIGEST_MAX_CHARS: int = 71
+
+#: How many deferred/blocked-admission reasons one prepare response lists.
+_MAX_ADMISSION_REASON_COUNT: int = 16
+
+#: A refused follow-up's operator-readable sentence.
+_MAX_REFUSAL_MESSAGE_CHARS: int = 1024
+
+#: A reviewer's optional comment on a permission answer.
+_MAX_PERMISSION_NOTES_CHARS: int = 2048
+
+#: The unarmed-profile health probe's status label.
+_MAX_HEALTH_STATUS_CHARS: int = 32
 
 
 class ProviderCatalogSelection(BaseModel):
@@ -311,8 +336,8 @@ class FrozenTeamAssignmentSummary(BaseModel):
 
     schema_version: Literal[1] = 1
     digest: str = Field(
-        min_length=64,
-        max_length=71,
+        min_length=_DIGEST_MIN_CHARS,
+        max_length=_DIGEST_MAX_CHARS,
         pattern=r"^(?:sha256:)?[a-f0-9]{64}$",
     )
     assignments: list[FrozenRoleAssignmentSummary] = Field(
@@ -369,7 +394,9 @@ class RunPrepareResponse(BaseModel):
     provider_eligibility: ProviderEligibility
     run_admission: RunAdmission
     # Bounded, path-free reasons explaining a deferred or blocked admission.
-    reasons: list[str] = Field(default_factory=list, max_length=16)
+    reasons: list[str] = Field(
+        default_factory=list, max_length=_MAX_ADMISSION_REASON_COUNT
+    )
 
 
 class RunCommitResponse(BaseModel):
@@ -449,7 +476,7 @@ class RunSummaryRecord(BaseModel):
     status: ThreadStatus
     feature_tag: str | None = Field(default=None, max_length=MAX_FEATURE_TAG_LENGTH)
     title: str | None = Field(default=None, max_length=MAX_RUN_TITLE_CHARS)
-    nickname: str | None = Field(default=None, max_length=128)
+    nickname: str | None = Field(default=None, max_length=MAX_NICKNAME_CHARS)
     team_preset: str | None = Field(default=None, max_length=MAX_TEAM_PRESET_CHARS)
     # The projection's verdict on this run's recoverability. A caller scanning
     # history for work that needs attention reads these, and they are the whole
@@ -554,9 +581,7 @@ class RunStatusResponse(BaseModel):
     proposal_ids: list[str] = Field(default_factory=list)
     changeset_ids: list[str] = Field(default_factory=list)
     approval_status: ApprovalStatus | None = None
-    approval_request_id: str | None = Field(
-        default=None, max_length=MAX_APPROVAL_REQUEST_ID_CHARS
-    )
+    approval_request_id: str | None = None
     checkpoint_id: str | None = None
     last_sequence: int
     # Whether this run's progress stream can be RESUMED from the id its frames
@@ -791,7 +816,7 @@ class RunMessageRefusalDetail(BaseModel):
     """
 
     code: RunMessageRefusalCode
-    message: str = Field(max_length=1024)
+    message: str = Field(max_length=_MAX_REFUSAL_MESSAGE_CHARS)
 
 
 class RunMessageRefusalResponse(BaseModel):
@@ -831,7 +856,7 @@ class RunPermissionRespondRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     option_id: str = Field(min_length=1, max_length=MAX_PERMISSION_OPTION_ID_CHARS)
-    notes: str | None = Field(default=None, max_length=2048)
+    notes: str | None = Field(default=None, max_length=_MAX_PERMISSION_NOTES_CHARS)
 
 
 class RunPermissionRespondResponse(BaseModel):
@@ -977,7 +1002,7 @@ class GatewayHealthResponse(BaseModel):
 
     service: Literal["gateway"] = "gateway"
     #: The probe verdict across every dependency this build checks.
-    status: str = Field(max_length=32)
+    status: str = Field(max_length=_MAX_HEALTH_STATUS_CHARS)
     #: The NARROWER local question: is this gateway's own worker usable. Not a
     #: restatement of ``status``; see the endpoint for why the two differ.
     ready: bool

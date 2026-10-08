@@ -472,6 +472,78 @@ async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_sibl
     ] == ["allow_once", "reject_once"]
 
 
+@pytest.mark.asyncio
+async def test_a_withheld_permission_row_is_not_also_reported_as_absent(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A durable row that offers nothing answerable is not ALSO orphaned.
+
+    The checkpoint parks on the same request id a durable row already
+    answers for; that row's content is withheld (it offers no usable
+    option), but it is not ABSENT, and CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW
+    must not claim the row never existed when the withholding reason already
+    reported the real fault.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-withheld-row",
+        )
+        await record_permission_request(
+            session,
+            request_id="withheld-1",
+            thread_id=thread.id,
+            pause_reason_type="permission_request",
+            description="Approve?",
+            allowed_options=[{"name": "Approve"}],
+            tool_call="bash",
+        )
+        await session.commit()
+
+        snapshot = ThreadStateSnapshot(
+            thread_id=thread.id,
+            status=ThreadStatus(thread.status),
+            last_sequence=0,
+        )
+        durable_permission_ids: set[str] = set()
+        snapshot = await enrich_snapshot_from_durable_state(
+            session,
+            thread=thread,
+            snapshot=snapshot,
+            durable_permission_ids=durable_permission_ids,
+        )
+
+    assert snapshot.pending_permissions == []
+    assert (
+        DegradedReason.PERMISSION_OFFERS_NO_USABLE_OPTION in snapshot.degraded_reasons
+    )
+    assert durable_permission_ids == {"withheld-1"}
+
+    projection = CheckpointProjection(
+        channel_values={},
+        config={"configurable": {"thread_id": thread.id, "checkpoint_id": "cp-1"}},
+        checkpoint_id="cp-1",
+        checkpoint_created_at=datetime(2026, 3, 9, 10, 20, tzinfo=UTC),
+        pending_interrupts=[
+            ProjectedInterrupt(
+                interrupt_id="withheld-1",
+                interrupt_type="permission_request",
+                payload={"type": "permission_request", "request_id": "withheld-1"},
+            )
+        ],
+    )
+
+    reconciled = reconcile_checkpoint_permissions_with_durable_state(
+        snapshot, projection, durable_permission_ids=durable_permission_ids
+    )
+
+    assert (
+        DegradedReason.CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW
+        not in reconciled.degraded_reasons
+    )
+
+
 def test_apply_execution_state_projection_merges_normalized_fields() -> None:
     """Durable execution-state projection should enrich reconnect snapshots."""
     snapshot = ThreadStateSnapshot(

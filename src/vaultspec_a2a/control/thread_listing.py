@@ -167,8 +167,15 @@ async def _judge_run_posture(
     snapshot = ThreadStateSnapshot(
         thread_id=thread.id, status=ThreadStatus(thread.status), last_sequence=0
     )
+    # Collects every request id a durable row exists for, disclosed or
+    # withheld alike, so the checkpoint-side reconciliation below never
+    # reports a withheld-but-existing row as having no durable row at all.
+    durable_permission_ids: set[str] = set()
     snapshot = await enrich_snapshot_from_durable_state(
-        db, thread=thread, snapshot=snapshot
+        db,
+        thread=thread,
+        snapshot=snapshot,
+        durable_permission_ids=durable_permission_ids,
     )
     if probe is None:
         return await enrich_snapshot_from_execution_state(
@@ -189,7 +196,7 @@ async def _judge_run_posture(
     projection = project_checkpoint_read(probe, thread.id)
     if projection is not None:
         snapshot = reconcile_checkpoint_permissions_with_durable_state(
-            snapshot, projection
+            snapshot, projection, durable_permission_ids=durable_permission_ids
         )
     if not checkpoint_present:
         clear_permissions_without_checkpoint_truth(snapshot)

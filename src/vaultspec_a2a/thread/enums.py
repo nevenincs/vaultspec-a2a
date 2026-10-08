@@ -165,6 +165,7 @@ class DegradedReason(StrEnum):
     PENDING_PERMISSION_WITHOUT_CHECKPOINT_TRUTH = (
         "pending_permission_without_checkpoint_truth"
     )
+    PERMISSION_OFFERS_NO_USABLE_OPTION = "permission_offers_no_usable_option"
     PERMISSION_PROJECTION_UNREADABLE = "permission_projection_unreadable"
     # The read proved this run's turn had ended and every attempt at writing
     # that settlement was refused by a competing writer. The status served is

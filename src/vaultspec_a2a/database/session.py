@@ -588,7 +588,16 @@ async def verify_wal_mode(engine: AsyncEngine) -> str:
 
 
 def inspect_sqlite_database(path: Path) -> dict[str, object]:
-    """Inspect a SQLite file for storage diagnostics."""
+    """Inspect a SQLite file for storage diagnostics.
+
+    Bounded by the CONFIGURED lock wait, not the driver's own. This read runs on
+    the gateway's boot path and reports a store it cannot read rather than
+    raising, so a store another writer has locked costs boot latency instead of
+    an error - which is exactly what makes the operator's budget load-bearing
+    here. Reading the journal mode out of the header takes a shared lock on a
+    store that is not in WAL, and at the driver's default that wait was five
+    seconds whatever the configuration said.
+    """
     diagnostics: dict[str, object] = {
         "path": str(path),
         "exists": path.exists(),
@@ -599,10 +608,9 @@ def inspect_sqlite_database(path: Path) -> dict[str, object]:
         diagnostics["detail"] = "sqlite file missing"
         return diagnostics
 
-    import sqlite3
-
+    lock_wait_seconds = settings.sqlite_busy_timeout_ms / 1000
     try:
-        conn = sqlite3.connect(str(path))
+        conn = sqlite3.connect(str(path), timeout=lock_wait_seconds)
         try:
             row = conn.execute("PRAGMA journal_mode").fetchone()
         finally:

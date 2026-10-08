@@ -28,6 +28,7 @@ from __future__ import annotations
 import http.server
 import json
 import sqlite3
+import time
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
@@ -48,6 +49,7 @@ from ...testing import (
     run_cli,
     seat_app_home,
     serve_handler,
+    settings_override,
 )
 from ...tests._write_authority import make_test_thread_authority_columns
 from ..models import Base, ControlActionModel, ThreadModel
@@ -160,6 +162,44 @@ async def test_migrating_initialisation_leaves_the_store_in_wal_on_disk(
 
     assert diagnostics["journal_mode"] == "wal"
     assert diagnostics["wal_enabled"] is True
+
+
+def test_storage_diagnostics_give_up_inside_the_configured_lock_wait(
+    runtime_dir: Path,
+) -> None:
+    """The boot diagnostics read waits the configured budget, not the driver's.
+
+    This read runs on the gateway's boot path and REPORTS rather than raises, so
+    a store someone else has locked costs boot latency instead of an error -
+    which is what makes the budget the operator configured load-bearing here.
+    Opened at the driver's own default it held boot for five seconds however
+    narrow that budget was.
+
+    A real second connection holds a real EXCLUSIVE lock on a store that is not
+    in WAL, so reading the journal mode out of its header has to wait.
+    """
+    database = runtime_dir / "diagnostics-contention.db"
+    holder = sqlite3.connect(str(database), isolation_level=None, timeout=10.0)
+    try:
+        holder.execute("PRAGMA journal_mode=DELETE")
+        holder.execute("CREATE TABLE occupied (i INTEGER)")
+        holder.execute("PRAGMA busy_timeout=10000")
+        holder.execute("BEGIN EXCLUSIVE")
+        holder.execute("INSERT INTO occupied VALUES (1)")
+        with settings_override(sqlite_busy_timeout_ms=400):
+            started = time.monotonic()
+            diagnostics = inspect_sqlite_database(database)
+            elapsed = time.monotonic() - started
+    finally:
+        holder.rollback()
+        holder.close()
+
+    # Lower bound: it waited, so a budget was in force at all. Upper bound: the
+    # configured 400ms rather than the driver's five seconds.
+    assert 0.3 <= elapsed < 3.0, elapsed
+    # And it reported the condition instead of raising it.
+    assert diagnostics["wal_enabled"] is False
+    assert "locked" in str(diagnostics["detail"])
 
 
 @pytest.mark.asyncio

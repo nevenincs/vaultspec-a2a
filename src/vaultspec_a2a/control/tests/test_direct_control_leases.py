@@ -9,9 +9,9 @@ the worker's synchronous dispatch-ID admission boundary.
 from __future__ import annotations
 
 import asyncio
-import sqlite3
+import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import anyio
 import httpx
@@ -19,12 +19,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
-from sqlalchemy.exc import OperationalError
 
 from ...conftest import SqlitePosture
-from ...control import cancel_service
 from ...control._permission_response_contract import PermissionInput
-from ...control.action_lease import ControlActionOutcome, prepare_control_action_claim
 from ...control.cancel_service import cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.leased_dispatch import DispatchTransport
@@ -58,6 +55,8 @@ from ...thread.idempotency import (
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from ...control.action_lease import ControlActionOutcome
 
 
 _TEST_INTERNAL_TOKEN = "direct-control-lease-test-token"
@@ -329,42 +328,52 @@ async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
 
 
 @pytest.mark.asyncio
+@pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS, timeout=0.15)
 async def test_cancel_retries_sqlite_lock_before_claim(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A real SQLite writer holding the lock forces a genuine retry, not a lost cancel.
+
+    ``_claim_cancel`` opens its acceptance transaction with ``begin_write_transaction``
+    (``BEGIN IMMEDIATE``), so a sibling connection already holding that write lock makes
+    the claim's first attempt wait out the driver's short ``timeout`` and fail with a
+    real ``database is locked`` ``OperationalError`` - exactly what
+    ``retry_write_contention`` exists to absorb.
+    """
     thread_id = "locked-cancel-thread"
     await _running_thread(session_factory, thread_id)
-    original_claim = prepare_control_action_claim
-    attempts = 0
+    acquired = anyio.Event()
 
-    async def locked_once(*args: Any, **kwargs: Any) -> Any:
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            raise OperationalError(
-                "INSERT INTO control_actions",
-                {},
-                sqlite3.OperationalError("database is locked"),
-            )
-        return await original_claim(*args, **kwargs)
+    async def _hold_write_lock() -> None:
+        async with session_factory() as locker:
+            await begin_write_transaction(locker)
+            acquired.set()
+            await anyio.sleep(0.3)
+            await locker.commit()
 
-    monkeypatch.setattr(cancel_service, "prepare_control_action_claim", locked_once)
     async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
-        async with session_factory() as db:
-            result = await cancel_thread(
-                db,
-                thread_id=thread_id,
-                idempotency_key=None,
-                transport=DispatchTransport(
-                    worker_client=worker.client,
-                    circuit_breaker=_circuit_breaker(),
-                    worker_spawner=adopted_spawner(),
-                ),
-            )
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_hold_write_lock)
+            await acquired.wait()
+            started = time.monotonic()
+            async with session_factory() as db:
+                result = await cancel_thread(
+                    db,
+                    thread_id=thread_id,
+                    idempotency_key=None,
+                    transport=DispatchTransport(
+                        worker_client=worker.client,
+                        circuit_breaker=_circuit_breaker(),
+                        worker_spawner=adopted_spawner(),
+                    ),
+                )
+            elapsed = time.monotonic() - started
+
         assert result.accepted
-        assert attempts == 2
+        # A lucky immediate claim finishes in milliseconds; this bound only holds
+        # if the claim genuinely waited out the lock and retried.
+        assert elapsed >= 0.15
         assert len(worker.app.state.dispatch_ids) == 1
 
 

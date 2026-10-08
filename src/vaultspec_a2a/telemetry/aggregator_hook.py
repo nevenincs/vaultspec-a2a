@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from contextlib import AbstractContextManager
 
     from opentelemetry.metrics import Meter
 
 from .instrumentation import get_meter, get_tracer
+from .middleware import open_internal_span
 
 __all__ = ["OTelAggregatorHook"]
 
@@ -38,10 +38,8 @@ class OTelAggregatorHook:
         self._counters: dict[str, Any] = {}
         self._histograms: dict[str, Any] = {}
 
-    @contextmanager
-    def start_span(self, name: str, **attrs: Any) -> Generator[Any]:
-        with self._tracer.start_as_current_span(name, attributes=attrs) as span:
-            yield span
+    def start_span(self, name: str, **attrs: Any) -> AbstractContextManager[Any]:
+        return open_internal_span(self._tracer, name, attrs)
 
     def increment_counter(self, name: str, value: int = 1, **attrs: Any) -> None:
         if name not in self._counters:

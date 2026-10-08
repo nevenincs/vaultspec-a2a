@@ -177,6 +177,38 @@ def _permission_graph(
     return compile_test_graph(builder, checkpointer=checkpointer)
 
 
+#: The disclosure copy of the question a journaled park records, standing in for
+#: the description the worker's frame carries.
+_PARKED_DESCRIPTION = "Allow action?"
+
+
+async def _journal_request_creation(
+    session: AsyncSession, *, thread_id: str, request_id: str, description: str
+) -> None:
+    """Reserve and settle a request's creation action, as the relay does.
+
+    Reserved through the production verb under the production key, so the
+    reservation a later relayed frame makes for the same request finds this one
+    rather than creating its own. Settled through the one settler, because nothing
+    dispatches a creation: the recovery reads that tell a settled action from one
+    still owed a delivery match on the instant, not on the status.
+    """
+    from ..database import mark_control_action_applied, reserve_control_action
+    from ..thread.enums import ControlActionType
+    from ..thread.idempotency import permission_request_action_key
+
+    reservation = await reserve_control_action(
+        session,
+        thread_id=thread_id,
+        action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
+        request_id=request_id,
+        idempotency_key=permission_request_action_key(request_id),
+        payload={"description": description},
+    )
+    if reservation.created:
+        await mark_control_action_applied(session, reservation.action.id)
+
+
 def _one_call(
     tool_name: str, tool_input: dict[str, Any] | None
 ) -> list[tuple[str, dict[str, Any]]]:
@@ -233,10 +265,17 @@ async def park_journaled_permissions(
 ) -> list[str]:
     """Park *thread_id* on one permission per call, journal each, and name them.
 
-    The run's checkpoint is what makes a request answerable; the journal row is
-    the copy the relay writes beside it, carrying the tool the request asked for
-    and the *options* the provider offered. Both are parked and journaled as
-    :func:`park_permissions` parks them, so *options* defaults the same way.
+    The run's checkpoint is what makes a request answerable; the journal is what
+    the relay writes beside it. BOTH journal rows are written, as the relay writes
+    them: the request row, carrying the tool asked about and the *options* the
+    provider offered, and the applied ``permission-request:`` creation action
+    whose existence is how the relay tells a fresh ask from one the run is making
+    again. Seating only the request row left every test here on the fresh-ask
+    path while production, having already journaled the ask, takes the re-park
+    one.
+
+    Both are parked and journaled as :func:`park_permissions` parks them, so
+    *options* defaults the same way.
     """
     offered = _TOOL_OPTIONS if options is None else options
     graph = _permission_graph(checkpointer, calls, offered)
@@ -244,12 +283,18 @@ async def park_journaled_permissions(
     async with session_factory() as session:
         for interrupt in parked.pending_interrupts:
             tool_name = str(interrupt.payload["tool_name"])
+            await _journal_request_creation(
+                session,
+                thread_id=thread_id,
+                request_id=interrupt.interrupt_id,
+                description=_PARKED_DESCRIPTION,
+            )
             await record_permission_request(
                 session,
                 request_id=interrupt.interrupt_id,
                 thread_id=thread_id,
                 pause_reason_type=tool_name,
-                description="Allow action?",
+                description=_PARKED_DESCRIPTION,
                 allowed_options=offered,
                 tool_call=tool_name,
             )

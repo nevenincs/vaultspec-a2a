@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
+
 from ..idempotency import (
     CLARIFICATION_RESPONSE_KEY_PREFIX,
     IDEMPOTENCY_KEY_MAX_LENGTH,
+    MAX_PERMISSION_ASKS,
     ResumeIntent,
     authoring_verdict_action_key,
     clarification_response_action_key,
@@ -43,9 +46,63 @@ def test_readable_prefix_builders_are_pinned_byte_for_byte() -> None:
     assert permission_rejection_action_key("idem-1") == "permission-rejection:idem-1"
     assert permission_duplicate_action_key("idem-1") == "permission-duplicate:idem-1"
     assert (
-        permission_response_applied_action_key("req-1")
+        permission_response_applied_action_key("permission-response:req-1")
         == "permission-response-applied:req-1"
     )
+
+
+def test_the_first_ask_of_a_permission_request_keeps_the_stored_key() -> None:
+    """Generation 0 is the unsuffixed key every stored row was written under.
+
+    Keys are compared as stored, so the ask a re-ask generation names must not
+    change the value the builder already produced: an explicit first ask and the
+    default spell the same key, and so does the application key derived from it.
+    """
+    assert permission_response_action_key("req-1", 0) == "permission-response:req-1"
+    assert permission_response_action_key("req-1", 0) == permission_response_action_key(
+        "req-1"
+    )
+    assert (
+        permission_response_applied_action_key(
+            permission_response_action_key("req-1", 0)
+        )
+        == "permission-response-applied:req-1"
+    )
+
+
+def test_a_reasked_permission_takes_a_suffixed_key_of_its_own() -> None:
+    """A later ask of one request is a journal identity of its own.
+
+    The suffix is outside the grammar of every handle this service mints, so a
+    re-ask of one request can never spell the first ask of another, and the
+    application key of each ask is derived from that ask's own key.
+    """
+    assert permission_response_action_key("req-1", 1) == "permission-response:req-1#1"
+    assert permission_response_action_key("req-1", 7) == "permission-response:req-1#7"
+    assert permission_response_action_key("req-1", 1) != permission_response_action_key(
+        "req-1"
+    )
+    assert (
+        permission_response_applied_action_key(
+            permission_response_action_key("req-1", 1)
+        )
+        == "permission-response-applied:req-1#1"
+    )
+
+
+def test_an_ask_outside_the_bound_is_refused_rather_than_reusing_a_key() -> None:
+    """Past the bound there is no key left to mint, so none is invented."""
+    assert MAX_PERMISSION_ASKS == 64
+    permission_response_action_key("req-1", MAX_PERMISSION_ASKS - 1)
+    for generation in (-1, MAX_PERMISSION_ASKS):
+        with pytest.raises(ValueError, match="outside the bound"):
+            permission_response_action_key("req-1", generation)
+
+
+def test_an_application_key_is_only_derived_from_a_response_key() -> None:
+    """A key that is not an accepted answer's names no application of one."""
+    with pytest.raises(ValueError, match="permission response"):
+        permission_response_applied_action_key("permission-request:req-1")
 
 
 def test_clarification_response_key_keeps_its_queryable_prefix() -> None:

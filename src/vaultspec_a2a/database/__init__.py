@@ -183,6 +183,9 @@ from .permission_repository import (
     record_permission_response_submission as record_permission_response_submission,
 )
 from .permission_repository import (
+    reopen_reasked_permission_request as reopen_reasked_permission_request,
+)
+from .permission_repository import (
     reset_permission_response_submission as reset_permission_response_submission,
 )
 from .permission_repository import (
@@ -405,6 +408,7 @@ __all__ = [
     "release_deletion_saga_claim",
     "release_recovery_claim",
     "remove_deletion_saga_row",
+    "reopen_reasked_permission_request",
     "require_lease_window",
     "reschedule_recovery_claim",
     "reserve_control_action",

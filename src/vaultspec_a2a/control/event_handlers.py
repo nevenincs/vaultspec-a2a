@@ -866,13 +866,20 @@ async def _persist_permission_request(
     disclosure. Whether the run is parked on it is the checkpoint's to say, so
     the pause recorder projects the pause and this writes no run state, and
     *held* - the interrupt that checkpoint holds under this request id - names
-    the pause kind the row records. A replayed event finds its creation action
-    already reserved and changes nothing.
+    the pause kind the row records.
+
+    A request whose creation action is already reserved has been journaled
+    before, so this is either a replayed event or a RE-ASK: a run holding the
+    request again after answering it is asking the same question a second time.
+    :func:`reopen_reasked_permission_request` tells the two apart from the row's
+    settled state, which reads the same whichever of the re-ask's park frame and
+    the previous answer's receipt the relay handled first.
     """
     from ..database import (
         get_thread,
         mark_control_action_applied,
         record_permission_request,
+        reopen_reasked_permission_request,
         reserve_control_action,
         supersede_permission_requests,
     )
@@ -892,8 +899,15 @@ async def _persist_permission_request(
         idempotency_key=permission_request_action_key(request_id),
         payload={"description": description},
     )
-    if not reservation.payload_matches or not reservation.created:
+    if not reservation.payload_matches:
         await db.rollback()
+        return
+    if not reservation.created:
+        await reopen_reasked_permission_request(
+            db,
+            request_id=request_id,
+            allowed_options=_option_mappings(payload.get("options")),
+        )
         return
     # Nothing dispatches a request-creation action: writing it IS applying it.
     # It is settled through the journal's one settler, which stamps the instant
@@ -953,6 +967,95 @@ async def _handle_permission_event(
     async with factory() as db:
         await begin_write_transaction(db)
         await _persist_permission_request(db, thread_id, payload, held=held)
+        await db.commit()
+
+
+def _is_resume_receipt(payload: dict[str, object]) -> bool:
+    """Whether a relayed event is the application receipt of a resume."""
+    return (
+        wire_event_type(payload) == "dispatch_applied"
+        and payload.get("action") == "resume"
+    )
+
+
+async def _answered_request_id(
+    db: AsyncSession, thread_id: str, payload: dict[str, object]
+) -> str | None:
+    """The request the resume a receipt proves applied was an answer to.
+
+    The accepted action the receipt names is the answer that landed, and the
+    request it answered is the only one this receipt says anything about.
+    ``None`` for a resume that answered no permission request.
+    """
+    from ..database import get_control_action_by_dispatch_id
+    from ..thread.enums import ControlActionType
+
+    dispatch_id = payload.get("dispatch_id")
+    if not isinstance(dispatch_id, str) or not dispatch_id:
+        return None
+    action = await get_control_action_by_dispatch_id(
+        db, thread_id=thread_id, dispatch_id=dispatch_id
+    )
+    if (
+        action is None
+        or action.action_type != ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
+    ):
+        return None
+    return action.request_id
+
+
+async def _handle_reasked_permission_event(
+    thread_id: str,
+    payload: dict[str, object],
+    *,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    checkpointer: Checkpointer | None = None,
+) -> None:
+    """Reopen a permission request its run is holding again after answering it.
+
+    The second prompt for the permission journal, beside the re-ask's own park
+    frame. The worker emits that frame from inside the graph run while the
+    application receipt waits for the checkpoint that proves the resume landed,
+    so one relay batch can carry them in either order and the frame that arrives
+    before the answer settles finds the row still being settled. This runs AFTER
+    the settlement its own receipt proved, which is the moment the journal can
+    tell a re-ask from an answer still in flight.
+
+    Both prompts reopen through the one repository verb, whose precondition -
+    the row has settled - is the single rule. Neither trusts the frame for
+    whether the run is parked: the checkpoint says that, as it does for every
+    interrupt kind.
+    """
+    if not _is_resume_receipt(payload):
+        return
+    factory = _session_factory(session_factory)
+    if factory is None or checkpointer is None:
+        return
+    from ..database import (
+        begin_write_transaction,
+        read_latest_checkpoint,
+        reopen_reasked_permission_request,
+    )
+    from ._permission_response_contract import held_interrupt
+    from .pause import project_checkpoint_read
+
+    async with factory() as db:
+        request_id = await _answered_request_id(db, thread_id, payload)
+        await db.rollback()
+        if request_id is None:
+            return
+        projection = project_checkpoint_read(
+            await read_latest_checkpoint(checkpointer, thread_id), thread_id
+        )
+        held = held_interrupt(projection, request_id)
+        if held is None:
+            return
+        await begin_write_transaction(db)
+        await reopen_reasked_permission_request(
+            db,
+            request_id=request_id,
+            allowed_options=_option_mappings(held.payload.get("options")),
+        )
         await db.commit()
 
 
@@ -1075,8 +1178,9 @@ async def relay_event(
     non-projection events into the hub's live run state.
 
     This function handles the DB-side event processing:
-    permission journal, progress inference, execution state persistence,
-    the pause projection, and terminal status updates with relay hub GC.
+    permission journal, progress inference, the re-ask reopen, execution state
+    persistence, the pause projection, and terminal status updates with relay
+    hub GC.
 
     A terminal frame is the one exception to the caller owning the fan-out.
     Whether it may be shown at all is this plane's answer, so the caller hands
@@ -1091,6 +1195,14 @@ async def relay_event(
         checkpointer=resolved.checkpointer,
     )
     await _handle_progress_event(
+        thread_id,
+        payload,
+        session_factory=resolved.session_factory,
+        checkpointer=resolved.checkpointer,
+    )
+    # After the settlement above, never before it: a request its run is holding
+    # again reads as re-asked only once the answer before it has settled.
+    await _handle_reasked_permission_event(
         thread_id,
         payload,
         session_factory=resolved.session_factory,

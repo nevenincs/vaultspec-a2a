@@ -39,6 +39,7 @@ __all__ = [
     "pending_document_approval_thread",
     "record_permission_request",
     "record_permission_response_submission",
+    "reopen_reasked_permission_request",
     "reset_permission_response_submission",
     "supersede_permission_requests",
 ]
@@ -309,6 +310,43 @@ async def record_permission_response_submission(
     permission.idempotency_key = idempotency_key
     permission.request_status = PermissionRequestStatus.ANSWERED_PENDING_APPLY.value
     permission.responded_at = utcnow()
+    await session.flush()
+    return permission
+
+
+async def reopen_reasked_permission_request(
+    session: AsyncSession,
+    *,
+    request_id: str,
+    allowed_options: list[dict[str, object]],
+) -> PermissionRequestModel | None:
+    """Return a settled request to pending, because its run asked it again.
+
+    A worker that parks again under a request id the run has already answered is
+    asking the SAME question a second time, and the row that recorded the first
+    ask is the request's journal: the request id is its primary key, so the ask
+    reopens that row rather than filing a second one. ``allowed_options`` is
+    what this ask offers, which the row caches afresh - the question is the same
+    question, but the choices offered for it need not be.
+
+    Only a SETTLED row reopens. One whose answer is still being applied belongs
+    to that settlement, and leaving it alone is what makes the reopen read the
+    same whether the re-ask's park frame reached the relay before or after the
+    receipt that proved the previous answer landed. ``None`` says nothing
+    reopened: the request has no row, or its row is not settled.
+    """
+    permission = await session.get(PermissionRequestModel, request_id)
+    if (
+        permission is None
+        or permission.request_status in _OUTSTANDING_PERMISSION_STATUSES
+    ):
+        return None
+    permission.allowed_options_json = json.dumps(allowed_options)
+    permission.request_status = PermissionRequestStatus.PENDING.value
+    permission.response_option_id = None
+    permission.idempotency_key = None
+    permission.responded_at = None
+    permission.applied_at = None
     await session.flush()
     return permission
 

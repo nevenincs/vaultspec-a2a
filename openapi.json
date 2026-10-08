@@ -3063,7 +3063,9 @@
           "interrupt_payload_untyped",
           "missing_assignment_digest",
           "pending_permission_without_checkpoint_truth",
+          "permission_offers_no_usable_option",
           "permission_projection_unreadable",
+          "repair_status_unreadable",
           "terminal_thread_pending_permission_residue"
         ],
         "title": "DegradedReason",

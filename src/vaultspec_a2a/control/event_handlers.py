@@ -39,7 +39,7 @@ from ..thread.snapshots import (
 )
 from ..utils.coercion import decode_json_object
 from ._event_application import (
-    apply_permission_resolution as _apply_permission_resolution,
+    apply_relayed_permission_resolution as _apply_relayed_permission_resolution,
 )
 from ._event_application import (
     commit_proven_application as _commit_proven_application,
@@ -944,7 +944,7 @@ async def _handle_permission_event(
     if wire_event_type(payload) not in PERMISSION_REQUEST_EVENT_TYPES:
         async with factory() as db:
             await begin_write_transaction(db)
-            await _apply_permission_resolution(db, thread_id, payload)
+            await _apply_relayed_permission_resolution(db, thread_id, payload)
             await db.commit()
         return
     held = await _held_request_interrupt(thread_id, payload, checkpointer)

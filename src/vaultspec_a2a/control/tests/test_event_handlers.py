@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ...conftest import SqlitePosture
-from ...control.accepted_input import freeze_accepted_input
+from ...control.accepted_input import freeze_accepted_input, read_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import (
     RelayServices,
@@ -66,7 +66,12 @@ from ...tests._write_authority import make_test_write_authority
 from ...thread import RunWriteAuthority
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
-from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
+from ...thread.enums import (
+    ControlActionResultStatus,
+    ControlActionType,
+    PermissionRequestStatus,
+    ThreadStatus,
+)
 from ...thread.executable_graph import freeze_graph_definition
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ...thread.idempotency import (
@@ -85,6 +90,10 @@ class _SeedActionSpec:
     idempotency_key: str
     request_id: str | None = None
     completed: bool = False
+    #: The option a seeded permission response froze as the answer given. The
+    #: accepted envelope is what the settlement reads the decision from, so a
+    #: fixture that means a denial has to record the denial here.
+    answer_option_id: str = "allow_once"
 
 
 async def _seed_unapplied_leased_action(
@@ -136,13 +145,13 @@ async def _seed_unapplied_leased_action(
             dispatch_id=dispatch_id,
             action="resume",
             thread_id=thread_id,
-            option_id={"option_id": "allow_once", "notes": None},
+            option_id={"option_id": spec.answer_option_id, "notes": None},
             workspace_root=str(Path.cwd()),
             team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=graph_definition,
             recursion_limit=25,
         )
-        intent = {"option_id": "allow_once", "notes": None}
+        intent = {"option_id": spec.answer_option_id, "notes": None}
     else:
         raise ValueError(f"unsupported graph action fixture: {spec.action_type}")
     action = await create_control_action(
@@ -1426,6 +1435,7 @@ async def _answered_rejection(
                 action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
                 idempotency_key=permission_response_action_key(request_id),
                 request_id=request_id,
+                answer_option_id="reject",
             ),
         )
         if spec.stamp_thread_rejected:
@@ -1442,9 +1452,13 @@ async def _answered_rejection(
 
     async with session_factory() as session:
         permission = await get_permission_request(session, request_id)
+        accepted = await session.get(ControlActionModel, submitted.id)
         assert permission is not None
         assert permission.request_status == "answered_pending_apply"
-        assert permission.response_option_id == "reject"
+        # The denial as the settlement reads it: off the frozen envelope of the
+        # accepted response, not off the request row's own copy of it.
+        assert accepted is not None
+        assert read_accepted_input(accepted).intent["option_id"] == "reject"
 
     return (
         thread_id,
@@ -1735,3 +1749,108 @@ async def test_persisted_description_matches_what_the_stream_showed(
     assert stored is not None
     assert len(stored.description) < len(oversize)
     assert stored.description == streamed["description"]
+
+
+@pytest.mark.asyncio
+async def test_a_tampered_request_row_cannot_change_the_applied_decision(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """The accepted envelope decides the resolution; the request row never does.
+
+    ``permission_logs`` is the single durable record of a permission decision,
+    and the answered option the apply path settles comes from the accepted
+    dispatch envelope of the response action. The request row's own resolution
+    column is therefore not a second source: a row edited after acceptance -
+    by a tamper, or by a writer racing the settlement - must leave what is
+    applied exactly as the operator decided it.
+    """
+    offered: list[dict[str, object]] = [
+        {"option_id": "allow_once", "name": "Allow once", "kind": "allow_once"},
+        {"option_id": "reject_once", "name": "Reject once", "kind": "reject_once"},
+    ]
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            title="Tampered Decision",
+            status="input_required",
+        )
+        request_id = f"{thread.id}:perm-1"
+        await record_permission_request(
+            session,
+            request_id=request_id,
+            thread_id=thread.id,
+            pause_reason_type="bash",
+            description="Allow action?",
+            allowed_options=offered,
+            tool_call="bash",
+        )
+        # The envelope records ``allow_once`` (the seeded accepted intent), so
+        # this is the decision the operator actually gave.
+        await record_permission_response_submission(
+            session,
+            request_id=request_id,
+            option_id="allow_once",
+            idempotency_key="response-1",
+        )
+        (
+            submitted,
+            submitted_receipt,
+            submitted_checkpoint,
+        ) = await _seed_unapplied_leased_action(
+            session,
+            checkpointer,
+            thread_id=thread.id,
+            spec=_SeedActionSpec(
+                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+                idempotency_key=permission_response_action_key(request_id),
+                request_id=request_id,
+            ),
+        )
+        await session.commit()
+
+    # The second copy of the decision, rewritten to the opposite verdict.
+    async with session_factory() as session:
+        tampered = await get_permission_request(session, request_id)
+        assert tampered is not None
+        tampered.response_option_id = "reject_once"
+        await session.commit()
+
+    await _handle_progress_event(
+        thread.id,
+        {
+            "type": "dispatch_applied",
+            "dispatch_id": submitted.dispatch_id,
+            "action": "resume",
+            "graph_action_receipt": submitted_receipt.model_dump(mode="json"),
+            "checkpoint_id": submitted_checkpoint,
+        },
+        session_factory=session_factory,
+        checkpointer=checkpointer,
+    )
+
+    async with session_factory() as session:
+        settled = await get_permission_request(session, request_id)
+        applied = (
+            (
+                await session.execute(
+                    select(ControlActionModel).where(
+                        ControlActionModel.request_id == request_id,
+                        ControlActionModel.action_type
+                        == ControlActionType.PERMISSION_RESPONSE_APPLIED.value,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        settled_thread = await get_thread(session, thread.id)
+
+    assert settled is not None
+    assert settled.request_status == PermissionRequestStatus.APPLIED.value
+    assert len(applied) == 1
+    assert settled_thread is not None
+    assert settled_thread.last_applied_action == (
+        ControlActionType.PERMISSION_RESPONSE_APPLIED.value
+    )

@@ -947,6 +947,12 @@ def _create_kimi_model(
         acp_family="kimi",
         provider_command=classified,
         auth_mode="temporary_model",
+        # The same spawn-time re-probe the Claude and Codex lanes carry: the
+        # proof checked above is this construction's, and a binary replaced
+        # between construction and the turn must not reach a child. The ACP
+        # re-probe reads this lane's own classified launcher, never the Claude
+        # pin.
+        version_proof_required=True,
     )
 
 

@@ -9,6 +9,18 @@ resolved as not granted, and the model is handed the synthesized tool result
 ``user rejected MCP tool call`` while the turn still settles ``completed``. That
 is a silent, total loss of every write an agent was asked to make.
 
+Those three actions are the binary's own, not a reading of the MCP specification.
+``codex app-server generate-json-schema --out <dir>`` makes the installed
+app-server print its protocol, which costs no credential and opens no session; on
+``codex-cli 0.160.0`` the generated ``McpServerElicitationRequestResponse.json``
+declares ``"McpServerElicitationAction": {"enum": ["accept", "decline",
+"cancel"], "type": "string"}`` and types ``content`` nullable "because
+decline/cancel responses have no content". ``generate-ts`` prints the same
+vocabulary as ``export type McpServerElicitationAction = "accept" | "decline" |
+"cancel";``. ``cancel`` is therefore the lane's abandon action: it ends the
+elicitation without a decision, where ``decline`` tells the model a user refused
+the call.
+
 The approval payload does NOT name the tool. It carries the server, a prose
 ``message`` ("Allow the X MCP server to run tool \"Y\"?") and the call's
 arguments, but no tool-name field. The exact name is recovered instead from the
@@ -51,6 +63,15 @@ MCP_TOOL_CALL_APPROVAL_KIND: Final = "mcp_tool_call"
 
 ACCEPT_ACTION: Final = "accept"
 DECLINE_ACTION: Final = "decline"
+CANCEL_ACTION: Final = "cancel"
+
+# The whole action vocabulary, pinned to the installed binary rather than
+# remembered. Checked against the app-server's own generated schema by
+# ``tests/test_codex_elicitation_actions.py``, so a binary that renames or drops
+# an action is a red test rather than a silently refused tool call.
+ELICITATION_ACTIONS: Final[frozenset[str]] = frozenset(
+    {ACCEPT_ACTION, DECLINE_ACTION, CANCEL_ACTION}
+)
 
 # The two decisions this rung can reach, in the ACP lane's option shape so a
 # supervised run's human rung is handed the same structure on both lanes and the
@@ -92,9 +113,26 @@ def elicitation_response(rpc_id: int, action: str) -> JsonObject:
     """Build the JSON-RPC response frame for one elicitation decision.
 
     ``content`` is sent only alongside an acceptance: the protocol types it as
-    nullable precisely because a decline carries no user input, and the
-    requested schema for a bare tool-call approval is an empty object.
+    nullable precisely because a decline and an abandonment carry no user input,
+    and the requested schema for a bare tool-call approval is an empty object.
+
+    An action outside :data:`ELICITATION_ACTIONS` is answered as a decline
+    rather than emitted. Codex resolves a spelling it does not recognise exactly
+    as it resolves an unanswered frame - the call is not granted and the model is
+    told a user rejected it, while the turn still settles ``completed`` - so an
+    unpinned action is a silent loss, not an error anybody sees. The frame is
+    still written, because withholding it hangs the turn until the idle backstop
+    fires, and it is written as the refusal, which is the direction a decision
+    that cannot be spelled has to fail in.
     """
+    if action not in ELICITATION_ACTIONS:
+        logger.warning(
+            "Declining a Codex elicitation answered with %r, which is outside "
+            "the actions codex accepts (%s)",
+            action,
+            sorted(ELICITATION_ACTIONS),
+        )
+        action = DECLINE_ACTION
     result: JsonObject = {"action": action}
     if action == ACCEPT_ACTION:
         result["content"] = {}

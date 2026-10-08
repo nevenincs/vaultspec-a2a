@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#adr-authoring-orchestration'
 date: '2026-07-14'
-modified: '2026-10-01'
-body_hash: 'sha256:411e7fd0e61571a5428812ae554becf7156f5b6ea58e487d693ef4839e6f9ab9'
+modified: '2026-10-08'
+body_hash: 'sha256:ff46f1f9354f3bb93d4f0ef99878fab809f70f66b991d6ae0a504802bbb139f0'
 related:
   - "[[2026-07-14-document-authoring-orchestration-audit]]"
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
@@ -265,3 +265,18 @@ Each document gate binds its verdict to the proposal it parked on:
 - A gate reached with no committed proposal has no request to put in its payload, so it sends the writer back to resubmit instead of parking (`src/vaultspec_a2a/graph/nodes/phase_gate.py`).
 
 Grounding: `2026-09-30-langgraph-conformance-audit`.
+
+## Amendment (2026-10-08): the verdict subscriber is discovery-gated, and a topology it cannot serve is refused at run start
+
+Accepted 2026-10-08 under the owner's 2026-10-07 delegation of ADR work for `2026-10-06-codebase-remediation-plan` (decision D9, plan Step W01.P02.S05).
+
+This record's gates park on an engine proposal and can be resumed only by the verdict subscriber. The subscriber is an operator setting that defaults off, so the served supervised preset accepts work it can never finish: it parks at Gate 1 and nothing will ever resume it. Grounding: R4-F12 in `2026-10-06-codebase-remediation-audit`. Code paths are under `src/vaultspec_a2a/`.
+
+- **Verified.** `authoring_subscriber_enabled` defaults to `False` (`control/infra_config.py:629-642`), and the subscriber is constructed nowhere else than behind that flag (`api/app.py:636-660`, the single call site at `api/app.py:821-823`). A document pause cannot be answered locally: `_document_approval_refusal` returns 403 on any pause whose cause is outside `LOCALLY_RESPONDABLE_PAUSE_CAUSES`, which excludes `document_approval_request` by construction (`control/permission_service.py:318-348`; `thread/snapshots.py:111-118`). The served preset is supervised (`team/presets/teams/vaultspec-adr-research.toml:16-21`: topology `research_adr`, `auto_approve = false`), and its gate parks on `document_approval_request` (`graph/nodes/phase_gate.py:278`).
+- **Discovery-gated start, replacing the setting.** The verdict subscriber starts whenever an engine record is discoverable. Discovery is the same boundary every other authoring caller uses, `authoring/discovery.resolve_engine`, already the subscriber's injected `endpoint_provider`, so a repository-controlled, linked, public, legacy, stale or unproven record is not an engine and does not start it. There is no separate enablement setting: an operator cannot configure a gateway that parks runs it cannot resume.
+- **Typed run-start refusal otherwise.** A document-gate topology is refused at run start with the typed reason `authoring_subscriber_unavailable` when no verdict subscriber runs. The refusal joins the existing pre-dispatch eligibility layer PW4 describes (`control/run_start_policy.evaluate_run_start_eligibility`, raised as a 422 at run start), and `is_document_authoring_preset` is the predicate for which topologies it binds. It is a named member of the served refusal vocabulary, so the dashboard can branch on it.
+- **The verdict-policy axis never removes the subscriber requirement.** AUTO, HUMAN and MIXED all park on the proposal and all resume through the subscriber, because an AUTO verdict is a system-actor decision taken over the engine's review surface and returns on the same lifecycle stream. HUMAN remains the production default and AUTO remains the testing default; what is withdrawn is the reading that the policy selector alone decides whether a run can finish.
+
+**Replaces.** The Implementation bullet "**Verdict subscriber**: a control-layer consumer of the engine's `/authoring/v1/events` SSE ..." keeps its mechanism and gains the start condition above in place of the operator setting. In PW7's verdict-policy axis, the sentence naming AUTO "the TESTING default" and HUMAN "the PRODUCTION default for real authorship" now reads as a default over the subscriber precondition, not instead of it.
+
+The typed refusal reason `authoring_subscriber_unavailable` is a new served vocabulary member and therefore a contract event under R6 of `2026-07-14-a2a-edge-conformance-adr`, announced to the dashboard before release. Reconsideration: if the engine ever serves verdicts synchronously to the run-start caller, the park disappears and the refusal is reopened by amendment.

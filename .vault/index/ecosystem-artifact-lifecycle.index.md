@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#ecosystem-artifact-lifecycle'
 date: '2026-08-05'
-modified: '2026-09-03'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:9d1d9319c1b88518d89b58d9d378ac7d50024a6ad3f2ab0479a56fa46adcc79a'
+body_hash: 'sha256:902e7b8148234c8ceac8e72ba98aca61c6d101115da468c4b3a9ac759616dced'
 related:
   - '[[2026-07-21-ecosystem-artifact-lifecycle-adr]]'
   - '[[2026-07-21-ecosystem-artifact-lifecycle-artifact-delete-residual-risk-audit]]'
@@ -23,7 +23,7 @@ Auto-generated index of all documents tagged with `#ecosystem-artifact-lifecycle
 
 ### adr
 
-- `2026-07-21-ecosystem-artifact-lifecycle-adr` - `ecosystem-artifact-lifecycle` adr: `artifact lifecycle contract` | (**status:** `proposed`)
+- `2026-07-21-ecosystem-artifact-lifecycle-adr` - `ecosystem-artifact-lifecycle` adr: `artifact lifecycle contract` | (**status:** `accepted`)
 
 ### audit
 

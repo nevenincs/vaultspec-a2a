@@ -3,13 +3,13 @@ tags:
 - '#adr'
 - '#observability-telemetry-integration'
 date: 2026-02-26
-modified: '2026-07-15'
-body_hash: 'sha256:83bb2bab7a2766de35f73f7a71036d5e84c70cd19db977e1bba11faeb59e3230'
+modified: '2026-10-08'
+body_hash: 'sha256:d2bd51fe44254756cfbf56df6c633f2984cd686757b41ef91491c455e5a5057d'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---
 
-# `observability-telemetry-integration` adr: `adr-8` | (**status:** `proposed`)
+# `observability-telemetry-integration` adr: `adr-8` | (**status:** `accepted`)
 
 ## Migration Note
 
@@ -85,3 +85,13 @@ the v1 architecture.
 ## 6. References
 
 - Process Domain - Distilled
+
+## Amendment (2026-10-08): reconciled with the telemetry module as built, and accepted
+
+Accepted 2026-10-08 under the owner's 2026-10-07 delegation of ADR work for `2026-10-06-codebase-remediation-plan` (decision D20, plan Step W04.P09.S45). This record described a live capability while carrying `proposed`, with three statements of fact from the removed frontend and WebSocket era. The decision stands; the facts are corrected. Grounding: X10 and the R1 WebSocket-surface findings in `2026-10-06-codebase-remediation-audit`. Code paths are under `src/vaultspec_a2a/`.
+
+- **Decision 2, corrected.** HTTP instrumentation is this project's own `TelemetryMiddleware`, not auto-instrumentation. `opentelemetry-instrumentation-fastapi` is a declared dependency and `FastAPIInstrumentor().instrument()` is deliberately never called, because running both would emit duplicate spans for every request; the reason is recorded at the seam (`telemetry/instrumentation.py`). The middleware carries W3C traceparent propagation and the semantic-convention attributes, and it is the single home of both the span helper and the outbound header builder (`telemetry/middleware.py`: `operation_span`, `trace_headers`). There is no WebSocket interface to instrument.
+- **Decision 3, corrected.** There is no bespoke React gateway in this repository. A2A is headless and ships no bundled UI; the dashboard is a separate repository fronting A2A across a loopback HTTP edge, governed by `2026-07-14-a2a-edge-conformance-adr`. The clause's substance survives the frontend's disappearance: historical aggregation and cost and latency analysis are delegated to OTel-compatible backends or LangSmith, and this project builds no such views. Export is as described, with the OTLP gRPC exporter an optional extra (`otlp`) and the provider wiring, exporter selection and LangSmith resolution all in one module (`telemetry/instrumentation.py`; providers installed by `api/app.py` and `worker/app.py`).
+- **Section 5, replaced.** The WebSocket context-propagation pitfall names a transport this project does not have: no production module imports or serves a WebSocket. The real pitfall is the one the code already guards: two instrumentation sources on one HTTP surface produce duplicate spans, so auto-instrumentation stays off while the middleware owns the span, and trace context crosses the gateway-to-worker hop through `trace_headers()` on the HTTP request rather than through any sustained connection.
+
+Nothing else in the record changes. The decision to mandate OpenTelemetry from day one, its rationale and its rejected alternatives are unchanged and are what the implementation does.

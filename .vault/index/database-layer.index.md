@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#database-layer'
 date: '2026-07-22'
-modified: '2026-09-03'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:30022e98de9f12664f7c58e73f7b0981e8dd8888d431c62ed88f53800fa0fc10'
+body_hash: 'sha256:980e95b6ee5b506c5d6ca1a0c89a6238459bd1f0fa01cb6bd6ee0ca71c668e5f'
 related:
   - '[[2026-03-28-database-layer-adr]]'
   - '[[2026-03-28-database-layer-plan]]'
@@ -22,7 +22,7 @@ Auto-generated index of all documents tagged with `#database-layer`.
 
 ### adr
 
-- `2026-03-28-database-layer-adr` - `database-layer` adr: `layer-2c-database-rework-handler-extraction` | (**status:** `proposed`)
+- `2026-03-28-database-layer-adr` - `database-layer` adr: `layer-2c-database-rework-handler-extraction` | (**status:** `accepted`)
 
 ### audit
 

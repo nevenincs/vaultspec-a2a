@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#container-release'
 date: '2026-10-04'
-modified: '2026-10-04'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:8ba04046141b225b3706eb42684b3e9773ca557817540c38fa9189b417f06dc6'
+body_hash: 'sha256:d219e875fb1729e75beb6fbda6fc87c38b52d95d50825fe4fd9de773ba339f59'
 related:
   - '[[2026-10-04-container-release-adr]]'
   - '[[2026-10-04-container-release-audit]]'
@@ -23,8 +23,8 @@ Auto-generated index of all documents tagged with `#container-release`.
 
 ### adr
 
-- `2026-10-04-container-release-adr` - `container-release` adr: `publish paired Compose images and promote immutable release digests` | (**status:** `accepted`)
-- `2026-10-04-container-release-native-production-adr` - `container-release` adr: `Native production binaries with Docker only for development fixtures` | (**status:** `{proposed|accepted|rejected|superseded|deprecated}`)
+- `2026-10-04-container-release-adr` - `container-release` adr: `publish paired Compose images and promote immutable release digests` | (**status:** `superseded`)
+- `2026-10-04-container-release-native-production-adr` - `container-release` adr: `native production binaries with Docker only for development fixtures` | (**status:** `accepted`)
 
 ### audit
 

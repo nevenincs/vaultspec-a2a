@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#process-and-workspace-management'
 date: '2026-07-22'
-modified: '2026-09-03'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:acb37b0b7611d27089348801dbceebaf1d9f3e0de945eeb1ea1f35871b79fa0f'
+body_hash: 'sha256:75a668768f2b3c88336615dbdefa183525fa17a875d15614812876595e657f17'
 related:
   - '[[2026-02-26-process-and-workspace-management-adr]]'
 ---
@@ -19,4 +19,4 @@ Auto-generated index of all documents tagged with `#process-and-workspace-manage
 
 ### adr
 
-- `2026-02-26-process-and-workspace-management-adr` - `process-and-workspace-management` adr: `adr-1` | (**status:** `proposed`)
+- `2026-02-26-process-and-workspace-management-adr` - `process-and-workspace-management` adr: `adr-1` | (**status:** `rejected`)

@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#observability-telemetry-integration'
 date: '2026-07-22'
-modified: '2026-09-03'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:83ec43cf28b0add5f1fb92b5c725260d85c4878aa105743c6e4f6a7d2ee8bfc3'
+body_hash: 'sha256:4f05483daf813907cf8b386645c79274a85eacdd2a7f69d377b9719dfc8909ab'
 related:
   - '[[2026-02-26-observability-telemetry-integration-adr]]'
 ---
@@ -19,4 +19,4 @@ Auto-generated index of all documents tagged with `#observability-telemetry-inte
 
 ### adr
 
-- `2026-02-26-observability-telemetry-integration-adr` - `observability-telemetry-integration` adr: `adr-8` | (**status:** `proposed`)
+- `2026-02-26-observability-telemetry-integration-adr` - `observability-telemetry-integration` adr: `adr-8` | (**status:** `accepted`)

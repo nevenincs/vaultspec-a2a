@@ -4,9 +4,9 @@ tags:
   - '#index'
   - '#domain-logic'
 date: '2026-07-22'
-modified: '2026-09-03'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:56ec2fc6be771202036949a3a6acbdea8af271b1d5729cccf19f7f6fbcb78e45'
+body_hash: 'sha256:b97cdeb0dbd25786d666c4206c7e75d95af9908d5fad1ebd80b56d76075197cc'
 related:
   - '[[2026-03-27-domain-logic-extraction-adr]]'
   - '[[2026-03-27-domain-logic-extraction-research]]'
@@ -24,7 +24,7 @@ Auto-generated index of all documents tagged with `#domain-logic`.
 
 ### adr
 
-- `2026-03-27-domain-logic-extraction-adr` - `domain-logic` adr: `layer-2b-domain-logic-extraction` | (**status:** `proposed`)
+- `2026-03-27-domain-logic-extraction-adr` - `domain-logic` adr: `layer-2b-domain-logic-extraction` | (**status:** `rejected`)
 
 ### audit
 

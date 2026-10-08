@@ -3,13 +3,14 @@ tags:
   - '#adr'
   - '#ecosystem-artifact-lifecycle'
 date: '2026-07-21'
-modified: '2026-08-04'
-body_hash: 'sha256:8a21934b837953333ec227aca1cf7d0ac276176631dab976f7ada2e9ae32529e'
+modified: '2026-10-08'
+body_hash: 'sha256:e8eea9915631252512f4fb3f9b222b833dc262ff1835d980cdf125b81010d067'
 related:
   - "[[2026-07-21-ecosystem-artifact-lifecycle-research]]"
+  - '[[2026-07-19-observability-lanes-adr]]'
 ---
 
-# `ecosystem-artifact-lifecycle` adr: `artifact lifecycle contract` | (**status:** `proposed`)
+# `ecosystem-artifact-lifecycle` adr: `artifact lifecycle contract` | (**status:** `accepted`)
 
 ## Problem Statement
 
@@ -220,3 +221,14 @@ record fixes the cross-repo defects it identifies. It does not. It defines what 
 must satisfy, and the dashboard-side name and location divergences remain open work in
 another repository, tracked separately, with the edge currently unauthenticated until the
 publication path is confirmed by a live run.
+
+## Amendment (2026-10-08): re-scoped to what is built, and accepted
+
+Accepted 2026-10-08 under the owner's 2026-10-07 delegation of ADR work for `2026-10-06-codebase-remediation-plan` (decision D20, plan Step W04.P09.S45). This record carried `proposed` while parts of it shipped and other parts lost their premise. The governing rule - retention is a declared property of every durable artifact, enforced where the artifact is created - stands unchanged and is accepted. Its Implementation is corrected to the state of the tree, and the undelivered half is named as obligation rather than as description. Grounding: R3-F13 and the R7 host findings in `2026-10-06-codebase-remediation-audit`. Code paths are under `src/vaultspec_a2a/`.
+
+- **Ordering constraint, premise removed.** "the destructive workspace-delete path must be disarmed before any work persists artifact rows, because that path is inert only for as long as the table stays empty" rested on an `artifacts` table and a writer for it. The table had no writer at all (R3-F13) and is dropped by revision `0026_remediation_schema_retirement`, together with its model and repository. The hazard is removed rather than disarmed, and the ordering constraint is discharged. Should action-event capture ever land, it lands in a store this record's declaration rule covers, and the same ordering question is reopened then on its own evidence.
+- **Second layer, partly delivered.** The one audited write-and-rename helper exists: `utils/atomic_write.atomic_write_text`, used by the credential, registry, discovery and singleton writers. One raw `os.replace` remains outside it (`authoring/_tool_calls.py`) and is the residual that clause still owes.
+- **First layer, not built, and stated as obligation.** No declaration construct exists. What exists is bounded-by-age retention for exactly two stores, each enforced at its own seam (`database/run_event_retention.py`, `database/checkpoint_retention.py`), plus per-site cleanup for provider config homes and native role homes (`providers/_config_home_roots.py`, `providers/_codex_config_home.py`, `providers/_native_role.py`). Acceptance therefore establishes the rule and the obligation, not a rollout. Until a declaration construct lands, a new durable artifact satisfies this record by stating its root, owner and disposition at the creating seam in prose and code comment, and review treats an undeclared artifact as a defect.
+- **Third layer, re-scoped.** Of the three items, the workspace-delete ordering is discharged above; the truncation path and the action-event gap remain open and are the record's live obligations. The residual exposure already named - the full ACP session persisting in the operator's own home under no declaration this project makes - is unchanged.
+
+Nothing in Problem Statement, Considered options, Rationale or Consequences changes. The declaration-at-the-seam choice and its knockout argument are what this amendment accepts.

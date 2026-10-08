@@ -20,8 +20,8 @@ related:
   - '[[2026-07-17-tool-cores-adr]]'
   - '[[2026-09-05-codebase-health-process-resource-lifetimes-research]]'
   - '[[2026-09-05-codebase-health-process-resource-lifetimes-audit]]'
-modified: '2026-09-05'
-body_hash: 'sha256:fc72ca0b0efb639d9ba780f972b4dc3711203481ad55434a19df07f424afa89c'
+modified: '2026-10-08'
+body_hash: 'sha256:6680324255888605ca46718d7bf5f402903f7977166426e58567f279e51c3077'
 ---
 
 <!-- RETIRED: P19, S30, S31, S32, S83, S84, S85, S86, S88, S100, S111, S112, S113, S145, S146, S147, S148, S158, S162, S164, S165, S166, S167, S168, S169 -->
@@ -147,7 +147,7 @@ Replace payload-shaped relaying with one versioned DTO and enforce resource limi
 - [x] `W02.P06.S22` - Define the versioned positive progress DTO with identifiers lifecycle state bounded counters approved summaries and one bounded token-delta field; `src/vaultspec_a2a/api/schemas/gateway.py, src/vaultspec_a2a/streaming`.
 - [x] `W02.P06.S23` - Transform gateway events through the positive DTO while excluding prompts documents artifacts edit diffs and raw provider payloads; `src/vaultspec_a2a/streaming/aggregator.py, src/vaultspec_a2a/streaming/transformer.py`.
 - [x] `W02.P06.S24` - Authenticate the progress stream and enforce global connection limits before principal lookup; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/dependencies.py`.
-- [ ] `W02.P06.S25` - Enforce global stream and per-connection subscription quotas on the authenticated stream path; `src/vaultspec_a2a/streaming/subscribers.py, src/vaultspec_a2a/api/routes/thread_stream.py`.
+- [x] `W02.P06.S25` - Enforce global stream and per-connection subscription quotas on the authenticated stream path; `src/vaultspec_a2a/streaming/subscribers.py, src/vaultspec_a2a/api/routes/thread_stream.py`.
 - [x] `W02.P06.S26` - Parse numeric and ISO heartbeat values strictly and reject stale malformed non-finite and implausibly future values; `src/vaultspec_a2a/authoring/discovery.py`.
 - [x] `W02.P06.S27` - Prove progress allowlisting with a real authenticated stream client; `tests/streaming, tests/api`.
 - [x] `W02.P06.S98` - Enforce the positive progress allowlist again at the SSE frame and API event-adapter output boundary; `src/vaultspec_a2a/streaming/sse_frames.py, src/vaultspec_a2a/api/event_adapter.py`.
@@ -163,8 +163,8 @@ Replace payload-shaped relaying with one versioned DTO and enforce resource limi
 
 Keep transition surfaces credential-gated and unadvertised while moving the dashboard store and engine facade to the supported product contract.
 
-- [ ] `W02.P07.S28` - Disable legacy product routes in Compose when no attach credential is configured after consuming certified desktop route authentication; `src/vaultspec_a2a/api/routes, service`.
-- [ ] `W02.P07.S29` - Remove the credential-gated legacy event WebSocket from dashboard discovery after consuming certified desktop WebSocket authentication; `src/vaultspec_a2a/lifecycle/discovery.py, src/vaultspec_a2a/api/app.py`.
+- [x] `W02.P07.S28` - Disable legacy product routes in Compose when no attach credential is configured after consuming certified desktop route authentication; `src/vaultspec_a2a/api/routes, service`.
+- [x] `W02.P07.S29` - Remove the credential-gated legacy event WebSocket from dashboard discovery after consuming certified desktop WebSocket authentication; `src/vaultspec_a2a/lifecycle/discovery.py, src/vaultspec_a2a/api/app.py`.
 - [x] `W02.P07.S183` - Answer a permission request through a run-scoped versioned verb; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/schemas/gateway.py`.
 
 ### Phase `W02.P08` - review and queue edge findings
@@ -328,13 +328,13 @@ Provide reusable real gateway worker provider and persistence infrastructure plu
 
 Execute both repositories' canonical gates and prove the versioned contract cannot silently drift.
 
-- [ ] `W05.P20.S106` - Remove the legacy product routes once no supported consumer depends on them; `src/vaultspec_a2a/api/routes`.
-- [ ] `W05.P20.S163` - Remove the legacy event WebSocket once no supported consumer depends on it; `src/vaultspec_a2a/api/app.py`.
+- [x] `W05.P20.S106` - Remove the legacy product routes once no supported consumer depends on them; `src/vaultspec_a2a/api/routes`.
+- [x] `W05.P20.S163` - Remove the legacy event WebSocket once no supported consumer depends on it; `src/vaultspec_a2a/api/app.py`.
 - [x] `W05.P20.S87` - Run the canonical A2A code-quality gate with just dev code check; `Justfile, just/dev/code.just, src, tests`.
-- [ ] `W05.P20.S89` - Fail certification on positive-schema fingerprint authentication or capability drift; `schemas, src/vaultspec_a2a/acceptance/tests`.
+- [x] `W05.P20.S89` - Fail certification on positive-schema fingerprint authentication or capability drift; `schemas, src/vaultspec_a2a/acceptance/tests`.
 - [x] `W05.P20.S141` - Run the canonical A2A dependency gate with just dev deps check; `Justfile, just/dev/deps.just, pyproject.toml, uv.lock`.
 - [x] `W05.P20.S142` - Run the canonical A2A unit gate with just dev test unit; `Justfile, just/dev/test.just, src, tests`.
-- [ ] `W05.P20.S143` - Run the canonical A2A service gate with just dev test service; `Justfile, just/dev/test.just, src/vaultspec_a2a/service_tests`.
+- [ ] `W05.P20.S143` - Run the canonical A2A service gate with just dev test service, correcting the recipe name to test-service; `Justfile, just/dev/test.just, src/vaultspec_a2a/service_tests`.
 - [x] `W05.P20.S144` - Run the A2A real-process acceptance suites with uv run --no-sync pytest tests/acceptance src/vaultspec_a2a/desktop_tests src/vaultspec_a2a/service_tests -ra; `tests/acceptance, src/vaultspec_a2a/desktop_tests, src/vaultspec_a2a/service_tests`.
 
 ### Phase `W05.P21` - review and close the rolling audit cycle

@@ -3,8 +3,8 @@ tags:
   - '#audit'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-09-21'
-body_hash: 'sha256:d2107047c1fa85ced1f74bfb9fa7e34f881cc322e2a1300e80fd2edc44a3eda7'
+modified: '2026-10-08'
+body_hash: 'sha256:82e2d53e167455713c90da38f51f2fc7e939b3daa374122eee8450866ecea2e2'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
   - "[[2026-07-18-desktop-product-profile-plan]]"
@@ -4351,3 +4351,7 @@ Implementation: extracted one capability token's ASCII, length, leading-characte
 ### 2026-09-21 PR #70 main integration review | low | append-only audit conflict resolved without loss
 
 Type: merge integration. Status: CLOSED. Merging current `origin/main` produced one content conflict in this rolling audit because both branches had appended findings at the same insertion point. The resolution retains the complete default-branch history first and appends both PR-specific workflow review entries. The integrated PR diff remains limited to its three workflow changes and these audit entries. `just check-workflow`, the focused CI contract test, `git diff --check`, and the complete codebase-health Vaultspec validation pass. Review result: PASS; no additional critical, high, medium, or low finding surfaced.
+
+### 2026-10-08 remediation-driven reopening of W04.P12.S49 and W04.P12.S101 | medium | duplication residue the remediation audit found underneath two checked Steps
+
+Type: duplication. Status: REOPENED. `2026-10-06-codebase-remediation-plan`'s audit (`2026-10-06-codebase-remediation-audit`, finding R3-F8) found that the repair-policy consolidation checked `W04.P12.S49` closed for still has four homes writing the readiness mirror (`control/terminal_settlement.py`, `control/dispatch.py`, `recovery_authority.py` alongside `thread/repair_policy.py`), and that residue carried into the test-double closeout `W04.P12.S101` also claimed. Both Steps stay checked here because their own acceptance criteria at the time were met; the newly found residue is a later-discovered gap, not evidence the original work was false. Disposition: the remediation plan's Step `A.3` (`W05.P13.S66`, catalog A03, merged `e1f4e4d6`, `3e68a047` on `refactor/centralize`) makes `thread/repair_policy.py` the only repair policy with one applier and derives `execution_readiness` at read time; its own ledger records this reopening. The `W04.P12.S101` carry-over (prohibited test doubles) is reconciled through the same plan's `F.3` (F03, merged `02a0aadb`, follow-up `0ee6f12a`), which replaces the langchain fakes and `_StubProviderFactory` with the deterministic lane. No codebase-health Step is reopened as unchecked by this entry; the residue is owned and fixed on `refactor/centralize`, pending that plan's own merge to `main` and verification phase.

@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#security-cloud-remediation'
 date: '2026-10-06'
-modified: '2026-10-06'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:bf94ea35fea9f5e363652c74f1eff508461c6c75bf0eaa8702515a30644d8a5f'
+body_hash: 'sha256:089ba8a17fa1aa66d5115af89f01c793c05b01bf6ee3baf35bd2f8bc0533d70b'
 related:
   - "[[2026-10-06-security-cloud-remediation-plan]]"
 ---
@@ -194,3 +194,5 @@ related:
 - `S15` Other full-suite failures remain queued in audit; remote CI is running on preceding revision.
 - `S16` Full Linux unit rerun and replacement remote CI remain pending; focused verification does not claim whole-suite success.
 - `S17` Companion ci-fleet/fleet.yml adds docker-rootless to the existing A2A Linux runner; GitHub runner63 label matches. End-to-end replacement GitHub workflow verification pending.
+- `S06` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: consumes H07's one redaction module (utils/redaction.py@26e0430e,db622b47) instead of building a sixth redactor
+- `S08` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: owner-only write via `harden_credential_path` owned by H05@2d839862; this Step keeps credential-refresh validation only

@@ -4,11 +4,12 @@ tags:
   - '#index'
   - '#tool-permission-model'
 date: '2026-10-01'
-modified: '2026-10-01'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:e9f39440856e55a5df71d9a34a024092ad07fad090389ab1e4f67477a51db4a3'
+body_hash: 'sha256:4225f3819042f5c631f0f0f992df312969b0b14ab36df67d0e64847dc2dd0d93'
 related:
   - '[[2026-10-01-tool-permission-model-adr]]'
+  - '[[2026-10-01-tool-permission-model-ledger]]'
   - '[[2026-10-01-tool-permission-model-plan]]'
   - '[[2026-10-01-tool-permission-model-research]]'
 ---
@@ -22,6 +23,10 @@ Auto-generated index of all documents tagged with `#tool-permission-model`.
 ### adr
 
 - `2026-10-01-tool-permission-model-adr` - `tool-permission-model` adr: `one compiled policy, one durable grant store, one attributed decision log` | (**status:** `accepted`)
+
+### exec
+
+- `2026-10-01-tool-permission-model-ledger` - `tool-permission-model` ledger
 
 ### plan
 

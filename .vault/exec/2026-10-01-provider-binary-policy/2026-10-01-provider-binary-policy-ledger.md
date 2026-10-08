@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#provider-binary-policy'
 date: '2026-10-01'
-modified: '2026-10-02'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:7ae6b10d5bfa2ea6af134a2684f3319d54a6f19b756f1127d686088ebd9a4b4e'
+body_hash: 'sha256:7b968098b838b90fe74f83a0b32ca75483ba873afb7e88d83cae815208b31e0e'
 related:
   - "[[2026-10-01-provider-binary-policy-plan]]"
 ---
@@ -393,3 +393,6 @@ related:
 - `S13` Managed policy presence remains unknown and audited; integrated CI pending root branch.
 - `S25` Review: stale fixture corrected; no additional finding in S25. Integrated CI pending.
 - `S26` Review verdict REVISION REQUIRED: two high policy conflicts await a decision; P02.S21 credentialed Claude and Z.ai turns remain open.
+- `S07` recorded Codex 0.160.0 per 2026-10-06-codebase-remediation-plan absorption table; the version was actually refreshed by security-cloud-remediation S10@5ad00794 on main `(providers/lane_admission.py` `PROVEN_TURN_LANES),` this Step's text now matches
+- `S10` recorded Codex 0.160.0 per 2026-10-06-codebase-remediation-plan absorption table, matching security-cloud-remediation S10@5ad00794
+- `S07` also updated the Verification section's 'Live proof status' paragraph to Codex 0.160.0 per the same table row

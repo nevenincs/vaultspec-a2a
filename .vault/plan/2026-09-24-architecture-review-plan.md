@@ -20,9 +20,9 @@ related:
   - '[[2026-08-03-current-project-binding-adr]]'
   - '[[2026-07-19-observability-lanes-adr]]'
   - '[[2026-03-20-service-lifecycle-architecture-adr]]'
-modified: '2026-10-01'
+modified: '2026-10-08'
 body_schema: body-v2
-body_hash: 'sha256:561ca7ac484ccd339d76620d5e16713833d9c02273bd21bfe7cb905844cef21d'
+body_hash: 'sha256:439b0ff701837460afa758c78867c86e34081c6d21185d8fa5fc017ea2d58507'
 ---
 
 # `architecture-review` plan
@@ -119,9 +119,9 @@ Close the decision-free findings the plan-close review and its re-review left op
 - [x] `P06.S45` - Reconcile finding statuses that later Steps closed; `.vault/audit/2026-09-24-architecture-review-audit.md, .vault/audit/2026-09-30-langgraph-conformance-audit.md`.
 - [x] `P06.S46` - Write absolute Claude permission rule paths with the CLI's absolute anchor so deny and scope rules match the paths they name; `src/vaultspec_a2a/providers/_claude_tool_policy.py`.
 - [x] `P06.S47` - Answer a permission response on a busy or saturated run with the same typed status the follow-up verb serves instead of 500 or 502; `src/vaultspec_a2a/control/permission_dispatch.py, src/vaultspec_a2a/api/routes/_gateway_action_endpoints.py`.
-- [ ] `P06.S48` - Remove the dead state the residual fixes left behind and flush the replay recorder on every relay transport; `src/vaultspec_a2a/api/internal.py, src/vaultspec_a2a/control/circuit_breaker.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/control/_permission_response_contract.py, src/vaultspec_a2a/graph/_compiler_research.py`.
+- [ ] `P06.S48` - Remove the dead state the residual fixes left behind and flush the replay recorder on every relay transport, re-scoped to HTTP only - 2026-10-06-codebase-remediation-plan's round-1 dead-internal deletes the internal WebSocket relay; `src/vaultspec_a2a/api/internal.py, src/vaultspec_a2a/control/circuit_breaker.py, src/vaultspec_a2a/control/message_service.py, src/vaultspec_a2a/control/_permission_response_contract.py, src/vaultspec_a2a/graph/_compiler_research.py`.
 - [x] `P06.S49` - Escape a role heading formed by a whole underlined paragraph and deliver a re-raised signal without awaiting the finalisation reads; `src/vaultspec_a2a/providers/_prompt_render.py, src/vaultspec_a2a/streaming/ingest.py`.
-- [ ] `P06.S50` - Bring the unused-symbol and unconsumed-export gates back to zero; `src/vaultspec_a2a/`.
+- [x] `P06.S50` - Bring the unused-symbol and unconsumed-export gates back to zero; `src/vaultspec_a2a/`.
 - [x] `P06.S51` - Mark an INGEST control action applied when its dispatch proves application, recording it as the thread's last applied action in the same settlement as the follow-up branch does; `src/vaultspec_a2a/control/_event_application.py, src/vaultspec_a2a/control/repair_transitions.py, src/vaultspec_a2a/control/tests/`.
 
 ## Parallelization

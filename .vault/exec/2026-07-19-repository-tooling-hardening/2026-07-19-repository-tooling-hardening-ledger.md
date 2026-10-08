@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#repository-tooling-hardening'
 date: '2026-07-19'
-modified: '2026-10-02'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:1b13fecfca9f9d616054df87d0533ab898ef83bdd89fc5d66d73139aa3c59044'
+body_hash: 'sha256:6a4ce37ab55c996c5537318120a37138426a16fbbe78479f7953f6377442e4f0'
 related:
   - "[[2026-07-19-repository-tooling-hardening-plan]]"
 ---
@@ -273,6 +273,7 @@ related:
 - `S50` `verify:` `pytest -q dev/tests/test_ci_contract.py src/vaultspec_a2a/control/tests/test_settings_sources.py src/vaultspec_a2a/control/tests/test_settings_startup.py src/vaultspec_a2a/control/tests/test_settings_redaction.py` -> `pass`
 - `S50` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S50` `by:` `vaultspec-standard-executor`
+- `S45` `M` `.vault/audit`
 
 ## Notes
 
@@ -291,3 +292,9 @@ related:
 - `S49` One production clone, 41 lines: migration 0009 downgrade reproduces 0008 upgrade verbatim, as Alembic immutability requires. None of the graduated gates measures shape or duplication, so none reached zero through it.
 - `S37` Already chained in lint all and the workflow; no change.
 - `S43` Also graduated in facbd89 under the aggregate rule: reachability, symbols and exports, each at zero; a probe unused export failed lint all and was reverted.
+- `S45` absorbed by 2026-10-06-codebase-remediation-plan: PV13 pins jscpd 5.4.0 and makes duplication detection blocking (D7)@26053ae4 and widens the structural duplication guard@87b39a9b on refactor/centralize (R6-F17/F18/F33)
+- `S40` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: radon/shape/vulture retirement (R6-F32) merged via round-1 dead-root@8300f41b; this Step now only promotes the gate and folds the false-pass exit fix
+- `S41` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: radon/shape/vulture retirement (R6-F32) merged via round-1 dead-root@8300f41b; this Step now only promotes the gate
+- `S32` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: that plan's round-1 dead-edge already deletes `api/event_adapter.py;` this Step drops the event-adapter half and runs the gateway.py decomposition after W05
+- `S33` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: run against the residue left after that plan's W05 (H01a/H01b, C01, M03a-M08 rewrite these hotspots first)
+- `S48` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: consumes that plan's Y.1 (R0902 retired), adds no new binders

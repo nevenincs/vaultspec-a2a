@@ -11,9 +11,9 @@ related:
   - '[[2026-10-01-tool-permission-model-adr]]'
   - '[[2026-07-16-authoring-contract-adr]]'
   - '[[2026-10-01-provider-binary-policy-adr]]'
-modified: '2026-10-06'
+modified: '2026-10-08'
 body_schema: body-v2
-body_hash: 'sha256:37f301f03abb1ea5d50f2470de2c34d9a90ec68ab2fa7180981e9906170890f2'
+body_hash: 'sha256:e4916c6132c6daab64abb205018a4e9c8adc33e006e232c16f8e8eca5500d02c'
 ---
 
 # `security-cloud-remediation` plan
@@ -47,9 +47,9 @@ S17 follows the user's explicit instruction to fix root causes and continue unti
 - [ ] `S03` - Reject linked state ancestors and SQLite or authoring journal leaves; `control/state_layout.py, config.py, database/session.py, authoring/_tool_calls.py and tests`.
 - [ ] `S04` - Bind permission identities and resolutions to their owning thread; `graph/nodes/_worker_permissions.py, database/permission_repository.py, control/_event_application.py and tests`.
 - [ ] `S05` - Reject linked desktop app-home aliases into protected capsule paths; `desktop/profile.py and tests`.
-- [ ] `S06` - Redact ACP stderr before every log and retention sink; `providers/_acp_stderr.py and tests`.
+- [ ] `S06` - Apply 2026-10-06-codebase-remediation-plan H07's one secret-redaction module (utils/redaction.py, merged@26e0430e,db622b47 on refactor/centralize) to redact ACP stderr before every log and retention sink; `providers/_acp_stderr.py and tests`.
 - [ ] `S07` - Enforce vault write prohibition for Claude native writes; `providers/_claude_tool_policy.py, required mediation seams and tests`.
-- [ ] `S08` - Validate Codex credential refresh before publishing operator auth; `providers/_codex_auth.py, _codex_config_home.py and tests`.
+- [ ] `S08` - Validate Codex credential refresh before publishing operator auth, re-scoped to credential-refresh validation only - the owner-only write via harden_credential_path is owned by 2026-10-06-codebase-remediation-plan H05 (merged@2d839862 on refactor/centralize); `providers/_codex_auth.py, _codex_config_home.py and tests`.
 - [x] `S09` - Remove ambient Z.ai credentials and gateway overrides from shared child environments while preserving selected Z.ai auth; `workspace/environment.py, provider credential and version-probe seams, focused environment/auth and MCP tests`.
 - [x] `S10` - Refresh Codex binary proof after a real completed turn and restore factory verification; `providers/lane_admission.py, binary admission and version tests, provider and graph live identity tests, worker identity tests, .github/workflows/test.yml`.
 - [x] `S11` - Move build-only Linux isolation staging out of shipped runtime and restore CI reachability; `desktop/_linux_runtime_assets.py, scripts/build_linux_isolation.py, desktop and provider native isolation test imports`.

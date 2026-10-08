@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#run-continuation'
 date: '2026-10-01'
-modified: '2026-10-06'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:da70af0b6204cb5c949890e2be7efc30f3a37d1553cab0af8b21163e993fde33'
+body_hash: 'sha256:68886640d5600c1c736de8ea0cdfccfb82c0c14cfe7a64e6c9af1c63a4229dc0'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -153,6 +153,10 @@ Open. Type: test resource hygiene. The focused eight-module API run passed 64 te
 ### clarification-park-never-input-required | high | a run parked on a clarification stayed running and queued follow-ups
 
 Fixed in 8a6fbe62; residue open. Type: contract drift against the Constraints of `2026-10-01-run-continuation-adr` (a run parked on input_required refuses, whether the pause is a clarification or a permission request). Only permission, plan-approval and document-approval events elected `INPUT_REQUIRED` (`control/event_handlers.py`), so a clarification park stayed `RUNNING`: `POST /messages` was admitted as a queued continuation, and gateway restart drove the park to `RECONCILING`. P04.S12 closed on `api/tests/test_run_continuation_admission.py:191-264`, which seeds an `INPUT_REQUIRED` row with no permission request, a state production never produced for a clarification. The fix `control/clarification_service.reconcile_clarification_pause` re-projects the pause from checkpoint truth on the relayed clarification nudge, on a resume application receipt and on startup redrive. It elects under the current writer identity, with the witness read before the checkpoint. `test_a_worker_reported_park_reads_input_required_and_refuses_followups` drives a park from a real worker through the real gateway and fails on the prior code. Still open, owned by the codebase-remediation plan (FX.1): a restart proof, and replacing the hand-seeded premise with a real park.
+
+### clarification-park-restart | medium | A clarification park now survives a gateway restart under test
+
+R4-F1 residue. Status: fixed on refactor/centralize (PV01, the PVG branch commit e644995a, integrated as 33c79748). Type: coverage. `api/tests/test_clarification_loop_live.py` `test_a_clarification_park_survives_a_gateway_restart` parks a run on a real clarification through a real worker, discards the gateway, client and worker, runs `control/reconciliation.reconcile_threads_on_startup` over the same stores, and proves a second gateway reads `input_required` with the same request id and resumes the real graph. The hand-seeded `INPUT_REQUIRED` premise in `api/tests/test_run_continuation_admission.py` is replaced by real interrupts.
 
 ## Recommendations
 

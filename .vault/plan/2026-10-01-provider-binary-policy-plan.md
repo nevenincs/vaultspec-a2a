@@ -10,9 +10,9 @@ related:
   - '[[2026-08-02-provider-capability-evidence-adr]]'
   - '[[2026-07-18-desktop-product-profile-adr]]'
   - '[[2026-10-01-provider-binary-policy-acp-adapter-upgrade-research]]'
-modified: '2026-10-02'
+modified: '2026-10-08'
 body_schema: body-v2
-body_hash: 'sha256:054045001532187dfc4617245c04fbea124e1b1e512a6cfa18200e01cecad13f'
+body_hash: 'sha256:d02df0ae60c82dd7748c304d3c5d3d0e2648fceb321a31b560e90525f7d53e46'
 ---
 
 # `provider-binary-policy` plan
@@ -54,10 +54,10 @@ Exactly one seam answers which CLI a Claude or Z.ai child will run, the answer i
 
 A lane proof declares the binary identity and version range it covers, and a resolved binary outside that range makes the lane ineligible with a typed reason that provider-catalog selection, construction, and child spawn all read.
 
-- [x] `P02.S07` - Declare the LaneProof binary identity and proved version range, record Codex 0.159.2 from its completed direct app-server turn, and withdraw Claude and Z.ai admission until their current binaries complete live turns; `src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`.
+- [x] `P02.S07` - Declare the LaneProof binary identity and proved version range, record Codex 0.160.0 from its completed direct app-server turn (refreshed from the originally recorded 0.159.2 by security-cloud-remediation S10@5ad00794), and withdraw Claude and Z.ai admission until their current binaries complete live turns; `src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`.
 - [x] `P02.S08` - Add a binary version probe that reads a resolved launcher's reported version once per launch identity, memoized per process, and derive the admitted range as exact equality for the pinned rungs and floor to next minor for the host PATH rung; `src/vaultspec_a2a/providers/binary_version.py, src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/test_binary_version.py, src/vaultspec_a2a/providers/tests/test_lane_admission_current.py`.
 - [x] `P02.S09` - Require current completed-turn proof for every frozen external lane before graph construction, and version-bound proof for Claude, Z.ai, and Codex at catalog, factory, and child spawn; preserve exact frozen selections and typed refusals; `src/vaultspec_a2a/graph/_compiler_models.py, src/vaultspec_a2a/graph/tests/test_compiler.py, src/vaultspec_a2a/providers/cli_resolution.py, src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/tests/test_binary_proof_admission.py, src/vaultspec_a2a/providers/tests/test_claude_binary_identity.py, src/vaultspec_a2a/providers/tests/test_claude_auth_channel.py, src/vaultspec_a2a/providers/tests/test_factory.py, .vault/adr/2026-10-01-provider-binary-policy-adr.md, .vault/adr/2026-08-02-provider-model-catalog-adr.md, .vault/audit/2026-10-01-provider-binary-policy-audit.md, .vault/plan/2026-10-01-provider-binary-policy-plan.md`.
-- [x] `P02.S10` - Pin the CI Codex install to its proved exact version 0.159.2 and verify npm signatures before provider prerequisite gates; `.github/workflows/test.yml, .github/ci-contract-allow.txt`.
+- [x] `P02.S10` - Pin the CI Codex install to its proved exact version 0.160.0 (refreshed from the originally recorded 0.159.2 by security-cloud-remediation S10@5ad00794) and verify npm signatures before provider prerequisite gates; `.github/workflows/test.yml, .github/ci-contract-allow.txt`.
 - [ ] `P02.S21` - Re-enroll Claude and Z.ai with hand-recorded binary versions and ranges only after their cited live turns complete on the resolved launchers; `src/vaultspec_a2a/providers/lane_admission.py, src/vaultspec_a2a/providers/tests/`.
 - [x] `P02.S22` - Narrow parsed proof versions before comparing host PATH bounds so strict typing verifies the admission gate; `src/vaultspec_a2a/providers/lane_admission.py`.
 - [x] `P02.S23` - Repair integration CI contracts for the lock-vendored CLI asset and changelog history after the 0.4.0 release; `src/vaultspec_a2a/providers/cli_resolution.py, dev/tests/test_release_please_automation.py`.
@@ -131,6 +131,6 @@ Plan-level criteria:
 - The Claude credential prerequisite agrees with the production resolution on a host with no token set (P04.S15).
 - No production caller sets a provider session id, proven over the source tree (P05.S16).
 
-Live proof status on this host. Codex 0.159.2 completed the direct production-factory app-server turn cited in P02.S07. The current Claude CLI reached ACP session creation but its first prompt failed with `Authentication required`; no Z.ai credential was available. P02.S07 therefore withdraws those two lanes, and P02.S21 reenrolls each only after its own completed live turn against the resolved binary. P01.S01, P01.S02, P01.S04, P01.S05, P01.S06, P02.S08, P02.S09, P04.S14 and P04.S15 are verified to the binary boundary rather than by a model turn. P03.S13 completed a real Codex turn and durable identity-row assertion on SQLite, plus worker and research graph-path proofs. P02.S21 remains open until Claude and Z.ai each complete a credentialed live turn on their resolved binary.
+Live proof status on this host. Codex 0.160.0 completed the direct production-factory app-server turn cited in P02.S07 (refreshed from the originally recorded 0.159.2 by security-cloud-remediation S10@5ad00794, per 2026-10-06-codebase-remediation-plan's reconciliation of this plan). The current Claude CLI reached ACP session creation but its first prompt failed with `Authentication required`; no Z.ai credential was available. P02.S07 therefore withdraws those two lanes, and P02.S21 reenrolls each only after its own completed live turn against the resolved binary. P01.S01, P01.S02, P01.S04, P01.S05, P01.S06, P02.S08, P02.S09, P04.S14 and P04.S15 are verified to the binary boundary rather than by a model turn. P03.S13 completed a real Codex turn and durable identity-row assertion on SQLite, plus worker and research graph-path proofs. P02.S21 remains open until Claude and Z.ai each complete a credentialed live turn on their resolved binary.
 
 Review follows the vaultspec system section: one review at each Phase close, one at plan close, and one before handoff for merge, with coincident gates sharing a single integrated review.

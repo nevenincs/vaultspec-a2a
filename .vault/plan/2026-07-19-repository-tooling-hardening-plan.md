@@ -8,8 +8,8 @@ related:
   - '[[2026-07-19-repository-tooling-hardening-adr]]'
   - '[[2026-07-19-repository-tooling-hardening-research]]'
   - '[[2026-07-19-repository-tooling-hardening-reference]]'
-modified: '2026-10-02'
-body_hash: 'sha256:5412bab3d9229b9b890ab013bd5af9f66fcfbb963d5c2a0f30a533dbc77b586c'
+modified: '2026-10-08'
+body_hash: 'sha256:59f6d4f49771fbcee01b38dfd947e32125420a657194897bf0233d1c0ae2e5ea'
 ---
 
 # `repository-tooling-hardening` plan
@@ -152,8 +152,8 @@ Decompose provider, streaming, API, and control hotspots while preserving their 
 - [x] `W07.P13.S29` - Decompose ProviderFactory construction paths below the configured complexity and shape thresholds.; `src/vaultspec_a2a/providers/factory.py`.
 - [x] `W07.P13.S30` - Decompose ACP composition, protocol, RPC, and chat-model hotspots without changing provider behavior.; `src/vaultspec_a2a/providers/_acp_mcp.py, src/vaultspec_a2a/providers/_acp_protocol.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/providers/acp_chat_model.py`.
 - [x] `W07.P13.S31` - Decompose streaming transformation and interrupt emission hotspots with stream regression evidence.; `src/vaultspec_a2a/streaming/transformer.py, src/vaultspec_a2a/streaming/ingest.py`.
-- [ ] `W07.P13.S32` - Decompose API gateway and event-adapter hotspots while preserving authenticated edge behavior.; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/event_adapter.py`.
-- [ ] `W07.P13.S33` - Decompose control permission, dispatch, projection, snapshot, and worker-management hotspots.; `src/vaultspec_a2a/control`.
+- [ ] `W07.P13.S32` - Decompose the API gateway hotspot while preserving authenticated edge behavior, re-scoped to run after 2026-10-06-codebase-remediation-plan W05: that plan's round-1 dead-edge already deletes api/event_adapter.py; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/event_adapter.py`.
+- [ ] `W07.P13.S33` - Decompose control permission, dispatch, projection, snapshot, and worker-management hotspots, re-scoped to run against the residue left after 2026-10-06-codebase-remediation-plan's W05 (H01a/H01b, C01, M03a-M08 rewrite these hotspots first); `src/vaultspec_a2a/control`.
 
 ### Phase `W07.P14` - remaining structural domains
 
@@ -162,7 +162,7 @@ Finish graph, lifecycle, desktop, and utility structural debt at the configured 
 - [x] `W07.P14.S34` - Decompose graph compiler and node hotspots while retaining compiled-topology evidence.; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/graph/nodes`.
 - [x] `W07.P14.S35` - Decompose lifecycle discovery and singleton hotspots without weakening ownership checks.; `src/vaultspec_a2a/lifecycle`.
 - [x] `W07.P14.S36` - Decompose desktop filesystem and process-utility hotspots with real-process regression evidence.; `src/vaultspec_a2a/desktop, src/vaultspec_a2a/utils/process.py`.
-- [ ] `W07.P14.S48` - Resolve every residual production complexity, shape, nesting, and size finding before any structural-sentinel graduation.; `src/vaultspec_a2a`.
+- [ ] `W07.P14.S48` - Resolve every residual production complexity, shape, nesting, and size finding before any structural-sentinel graduation, re-scoped to consume 2026-10-06-codebase-remediation-plan Y.1 (R0902 retired) and add no new binders; `src/vaultspec_a2a`.
 - [x] `W07.P14.S50` - Restore the graduated strict-type gate after the runner-placement and deferred-settings changes; `dev/ci_contract.py, src/vaultspec_a2a/control/settings_base.py, covering tests`.
 
 ## Wave `W08` - evidence-bound graduation and audit
@@ -177,8 +177,8 @@ Independently prove and atomically promote each deterministic strict sentinel on
 - [x] `W08.P15.S37` - Prove cross-platform Ty is zero and atomically promote type-platforms into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [x] `W08.P15.S38` - Prove Basedpyright strict is zero and atomically promote type-strict into the blocking aggregate.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S39` - Prove cognitive complexity is zero on the corrected production scope and atomically promote complexity.; `dev/toolchain.py, .github/workflows/test.yml`.
-- [ ] `W08.P15.S40` - Prove cyclomatic complexity is zero and atomically promote cyclomatic.; `dev/toolchain.py, .github/workflows/test.yml`.
-- [ ] `W08.P15.S41` - Prove module and function shape is zero and atomically promote shape.; `dev/toolchain.py, .github/workflows/test.yml`.
+- [ ] `W08.P15.S40` - Atomically promote cyclomatic duplication/complexity gates from advisory to blocking, re-scoped to promotion only - the radon detection retirement (R6-F32) merged via 2026-10-06-codebase-remediation-plan round-1 dead-root@8300f41b; fold the health --gate false-pass exit fix into this Step; `dev/toolchain.py, .github/workflows/test.yml`.
+- [ ] `W08.P15.S41` - Atomically promote module and function shape gates from advisory to blocking, re-scoped to promotion only - the shape/vulture detection retirement (R6-F32) merged via 2026-10-06-codebase-remediation-plan round-1 dead-root@8300f41b; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S42` - Prove function limits are zero and atomically promote limits.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [x] `W08.P15.S43` - Prove nesting is zero and atomically promote nesting.; `dev/toolchain.py, .github/workflows/test.yml`.
 - [ ] `W08.P15.S44` - Prove size and design limits are zero and atomically promote size.; `dev/toolchain.py, .github/workflows/test.yml`.
@@ -187,7 +187,7 @@ Independently prove and atomically promote each deterministic strict sentinel on
 
 Retain terminal advisory clone evidence and complete the mandatory implementation review and finding queue.
 
-- [ ] `W08.P16.S45` - Recheck and classify production JSCPD findings after graduation without changing the advisory policy.; `.vault/audit, .vault/exec`.
+- [x] `W08.P16.S45` - Recheck and classify production JSCPD findings after graduation without changing the advisory policy.; `.vault/audit, .vault/exec`.
 - [ ] `W08.P16.S46` - Run formal code review, record every finding, and close the campaign only on full evidence.; `.vault/audit, .vault/exec`.
 
 ## Parallelization

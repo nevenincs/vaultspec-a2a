@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#run-continuation'
 date: '2026-10-01'
-modified: '2026-10-02'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:bb8bf525ade8a4e590e982476d046282f80674eaf840cad8b698a6c27dfdd4ae'
+body_hash: 'sha256:3592f26ab7069861a69c737a46f95d63b66632bc82013c0f7629b52f4647ace4'
 related:
   - "[[2026-10-01-run-continuation-plan]]"
 ---
@@ -183,6 +183,7 @@ related:
 - `S20` `verify:` `uv run --no-sync ty check [4 touched Python]` -> `pass`
 - `S20` `verify:` `vaultspec-core vault check all` -> `pass`
 - `S20` `by:` `vaultspec-standard-executor`
+- `S12` `M` `.vault/audit/2026-10-01-run-continuation-audit.md`
 
 ## Notes
 
@@ -202,3 +203,4 @@ related:
 - `S16` The R6 amendment already existed; this Step reconciled it with the served `queue_position` and narrowed dispatch-time answers.
 - `S17` Real worker 409 is exercised over loopback; gateway breaker and claim classification is supplied by `test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running` because public continuation admission queues and ordinary redelivery reuses the dispatch ID.
 - `S20` 64 focused SQLite/API tests passed; one existing PostgreSQL live proof was withheld by the optional prerequisite and is unchanged by this Step. Review PASS; three findings recorded in rolling audit, including an open low SQLite test connection warning.
+- `S12` audit record only per 2026-10-06-codebase-remediation-plan absorption table: PV01 (R4-F1 restart proof, real-park replacement of the hand-seeded fixture) recorded as the clarification-park-restart finding, fixed on refactor/centralize (PVG commit e644995a, integrated as 33c79748); P04.S12 stays checked, no Step state changed

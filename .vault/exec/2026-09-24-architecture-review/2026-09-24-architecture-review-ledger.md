@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#architecture-review'
 date: '2026-09-24'
-modified: '2026-10-01'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:7570ba7f86534710beda4e54775fc1b585f8e0e68caca77e2fd36029a9ee8124'
+body_hash: 'sha256:d3377e59d04467f136c6bdd8fd0a6bf58fadc3b475603c2569d0644bec609656'
 related:
   - "[[2026-09-24-architecture-review-plan]]"
 ---
@@ -523,6 +523,7 @@ related:
 - `S51` `verify:` `pytest src/vaultspec_a2a/control src/vaultspec_a2a/database src/vaultspec_a2a/worker -n 3 --require-prerequisite=postgres` -> `pass`
 - `S51` `verify:` `python -m dev lint symbols` -> `pass`
 - `S51` `by:` `vaultspec-standard-executor`
+- `S50` `M` `src/vaultspec_a2a/`
 
 ## Notes
 
@@ -564,3 +565,5 @@ related:
 - `S47` Dashboard contract event: permission respond answers a worker `run_busy` with a typed 409 (was 500), capacity with 503 (was 502), `incompatible_state` with a typed 409 (was 502); openapi documents 409/502/503 on that route and 502/503 on the messages route.
 - `S49` markdown-it-py joins the tooling group as the CommonMark reader the forgery tests read a rendered prompt with; it was already locked through rich.
 - `S50` Partial: reachability is zero; symbols holds `mark_ingest_applied,` which names a real gap owned by P06.S51; exports holds four names in database and thread files the run-continuation P04 executor is editing, left until it merges. The Step stays open.
+- `S50` absorbed by 2026-10-06-codebase-remediation-plan verification phase V4: the unused-symbol, export and reachability gates were brought back to zero@c5656a6d (merged to refactor/centralize 2026-10-01, ancestor of HEAD)
+- `S48` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: that plan's round-1 dead-internal already deletes the WebSocket relay; this Step is HTTP only

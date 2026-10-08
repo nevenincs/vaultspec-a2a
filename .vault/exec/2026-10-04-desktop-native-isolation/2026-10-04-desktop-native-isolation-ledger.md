@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#desktop-native-isolation'
 date: '2026-10-04'
-modified: '2026-10-05'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:0f782251d0be5bcf8051516f99d3db1c0e8fe588610a455e38c2ae968a1f868f'
+body_hash: 'sha256:fa3a5d71bfd4e38bb5d91e8314423f503faac65831e8a04426d5a23af934038b'
 related:
   - "[[2026-10-04-desktop-native-isolation-plan]]"
 ---
@@ -259,3 +259,5 @@ related:
 - `S11` Genuine control uses access-only existing Windows login via stdin; original source unchanged.
 - `S13` S13 remains open: actual `get_usage` control and source inspection reject usage success and local eligibility as fresh authentication; positive/invalid stores both have null limits. User-selected Windows source unchanged and all temporary roles removed. This verifies the investigation control, not a production fix or authentication verifier.
 - `S14` S14 closes only the public configuration/type/sync-listener streaming subset; direct typed model bind DNI-023 remains blocked on upstream private nominal type/closure contract and broader Runnable lifetime debt DNI-024 remains source-backed qualification. S13 auth/evidence contract and S12 full target qualification remain open. Selected Windows source unchanged; no refresh tokens or model prompts used for rejected Claude usage verifier.
+- `S12` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: setuid/role-home dedup dropped (H08, R7-F9, merged on refactor/centralize) and its test coverage owed to that plan's PV12; this Step consumes G01's RunAdmission verdict@162f8f9e rather than re-deriving it
+- `S12` H08 sha confirmed: a24f2d52 (refactor(desktop): one unprivileged static-helper check and one role-home env) is an ancestor of refactor/centralize HEAD

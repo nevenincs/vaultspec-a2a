@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#codebase-health'
 date: '2026-07-19'
-modified: '2026-09-19'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:d13ffead5ee1f03c1280535bd8c14fc8bfce43fd6f98d323df7bc74659da9946'
+body_hash: 'sha256:ec638ae5220c9231a66a409123f79ddf692906e74fb06c34a5f76f77e3ac5841'
 related:
   - "[[2026-07-19-codebase-health-plan]]"
 ---
@@ -274,6 +274,15 @@ related:
 - `S96` `M` `src/vaultspec_a2a/utils/process.py`
 - `S97` `D` `tests/lifecycle/test_manager_processes.py`
 - `S97` `M` `src/vaultspec_a2a/desktop_tests`
+- `S89` `A` `schemas`
+- `S25` `M` `src/vaultspec_a2a/streaming/subscribers.py`
+- `S25` `verify:` `code-read max_subscriptions_per_client + global limit in streaming/subscribers.py` -> `pass`
+- `S49` `M` `.vault/audit/2026-07-19-codebase-health-audit.md`
+- `S101` `M` `.vault/audit/2026-07-19-codebase-health-audit.md`
+- `S28` `D` `src/vaultspec_a2a/api/routes`
+- `S29` `D` `src/vaultspec_a2a/lifecycle/discovery.py`
+- `S106` `D` `src/vaultspec_a2a/api/routes`
+- `S163` `D` `src/vaultspec_a2a/api/app.py`
 
 ## Notes
 
@@ -326,3 +335,12 @@ related:
 - `S74` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
 - `S96` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
 - `S97` Ledger rows reconstructed on 2026-09-19 from the Step row path clause in the owning plan; the Step closed without contemporaneous logging.
+- `S28` closed as satisfied by 2026-10-06-codebase-remediation-plan: a8fccf98 (refactor(api)!: remove the transition product surface and its WebSocket) on refactor/centralize removes the legacy product routes and the credential-gated event WebSocket entirely, obviating this Step
+- `S29` closed as satisfied by 2026-10-06-codebase-remediation-plan: a8fccf98 (refactor(api)!: remove the transition product surface and its WebSocket) on refactor/centralize removes the legacy product routes and the credential-gated event WebSocket entirely, obviating this Step
+- `S106` closed as satisfied by 2026-10-06-codebase-remediation-plan: a8fccf98 (refactor(api)!: remove the transition product surface and its WebSocket) on refactor/centralize removes the legacy product routes and the credential-gated event WebSocket entirely, obviating this Step
+- `S163` closed as satisfied by 2026-10-06-codebase-remediation-plan: a8fccf98 (refactor(api)!: remove the transition product surface and its WebSocket) on refactor/centralize removes the legacy product routes and the credential-gated event WebSocket entirely, obviating this Step
+- `S89` absorbed by 2026-10-06-codebase-remediation-plan: PV08 generates the frame schema from the single encoder catalogue@818e4f56 on refactor/centralize, subsuming the certification fingerprint-drift test
+- `S25` verified satisfied per 2026-10-06-codebase-remediation-plan absorption table (X4): global and per-client subscription quotas exist in streaming/subscribers.py, landed@ceb37221 on main; the stale `api/routes/thread_stream.py` locator is actually `api/thread_stream.py`
+- `S143` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: corrected the recipe name to test-service (confirmed at Justfile:531)
+- `S49` recorded the 2026-10-06-codebase-remediation-plan reopening (R3-F8, A.3/A03@e1f4e4d6,3e68a047) in 2026-07-19-codebase-health-audit per the absorption table; Step stays checked, residue owned and fixed on refactor/centralize
+- `S101` recorded the 2026-10-06-codebase-remediation-plan reopening (F.3/F03@02a0aadb,0ee6f12a) in 2026-07-19-codebase-health-audit per the absorption table; Step stays checked, residue owned and fixed on refactor/centralize

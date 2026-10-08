@@ -3,9 +3,9 @@ tags:
   - '#exec'
   - '#embedded-runtime-remediation'
 date: '2026-09-05'
-modified: '2026-09-19'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:0c0992ef5fe9768cb4af5149354fef82501c39bd8a8da139b5393727219dbeda'
+body_hash: 'sha256:e570938bee4600e8b4f452d3fd1a9d8dd82012367d7dda39a524a39a790ff715'
 related:
   - "[[2026-09-05-embedded-runtime-remediation-plan]]"
 ---
@@ -490,6 +490,16 @@ related:
 - `S90` `verify:` `.venv/Scripts/python.exe -m vaultspec_a2a.testing.runner --run-timeout 60 --exit-timeout 5 -- src/vaultspec_a2a/control/tests/test_worker_provenance.py -q -k "attaches_to_a_same_gateway or refuses_missing_or_blank or auto_spawn_does_not_evict"` -> `pass`
 - `S90` `verify:` `.venv/Scripts/python.exe -m ruff check src/vaultspec_a2a/control/worker_management.py src/vaultspec_a2a/control/tests/test_worker_provenance.py` -> `pass`
 - `S90` `verify:` `.venv/Scripts/python.exe -m ty check src/vaultspec_a2a/control/worker_management.py src/vaultspec_a2a/control/tests/test_worker_provenance.py` -> `pass`
+- `S82` `M` `src/vaultspec_a2a/database/thread_repository.py`
+- `S82` `M` `src/vaultspec_a2a/database/__init__.py`
+- `S79` `M` `src/vaultspec_a2a/api/routes/gateway.py`
+- `S12` `A` `src/vaultspec_a2a/database/migrations/versions/0018_graph_action_receipts.py`
+- `S12` `verify:` `code-read graph_receipt_json column + control_actions evidence` -> `pass`
+- `S83` `verify:` `code-read recovery_attempts schema (condition, attempt_count, next_eligible_at, deadline_at)` -> `pass`
+- `S16` `M` `src/vaultspec_a2a/control/message_service.py`
+- `S16` `verify:` `code-read served_continuation_queue_limits() enforcement` -> `pass`
+- `S20` `M` `src/vaultspec_a2a/streaming/ingest.py`
+- `S20` `verify:` `code-read _next_event_or_cancel cancel_event wake path` -> `pass`
 
 ## Notes
 
@@ -634,3 +644,13 @@ related:
 - `S86` A preceding six-case attempt printed case dots but exceeded its 60-second process deadline; it was terminated with zero survivors and remains failed verification evidence. The bounded resource-aware rerun completed naturally: six passed in 3.54 seconds, exit 0. Recovery consumption remains under S11/S12/S83.
 - `S88` The filesystem cleanup overwrite and nested self-test pipe hang are resolved. The separately classified medium finding for pre-result startup and collection deadlines remains queued in the audit.
 - `S90` The full provenance file emitted eight passing case markers but did not produce a pytest session result within 90 seconds. The bounded owner reported `tree_reaped=true`; that invocation is retained as FAIL. The three changed adoption and refusal cases passed in 2.47 seconds and exited naturally.
+- `S82` absorbed by 2026-10-06-codebase-remediation-plan: A06 routes every run-status write through `elect_thread_status` and deletes `update_thread_status@6c2a0d10` (test seed fix@c1ac53cc) on refactor/centralize
+- `S79` absorbed by 2026-10-06-codebase-remediation-plan: C06 dedups cancel eligibility/busy-retry@cf34b4c2 (c83e1987) and PV09 adds the typed retryable store-contention refusal@839eb901 on refactor/centralize
+- `S12` verified satisfied per 2026-10-06-codebase-remediation-plan Description (ERR reconciliation): migration 0018 persists the dispatch-identity/payload-fingerprint receipt on `control_actions@825d07d3,72d3b70d`
+- `S83` verified satisfied per 2026-10-06-codebase-remediation-plan Description (ERR reconciliation): `recovery_attempts` persists one leased attempt per run revision/receipt and is drained on startup@6c1da539,a7ba047c
+- `S16` verified satisfied per 2026-10-06-codebase-remediation-plan Description (ERR reconciliation): `message_service.py` enforces `served_continuation_queue_limits` before acknowledgement
+- `S20` verified satisfied per 2026-10-06-codebase-remediation-plan Description (ERR reconciliation): ingest.py wakes the blocked graph/provider event await on `cancel_event` and distinguishes acknowledgement from cessation
+- `S21` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: dedup moved to C06 (R4-F34); this Step keeps only task-group cancellation correctness
+- `S22` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: C06 leaves worker/executor.py task-group code alone; this Step keeps only task-group cancellation correctness
+- `S36` re-scoped per 2026-10-06-codebase-remediation-plan absorption table: native control/command deletion absorbed by C11 (R4-F35); native-path verdict dropped from this Step
+- `S11` re-scoped per 2026-10-06-codebase-remediation-plan Description (ERR reconciliation): amended before start to consume round-1 ckread + M03b and re-scoped to the residue

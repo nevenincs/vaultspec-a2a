@@ -319,6 +319,57 @@ def test_a_zero_budget_publication_attempts_the_rename_exactly_once(
     assert _temporaries(tmp_path) == []
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="only Windows denies a rename whose source another opener holds",
+)
+def test_a_retry_renames_from_a_source_the_holder_has_never_seen(
+    tmp_path: Path,
+) -> None:
+    """A holder latched onto the first source must not fail the publication.
+
+    The denial this covers is on the rename's SOURCE, not its target: on Windows a
+    rename is a delete-class operation, so any other opener holding the temporary
+    without delete sharing denies it. Retrying from that same temporary re-offers
+    the file the holder is latched onto, so the publication fails however long the
+    budget is - the recurring ``WinError 5`` from a filesystem filter driver that
+    samples a brand-new file and keeps it.
+
+    Driven by a real second process holding the real first source for longer than
+    the whole budget, taken through the hardening hook because that is where this
+    helper hands out the source path. A retry that claims a new source publishes;
+    one that re-offers the old source cannot.
+    """
+    target = tmp_path / "record.json"
+    atomic_write_text(target, '{"generation": "first"}')
+    sources: list[Path] = []
+
+    with contextlib.ExitStack() as holders:
+
+        def hold_the_first_source(candidate: Path) -> None:
+            sources.append(candidate)
+            if len(sources) == 1:
+                holders.enter_context(_reader_holding(candidate, 30.0))
+
+        atomic_write_text(
+            target, '{"generation": "second"}', harden=hold_the_first_source
+        )
+
+        assert len(sources) >= 2, (
+            "the publication landed from the held source, so no retry claimed a "
+            f"fresh one: {sources}"
+        )
+        assert sources[0] not in sources[1:], sources
+        assert target.read_text(encoding="utf-8") == '{"generation": "second"}'
+        # The only residue is the source this test's holder still owns: Windows
+        # denies the unlink for exactly the reason it denied the rename, so the
+        # helper could not collect it. Every source it could collect, it did.
+        assert _temporaries(tmp_path) == [sources[0]]
+
+    sources[0].unlink(missing_ok=True)
+    assert _temporaries(tmp_path) == []
+
+
 def test_the_temporary_is_named_for_the_writing_process(tmp_path: Path) -> None:
     """Two publishers must not collide on the temporary file itself.
 

@@ -10,14 +10,14 @@ an orphaned temporary sitting beside a discovery record for six days, left by a
 publication that never completed.
 
 This module is the audited version and the only copy of the pattern: it always
-fsyncs before the rename so the bytes are durable, always retries the rename over
-a bounded contention window, and always removes the temporary file when the
-publication does not complete - including when the interruption is a
-``KeyboardInterrupt`` or a ``SystemExit`` rather than an error.  And it never
-opens a temporary that is a link, on either of its two write paths, so the
-predictable temporary name cannot be used to redirect a write elsewhere.
-Service discovery, the process registry, and the runtime singleton
-OAuth refresh all publish through it.
+fsyncs before the rename so the bytes are durable, always retries a denied rename
+over a bounded contention window AND from a source the denier has never seen, and
+always removes the temporary file when the publication does not complete -
+including when the interruption is a ``KeyboardInterrupt`` or a ``SystemExit``
+rather than an error.  And it never opens a temporary that is a link, on either of
+its two write paths, so a temporary name an attacker can predict cannot be used
+to redirect a write elsewhere.  Service discovery, the process registry, and the
+runtime singleton OAuth refresh all publish through it.
 
 It lives under ``utils`` rather than beside its first callers in ``lifecycle``
 for a reason worth stating, because it used to live there and the move removed a
@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import secrets
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
@@ -57,8 +58,8 @@ __all__ = ["atomic_write_text"]
 REPLACE_RETRY_SECONDS = 2.0
 """How long to ride out a transient Windows sharing violation on the rename.
 
-``os.replace`` is atomic, but on Windows a reader holding the target open can
-briefly deny it.  Retrying over a short window turns a spurious failure into a
+``os.replace`` is atomic, but on Windows an opener holding either end of it can
+deny it.  Retrying over a short window turns a spurious failure into a
 successful publication; the operation stays all-or-nothing either way.
 
 This budget is time this process spends WAITING between attempts, not elapsed
@@ -95,9 +96,12 @@ def _open_refusing_a_link(
 ) -> int:
     """Open *path* for writing, refusing it if it is a link.
 
-    The temporary name is predictable - the target's name plus the writing
-    process id - so anything able to create a file beside the target can plant a
-    link there first and have the write land on that link's target instead.  A
+    The first attempt's temporary name is predictable - the target's name plus
+    the writing process id - so anything able to create a file beside the target
+    can plant a link there first and have the write land on that link's target
+    instead.  A retry's name is unguessable, which narrows the window but does not
+    close it: whatever can create a file beside the target can also observe one
+    appear, so the refusal applies to every source either path opens.  A
     credential written through such a link is disclosed to whoever chose it, and
     a record written through one silently destroys an unrelated file.
 
@@ -134,10 +138,14 @@ def atomic_write_text(
     residue nothing collects.
 
     The temporary name carries the writing process id so two processes
-    publishing to the same target cannot collide on the temporary itself.
+    publishing to the same target cannot collide on the temporary itself.  A
+    RETRY after a denied rename claims a fresh randomly named source rather than
+    re-offering the one that was just refused; see :func:`_temporary_for` for why
+    the source, not the wait, is the variable that matters.  Each attempt writes,
+    fsyncs and hardens its own source, so *harden* runs once per attempt.
 
-    That name is therefore predictable, so NEITHER write path will open a
-    temporary that is a link: one planted there would redirect the write -
+    The first attempt's name is therefore predictable, so NEITHER write path will
+    open a temporary that is a link: one planted there would redirect the write -
     of a credential, or over an unrelated file - to a place the writer never
     chose.  The refusal is atomic where the platform offers it and a
     pre-open inspection where it does not, and it does not depend on which
@@ -150,6 +158,7 @@ def atomic_write_text(
         retry_seconds: How long to WAIT, in total, across repeated attempts at a
             transient rename denial.  Time spent inside a slow attempt is not
             charged against it, so zero still attempts the rename exactly once.
+            Only a denied RENAME is retried; a failure before it is the answer.
         mode: POSIX permission bits to create the temporary file with.  Pass
             this for a credential-bearing record so the bytes are never briefly
             world-readable between creation and rename; omitting it takes the
@@ -157,9 +166,10 @@ def atomic_write_text(
             parent directory's access-control list rather than mode bits.  This
             path writes without line-ending translation, so the bytes land
             exactly as given.
-        harden: Applied to the temporary file once its bytes are durable and
-            before the rename, so the published file is already restricted at
-            the instant it becomes reachable under its real name.  It exists
+        harden: Applied to each attempt's temporary file once its bytes are
+            durable and before that attempt's rename, so the published file is
+            already restricted at the instant it becomes reachable under its real
+            name.  It exists
             because owner-restriction is not always an integer: on Windows it
             is a discretionary access-control list, which *mode* cannot carry.
             Raising from here fails the publication and removes the temporary,
@@ -183,57 +193,76 @@ def atomic_write_text(
     mode = options.get("mode")
     harden = options.get("harden")
     newline = options.get("newline", "")
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    try:
-        if mode is None:
-            with open(
-                tmp,
-                "w",
-                encoding=encoding,
-                newline=newline,
-                opener=_open_refusing_a_link,
-            ) as handle:
-                handle.write(text)
-                handle.flush()
-                os.fsync(handle.fileno())
-        else:
-            descriptor = _open_refusing_a_link(tmp, _BYTE_WRITE_FLAGS, mode)
-            try:
-                os.write(descriptor, text.encode(encoding))
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-        if harden is not None:
-            harden(tmp)
-        _replace_with_retry(tmp, path, retry_seconds=retry_seconds)
-    except BaseException:
-        # Includes KeyboardInterrupt and SystemExit: an interrupted publication
-        # must not be the one case that leaves residue behind.
-        with contextlib.suppress(OSError):
-            tmp.unlink(missing_ok=True)
-        raise
-
-
-def _replace_with_retry(tmp: Path, path: Path, *, retry_seconds: float) -> None:
-    """Rename *tmp* over *path*, riding out a transient sharing violation.
-
-    *retry_seconds* bounds the waiting, not the wall clock, because only the
-    waiting is this process's to spend: the kernel can hold a denied rename for
-    seconds while a reader's handle on the target is still being resolved, and
-    charging that against the budget retires it before the contention it exists
-    to outlast has cleared.  Zero therefore still attempts the rename exactly
-    once, however slow that attempt turns out to be.
-    """
     waited = 0.0
     pause = _REPLACE_FIRST_PAUSE
+    attempt = 0
     while True:
+        tmp = _temporary_for(path, attempt)
+        try:
+            if mode is None:
+                with open(
+                    tmp,
+                    "w",
+                    encoding=encoding,
+                    newline=newline,
+                    opener=_open_refusing_a_link,
+                ) as handle:
+                    handle.write(text)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            else:
+                descriptor = _open_refusing_a_link(tmp, _BYTE_WRITE_FLAGS, mode)
+                try:
+                    os.write(descriptor, text.encode(encoding))
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+            if harden is not None:
+                harden(tmp)
+        except BaseException:
+            # Includes KeyboardInterrupt and SystemExit: an interrupted
+            # publication must not be the one case that leaves residue behind.
+            # A failure on THIS side of the rename is the caller's answer as it
+            # stands; only a denied rename is retried.
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
+            raise
         try:
             os.replace(tmp, path)
             return
         except PermissionError:
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
             if waited >= retry_seconds:
                 raise
             slept = min(pause, retry_seconds - waited)
             time.sleep(slept)
             waited += slept
             pause = min(pause * 2, _REPLACE_MAX_PAUSE)
+            attempt += 1
+        except BaseException:
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
+            raise
+
+
+def _temporary_for(path: Path, attempt: int) -> Path:
+    """Name the temporary file for publication *attempt* of *path*.
+
+    The first attempt uses the stable ``{name}.{pid}.tmp``: the process id is
+    what keeps two publishers to the same target from colliding on the temporary
+    itself, and it is the name a test can plant a link at to prove the link
+    refusal is real.
+
+    Every RETRY claims a brand-new randomly named source instead, and that is the
+    load-bearing part.  On Windows a rename is a delete-class operation on its
+    SOURCE, so any other opener holding that file without delete sharing denies
+    it; what remains after this service's own such openers were fixed is a
+    filesystem filter driver that samples a brand-new file and latches onto that
+    exact one.  Retrying the rename from the same source keeps asking the same
+    holder about the same file, which is why a longer budget never helped - the
+    wait was never the variable.  A source the holder has never seen is.
+    """
+    if attempt == 0:
+        return path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    return path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")

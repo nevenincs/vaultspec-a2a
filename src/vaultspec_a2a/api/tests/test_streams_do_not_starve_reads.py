@@ -42,7 +42,7 @@ from ...testing import (
 from .conftest import make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -65,7 +65,7 @@ _WAIT_POLL_S = 0.005
 @contextlib.asynccontextmanager
 async def _attached_viewer(
     client: httpx.AsyncClient, run_id: str
-) -> AsyncIterator[httpx.Response]:
+) -> AsyncGenerator[httpx.Response]:
     """Hold one real progress stream open for the body of the block."""
     async with client.stream("GET", f"/v1/runs/{run_id}/stream") as response:
         assert response.status_code == 200, response.status_code

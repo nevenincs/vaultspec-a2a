@@ -3068,10 +3068,11 @@
           "permission_offers_no_usable_option",
           "permission_projection_unreadable",
           "repair_status_unreadable",
+          "settlement_store_contended",
           "terminal_thread_pending_permission_residue"
         ],
         "title": "DegradedReason",
-        "description": "Why a run snapshot is less than complete, in terms a program can match.\n\nThese are the machine-readable members of a run snapshot's degradation list.\nThey are deliberately NOT the same vocabulary as the service-state\ndegradation list, which carries human-readable prose (\"worker is down\") for\nan operator to read rather than tokens for a client to branch on. The two\nshare a field name and nothing else, so they stay separate declarations.\n\nMembership follows the reader's fault lines: what could not be read\n(``*_UNAVAILABLE``, ``*_UNREADABLE``, ``*_TIMEOUT``), what was read but is\nnot current (``*_STALE``), what should have been present and was not\n(``*_MISSING``), and what was present but contradicts another store\n(the permission residue and cross-store mismatch members)."
+        "description": "Why a run snapshot is less than complete, in terms a program can match.\n\nThese are the machine-readable members of a run snapshot's degradation list.\nThey are deliberately NOT the same vocabulary as the service-state\ndegradation list, which carries human-readable prose (\"worker is down\") for\nan operator to read rather than tokens for a client to branch on. The two\nshare a field name and nothing else, so they stay separate declarations.\n\nMembership follows the reader's fault lines: what could not be read\n(``*_UNAVAILABLE``, ``*_UNREADABLE``, ``*_TIMEOUT``), what was read but is\nnot current (``*_STALE``), what should have been present and was not\n(``*_MISSING``), what was present but contradicts another store (the\npermission residue and cross-store mismatch members), and what the read\nPROVED but could not write (``*_CONTENDED``)."
       },
       "DesktopReadiness": {
         "properties": {

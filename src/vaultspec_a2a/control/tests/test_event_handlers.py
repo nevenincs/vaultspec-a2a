@@ -83,14 +83,6 @@ from ...worker.ipc import WorkerBridge
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
 
-# These seeds write a checkpoint from INSIDE an open, uncommitted application
-# transaction, which the one file production serves both stores from cannot
-# admit: the saver's write upgrades a read transaction and SQLite refuses it
-# outright. The shape is the test's, not production's - the worker writes
-# checkpoints on its own connection - so the two stores are separated here
-# until the seeds commit before they checkpoint.
-pytestmark = pytest.mark.separate_checkpoint_store
-
 
 @dataclass(frozen=True, slots=True)
 class _SeedActionSpec:
@@ -215,6 +207,13 @@ async def _seed_unapplied_leased_action(
         checkpoint["channel_versions"]["graph_completion_receipts"] = (
             checkpointer.get_next_version(None, None)
         )
+    # The durable half of the arrangement is settled BEFORE the checkpoint is
+    # written, which is the ordering production has: the gateway commits its
+    # journal row and the worker writes the checkpoint on its own connection,
+    # never one inside the other's open transaction. Seeded the other way round,
+    # a checkpoint write made from inside this session's uncommitted transaction
+    # contends with it on the single file the service serves both stores from.
+    await session.commit()
     await checkpointer.aput(
         config,
         checkpoint,

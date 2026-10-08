@@ -8,6 +8,8 @@ import pytest
 
 from ...graph.enums import Provider
 from ...thread.errors import ConfigError
+from ..cli_resolution import ProviderRuntimeUnavailableReason
+from ..execution_modes import ACP_BACKEND_LANES
 from ..in_process_catalog import in_process_catalog_key
 from ..lane_admission import (
     PROVEN_CATALOG_TURN_LANES,
@@ -131,20 +133,50 @@ def test_proof_range_rejects_unproved_and_malformed_versions() -> None:
     )
 
 
-def test_every_proven_lane_pairs_with_a_launcher_admission_entry() -> None:
+def test_every_launcher_backed_lane_pairs_with_a_launcher_admission_entry() -> None:
     """A recorded proof without a launcher check would serve an unchecked binary.
 
     Served eligibility is proof AND the admitted binary identity, so the pairing
-    between a lane's proof and the factory entry that measures its resolved
-    launcher is itself an invariant: a lane added to the declaration without one
-    is refused by :func:`served_lane_eligible` rather than served on the proof
+    between a lane's launcher and the factory entry that measures it is itself an
+    invariant: a lane added to the proof declaration without a pairing here is
+    refused by :func:`served_lane_eligible` rather than served on the proof
     alone, and this is where that is stated.
+
+    The pairing is asked of every lane whose factory launches a CLI (the
+    Claude-backed ACP lanes, Codex, Kimi) rather than only the lanes with a
+    proof entry TODAY: it is keyed on which lane FAMILY has a checkable
+    launcher, not on :data:`PROVEN_TURN_LANES`'s current contents, so Claude's
+    or Z.ai's or Kimi's proof can be recorded later without a second edit here
+    to actually enforce it. A lane with no CLI launcher at all - a lane this
+    process holds, or a plain hosted API with nothing to spawn - has nothing
+    for this pairing to check and stays unpaired.
     """
-    for lane in PROVEN_TURN_LANES:
+    launcher_backed_lanes = {*ACP_BACKEND_LANES, Provider.CODEX, Provider.KIMI}
+    assert PROVEN_TURN_LANES.keys() <= launcher_backed_lanes
+    for lane in launcher_backed_lanes:
         assert _launcher_admission(lane) is not None, lane
     for lane in Provider:
-        if lane not in PROVEN_TURN_LANES:
+        if lane not in launcher_backed_lanes:
             assert _launcher_admission(lane) is None, lane
+
+
+def test_claude_family_launcher_admission_needs_no_workspace() -> None:
+    """The Claude/Z.ai pairing calls the factory's workspace-free binary proof.
+
+    ``_launcher_admission`` runs at served-eligibility time, independent of any
+    particular run, so it has no workspace to hand the factory's original
+    ``_claude_binary_proof_reason`` (which REQUIRES one). The entry paired here
+    must be the public, workspace-free sibling - proven by calling it with zero
+    arguments and no workspace in scope at all, which would raise a TypeError
+    immediately if the pairing had reverted to the workspace-taking probe.
+    Neither lane carries a proof entry yet, so the answer is the same
+    ``BINARY_PROOF_MISSING`` the probe gives every unproven lane - the
+    assertion that matters is that calling it needs nothing else.
+    """
+    for lane in (Provider.CLAUDE, Provider.ZAI):
+        admission = _launcher_admission(lane)
+        assert admission is not None, lane
+        assert admission() is ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
 
 
 def test_an_unproven_external_lane_is_refused_however_ready_it_is() -> None:

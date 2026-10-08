@@ -12,27 +12,18 @@ serves as HTTP 409.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control.accepted_input import freeze_accepted_input
-from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.graph_definition import read_accepted_graph_definition
 from ...control.leased_dispatch import build_followon_dispatch
-from ...database import (
-    create_control_action,
-    create_thread,
-    get_control_action_by_idempotency_key,
-)
+from ...database import create_thread, get_control_action_by_idempotency_key
 from ...ipc.schemas import DispatchRequest
-from ...team.team_config import load_team_config
-from ...testing import DEFAULT_TEAM_PRESET, current_execution_metadata
+from ...testing import current_execution_metadata, seed_create_action
 from ...thread import RunWriteAuthority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType
-from ...thread.executable_graph import freeze_graph_definition
 from ...thread.idempotency import thread_create_action_key
 
 if TYPE_CHECKING:
@@ -64,34 +55,7 @@ async def test_a_tampered_receipt_refuses_the_graph_definition_read(
             thread_id=thread_id,
             metadata=current_execution_metadata(tmp_path),
         )
-        await create_control_action(
-            session,
-            thread_id=thread_id,
-            action_type=ControlActionType.INGEST,
-            idempotency_key=thread_create_action_key(thread_id),
-            dispatch_id="accepted",
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-            payload=freeze_accepted_input(
-                DispatchRequest(
-                    dispatch_id="accepted",
-                    action="ingest",
-                    thread_id=thread_id,
-                    content="work",
-                    workspace_root=str(tmp_path),
-                    recursion_limit=25,
-                    team_preset=DEFAULT_TEAM_PRESET,
-                    graph_definition=freeze_graph_definition(
-                        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
-                        workspace_root=tmp_path,
-                    ),
-                ),
-                intent={"content": "work"},
-            ),
-        )
-        receipt = await prepare_graph_action_receipt(
-            session, thread_id=thread_id, dispatch_id="accepted"
-        )
-        assert receipt is not None
+        receipt = await seed_create_action(session, thread_id, workspace=tmp_path)
         await session.commit()
 
     # Confirmed untampered first: the same read the dispatch rebuild relies on

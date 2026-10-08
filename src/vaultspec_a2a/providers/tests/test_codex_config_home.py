@@ -21,10 +21,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from pydantic import SecretStr
 
-from ...authoring import AgentTool, CatalogSnapshot
 from ...control.config import Settings
 from ...graph.enums import Provider
-from ...testing import inherited_environment, run_child, settings_override
+from ...testing import (
+    authoring_tool_binding,
+    inherited_environment,
+    run_child,
+    settings_override,
+)
 from ...utils.enums import CodexWebSearchMode
 from .._acp_authoring import AuthoringToolBinding, attach_authoring_tools
 from .._acp_mcp import codex_mcp_server_specs
@@ -570,36 +574,7 @@ def _authoring_binding(
     *, engine_base_url: str = "http://127.0.0.1:8767", run_id: str = "run:codex-test"
 ) -> AuthoringToolBinding:
     """A real stdio-transport binding, as ``AuthoringBindingProvider`` builds it."""
-    snapshot = CatalogSnapshot(
-        schema_version="authoring.semantic_tools.v1",
-        tools=(
-            AgentTool(
-                name="read_context",
-                description="read",
-                input_schema={"type": "object"},
-                risk_tier="read_only",
-                permission_requirement="auto_permitted",
-                idempotency_required=False,
-                commands=("read_context",),
-            ),
-            AgentTool(
-                name="propose_changeset",
-                description="propose",
-                input_schema={"type": "object"},
-                risk_tier="mutating",
-                permission_requirement="human_approval_required",
-                idempotency_required=True,
-                commands=("create_proposal",),
-            ),
-        ),
-    )
-    return AuthoringToolBinding(
-        snapshot=snapshot,
-        bearer_token="machine-bearer-xyz",
-        actor_token="actor-token-abc",
-        engine_base_url=engine_base_url,
-        run_id=run_id,
-    )
+    return authoring_tool_binding(engine_base_url=engine_base_url, run_id=run_id)
 
 
 def test_authoring_bridge_composition_seam_threads_into_codex_config_toml(

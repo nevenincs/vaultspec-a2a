@@ -761,6 +761,16 @@ TEST = Verb(
             ),
         ),
         Target(
+            "frozen-contents",
+            "Reject test tiers in the explicitly selected frozen runtime tree.",
+            (
+                _pytest(
+                    "packaging/tests/test_build_artifact_contents.py"
+                    "::test_the_frozen_onedir_excludes_every_test_tier"
+                ),
+            ),
+        ),
+        Target(
             "merge",
             "Pure unit tests under declaration-derived resource-aware "
             "distribution for the pull-request merge gate.",

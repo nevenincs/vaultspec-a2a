@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:2a294c7a83864149288bb9aca3983e26090ad36862d3ae9aa88af26db5429861'
+body_hash: 'sha256:2c1d161392b8cfe89855e08c82d69522932cb08e7f9ac489cda4b1009a15070c'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -55,6 +55,13 @@ related:
 - `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- src/vaultspec_a2a/desktop_tests/test_worker_provenance.py src/vaultspec_a2a/testing/tests/test_default_safety.py --junitxml=.pytest-tmp/green-20261008/provenance-reservation-fixed.xml --no-showlocals -q` -> `pass`
 - `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- src/vaultspec_a2a/tests/test_structural_duplication.py src/vaultspec_a2a/api/tests/test_clarification_loop_live.py src/vaultspec_a2a/control/tests/test_permission_reask.py --junitxml=.pytest-tmp/green-20261008/graph-helper-fold.xml --no-showlocals -q` -> `pass`
 - `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m dev lint all` -> `pass`
+- `S83` `M` `packaging/pyinstaller/vaultspec-a2a.spec`
+- `S83` `M` `packaging/tests/test_build_artifact_contents.py`
+- `S83` `M` `.github/workflows/release.yml`
+- `S83` `M` `dev/toolchain.py`
+- `S83` `M` `Justfile`
+- `S83` `verify:` `just test-frozen-contents` -> `pass`
+- `S83` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m dev lint all` -> `pass`
 
 ## Notes
 
@@ -62,3 +69,4 @@ related:
 - `S116` Fresh tool-cores S15 verification repaired the missing checkpoint; metadata-only maintenance reviewed. Permissions service coverage gap recorded; S116 remains open.
 - `S116` Correction: the earlier wheel verification row containing `not_frozen_placeholder` is a transcription error, not an executed command, and must not be used as evidence. The following correctly transcribed selection passed three tests with one deselected; wheel-contents.log records the actual run.
 - `S99` Correction checkpoint only: S99 remains unchecked pending broader historical execution reconciliation.
+- `S83` Corrected real Windows onedir excludes Core test fixtures; build smoke and actual bundled Core help pass. Independent review PASS. Broader S83 historical closure is not inferred from this correction.

@@ -144,9 +144,11 @@ def test_the_frozen_onedir_excludes_every_test_tier() -> None:
     then invoked with ``VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE=DIR``.
     """
     tree = Path(os.environ["VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE"])
+    assert tree.is_dir(), f"frozen runtime tree is missing: {tree}"
     paths = [
         path.relative_to(tree).as_posix() for path in tree.rglob("*") if path.is_file()
     ]
+    assert paths, f"frozen runtime tree is empty: {tree}"
     violations = _artifact_violations(paths)
     assert not violations, (
         "the frozen onedir ships a test-tier path the PyInstaller spec's own "

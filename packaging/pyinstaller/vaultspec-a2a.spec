@@ -20,7 +20,8 @@
 #   what is product code.
 # - collect_all("vaultspec_core"): dispatched only through the binary's
 #   run-module verb (never statically imported), so PyInstaller's import
-#   analysis cannot see it; it must be collected explicitly.
+#   analysis cannot see it; it must be collected explicitly. Its test suites
+#   and synthetic fixture utilities are excluded from both code and data.
 # - The run-module dispatch targets (worker, authoring stdio bridge) are
 #   likewise reached dynamically via runpy and are pinned as hidden imports
 #   even though static analysis usually finds them through the CLI.
@@ -45,13 +46,16 @@ with (_PROJECT_ROOT / "pyproject.toml").open("rb") as _pyproject:
 
 
 def _excluded(package_path: PurePosixPath) -> bool:
-    """Whether the wheel excludes this package-relative path or any parent of it.
+    """Whether this package-relative path belongs to an excluded test tier.
 
-    The patterns are rooted at the project, where the package sits under
+    Core's test suites and fixture utilities are excluded by package component.
+    A2A's wheel patterns are rooted at the project, where the package sits under
     ``src/``, and matched the way the wheel import-boundary guard matches them.
     A file is excluded when it or any directory above it matches, so a pattern
     naming a tree keeps out everything beneath it.
     """
+    if package_path.parts[0] == "vaultspec_core":
+        return any(part in {"tests", "testing"} for part in package_path.parts[1:])
     rooted = PurePosixPath("src", package_path)
     candidates = (rooted, *(parent for parent in rooted.parents if parent.parts))
     return any(
@@ -125,6 +129,8 @@ excludes = [
     "sentence_transformers",
     "sympy",
     "vaultspec_rag",
+    "vaultspec_core.tests",
+    "vaultspec_core.testing",
     "opentelemetry.exporter.otlp",
     "grpc",
 ]
@@ -136,8 +142,10 @@ datas += [entry for entry in pkg_datas if _shipped_data(entry)]
 binaries += pkg_binaries
 hiddenimports += pkg_hidden
 
-pkg_datas, pkg_binaries, pkg_hidden = collect_all("vaultspec_core")
-datas += pkg_datas
+pkg_datas, pkg_binaries, pkg_hidden = collect_all(
+    "vaultspec_core", filter_submodules=_shipped_module
+)
+datas += [entry for entry in pkg_datas if _shipped_data(entry)]
 binaries += pkg_binaries
 hiddenimports += pkg_hidden
 

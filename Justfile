@@ -512,6 +512,11 @@ test-unit:
 test-parallel:
     {{dev}} test parallel
 
+# Inspect the built onedir named by VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE.
+[group('test')]
+test-frozen-contents:
+    {{dev}} test frozen-contents
+
 # Run deterministic service tests against real local services.
 [group('test')]
 test-service:

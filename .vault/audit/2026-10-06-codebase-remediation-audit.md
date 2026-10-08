@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:c27ff32621951d49d5c7b876c6d041cb8f5d15e5192c2bb40ad3abf648380e42'
+body_hash: 'sha256:0082028c08d809d432b2ece4d63ac0a78a315260a7ab921ad8b0f219d4e0f2ec'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -1583,3 +1583,25 @@ were deleted; no guard exception was added. Actual-diff review confirms both
 consumers use the same helper. All 11 tests across both consumer modules and the
 structural duplication guard pass; scoped strict types and Ruff pass. Review
 verdict: PASS for the fold. The integrated lint rerun is pending separately.
+
+### green-20261008-frozen-core-fixtures | medium | Frozen runtime included Core test utilities
+
+Status: fixed under S83; verified during S116. Type: release artifact correctness.
+The first real Windows onedir build passed command smoke checks but the existing
+artifact gate failed on three `vaultspec_core/testing` files. Core 0.3.2's
+synthetic vault and workspace fixture utilities have no production importers;
+unfiltered `collect_all("vaultspec_core")` included them as code and data.
+Core collection now uses the shared module/data filters, with explicit Analysis
+exclusions for its test suites and fixture utilities. The artifact guard remains
+broad. A rebuilt onedir passes `just test-frozen-contents` (one test), the build's
+version/help/refused-module smoke checks, and actual bundled Core CLI help via
+`run-module vaultspec_core -- --help`. The recipe now runs after every release
+freeze, using locked tooling and the repository-pinned Just installation.
+
+Actual-diff review found no blocking issue. Two low maintainability/verification
+findings were fixed: the predicate documentation now states the Core policy, and
+the artifact gate refuses missing or empty input directories. Actionlint and the
+CI recipe contract pass; full `python -m dev lint all` passes. Reports are under
+`.pytest-tmp/green-20261008/frozen-*.log`. This proves the locally built Windows
+artifact, not successful release execution on the other native targets. S83's
+broader historical plan checkpoint remains to be reconciled. Review verdict: PASS.

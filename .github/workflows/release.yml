@@ -198,6 +198,19 @@ jobs:
         shell: bash
         run: uv run --no-sync --frozen python scripts/build_binary.py --dist dist/binary
 
+      - name: Set up just
+        uses: taiki-e/install-action@6012bba2f8e3e666a2b212f8823c06831704ce92 # just
+        with:
+          tool: just@1.38.0
+
+      - name: Install artifact-check tooling
+        run: just deps-tooling
+
+      - name: Reject test tiers in the frozen runtime
+        env:
+          VAULTSPEC_A2A_TEST_FROZEN_RUNTIME_TREE: dist/binary/vaultspec-a2a
+        run: just test-frozen-contents
+
       # THE TREE THE CONSUMER ACTUALLY ACCEPTS. The archive is unpacked into an
       # immutable generation tree, and that tree's rules are narrower than "a
       # directory of files": it admits no directory without a regular-file

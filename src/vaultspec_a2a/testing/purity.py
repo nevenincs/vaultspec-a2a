@@ -68,7 +68,7 @@ IMPURE_FIXTURES: Final = frozenset(
         "session",
         "migrated_engine",
         "migrated_session_factory",
-        # A per-test checkpoint directory and the real saver opened over it.
+        # The per-test checkpoint store and the real saver opened over it.
         "checkpoint_file",
         "checkpointer",
     }

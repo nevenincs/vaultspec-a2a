@@ -112,7 +112,7 @@ async def _codex_action(
     arguments: JsonObject,
     allowed: frozenset[tuple[str, str]] = frozenset(),
     permission_callback: PermissionCallback | None = None,
-    project_scope: RunProjectScope | None,
+    project_scope: RunProjectScope,
     server: str = _WITHHELD_SERVER,
 ) -> str:
     """Drive the production Codex rung over an announced call and its approval."""
@@ -228,26 +228,35 @@ async def test_a_withheld_harness_tool_is_refused_over_a_human_approval_on_both_
 
 
 @pytest.mark.asyncio
-async def test_a_rung_with_no_project_to_measure_against_refuses(
+async def test_a_decision_with_no_project_to_measure_against_refuses(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """No scope is no authority to permit against, so the call is refused.
 
-    Production always hands the rung the run's bound project. A rung built
-    without one cannot measure a call's project argument at all, and the
-    deny-by-default direction for a check that cannot be made is to refuse -
-    not to skip the check and let the call through unmeasured.
+    The project scan is the first authority the shared decision consults, and
+    the deny-by-default direction for a check that cannot be made is to refuse -
+    not to skip the check and let the call through unmeasured. Asserted on the
+    decision rather than through a rung, because neither rung can produce this
+    call any more: the Codex rung requires the run's project at construction and
+    the ACP config derives one from its workspace. This is the floor underneath
+    both of them, and it has to hold whatever a future caller does.
     """
     with caplog.at_level("WARNING"):
-        action = await _codex_action(
-            tool="status",
-            arguments={"project_root": str(tmp_path)},
-            allowed=frozenset({(_WITHHELD_SERVER, "status")}),
-            permission_callback=_returning("accept"),
-            project_scope=None,
+        decision = await decide(
+            ToolPermissionRequest(
+                tool=f"mcp__{_WITHHELD_SERVER}__status",
+                arguments={"project_root": str(tmp_path)},
+                options=[
+                    {"optionId": "accept", "kind": "allow_once"},
+                    {"optionId": "decline", "kind": "reject_once"},
+                ],
+            ),
+            scope=None,
+            covered=lambda: True,
+            ask=_answering("accept"),
         )
 
-    assert action == DECLINE_ACTION
+    assert decision is None
     assert any(
         "no project to measure it against" in record.getMessage()
         for record in caplog.records

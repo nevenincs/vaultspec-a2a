@@ -10,6 +10,7 @@ stdio pipes with real asyncio semantics — no mocks. The live turn test is
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import sys
@@ -276,11 +277,17 @@ for line in sys.stdin:
 
 async def _approval_client(
     *,
+    project_scope: RunProjectScope,
     allowed: frozenset[tuple[str, str]] = frozenset(),
     permission_callback: PermissionCallback | None = None,
-    project_scope: RunProjectScope | None = None,
 ) -> _CodexAppServerClient:
-    """Spawn the real approval subprocess behind a client carrying a live rung."""
+    """Spawn the real approval subprocess behind a client carrying a live rung.
+
+    The run's bound project is required here for the same reason the rung
+    requires it: production always supplies one, so a scope-less arm would
+    assert a decision against a path no real run takes - and every refusal below
+    would be satisfied by the scope guard rather than by the reason it names.
+    """
     process = await spawn_acp_process(
         [sys.executable, "-c", _APPROVAL_SERVER],
         env={},
@@ -337,10 +344,13 @@ async def test_a_declared_tool_call_is_approved(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_tool_call_outside_the_composed_surface_is_declined() -> None:
+async def test_a_tool_call_outside_the_composed_surface_is_declined(
+    tmp_path: Path,
+) -> None:
     """An undeclared tool is refused, never approved by the autonomous rung."""
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         await client.request("drive", {"tool": "delete_everything"})
@@ -351,14 +361,17 @@ async def test_a_tool_call_outside_the_composed_surface_is_declined() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_approval_whose_tool_cannot_be_named_is_declined() -> None:
+async def test_an_approval_whose_tool_cannot_be_named_is_declined(
+    tmp_path: Path,
+) -> None:
     """With no announced call to correlate, the rung fails closed.
 
     The payload names the tool only in prose, and this project never turns prose
     into an approval — so an approval it cannot name is refused.
     """
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         await client.request("drive", {"announce": False})
@@ -369,7 +382,9 @@ async def test_an_approval_whose_tool_cannot_be_named_is_declined() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_approval_from_a_different_turn_is_declined() -> None:
+async def test_an_approval_from_a_different_turn_is_declined(
+    tmp_path: Path,
+) -> None:
     """A stale announcement from another turn does not decide this approval.
 
     The correlation-miss path that matters most. The announcement names an
@@ -379,7 +394,8 @@ async def test_an_approval_from_a_different_turn_is_declined() -> None:
     DIFFERENT call, not weaker evidence of this one.
     """
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         await client.request("drive", {"announce_turn": "u-stale"})
@@ -390,10 +406,13 @@ async def test_an_approval_from_a_different_turn_is_declined() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_approval_from_a_different_thread_is_declined() -> None:
+async def test_an_approval_from_a_different_thread_is_declined(
+    tmp_path: Path,
+) -> None:
     """An announcement on another thread does not decide this approval either."""
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         await client.request("drive", {"announce_thread": "t-other"})
@@ -405,6 +424,7 @@ async def test_an_approval_from_a_different_thread_is_declined() -> None:
 
 @pytest.mark.asyncio
 async def test_a_correlation_miss_says_why_it_declined(
+    tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The fail-closed decline is LOUD, naming the identity it could not match.
@@ -414,7 +434,8 @@ async def test_a_correlation_miss_says_why_it_declined(
     as invisible, so the reason is asserted, not assumed.
     """
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.providers"):
@@ -436,10 +457,11 @@ async def test_a_correlation_miss_says_why_it_declined(
 
 
 @pytest.mark.asyncio
-async def test_a_non_tool_call_elicitation_is_declined() -> None:
+async def test_a_non_tool_call_elicitation_is_declined(tmp_path: Path) -> None:
     """An elicitation that is not a tool-call approval is refused, not accepted."""
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         await client.request("drive", {"kind": "something_else"})
@@ -482,9 +504,11 @@ async def test_a_supervised_rung_decides_the_tool_call(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_unknown_server_request_is_refused_loudly() -> None:
+async def test_an_unknown_server_request_is_refused_loudly(
+    tmp_path: Path,
+) -> None:
     """A genuinely unsupported request keeps its method-not-found answer."""
-    client = await _approval_client()
+    client = await _approval_client(project_scope=RunProjectScope(str(tmp_path)))
     try:
         await client.request("unknown/server/request", {})
         answered = await _answered_frame(client)
@@ -494,6 +518,29 @@ async def test_an_unknown_server_request_is_refused_loudly() -> None:
         assert error["code"] == -32601
     finally:
         await client.aclose()
+
+
+def test_a_permission_rung_cannot_be_built_without_the_runs_project() -> None:
+    """A scope-less rung is a construction error, not a rung that refuses.
+
+    The project scan is the first authority the shared decision consults, so a
+    rung holding no project can permit nothing - every call it is handed is
+    refused unmeasured. That is the right answer to a question nothing should be
+    able to ask: production derives the scope from the run's own workspace, so an
+    absent one is a wiring defect in the caller, and a refusal at the rung turns
+    it into a run whose every tool call mysteriously fails.
+
+    The callable signature is a runtime contract as well as a static one, so the
+    binding is checked through the interpreter's own argument check rather than
+    with a checker escape. The positive binding is asserted beside it: only the
+    scope became required, and an unattended run still builds a rung with no
+    human rung attached.
+    """
+    with pytest.raises(TypeError):
+        inspect.signature(CodexPermissionRung).bind(allowed_tools=frozenset())
+    inspect.signature(CodexPermissionRung).bind(
+        allowed_tools=frozenset(), project_scope=RunProjectScope("/project")
+    )
 
 
 def test_the_codex_model_declares_a_permission_callback() -> None:

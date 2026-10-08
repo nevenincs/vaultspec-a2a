@@ -65,7 +65,7 @@ class ActorTokenBundle(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    tokens: dict[str, str] = Field(default_factory=dict)
+    tokens: dict[str, str] = Field(default_factory=dict, max_length=MAX_ROLES_PER_RUN)
     engine_bearer: str | None = None
 
     @field_validator("tokens")

@@ -23,7 +23,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 4096
                 },
                 {
                   "type": "null"
@@ -2725,6 +2726,7 @@
               "type": "string"
             },
             "type": "object",
+            "maxProperties": 64,
             "title": "Tokens"
           },
           "engine_bearer": {
@@ -5561,7 +5563,8 @@
           "approval_request_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 256
               },
               {
                 "type": "null"

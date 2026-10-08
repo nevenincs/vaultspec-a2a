@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from ...api.schemas.gateway import RunStartRequest
-from ...thread.actor_tokens import ActorTokenBundle
+from ...thread.actor_tokens import MAX_ROLES_PER_RUN, ActorTokenBundle
 
 
 def test_actor_token_bundle_accepts_production_role_grammar_and_redacts() -> None:
@@ -40,6 +40,23 @@ def test_actor_token_bundle_rejects_unbounded_or_empty_secrets(
     payload: dict[str, object] = {field: value}
     with pytest.raises(ValidationError, match=message):
         ActorTokenBundle.model_validate(payload)
+
+
+def test_actor_token_bundle_publishes_the_role_bound_as_max_properties() -> None:
+    """``tokens`` carries MAX_ROLES_PER_RUN in its schema, not only a validator.
+
+    A client generated from the published schema saw an unbounded object: the
+    role-count limit was enforced at runtime but never declared, so nothing
+    told a schema-driven consumer the bound exists.
+    """
+    schema = ActorTokenBundle.model_json_schema()
+    assert schema["properties"]["tokens"]["maxProperties"] == MAX_ROLES_PER_RUN
+
+
+def test_actor_token_bundle_rejects_more_roles_than_the_published_bound() -> None:
+    too_many = {f"role-{i}": "actor-secret" for i in range(MAX_ROLES_PER_RUN + 1)}
+    with pytest.raises(ValidationError):
+        ActorTokenBundle(tokens=too_many)
 
 
 def test_actor_token_bundle_forbids_unknown_wire_fields() -> None:

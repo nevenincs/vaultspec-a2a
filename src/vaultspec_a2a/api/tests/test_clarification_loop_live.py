@@ -72,6 +72,7 @@ from ...testing import (
     park_clarification,
     seed_accepted_thread,
     served_worker,
+    supervised_graph_cache_key,
     wait_for_run_status_async,
 )
 from ...thread.clarification import (
@@ -105,24 +106,6 @@ if TYPE_CHECKING:
 _RUN_SEQ = itertools.count(1)
 
 type SessionFactory = async_sessionmaker[AsyncSession]
-
-
-async def _cache_key_for_thread(
-    session_factory: SessionFactory, thread_id: str
-) -> GraphCompilationKey:
-    """Bind the registered real graph to the run's exact durable authority."""
-    async with session_factory() as db:
-        thread = await get_thread(db, thread_id)
-        graph_definition = await read_accepted_graph_definition(db, thread_id)
-    assert thread is not None
-    authority = resolve_execution_authority(thread.thread_metadata)
-    return (
-        DEFAULT_TEAM_PRESET,
-        None,
-        False,
-        authority.model_assignment_digest,
-        graph_definition.digest(),
-    )
 
 
 async def _wait_for_terminal_graph(
@@ -197,7 +180,7 @@ async def _create_parked_run(
     )
     assert create_resp.status_code == 201
     thread_id = create_resp.json()["run_id"]
-    cache_key = await _cache_key_for_thread(session_factory, thread_id)
+    cache_key = await supervised_graph_cache_key(session_factory, thread_id)
     parked = await park_clarification(
         checkpointer,
         thread_id=thread_id,
@@ -217,7 +200,7 @@ async def _load_parked_run(
     checkpointer: AsyncSqliteSaver,
     thread_id: str,
 ) -> _ParkedRun:
-    cache_key = await _cache_key_for_thread(session_factory, thread_id)
+    cache_key = await supervised_graph_cache_key(session_factory, thread_id)
     parked = await park_clarification(checkpointer, thread_id=thread_id)
     return _ParkedRun(
         thread_id=thread_id,
@@ -653,7 +636,7 @@ async def test_a_clarification_park_survives_a_gateway_restart(
     ) as first_client:
         await _start_clarifying_run(first_client, run_id)
         ingest = first_stub.dispatches[-1]
-        cache_key = await _cache_key_for_thread(session_factory, run_id)
+        cache_key = await supervised_graph_cache_key(session_factory, run_id)
         async with _real_worker(
             first_app,
             _WorkerTarget(run_id, cache_key, clarification_graph(checkpointer)),
@@ -745,7 +728,7 @@ async def test_a_worker_reported_park_reads_input_required_and_refuses_followups
         ingest = stub_worker.dispatches[-1]
         target = _WorkerTarget(
             thread_id,
-            await _cache_key_for_thread(session_factory, thread_id),
+            await supervised_graph_cache_key(session_factory, thread_id),
             clarification_graph(checkpointer),
         )
 

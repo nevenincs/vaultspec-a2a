@@ -23,6 +23,7 @@ from ..children import (
     measured_child_startup_s,
 )
 from ..cli import combined_output, inherited_environment
+from ..environment import settings_override
 from ..ports import free_port
 from ..sessions import SESSION_LEASE_KEY, effective_worker_count
 
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_free_port_takes_a_held_registry_reservation() -> None:
+def test_free_port_takes_a_held_registry_reservation(tmp_path: Path) -> None:
     """The shared primitive allocates from the band and HOLDS the claim.
 
     The claim is machine-global state another allocator observes, which is
@@ -39,11 +40,15 @@ def test_free_port_takes_a_held_registry_reservation() -> None:
     """
     from ...lifecycle import procs_home
 
-    port = free_port()
-    band = load_procs_config().role("scratch").band
-    assert port in band
-    marker = procs_home() / f"scratch-{port}.reserved"
-    assert marker.exists(), "the allocation left no held reservation marker"
+    # Other tests may hold every slot in the session's band for their lifetime.
+    # This proof needs a fresh registry to exercise reservation rather than the
+    # documented exhaustion fallback.
+    with settings_override(procs_home=tmp_path / "procs"):
+        port = free_port()
+        band = load_procs_config().role("scratch").band
+        assert port in band
+        marker = procs_home() / f"scratch-{port}.reserved"
+        assert marker.exists(), "the allocation left no held reservation marker"
 
 
 def test_two_concurrent_processes_never_share_free_ports(tmp_path: Path) -> None:

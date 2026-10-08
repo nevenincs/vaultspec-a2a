@@ -129,7 +129,7 @@ def _assert_refused_without_adoption_or_eviction(
 def test_plain_worker_health_never_authorizes_adoption(tmp_path: Path) -> None:
     """A bare healthy stranger on the worker port is never adopted."""
     _assert_refused_without_adoption_or_eviction(
-        tmp_path, {"status": "healthy"}, "run-provenance-plain-health"
+        tmp_path, {"status": "ok", "service": "worker"}, "run-provenance-plain-health"
     )
 
 
@@ -138,7 +138,8 @@ def test_blank_worker_pairing_never_authorizes_adoption(tmp_path: Path) -> None:
     _assert_refused_without_adoption_or_eviction(
         tmp_path,
         {
-            "status": "healthy",
+            "status": "ok",
+            "service": "worker",
             "paired_gateway_lifetime": "",
             "worker_generation": "",
         },
@@ -160,7 +161,8 @@ def test_legacy_gateway_url_echo_never_authorizes_adoption(tmp_path: Path) -> No
     worker_port = free_port()
     gateway_port = free_port()
     body = {
-        "status": "healthy",
+        "status": "ok",
+        "service": "worker",
         "gateway_url": f"http://127.0.0.1:{gateway_port}",
     }
     app_home = tmp_path / "app-home"
@@ -192,8 +194,8 @@ def test_two_gateways_one_worker_authenticated_pairing(tmp_path: Path) -> None:
 
     Gateway A spawns and owns its REAL worker on the shared port; gateway B,
     armed over its own application home but pointed at the same worker port,
-    classifies A's worker FOREIGN (a lifetime B never issued): B's demand is
-    refused, A's worker survives, and A keeps its execution readiness.
+    refuses A's listener as outside B's process ownership before any credentialed
+    probe: B's demand is refused, A's worker survives, and A stays ready.
     """
     worker_port = free_port()
     with _armed_gateway_on_worker_port(tmp_path, worker_port, home_name="home-a") as (
@@ -226,18 +228,11 @@ def test_two_gateways_one_worker_authenticated_pairing(tmp_path: Path) -> None:
                 health = client.get(f"http://127.0.0.1:{worker_port}/health")
             assert health.status_code in (200, 401), health.status_code
 
-            # B's refusal is provenance-shaped, through either fail-closed
-            # layer: the worker-IPC credential boundary (A's worker answers
-            # B's probe 401 - B cannot even read the pairing evidence of a
-            # worker from a foreign application home), or, when the evidence
-            # is readable, the classifier's loud refusal. Both leave B
-            # without adoption and A's worker untouched.
+            # B refuses at listener ownership before disclosing its credential
+            # to A's worker. A 401 would mean a probe crossed that boundary.
             log_text = log_b.read_bytes().decode("utf-8", errors="replace")
-            assert (
-                "401 Unauthorized" in log_text
-                or "cannot adopt or evict" in log_text
-                or "not adoptable" in log_text
-            ), "expected B's log to carry a provenance-shaped refusal"
+            assert "this gateway does not own" in log_text
+            assert "refusing to spawn, probe, adopt, or evict" in log_text
 
 
 # A genuinely armed drive of the production spawn seam's conflict branch.
@@ -278,7 +273,8 @@ if not settings.desktop_profile_armed:
 # The squatter claims THIS gateway's lifetime at an earlier generation: exactly
 # what a prior-generation worker this gateway spawned would report.
 body = {
-    "status": "healthy",
+    "status": "ok",
+    "service": "worker",
     "paired_gateway_lifetime": GATEWAY_LIFETIME_ID,
     "worker_generation": "1",
 }

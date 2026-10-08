@@ -14,6 +14,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+from ..control.execution_authority import resolve_execution_authority
+from ..control.graph_definition import read_accepted_graph_definition
+from ..database import get_thread
 from ..graph.compiler import add_graph_node, compile_graph_builder, new_graph_builder
 from ..thread import sha256_hex
 from ..thread.state import TeamState
@@ -26,6 +29,9 @@ if TYPE_CHECKING:
     from langgraph.graph import StateGraph
     from langgraph.store.base import BaseStore
     from langgraph.types import Command, RetryPolicy, TimeoutPolicy
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from ..worker.graph_lifecycle import GraphCompilationKey
 
 __all__ = [
     "add_test_node",
@@ -33,7 +39,26 @@ __all__ = [
     "compile_test_graph",
     "new_state_graph",
     "stand_in_definition_digest",
+    "supervised_graph_cache_key",
 ]
+
+
+async def supervised_graph_cache_key(
+    session_factory: async_sessionmaker[AsyncSession], thread_id: str
+) -> GraphCompilationKey:
+    """Bind a registered supervised test graph to its run's durable authority."""
+    async with session_factory() as db:
+        thread = await get_thread(db, thread_id)
+        definition = await read_accepted_graph_definition(db, thread_id)
+    assert thread is not None
+    authority = resolve_execution_authority(thread.thread_metadata)
+    return (
+        definition.team_id,
+        None,
+        False,
+        authority.model_assignment_digest,
+        definition.digest(),
+    )
 
 
 def new_state_graph(

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:0959ce8b20df9db3dca8770c5fd902a7b2cd2fc7323bd377ef3442d0f6dd77dc'
+body_hash: 'sha256:2a294c7a83864149288bb9aca3983e26090ad36862d3ae9aa88af26db5429861'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -45,6 +45,16 @@ related:
 - `S99` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m service --require-prerequisite=docker src/vaultspec_a2a/service_tests/test_run_continuation_live.py --junitxml=.pytest-tmp/green-20261008/continuation-fixed.xml --no-showlocals` -> `pass`
 - `S116` `M` `src/vaultspec_a2a/service_tests/test_worker_attach_provenance.py`
 - `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m service src/vaultspec_a2a/service_tests/test_worker_attach_provenance.py --junitxml=.pytest-tmp/green-20261008/attachment-fixed.xml --no-showlocals` -> `pass`
+- `S116` `M` `src/vaultspec_a2a/desktop_tests/test_worker_provenance.py`
+- `S116` `M` `src/vaultspec_a2a/testing/tests/test_default_safety.py`
+- `S116` `M` `src/vaultspec_a2a/testing/graph.py`
+- `S116` `M` `src/vaultspec_a2a/testing/__init__.py`
+- `S116` `M` `src/vaultspec_a2a/api/tests/test_clarification_loop_live.py`
+- `S116` `M` `src/vaultspec_a2a/control/tests/test_permission_reask.py`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m dev test parallel` -> `fail`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- src/vaultspec_a2a/desktop_tests/test_worker_provenance.py src/vaultspec_a2a/testing/tests/test_default_safety.py --junitxml=.pytest-tmp/green-20261008/provenance-reservation-fixed.xml --no-showlocals -q` -> `pass`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- src/vaultspec_a2a/tests/test_structural_duplication.py src/vaultspec_a2a/api/tests/test_clarification_loop_live.py src/vaultspec_a2a/control/tests/test_permission_reask.py --junitxml=.pytest-tmp/green-20261008/graph-helper-fold.xml --no-showlocals -q` -> `pass`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m dev lint all` -> `pass`
 
 ## Notes
 

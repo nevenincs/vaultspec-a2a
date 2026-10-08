@@ -176,6 +176,7 @@ if TYPE_CHECKING:
         compile_test_graph,
         new_state_graph,
         stand_in_definition_digest,
+        supervised_graph_cache_key,
     )
     from .harness_names import (
         COMPLETION_ENDPOINT_ENV,
@@ -614,6 +615,10 @@ _LAZY_EXPORTS = {
     "ainvoke_test_graph": ("vaultspec_a2a.testing.graph", "ainvoke_test_graph"),
     "compile_test_graph": ("vaultspec_a2a.testing.graph", "compile_test_graph"),
     "new_state_graph": ("vaultspec_a2a.testing.graph", "new_state_graph"),
+    "supervised_graph_cache_key": (
+        "vaultspec_a2a.testing.graph",
+        "supervised_graph_cache_key",
+    ),
     "stand_in_definition_digest": (
         "vaultspec_a2a.testing.graph",
         "stand_in_definition_digest",
@@ -1006,6 +1011,7 @@ __all__ = [
     "spawn_until_ready",
     "stand_in_definition_digest",
     "status_and_json",
+    "supervised_graph_cache_key",
     "text_list",
     "unvalidated_selection",
     "uses_impure_fixture",

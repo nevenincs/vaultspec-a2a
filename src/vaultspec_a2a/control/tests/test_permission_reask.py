@@ -30,15 +30,12 @@ from ...control.accepted_input import read_accepted_input, restore_accepted_disp
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.dispatch_receipts import bind_graph_action_receipt
 from ...control.event_handlers import RelayServices, relay_event
-from ...control.execution_authority import resolve_execution_authority
-from ...control.graph_definition import read_accepted_graph_definition
 from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
 from ...database import (
     decode_allowed_options,
     get_control_action_by_idempotency_key,
     get_permission_request,
-    get_thread,
 )
 from ...graph.acp_options import valid_option_ids
 from ...graph.nodes._worker_permissions import (
@@ -46,7 +43,6 @@ from ...graph.nodes._worker_permissions import (
     recorded_permission_answers,
 )
 from ...testing import (
-    DEFAULT_TEAM_PRESET,
     add_test_node,
     adopted_spawner,
     compile_test_graph,
@@ -54,6 +50,7 @@ from ...testing import (
     seed_accepted_thread,
     serve_on_loopback,
     served_worker,
+    supervised_graph_cache_key,
 )
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...thread.idempotency import (
@@ -76,7 +73,6 @@ if TYPE_CHECKING:
     from ...control.action_lease import ControlActionOutcome
     from ...providers import JsonObject
     from ...testing import ServedWorker
-    from ...worker.graph_lifecycle import GraphCompilationKey
 
 _TOOL = "bash"
 _TOOL_INPUT: dict[str, Any] = {"command": "ls"}
@@ -150,24 +146,6 @@ async def _held_request_ids(
     assert stored is not None, "the graph wrote no checkpoint"
     projection = project_checkpoint_tuple(stored, thread_id=thread_id)
     return [held.interrupt_id for held in projection.pending_interrupts]
-
-
-async def _cache_key(
-    session_factory: async_sessionmaker[AsyncSession], thread_id: str
-) -> GraphCompilationKey:
-    """Bind the registered graph to the run's exact durable authority."""
-    async with session_factory() as db:
-        thread = await get_thread(db, thread_id)
-        definition = await read_accepted_graph_definition(db, thread_id)
-    assert thread is not None
-    authority = resolve_execution_authority(thread.thread_metadata)
-    return (
-        DEFAULT_TEAM_PRESET,
-        None,
-        False,
-        authority.model_assignment_digest,
-        definition.digest(),
-    )
 
 
 @contextlib.asynccontextmanager
@@ -341,7 +319,7 @@ async def test_a_reasked_permission_is_answerable_and_resumes_the_graph(
         )
         await session.commit()
     config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-    cache_key = await _cache_key(session_factory, thread_id)
+    cache_key = await supervised_graph_cache_key(session_factory, thread_id)
     services = RelayServices(session_factory=session_factory, checkpointer=checkpointer)
     async with (
         _capturing_bridge() as (bridge, captured),

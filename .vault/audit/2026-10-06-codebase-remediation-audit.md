@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:d6909dd42cd7839ac3c6aedba85586e7d7223b2637c252739a3a5c970aa5b6f8'
+body_hash: 'sha256:c27ff32621951d49d5c7b876c6d041cb8f5d15e5192c2bb40ad3abf648380e42'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -1523,3 +1523,63 @@ the matching case additionally proves no process ownership is acquired. Both
 service tests pass (8.67s); their health-only request and surviving external
 process assertions remain. Independent review found the correction consistent
 with production readiness and attachment ownership. Review verdict: PASS.
+### green-20261008-nonservice-baseline | medium | Full baseline completed with twenty attributable failures
+
+Status: measured; follow-up verification in progress. Type: test status evidence.
+The resource-aware non-service run started from integrated revision 1ff26244 and
+completed 5,879 cases on Windows in 3192.32s: 5,848 passed, 20 failed, 11 skipped.
+The report is `.pytest-tmp/green-20261008/nonservice.xml`. Fifteen failures are
+one external RAG client/service version mismatch; one is the obsolete Kimi
+readiness expectation already corrected; two are desktop provenance fixtures;
+one is the shared-band reservation proof; one is structural test duplication.
+The 11 skips are nine POSIX/Linux-only cases, one missing live engine and one
+missing second provider selection. Skips are not counted as passes.
+
+### green-20261008-rag-version | high | RAG client and shared daemon disagree on their served version
+
+Status: open; environment remediation awaiting the shared-service choice.
+Type: functional prerequisite. The real harness resolves vaultspec-rag 0.6.0,
+while the responding shared daemon is 0.5.3. Its own `service_version_mismatch`
+causes 15 failures across harness MCP wiring, topology reach, persona web
+composition, Codex credential-home cleanup, interpreter pinning and hostile-PATH
+probe tests. The guard is correctly refusing unusable grounding tools. The
+accepted tooling ADR and registry test require unconstrained runtime capability
+launches; pinning the production launch backward or suppressing the guard is
+not a repair. The project RAG extra remains locked at 0.5.3 independently of
+that runtime launch. Align the separately owned daemon/client, then rerun these
+15 cases and the integrated suite. No daemon was stopped or upgraded at this
+checkpoint; the shared installation also serves other workspaces.
+
+### green-20261008-fixture-contracts | medium | Desktop provenance proofs used obsolete readiness and refusal contracts
+
+Status: fixed in S116. Type: verification correctness. Canonical ready-worker
+bodies now let the prior-generation eviction case reach the intended authorized
+shutdown branch. Plain, blank-pairing and legacy-URL adversaries retain their
+untrusted identity with valid readiness bodies. The two-gateway proof now
+requires the earlier listener-ownership refusal before any credentialed probe,
+instead of accepting a 401 as evidence. It still requires the owned worker to
+survive and the foreign gateway to remain unadopted. Actual-diff review found no
+production change or relaxed safety assertion. The full desktop provenance and
+default-safety modules passed together: ten tests in 94.16s; strict types pass.
+
+### green-20261008-reservation-proof | low | Reservation proof assumed an unexhausted shared scratch band
+
+Status: fixed in S116. Type: test isolation. The failed port was an ephemeral
+candidate, the documented fallback when the scratch band is exhausted or cannot
+be reserved. A long-lived single worker can retain all 100 band reservations.
+The proof now uses a fresh registry home through the official settings overlay,
+keeping its strict in-band and held-marker assertions. Production allocation,
+exhaustion behavior and process-lifetime ownership are unchanged. The resource-
+aware ADR explicitly permits this fallback. Full default-safety module passes
+with the desktop provenance rerun above. Review verdict: PASS for this repair.
+
+### green-20261008-graph-helper-fold | medium | Two test tiers duplicated the same accepted graph cache key
+
+Status: fixed in S116. Type: structural duplication. The clarification-loop and
+permission-reask suites now consume `testing.graph.supervised_graph_cache_key`.
+It reads the real accepted definition and assignment, preserving the supervised
+mode and binding the key to the definition's team identity. Both local copies
+were deleted; no guard exception was added. Actual-diff review confirms both
+consumers use the same helper. All 11 tests across both consumer modules and the
+structural duplication guard pass; scoped strict types and Ruff pass. Review
+verdict: PASS for the fold. The integrated lint rerun is pending separately.

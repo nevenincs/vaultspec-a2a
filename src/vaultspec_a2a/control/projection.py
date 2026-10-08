@@ -605,6 +605,7 @@ async def enrich_snapshot_from_durable_state(
     thread: ThreadModel,
     snapshot: ThreadStateSnapshot,
     durable_permission_ids: set[str] | None = None,
+    report_queued_messages: bool = True,
 ) -> ThreadStateSnapshot:
     """Merge durable gateway-owned state into a reconnect snapshot.
 
@@ -614,6 +615,11 @@ async def enrich_snapshot_from_durable_state(
     :func:`reconcile_checkpoint_permissions_with_durable_state` should pass the
     same set there, so a row withheld here (it offered nothing answerable) is
     not also reported there as having no durable row at all.
+
+    *report_queued_messages* skips the queued-continuations count for a
+    caller whose served shape has no field for it: the listing summary never
+    read ``snapshot.queued_messages``, so that query ran, once per row, for a
+    number nothing downstream used.
     """
     try:
         record_repair_posture(snapshot, thread.repair_status)
@@ -628,13 +634,14 @@ async def enrich_snapshot_from_durable_state(
             DegradedReason.REPAIR_STATUS_UNREADABLE,
             repair=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
         )
-    # Read before the terminal branch below returns, so a settled run reports
-    # the truth rather than inheriting the default: a run that ends with
-    # something still queued on it would be a defect, and this is where it
-    # would be visible.
-    snapshot.queued_messages = await count_queued_continuations(
-        session, thread_id=thread.id
-    )
+    if report_queued_messages:
+        # Read before the terminal branch below returns, so a settled run
+        # reports the truth rather than inheriting the default: a run that
+        # ends with something still queued on it would be a defect, and this
+        # is where it would be visible.
+        snapshot.queued_messages = await count_queued_continuations(
+            session, thread_id=thread.id
+        )
     if thread.status in TERMINAL_STATUS_VALUES:
         # A settled run is outside the live-run query, so what it never
         # answered is read directly. The residue is REPORTED and never

@@ -176,6 +176,9 @@ async def _judge_run_posture(
         thread=thread,
         snapshot=snapshot,
         durable_permission_ids=durable_permission_ids,
+        # The summary this builds has no queued_messages field; the listing
+        # never served the count this would read per row.
+        report_queued_messages=False,
     )
     if probe is None:
         return await enrich_snapshot_from_execution_state(

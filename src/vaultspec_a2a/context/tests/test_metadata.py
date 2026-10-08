@@ -5,14 +5,17 @@ from pathlib import Path
 import pytest
 
 from ...context.metadata import (
+    MAX_NICKNAME_SLUG_CHARS,
     ContextRef,
     ThreadMetadata,
     discover_context_refs,
     generate_nickname,
 )
 from ...domain_config import domain_config
+from ...team.team_config import TopologyType
 from ...thread.constants import (
     MAX_CALLEE_CHARS,
+    MAX_FEATURE_TAG_LENGTH,
     MAX_FEEDBACK_BATCH_ID_CHARS,
     MAX_SOURCE_BRANCH_CHARS,
 )
@@ -370,6 +373,67 @@ class TestGenerateNickname:
         """Empty thread_id falls back to '0000' suffix."""
         nick = generate_nickname("feat", "star", "")
         assert nick == "feat-star-0000"
+
+
+class TestGeneratedNicknamesSatisfyTheirOwnValidator:
+    """Every nickname this generates must survive the model that stores it.
+
+    The generator's contract is a slug, and ``ThreadMetadata`` is the validator
+    that enforces it. Nothing between them checks: the run-creation seam assigns
+    the generated nickname to an already-constructed model, and Pydantic does not
+    validate on assignment, so a non-conforming nickname was persisted happily and
+    only failed when run-status re-read the record - which reports provenance
+    ABSENT for a record it cannot validate. Every document-authoring run hit this:
+    its topology name carries an underscore, which the grammar forbids.
+
+    Driven through the real model rather than through the local pattern, and over
+    the real topology names rather than spelled-out ones, because the defect was
+    exactly a topology name no test had passed.
+    """
+
+    @pytest.mark.parametrize("topology", [member.value for member in TopologyType])
+    def test_every_real_topology_yields_a_storable_nickname(
+        self, topology: str, tmp_path: Path
+    ) -> None:
+        """A run of any supported topology persists a nickname its model admits."""
+        nickname = generate_nickname("agent-panel", topology, "run-a286fe1cd9dd4417")
+
+        stored = ThreadMetadata(nickname=nickname, workspace_root=str(tmp_path))
+
+        assert stored.nickname == nickname
+
+    def test_a_document_authoring_run_keeps_its_topology_in_the_slug(
+        self, tmp_path: Path
+    ) -> None:
+        """``research_adr`` becomes ``research-adr``, not a stripped ``researchadr``.
+
+        The underscore is mapped to the separator the grammar already uses, so the
+        topology stays readable in the nickname an operator sees.
+        """
+        nickname = generate_nickname(
+            "agent-panel", TopologyType.RESEARCH_ADR.value, "run-a286fe1cd9dd4417"
+        )
+
+        assert nickname.startswith("agent-panel-research-adr-")
+        assert ThreadMetadata(nickname=nickname, workspace_root=str(tmp_path))
+
+    def test_a_tag_at_the_column_width_is_truncated_rather_than_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """A feature tag wider than the slug leaves room for the run's identity.
+
+        The column admits a tag far longer than the slug grammar does, so the
+        generator cannot simply concatenate. The topology and the hash are what
+        the nickname must keep - they name the run's shape and the run itself -
+        so the tag is what gives way.
+        """
+        tag = "a" * MAX_FEATURE_TAG_LENGTH
+
+        nickname = generate_nickname(tag, "pipeline", "run-a286fe1cd9dd4417")
+
+        assert len(nickname) <= MAX_NICKNAME_SLUG_CHARS
+        assert nickname.endswith("-pipeline-" + nickname.rsplit("-", 1)[1])
+        assert ThreadMetadata(nickname=nickname, workspace_root=str(tmp_path))
 
 
 # ---------------------------------------------------------------------------

@@ -181,6 +181,53 @@ async def test_the_saver_waits_the_configured_timeout_on_its_first_write(
 
 
 @pytest.mark.asyncio
+async def test_the_journal_mode_write_waits_the_configured_timeout(
+    runtime_dir: Path,
+) -> None:
+    """A store not yet in WAL takes its journal-mode lock inside the budget.
+
+    ``journal_mode=WAL`` is the first statement of the posture that can be
+    refused: on a store whose header still says ``delete`` it has to take a lock
+    and rewrite that header, and SQLite consults the busy handler for it while
+    another connection holds a read snapshot. Ordered BEFORE ``busy_timeout``,
+    that wait was whatever lock budget the driver happened to open the
+    connection with - five seconds for both checkpoint writers - so an operator
+    who widened or narrowed the budget had no say over the one write that puts
+    the store into its serving mode.
+
+    Narrower than it looks: a competing connection holding a WRITE lock refuses
+    the journal-mode change outright, without consulting the busy handler in
+    either order. The configured budget governs the read-snapshot conflict,
+    which is the one a store shared with the application's readers meets.
+    """
+    checkpoint = runtime_dir / "journal-mode-contention.db"
+    # A real occupant with a real read snapshot open on a store that is NOT yet
+    # in WAL, so the saver's journal-mode statement has to wait for it.
+    reader = sqlite3.connect(str(checkpoint), isolation_level=None, timeout=10.0)
+    try:
+        reader.execute("PRAGMA journal_mode=DELETE")
+        reader.execute("CREATE TABLE occupied (i INTEGER)")
+        reader.execute("BEGIN")
+        reader.execute("SELECT count(*) FROM occupied").fetchone()
+        with _settings_override(
+            checkpoint_database_url=f"sqlite+aiosqlite:///{checkpoint}",
+            sqlite_busy_timeout_ms=400,
+        ):
+            started = time.monotonic()
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                async with open_checkpointer():
+                    pass
+            elapsed = time.monotonic() - started
+    finally:
+        reader.rollback()
+        reader.close()
+
+    # Lower bound: it waited, so a budget was in force at all. Upper bound: the
+    # configured 400ms rather than the driver's five seconds.
+    assert 0.3 <= elapsed < 3.0, elapsed
+
+
+@pytest.mark.asyncio
 async def test_read_only_connection_carries_the_configured_busy_timeout(
     runtime_dir: Path,
 ) -> None:
@@ -230,9 +277,14 @@ async def test_checkpoint_tables_declare_no_foreign_keys(runtime_dir: Path) -> N
 
 
 def test_pragma_set_is_shared_and_carries_the_supplied_timeout() -> None:
-    """The single statement source both writable paths consume."""
+    """The single statement source both writable paths consume, in order.
+
+    The order is part of the posture, not an accident of how the tuple was
+    written: the lock budget has to be in force before the journal-mode write
+    that can wait on it.
+    """
     assert checkpoint_pragmas(9999) == (
-        "PRAGMA journal_mode=WAL",
         "PRAGMA busy_timeout=9999",
+        "PRAGMA journal_mode=WAL",
         "PRAGMA foreign_keys=ON",
     )

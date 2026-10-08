@@ -184,10 +184,22 @@ def checkpoint_pragmas(busy_timeout_ms: int) -> tuple[str, ...]:
     ``journal_mode`` is persisted in the database header, so the first writer to
     set WAL fixes it for every later connection. ``busy_timeout`` and
     ``foreign_keys`` are per-connection and must be re-applied every time.
+
+    ``busy_timeout`` comes FIRST, and the order is the decision. On a store
+    whose header does not already say WAL, ``journal_mode=WAL`` is the first
+    statement here that can be refused: it rewrites the header, and SQLite
+    consults the busy handler for it against a connection holding a read
+    snapshot. Set after it, the budget governing that wait was whatever lock
+    timeout the driver opened the connection with - five seconds for both
+    checkpoint writers - so an operator who widened or narrowed the configured
+    budget had no say over the one write that puts the store into its serving
+    mode. A connection holding a WRITE lock refuses the change outright in
+    either order, which is why this is a correction to the budget and not a
+    cure for that refusal.
     """
     return (
-        "PRAGMA journal_mode=WAL",
         f"PRAGMA busy_timeout={busy_timeout_ms}",
+        "PRAGMA journal_mode=WAL",
         "PRAGMA foreign_keys=ON",
     )
 

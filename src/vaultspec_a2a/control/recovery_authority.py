@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from ..database import (
     ThreadModel,
     ThreadStatusElectionOutcome,
+    WriteContentionError,
     elect_thread_status,
     get_control_action_by_dispatch_id,
     get_thread,
@@ -18,6 +19,7 @@ from ..database import (
     mark_control_action_applied,
     read_latest_checkpoint,
     read_next_queued_continuation,
+    retry_write_contention,
     thread_write_expectation,
 )
 from ..thread.checkpoint_evidence import (
@@ -59,6 +61,7 @@ __all__ = [
     "CONTINUATION_PROMOTED",
     "HOLDS_QUEUED_CONTINUATION",
     "PROMOTION_OWNED_CONDITIONS",
+    "STORE_CONTENDED",
     "RecoveryObservation",
     "RecoveryRequest",
     "RecoveryTrigger",
@@ -105,6 +108,16 @@ _LIFETIME_SPENT_REFUSAL = "the run's total lifetime is spent"
 
 #: The run is parked on a question and is waiting for a human, not for recovery.
 _AWAITING_CONTROL = "awaiting_control"
+
+#: Every attempt at this pass's write was refused by a competing writer, so
+#: nothing was applied: the run holds exactly the state the pass found, and the
+#: outcome it proved is still owed. Named rather than left as the driver error
+#: because this pass runs inside the run READS, which must answer the durable
+#: truth about a run rather than fail over a store condition that resolves by
+#: itself - the error reached the gateway as a 500 on run-status and run-history
+#: alike. A caller that serves run state discloses it; a caller that only
+#: triggers a pass needs nothing of it, because a later pass makes the write.
+STORE_CONTENDED = "store_contended"
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,6 +419,30 @@ async def reconcile_run_checkpoint(
         promotion_pending,
         queue_owned,
     )
-    if evidence.kind is not CheckpointEvidenceKind.COMPLETED:
-        return await _reconcile_incomplete_checkpoint(db, decision)
-    return await _reconcile_completed_checkpoint(db, thread, action_id, decision)
+
+    async def apply() -> RecoveryObservation:
+        if evidence.kind is not CheckpointEvidenceKind.COMPLETED:
+            return await _reconcile_incomplete_checkpoint(db, decision)
+        return await _reconcile_completed_checkpoint(db, thread, action_id, decision)
+
+    # Under the store's one write-contention policy, like every other durable
+    # write this package makes. Each refusal rolls the session back, so the next
+    # attempt opens its own write transaction and re-locks the run's row: a
+    # deferred transaction left behind by a refusal would be joined by that
+    # attempt's first read and refused again without consulting the lock wait.
+    try:
+        return await retry_write_contention(db, apply)
+    except WriteContentionError as exc:
+        logger.warning(
+            "Recovery of %s found the store contended: %s",
+            thread_id,
+            exc,
+            extra={
+                "thread_id": thread_id,
+                "trigger": request.trigger.value,
+                "action": "recovery_pass_contended",
+            },
+        )
+        return RecoveryObservation(
+            status, STORE_CONTENDED, evidence.checkpoint_id, False
+        )

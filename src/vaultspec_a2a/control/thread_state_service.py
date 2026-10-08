@@ -60,6 +60,7 @@ from .projection import (
     withhold_terminal_interrupt_disclosure,
 )
 from .recovery_authority import (
+    STORE_CONTENDED,
     RecoveryRequest,
     RecoveryTrigger,
     reconcile_run_checkpoint,
@@ -426,7 +427,7 @@ async def capture_thread_state(
         # Product run lookups must not surface it; the cleanup coordinator reads
         # it directly instead. Report it as absent so the route answers 404.
         return None
-    await reconcile_run_checkpoint(
+    observation = await reconcile_run_checkpoint(
         db,
         checkpointer,
         RecoveryRequest(
@@ -457,6 +458,17 @@ async def capture_thread_state(
     snapshot = await enrich_snapshot_from_durable_state(
         db, thread=thread, snapshot=snapshot
     )
+    if observation.condition == STORE_CONTENDED:
+        # The read's product is the truth about the run, and the row above is
+        # that truth: the refused settlement applied nothing, so the status
+        # served is the run's own durable state and this names the advance it is
+        # still owed. Disclosed rather than refused because the settlement is
+        # the recovery coordinator's work, not this read's - failing the whole
+        # response would cost the caller the record it asked for over a store
+        # condition that resolves by itself, which is what the 500 on run-status
+        # and run-history did. No repair posture: nothing about the run is
+        # damaged, and the next pass writes what this one proved.
+        mark_degraded(snapshot, DegradedReason.SETTLEMENT_STORE_CONTENDED)
     metadata = _view_metadata(thread_id, thread.thread_metadata)
     try:
         expected_assignment_digest = resolve_execution_authority_from_fields(

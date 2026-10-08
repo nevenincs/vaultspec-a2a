@@ -30,6 +30,8 @@ from ..session import application_session_factory, get_session_factory, init_db
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from sqlalchemy.ext.asyncio import AsyncEngine
+
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_init_db_seats_the_application_session_factory(tmp_path: Path) -> None:
@@ -66,11 +68,11 @@ async def test_init_db_seats_the_application_session_factory(tmp_path: Path) -> 
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_an_explicit_engine_still_does_not_adopt_the_process(
-    tmp_path: Path,
+    engine: AsyncEngine,
 ) -> None:
     """``get_session_factory(engine)`` remains a local factory, not an adoption.
 
-    The counterpart that keeps the fix honest. Seating the singleton from
+    The counterpart that keeps the seating honest. Seating the singleton from
     ``init_db`` must not become "any explicit engine takes over the process":
     callers pass one to get a factory bound to a database of their own, and
     hijacking the singleton from there would point every uninjected durable
@@ -81,17 +83,11 @@ async def test_an_explicit_engine_still_does_not_adopt_the_process(
     session_module._engine = None
     session_module._session_factory = None
     try:
-        from sqlalchemy.ext.asyncio import create_async_engine
-
-        local = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'local.db'}")
-        try:
-            factory = get_session_factory(local)
-            assert factory.kw["bind"] is local
-            assert application_session_factory() is None, (
-                "an explicit engine must not become the process-wide database"
-            )
-        finally:
-            await local.dispose()
+        factory = get_session_factory(engine)
+        assert factory.kw["bind"] is engine
+        assert application_session_factory() is None, (
+            "an explicit engine must not become the process-wide database"
+        )
     finally:
         session_module._engine = saved_engine
         session_module._session_factory = saved_factory

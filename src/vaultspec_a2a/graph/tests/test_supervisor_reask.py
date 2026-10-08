@@ -1,11 +1,13 @@
 """A refused supervisor decision returns to the supervisor, within a budget.
 
-A real star team is compiled through ``compile_team_graph`` and run with a
-scripted supervisor model. A route a HARD phase gate blocks must never reach the
-blocked worker: the run goes back to the supervisor with the refusal in its
-prompt, and its next admissible decision is followed. A reply naming no route is
-re-asked the same way, and a supervisor that never produces an admissible route
-fails the run instead of ending it as if the work were done.
+A real star team is compiled through ``compile_team_graph`` and run on the
+deterministic lane through the real provider factory, its supervisor the lane's
+scripted supervisor replying as each test states. A route a HARD phase gate
+blocks must never reach the blocked worker: the run goes back to the supervisor
+with the refusal in its prompt, and its next admissible decision is followed. A
+reply naming no route is re-asked the same way, and a supervisor that never
+produces an admissible route fails the run instead of ending it as if the work
+were done.
 """
 
 from __future__ import annotations
@@ -14,13 +16,13 @@ from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from ...domain_config import domain_config
+from ...providers import ProviderFactory
 from ...team.team_config import (
     TeamConfig,
     TeamGraphConfig,
@@ -29,6 +31,8 @@ from ...team.team_config import (
     WorkerRef,
     load_agent_config,
 )
+from ...testing import deterministic_model_assignment
+from ...testing.lanes import scripted_supervisor
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -36,7 +40,6 @@ from ...thread.action_receipts import (
 from ...thread.enums import ControlActionType
 from ...thread.errors import ConfigError, SupervisorRoutingError
 from ..compiler import compile_team_graph, required_recursion_limit_for_finish_blocks
-from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -45,31 +48,16 @@ if TYPE_CHECKING:
 
 _PLAN_AUTHOR = "vaultspec-plan-author"
 _CODER = "vaultspec-coder"
-# The one shipped agent of the audit phase, so a team carrying it can have a
-# blocked FINISH rerouted rather than refused.
-_REVIEWER = "mock-reviewer"
+# An agent of the audit phase, so a team carrying it can have a blocked FINISH
+# rerouted rather than refused. Its verdict is never read on a star team, and it
+# writes no audit document, so the completion gate it is rerouted to never clears.
+_REVIEWER = "deterministic-revising-reviewer"
 _ROUTING_PROMPT_MARK = "Respond EXACTLY with one of the following words"
-
-
-class _ScriptedFactory:
-    """Hands the supervisor a scripted reply sequence and each worker a fixed one."""
-
-    def __init__(self, supervisor_replies: list[str]) -> None:
-        self._supervisor_replies = supervisor_replies
-
-    def create(
-        self,
-        provider: Any,
-        *,
-        model: Any | None = None,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
-        **kwargs: Any,
-    ) -> FakeListChatModel:
-        del provider, model, workspace_root, kwargs
-        if agent_config is None:
-            return FakeListChatModel(responses=self._supervisor_replies)
-        return FakeListChatModel(responses=[f"{agent_config.id} did its part"])
+_UNPARSEABLE = "no idea, honestly"
+# The re-ask quotes the reply it refused. The script also sits in the scripted
+# supervisor's persona, and so in every prompt, which is why the quotation inside
+# the refusal is matched rather than the reply's bare words.
+_UNPARSEABLE_REFUSAL = f"could not parse route from: {_UNPARSEABLE!r}"
 
 
 class _SupervisorPrompts(AsyncCallbackHandler):
@@ -119,7 +107,8 @@ def _star_graph(
     return compile_team_graph(
         team_config=team,
         agent_configs={a: load_agent_config(a) for a in workers},
-        provider_factory=_ScriptedFactory(supervisor_replies),
+        supervisor_agent_config=scripted_supervisor(*supervisor_replies),
+        provider_factory=ProviderFactory(),
         model_assignment=deterministic_model_assignment(team),
         checkpointer=InMemorySaver(),
     )
@@ -197,7 +186,7 @@ async def test_a_hard_gated_route_returns_to_the_supervisor_not_the_worker() -> 
 
 @pytest.mark.asyncio
 async def test_an_unparseable_reply_is_re_asked_before_it_is_followed() -> None:
-    graph = _star_graph(["no idea, honestly", "FINISH"])
+    graph = _star_graph([_UNPARSEABLE, "FINISH"])
     prompts = _SupervisorPrompts()
 
     visited = await _visits(
@@ -206,8 +195,7 @@ async def test_an_unparseable_reply_is_re_asked_before_it_is_followed() -> None:
 
     assert visited[:2] == ["supervisor", "supervisor"]
     assert _CODER not in visited and _PLAN_AUTHOR not in visited
-    assert "could not parse route" in prompts.prompts[1]
-    assert "no idea, honestly" in prompts.prompts[1]
+    assert _UNPARSEABLE_REFUSAL in prompts.prompts[1]
 
 
 @pytest.mark.asyncio
@@ -249,11 +237,11 @@ async def test_a_reply_naming_one_route_inside_a_sentence_is_followed() -> None:
 async def test_a_re_ask_shows_the_refusal_when_no_feature_is_bound() -> None:
     """The reason reaches the model whether or not a feature is active.
 
-    It used to travel only inside the anchoring block, which is empty without
-    an active feature - so an unbound thread was re-asked with the prompt it
-    had just failed, verbatim, until the budget ran out.
+    It travels outside the anchoring block, which is empty without an active
+    feature - so an unbound thread is not re-asked with the prompt it just
+    failed, verbatim, until the budget runs out.
     """
-    graph = _star_graph(["no idea, honestly", "FINISH"])
+    graph = _star_graph([_UNPARSEABLE, "FINISH"])
     prompts = _SupervisorPrompts()
     graph_input = _run_input("unbound-reask", {})
     graph_input["active_feature"] = None
@@ -262,8 +250,7 @@ async def test_a_re_ask_shows_the_refusal_when_no_feature_is_bound() -> None:
 
     assert len(prompts.prompts) >= 2
     assert prompts.prompts[0] != prompts.prompts[1]
-    assert "could not parse route" in prompts.prompts[1]
-    assert "no idea, honestly" in prompts.prompts[1]
+    assert _UNPARSEABLE_REFUSAL in prompts.prompts[1]
 
 
 @pytest.mark.asyncio
@@ -409,10 +396,10 @@ async def test_a_blocked_finish_still_meets_the_plan_approval_gate() -> None:
 async def test_a_blocked_finish_keeps_its_reason_through_the_approval_gate() -> None:
     """The refusal reaches state on the pass it was decided, not one later.
 
-    The approval branch used to be selected on the routing note being unset,
-    so a blocked FINISH that also needed approval had to drop the gate's
-    reason to park for its human at all - and the run carried no record of
-    why FINISH was refused while the human read the request.
+    The approval branch is not selected on the routing note being unset, so a
+    blocked FINISH that also needs approval keeps the gate's reason while it
+    parks for its human - the run carries a record of why FINISH was refused
+    while the human reads the request.
     """
     graph = _star_graph(["FINISH"])
     prompts = _SupervisorPrompts()
@@ -511,8 +498,8 @@ async def test_a_finish_gate_no_worker_can_satisfy_is_refused_not_rerouted() -> 
     """A gate with no worker to satisfy it refuses rather than picking one.
 
     This team has a plan author and a coder and no reviewer, so nothing on it
-    can produce the audit artifact the completion gate demands. The reroute
-    used to fall back to ``workers[0]`` - here the plan author - whose next
+    can produce the audit artifact the completion gate demands. Falling back to
+    ``workers[0]`` - here the plan author - would hand off to a role whose next
     hand-off is blocked by the same gate for the same reason. Refusing puts
     the reason in front of the supervisor and ends the run within the re-ask
     budget instead.
@@ -609,7 +596,7 @@ def test_a_star_preset_too_short_for_its_finish_budget_is_refused() -> None:
         compile_team_graph(
             team_config=team,
             agent_configs={a: load_agent_config(a) for a in workers},
-            provider_factory=_ScriptedFactory(["FINISH"]),
+            provider_factory=ProviderFactory(),
             model_assignment=deterministic_model_assignment(team),
             checkpointer=InMemorySaver(),
         )
@@ -628,7 +615,7 @@ def test_a_star_preset_at_the_required_limit_compiles() -> None:
     assert compile_team_graph(
         team_config=team,
         agent_configs={a: load_agent_config(a) for a in workers},
-        provider_factory=_ScriptedFactory(["FINISH"]),
+        provider_factory=ProviderFactory(),
         model_assignment=deterministic_model_assignment(team),
         checkpointer=InMemorySaver(),
     )
@@ -648,7 +635,7 @@ def test_a_star_team_that_cannot_spend_the_budget_is_not_held_to_it() -> None:
     assert compile_team_graph(
         team_config=team,
         agent_configs={a: load_agent_config(a) for a in workers},
-        provider_factory=_ScriptedFactory(["FINISH"]),
+        provider_factory=ProviderFactory(),
         model_assignment=deterministic_model_assignment(team),
         checkpointer=InMemorySaver(),
     )

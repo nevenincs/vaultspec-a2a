@@ -33,8 +33,6 @@ Two rules shape the design beyond the bounds:
 
 from __future__ import annotations
 
-import hashlib
-import json
 import unicodedata
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, cast
@@ -48,22 +46,27 @@ from pydantic import (
     model_validator,
 )
 
-from .snapshots import project_checkpoint_tuple
+from .action_receipts import canonical_json, sha256_fingerprint
+from .constants import (
+    MAX_REQUEST_ID_CHARS,
+    MAX_RUN_MESSAGE_CHARS,
+    REQUEST_ID_PATTERN,
+)
+from .enums import InterruptType
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from .snapshots import CheckpointProjection
+
 __all__ = [
     "CLARIFICATION_DECLINE_MARKER",
-    "CLARIFICATION_INTERRUPT_TYPE",
     "CLARIFICATION_TOPOLOGIES",
     "MAX_ANSWER_CHARS",
-    "MAX_IDENTIFIER_CHARS",
     "MAX_OPTIONS_PER_QUESTION",
     "MAX_OPTION_CHARS",
     "MAX_PROMPT_CHARS",
     "MAX_QUESTIONS_PER_REQUEST",
-    "MAX_RUN_MESSAGE_CHARS",
     "ClarificationAnswers",
     "ClarificationContinuation",
     "ClarificationDecline",
@@ -81,10 +84,10 @@ __all__ = [
     "validate_clarification_answers",
 ]
 
-# The interrupt discriminator the parked node raises and the three resolution
-# discriminators a resume may carry back. They are matched by string at the
-# checkpoint and dispatch boundaries, so they are named once here.
-CLARIFICATION_INTERRUPT_TYPE = "clarification_request"
+# The three resolution discriminators a resume may carry back. They are matched
+# by string at the dispatch boundary, so they are named once here; the
+# interrupt the parked node raises is discriminated by the shared
+# ``InterruptType`` vocabulary instead.
 CLARIFICATION_RESUME_TYPE = "clarification_response"
 CLARIFICATION_CONTINUATION_TYPE = "clarification_continuation"
 CLARIFICATION_DECLINE_TYPE = "clarification_decline"
@@ -105,7 +108,7 @@ CLARIFICATION_DECLINE_MARKER = (
 # cannot disagree. Membership is a promise about the graph builder, not a label: a
 # topology named here mounts the request and gate nodes in ``graph.compiler``, and
 # a topology absent from it refuses a ``[team.clarification]`` declaration outright
-# at preset load and again at compile. Refusing is the point - a declaration
+# at preset load. Refusing is the point - a declaration
 # accepted by a topology that never asks is a run that silently skips its own
 # questionnaire, which is indistinguishable from a working run until a human
 # notices they were never asked.
@@ -131,28 +134,25 @@ MAX_QUESTIONS_PER_REQUEST = 4
 MAX_OPTIONS_PER_QUESTION = 4
 
 # String bounds. Sized so a whole request stays small enough to sit inside a
-# checkpoint and inside the status response without special handling.
-MAX_IDENTIFIER_CHARS = 64
-MAX_REQUEST_ID_CHARS = 128
+# checkpoint and inside the status response without special handling. The
+# request handle and the continuation prompt are bounded by the shared
+# request-id and run-message caps: a continuation is a new human turn in the
+# existing run.
+_MAX_IDENTIFIER_CHARS = 64
 MAX_PROMPT_CHARS = 512
 MAX_OPTION_CHARS = 128
 MAX_ANSWER_CHARS = 2048
-# A continuation is a new human turn in the existing run, so it carries the
-# same character budget as the opening run message.
-MAX_RUN_MESSAGE_CHARS = 65536
 
-# Question and request identifiers are correlation handles that travel in a URL
-# path and in JSON object keys, so they are restricted to a path- and key-safe
-# alphabet rather than merely capped.
-_IDENTIFIER_PATTERN = r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$"
-
+# Question and request identifiers are correlation handles with one shared
+# grammar, declared beside the length that bounds them so the respond route
+# refusing a malformed handle and the model refusing it compile one text.
 QuestionId = Annotated[
     str,
-    Field(min_length=1, max_length=MAX_IDENTIFIER_CHARS, pattern=_IDENTIFIER_PATTERN),
+    Field(min_length=1, max_length=_MAX_IDENTIFIER_CHARS, pattern=REQUEST_ID_PATTERN),
 ]
 ClarificationRequestId = Annotated[
     str,
-    Field(min_length=1, max_length=MAX_REQUEST_ID_CHARS, pattern=_IDENTIFIER_PATTERN),
+    Field(min_length=1, max_length=MAX_REQUEST_ID_CHARS, pattern=REQUEST_ID_PATTERN),
 ]
 
 
@@ -223,8 +223,20 @@ LineSafeText = Annotated[str, AfterValidator(_refuse_control_characters)]
 OptionLabel = Annotated[LineSafeText, Field(min_length=1, max_length=MAX_OPTION_CHARS)]
 PromptText = Annotated[LineSafeText, Field(min_length=1, max_length=MAX_PROMPT_CHARS)]
 AnswerText = Annotated[LineSafeText, Field(max_length=MAX_ANSWER_CHARS)]
+
+
+def _refuse_blank_prompt(value: str) -> str:
+    """Require a submitted human turn, not an empty composer transition."""
+    if not value.strip():
+        msg = "prompt must not be blank"
+        raise ValueError(msg)
+    return value
+
+
 ContinuationPrompt = Annotated[
-    str, Field(min_length=1, max_length=MAX_RUN_MESSAGE_CHARS)
+    str,
+    Field(min_length=1, max_length=MAX_RUN_MESSAGE_CHARS),
+    AfterValidator(_refuse_blank_prompt),
 ]
 
 
@@ -288,7 +300,9 @@ class ClarificationRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["clarification_request"] = CLARIFICATION_INTERRUPT_TYPE
+    type: Literal[InterruptType.CLARIFICATION_REQUEST] = (
+        InterruptType.CLARIFICATION_REQUEST
+    )
     request_id: ClarificationRequestId
     questions: list[ClarificationQuestion] = Field(
         min_length=1, max_length=MAX_QUESTIONS_PER_REQUEST
@@ -325,7 +339,7 @@ class ClarificationRequest(BaseModel):
         if not isinstance(payload, dict):
             return None
         payload_map = cast("dict[str, object]", payload)
-        if payload_map.get("type") != CLARIFICATION_INTERRUPT_TYPE:
+        if payload_map.get("type") != InterruptType.CLARIFICATION_REQUEST:
             return None
         try:
             return cls.model_validate(payload_map)
@@ -374,14 +388,6 @@ class ClarificationContinuation(BaseModel):
     request_id: ClarificationRequestId
     prompt: ContinuationPrompt
 
-    @model_validator(mode="after")
-    def _prompt_has_content(self) -> Self:
-        """Require a submitted human turn, not an empty composer transition."""
-        if not self.prompt.strip():
-            msg = "clarification continuation prompt must not be blank"
-            raise ValueError(msg)
-        return self
-
     def as_resume_value(self) -> dict[str, Any]:
         """Render the continuation as the value handed to ``Command(resume=)``."""
         return self.model_dump(mode="json")
@@ -424,13 +430,8 @@ def clarification_resolution_fingerprint(
     JSON form preserves the existing discriminator and request identity.  Prompt
     text is consumed here transiently and is not stored in the receipt.
     """
-    canonical = json.dumps(
-        resolution.as_resume_value(),
-        ensure_ascii=True,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
+    canonical = canonical_json(resolution.as_resume_value()).encode("utf-8")
+    return sha256_fingerprint(canonical)
 
 
 def _normalized_clarification_answers(
@@ -565,29 +566,24 @@ def render_clarification_answers(
 
 
 def pending_clarification(
-    checkpoint_tuple: object | None,
-    *,
-    thread_id: str,
+    projection: CheckpointProjection | None,
 ) -> ClarificationRequest | None:
-    """Read the clarification a run is parked on out of its checkpoint.
+    """Read the clarification a run is parked on out of its checkpoint projection.
 
     The authoritative read behind the recovery disclosure and behind the answer
-    path's scoping check. It projects through the shared checkpoint projection
-    rather than re-walking ``pending_writes``, so this and the repair surfaces
-    agree on what "parked at an interrupt" means.
+    path's scoping check. It consumes the projection the caller already made of
+    the checkpoint rather than projecting it again, so the disclosure and every
+    other field read from that projection describe the same held writes, and
+    this and the repair surfaces agree on what "parked at an interrupt" means.
 
     Answers ``None`` for a run that is not parked, is parked on a different
-    interrupt kind, or has no readable checkpoint at all - each of which is
-    honestly "no pending clarification" rather than an error.
+    interrupt kind, or has no readable checkpoint at all (no projection) - each
+    of which is honestly "no pending clarification" rather than an error.
     """
-    if checkpoint_tuple is None:
-        return None
-    try:
-        projection = project_checkpoint_tuple(checkpoint_tuple, thread_id=thread_id)
-    except (AttributeError, TypeError, ValueError):
+    if projection is None:
         return None
     for projected in projection.pending_interrupts:
-        if projected.interrupt_type != CLARIFICATION_INTERRUPT_TYPE:
+        if projected.interrupt_type != InterruptType.CLARIFICATION_REQUEST:
             continue
         request = ClarificationRequest.from_payload(projected.payload)
         if request is not None:

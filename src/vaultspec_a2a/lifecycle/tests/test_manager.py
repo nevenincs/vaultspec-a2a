@@ -23,7 +23,8 @@ import pytest
 
 from ...control.config import setting_env
 from ...control.infra_config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
-from ...testing.ports import free_port
+from ...testing import ProgressDeadline, free_port, wait_for, wait_until
+from ...utils._process_tree import pid_is_live, wait_pid_gone
 from ..boot import (
     build_cwd_for,
     render_command,
@@ -31,7 +32,6 @@ from ..boot import (
     serve_cwd_for,
     serve_env,
 )
-from ..discovery import is_pid_alive
 from ..errors import LifecycleError
 from ..manager import (
     attach,
@@ -55,16 +55,6 @@ from ..registry import (
     remove_record,
     write_record,
 )
-
-
-def wait_pid_dead(pid: int, *, timeout: float = 10.0) -> bool:
-    """Poll until *pid* is no longer a live process, or *timeout* elapses."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not is_pid_alive(pid):
-            return True
-        time.sleep(0.05)
-    return not is_pid_alive(pid)
 
 
 def _sleeper() -> subprocess.Popen[bytes]:
@@ -174,7 +164,7 @@ def test_tree_kill_fells_a_live_child_and_is_idempotent_on_dead() -> None:
     child = _sleeper()
     try:
         assert tree_kill(child.pid) is True
-        assert wait_pid_dead(child.pid)
+        assert wait_pid_gone(child.pid, timeout=10.0)
     finally:
         if child.poll() is None:
             child.kill()
@@ -189,7 +179,7 @@ def test_kill_verb_removes_the_record_after_felling_the_tree(tmp_path: Path) -> 
         write_record(_record(name="killme", pid=child.pid, port=18902), home=tmp_path)
         record = kill("killme", home=tmp_path)
         assert record.pid == child.pid
-        assert wait_pid_dead(child.pid)
+        assert wait_pid_gone(child.pid, timeout=10.0)
         assert read_record(record_path("scratch", "killme", home=tmp_path)) is None
     finally:
         if child.poll() is None:
@@ -213,7 +203,7 @@ def test_kill_verb_deletes_the_record_log_file(tmp_path: Path) -> None:
             home=tmp_path,
         )
         kill("killme-log", home=tmp_path)
-        assert wait_pid_dead(child.pid)
+        assert wait_pid_gone(child.pid, timeout=10.0)
         assert not log_file.exists()
     finally:
         if child.poll() is None:
@@ -307,7 +297,7 @@ def test_resume_restarts_a_died_record_on_its_original_port(tmp_path: Path) -> N
 def test_resume_that_never_becomes_ready_is_atomic(tmp_path: Path) -> None:
     """A respawn that never binds is felled and the prior record left unchanged.
 
-    Proves the S04/S07 readiness-gated single-generation commit against a real
+    Proves the readiness-gated single-generation commit against a real
     child: the serve exits immediately without binding, so resume must fail loud
     and NOT publish a record pointing at the dead pid - exactly one generation is
     committed, only once ready, and a failed resume is atomic.
@@ -332,7 +322,7 @@ def test_resume_that_never_becomes_ready_is_atomic(tmp_path: Path) -> None:
 def test_rerun_that_never_becomes_ready_is_atomic(tmp_path: Path) -> None:
     """A rerun whose respawn never binds raises without publishing a new pid.
 
-    Proves S107/S149 against real children: rerun fells the running tree, then the
+    Proves against real children that rerun fells the running tree, then the
     respawn (a serve that exits without binding) must fail loud and NOT rewrite the
     record with a not-ready generation. The record is left carrying the pre-rerun
     pid rather than a half-published dead new one.
@@ -370,7 +360,7 @@ def _hold_loopback_port() -> tuple[socket.socket, int]:
 
 
 def test_resume_kill_failure_leaves_the_generation_unchanged(tmp_path: Path) -> None:
-    """S97: a foreign holder on the record's port makes resume atomic.
+    """A foreign holder on the record's port makes resume atomic.
 
     Models a resume kill failure - the old generation (or an un-reaped orphan)
     still holds the port. The respawn stays alive but never OWNS that listener, so
@@ -401,7 +391,7 @@ def test_resume_kill_failure_leaves_the_generation_unchanged(tmp_path: Path) -> 
 
 
 def test_rerun_kill_failure_leaves_the_generation_unchanged(tmp_path: Path) -> None:
-    """S152: the rerun analogue of the foreign-holder atomicity proof.
+    """The rerun analogue of the foreign-holder atomicity proof.
 
     rerun fells the running tree, then a foreign holder on the record's port keeps
     the respawn from ever owning the listener, so the pid-ownership readiness gate
@@ -578,7 +568,7 @@ def test_serve_up_boots_registers_and_picks_distinct_ports(tmp_path: Path) -> No
     try:
         # Two live processes on two DIFFERENT band ports — the collision the race
         # would have caused cannot happen because reserve_port is exclusive.
-        assert is_pid_alive(first.pid) and is_pid_alive(second.pid)
+        assert pid_is_live(first.pid) and pid_is_live(second.pid)
         assert first.port != second.port
         assert first.port in range(band[0], band[1] + 1)
         assert second.port in range(band[0], band[1] + 1)
@@ -620,7 +610,7 @@ def test_gateway_serve_up_requires_http_readiness_before_registration(
         "gateway-dev", "ready", home=tmp_path, config=ready, ready_timeout=5.0
     )
     try:
-        assert is_pid_alive(record.pid)
+        assert pid_is_live(record.pid)
         assert read_record(record_path("gateway-dev", "ready", home=tmp_path)) == record
     finally:
         tree_kill(record.pid)
@@ -657,20 +647,22 @@ class _ForeignWorkerListener:
     def is_alive(self) -> bool:
         return self._thread.is_alive()
 
-    def _wait_for_reservation_marker(self, *, deadline: float) -> Path | None:
-        while time.monotonic() < deadline:
-            markers = list(self._tmp_path.glob(f"{self._role}-*.reserved"))
-            if markers:
-                return markers[0]
-            time.sleep(0.01)
-        return None
+    def _reservation_marker(self) -> Path | None:
+        markers = list(self._tmp_path.glob(f"{self._role}-*.reserved"))
+        return markers[0] if markers else None
 
     def _run(self) -> None:
         listener: socket.socket | None = None
         try:
-            marker = self._wait_for_reservation_marker(deadline=time.monotonic() + 10.0)
-            if marker is None:
-                raise AssertionError("serve_up did not create a worker reservation")
+            marker = wait_for(
+                self._reservation_marker,
+                deadline=ProgressDeadline(idle_window_s=10.0),
+                interval_s=0.01,
+                stalled=lambda: (
+                    f"serve_up did not create a {self._role} reservation in "
+                    f"{self._tmp_path} (found {sorted(self._tmp_path.iterdir())})"
+                ),
+            )
             foreign_port = int(marker.stem.rsplit("-", 1)[1])
             listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             listener.bind(("127.0.0.1", foreign_port))
@@ -1082,9 +1074,12 @@ def test_resume_reproduces_recorded_engine_service_json(tmp_path: Path) -> None:
     updated = resume("rev", home=tmp_path, config=config)
     try:
         assert updated.engine_service_json == seat
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and not sentinel.exists():
-            time.sleep(0.05)
+        wait_until(
+            sentinel.exists,
+            deadline=ProgressDeadline(idle_window_s=10.0),
+            interval_s=0.05,
+            stalled=lambda: f"the resumed child never wrote {sentinel}",
+        )
         assert sentinel.read_text() == seat
     finally:
         tree_kill(updated.pid)
@@ -1230,7 +1225,7 @@ def test_rerun_refuses_require_repo_role_before_killing(tmp_path: Path) -> None:
         with pytest.raises(LifecycleError, match="requires an explicit repo"):
             rerun("rr", home=tmp_path, config=config)
         # The refusal happened before tree_kill: the process is still alive.
-        assert is_pid_alive(child.pid)
+        assert pid_is_live(child.pid)
     finally:
         tree_kill(child.pid)
 
@@ -1291,7 +1286,7 @@ _BIND_AND_RECORD_PID = (
 def test_serve_up_reaps_the_owned_tree_when_commit_fails_after_readiness(
     tmp_path: Path,
 ) -> None:
-    """A commit failure after readiness reaps the ready owned process (S05).
+    """A commit failure after readiness reaps the ready owned process.
 
     Inject a REAL commit failure - no mock - by pre-occupying the record path with
     a directory so write_record raises. The serve binds its port (readiness
@@ -1325,28 +1320,9 @@ def test_serve_up_reaps_the_owned_tree_when_commit_fails_after_readiness(
         # The serve reached readiness, so it recorded its pid before the commit.
         spawned_pid = int(pid_file.read_text(encoding="utf-8").strip())
         # The ready owned process was reaped, not leaked.
-        assert wait_pid_dead(spawned_pid)
+        assert wait_pid_gone(spawned_pid, timeout=10.0)
         # No half-committed record survived beside the injected directory.
         assert list_records(tmp_path) == []
     finally:
-        if spawned_pid is not None and is_pid_alive(spawned_pid):
+        if spawned_pid is not None and pid_is_live(spawned_pid):
             tree_kill(spawned_pid)
-
-
-def test_confirm_terminated_detects_a_live_and_a_dead_pid() -> None:
-    """The termination gate returns True only once the pid is actually gone."""
-    from ..manager import _confirm_terminated
-
-    child = _sleeper()
-    try:
-        # A live pid is not confirmed terminated within a short window.
-        assert _confirm_terminated(child.pid, timeout=0.3) is False
-    finally:
-        tree_kill(child.pid)
-    # Once felled, it confirms terminated.
-    assert _confirm_terminated(child.pid, timeout=10.0) is True
-
-    # tree_kill's bounded-wedged-killer property (formerly tested here against
-    # the private _win_taskkill_tree/_TASKKILL_REAP_WAIT this module owned) now
-    # lives with the shared async primitive tree_kill wraps - see
-    # utils/tests/test_process.py's taskkill-budget test.

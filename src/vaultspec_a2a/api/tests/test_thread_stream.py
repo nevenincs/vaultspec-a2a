@@ -1,27 +1,26 @@
-"""Gateway-level SSE coverage for GET /threads/{thread_id}/stream.
+"""Gateway-level SSE coverage for GET /v1/runs/{run_id}/stream.
 
-Net-new coverage: before the src/ui deletion the SSE endpoint had
-no automated exerciser at all — the React SPA was its only consumer. These tests
-drive the real endpoint through a real ASGI app + a real SQLite thread row + the
-real EventAggregator, asserting an actual ``text/event-stream`` frame. No mocks,
-no test doubles. The /ws WebSocket tests do NOT cover this SSE surface.
+These tests drive the real endpoint through a real ASGI app + a real SQLite
+thread row + the real RelayHub, asserting an actual ``text/event-stream``
+frame. No mocks, no test doubles.
 
 The terminal-replay path is asserted directly because it is deterministic and
-finite (the endpoint yields one ``thread_terminal`` frame and returns); it is
-exactly the close-after-terminal behaviour the -17 merge extended. The live
-streaming loop is exercised end-to-end by the mock-tape run proofs.
+finite (the endpoint yields one ``thread_terminal`` frame and returns), which
+is the close-after-terminal behaviour. The live streaming loop is exercised
+end-to-end by the deterministic-lane run proofs.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import TYPE_CHECKING, Any
 
 from fastapi.testclient import TestClient
 
-from ...database.thread_repository import create_thread, update_thread_status
-from ...providers.conditions import ProviderCondition
+from ...database import create_thread
+from ...graph.enums import ProviderCondition
+from ...streaming.sse_frames import decode_sse_text
+from ...testing import SseFrame, elect_status, seed_accepted_thread
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from .conftest import SessionFactory, make_app
@@ -32,18 +31,38 @@ if TYPE_CHECKING:
 
 def _sse_frames(body: str) -> list[tuple[str, dict[str, Any]]]:
     """Split a finite SSE body into its ``(event name, payload)`` pairs."""
-    frames: list[tuple[str, dict[str, Any]]] = []
-    for block in body.split("\n\n"):
-        name: str | None = None
-        data: str | None = None
-        for line in block.splitlines():
-            if line.startswith("event: "):
-                name = line.removeprefix("event: ").strip()
-            elif line.startswith("data: "):
-                data = line.removeprefix("data: ")
-        if name is not None and data is not None:
-            frames.append((name, json.loads(data)))
-    return frames
+    frames = (SseFrame.from_event(event) for event in decode_sse_text(body))
+    return [(frame.event, frame.data) for frame in frames]
+
+
+def _stream_response_for_a_completed_thread(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> tuple[Any, str]:
+    """GET ``/stream`` for a freshly seeded, already-completed thread.
+
+    Shared by the terminal-frame-content test and the no-error-frame test,
+    which both need exactly this seed and need it unmodified: it is the
+    single-attempt, single-frame terminal-replay shape the companion
+    failure-path tests deliberately vary.
+    """
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+    async def _seed() -> str:
+        async with session_factory() as session:
+            thread = await create_thread(
+                session,
+                write_authority=make_test_write_authority(),
+                status=ThreadStatus.COMPLETED,
+                title="done",
+            )
+            await session.commit()
+            return thread.id
+
+    thread_id = asyncio.run(_seed())
+
+    with TestClient(app, raise_server_exceptions=True) as client:
+        resp = client.get(f"/v1/runs/{thread_id}/stream")
+    return resp, thread_id
 
 
 class TestStreamThreadEvents:
@@ -67,23 +86,9 @@ class TestStreamThreadEvents:
         and returns, so the response body is finite and deterministic — a real
         ``text/event-stream`` frame through the real endpoint, no doubles.
         """
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
-
-        async def _seed() -> str:
-            async with session_factory() as session:
-                thread = await create_thread(
-                    session,
-                    write_authority=make_test_write_authority(),
-                    status=ThreadStatus.COMPLETED,
-                    title="done",
-                )
-                await session.commit()
-                return thread.id
-
-        thread_id = asyncio.run(_seed())
-
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get(f"/v1/runs/{thread_id}/stream")
+        resp, thread_id = _stream_response_for_a_completed_thread(
+            session_factory, checkpointer
+        )
 
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/event-stream")
@@ -108,20 +113,18 @@ class TestStreamThreadEvents:
 
         async def _seed() -> str:
             async with session_factory() as session:
-                thread = await create_thread(
-                    session,
-                    write_authority=make_test_write_authority(),
-                    title="throttled run",
+                thread_id, _receipt = await seed_accepted_thread(
+                    session, status="running"
                 )
-                await update_thread_status(
+                await elect_status(
                     session,
-                    thread.id,
+                    thread_id,
                     ThreadStatus.FAILED,
                     failure_reason="RateLimitError: too many requests",
                     provider_condition=ProviderCondition.THROTTLED.value,
                 )
                 await session.commit()
-                return thread.id
+                return thread_id
 
         thread_id = asyncio.run(_seed())
 
@@ -165,19 +168,17 @@ class TestStreamThreadEvents:
 
         async def _seed() -> str:
             async with session_factory() as session:
-                thread = await create_thread(
-                    session,
-                    write_authority=make_test_write_authority(),
-                    title="legacy failure",
+                thread_id, _receipt = await seed_accepted_thread(
+                    session, status="running"
                 )
-                await update_thread_status(
+                await elect_status(
                     session,
-                    thread.id,
+                    thread_id,
                     ThreadStatus.FAILED,
                     failure_reason="ValueError: bad workspace root",
                 )
                 await session.commit()
-                return thread.id
+                return thread_id
 
         thread_id = asyncio.run(_seed())
 
@@ -203,23 +204,9 @@ class TestStreamThreadEvents:
         replay that emitted an error frame unconditionally would tell every
         reconnecting client that a finished run had failed.
         """
-        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
-
-        async def _seed() -> str:
-            async with session_factory() as session:
-                thread = await create_thread(
-                    session,
-                    write_authority=make_test_write_authority(),
-                    status=ThreadStatus.COMPLETED,
-                    title="done",
-                )
-                await session.commit()
-                return thread.id
-
-        thread_id = asyncio.run(_seed())
-
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.get(f"/v1/runs/{thread_id}/stream")
+        resp, _thread_id = _stream_response_for_a_completed_thread(
+            session_factory, checkpointer
+        )
 
         frames = _sse_frames(resp.text)
         assert [name for name, _ in frames] == ["stream_snapshot", "thread_terminal"]

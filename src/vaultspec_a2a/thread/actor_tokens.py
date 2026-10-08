@@ -21,6 +21,8 @@ from typing import override
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .constants import MAX_ROLE_ID_CHARS, ROLE_ID_PATTERN
+
 __all__ = ["MAX_ROLES_PER_RUN", "ActorTokenBundle"]
 
 # Bounds keep the forwarded payload self-describing and safe to wrap verbatim
@@ -39,8 +41,6 @@ __all__ = ["MAX_ROLES_PER_RUN", "ActorTokenBundle"]
 MAX_ROLES_PER_RUN = 64
 _MAX_ROLES = MAX_ROLES_PER_RUN
 _MAX_TOKEN_BYTES = 512
-_MAX_ROLE_LENGTH = 63
-_ROLE_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_-]{0,62}\Z")
 
 
 class ActorTokenBundle(BaseModel):
@@ -65,7 +65,7 @@ class ActorTokenBundle(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    tokens: dict[str, str] = Field(default_factory=dict)
+    tokens: dict[str, str] = Field(default_factory=dict, max_length=MAX_ROLES_PER_RUN)
     engine_bearer: str | None = None
 
     @field_validator("tokens")
@@ -77,10 +77,11 @@ class ActorTokenBundle(BaseModel):
         for role, token in value.items():
             if not role or not role.strip():
                 raise ValueError("actor token bundle has an empty role key")
-            if len(role) > _MAX_ROLE_LENGTH or _ROLE_PATTERN.fullmatch(role) is None:
-                raise ValueError(
-                    "actor token role must match [A-Za-z_][A-Za-z0-9_-]{0,62}"
-                )
+            if (
+                len(role) > MAX_ROLE_ID_CHARS
+                or re.fullmatch(ROLE_ID_PATTERN, role) is None
+            ):
+                raise ValueError(f"actor token role must match {ROLE_ID_PATTERN}")
             if not token:
                 raise ValueError(f"actor token for role {role!r} is empty")
             if len(token.encode("utf-8")) > _MAX_TOKEN_BYTES:

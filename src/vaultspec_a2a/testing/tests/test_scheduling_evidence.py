@@ -10,11 +10,11 @@ isolated machine-global home, real sleeps.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from typing import TYPE_CHECKING
 
+from ..cli import combined_output, inherited_environment
 from ..harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
 
 if TYPE_CHECKING:
@@ -65,15 +65,18 @@ def _run_pytest(
     *extra_args: str,
     env_overrides: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
-    env.pop("PYTEST_ADDOPTS", None)
-    # This nested controller exercises scheduling, not the outer runner's
-    # lifecycle.  Completion credentials are strictly parent-scoped; passing
-    # them through would let an accidental child rebind its PID and compete for
-    # the outer receipt channel.
-    env.pop(COMPLETION_ENDPOINT_ENV, None)
-    env.pop(COMPLETION_OWNER_PID_ENV, None)
-    env.update(env_overrides or {})
+    env = inherited_environment(
+        {
+            "PYTEST_ADDOPTS": None,
+            # This nested controller exercises scheduling, not the outer runner's
+            # lifecycle.  Completion credentials are strictly parent-scoped;
+            # passing them through would let an accidental child rebind its PID
+            # and compete for the outer receipt channel.
+            COMPLETION_ENDPOINT_ENV: None,
+            COMPLETION_OWNER_PID_ENV: None,
+            **(env_overrides or {}),
+        }
+    )
     return subprocess.run(
         [
             sys.executable,
@@ -148,7 +151,7 @@ def test_contended_pair_serializes_and_disjoint_groups_run_concurrently(
             "VAULTSPEC_A2A_TEST_CPU_BUDGET": "8",
         },
     )
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.returncode == 0, combined_output(completed)
     intervals = {
         stem: json.loads((evidence / f"{stem}.json").read_text())
         for stem in ("pair_first", "pair_second", "other_first", "other_second")
@@ -174,7 +177,7 @@ def test_blind_distribution_modes_are_refused(tmp_path: Path) -> None:
     (suite / "test_noop.py").write_text("def test_noop() -> None:\n    pass\n")
     completed = _run_pytest(suite, "-n", "2")
     assert completed.returncode != 0
-    assert "requires --dist=loadgroup" in completed.stdout + completed.stderr
+    assert "requires --dist=loadgroup" in combined_output(completed)
 
 
 def test_group_names_merge_overlapping_exclusive_sets(tmp_path: Path) -> None:
@@ -202,7 +205,7 @@ def test_group_names_merge_overlapping_exclusive_sets(tmp_path: Path) -> None:
         suite,
         env_overrides={"VAULTSPEC_A2A_PROCS_HOME": str(tmp_path / "procs")},
     )
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.returncode == 0, combined_output(completed)
 
 
 def test_undeclared_live_tier_tests_join_the_serial_catchall(
@@ -222,7 +225,7 @@ def test_undeclared_live_tier_tests_join_the_serial_catchall(
         suite,
         env_overrides={"VAULTSPEC_A2A_PROCS_HOME": str(tmp_path / "procs")},
     )
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.returncode == 0, combined_output(completed)
 
 
 def test_backstop_timeout_derives_from_the_claimed_resource(
@@ -242,7 +245,7 @@ def test_backstop_timeout_derives_from_the_claimed_resource(
         suite,
         env_overrides={"VAULTSPEC_A2A_PROCS_HOME": str(tmp_path / "procs")},
     )
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.returncode == 0, combined_output(completed)
 
 
 def test_unknown_resource_keys_fail_collection_loudly(tmp_path: Path) -> None:
@@ -259,7 +262,7 @@ def test_unknown_resource_keys_fail_collection_loudly(tmp_path: Path) -> None:
         env_overrides={"VAULTSPEC_A2A_PROCS_HOME": str(tmp_path / "procs")},
     )
     assert completed.returncode != 0
-    assert "loopback-stak" in completed.stdout + completed.stderr
+    assert "loopback-stak" in combined_output(completed)
 
 
 def test_registry_backed_fixture_refuses_undeclared_use(tmp_path: Path) -> None:
@@ -274,4 +277,4 @@ def test_registry_backed_fixture_refuses_undeclared_use(tmp_path: Path) -> None:
         env_overrides={"VAULTSPEC_A2A_PROCS_HOME": str(tmp_path / "procs")},
     )
     assert completed.returncode != 0
-    assert "without declaring" in completed.stdout + completed.stderr
+    assert "without declaring" in combined_output(completed)

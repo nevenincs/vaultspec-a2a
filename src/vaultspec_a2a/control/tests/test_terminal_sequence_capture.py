@@ -1,287 +1,263 @@
-"""F19: the reconnect cursor must survive the terminal-settle prune.
+"""A run's cursor is the highest frame number its stream issued.
 
-``EventAggregator``/``EventEmitters`` hold ``last_sequence`` only in memory,
-keyed by thread id, and ``aggregator.clear_thread_state`` -- called from
-``_handle_terminal_event``'s ``finally`` block on every terminal outcome --
-prunes it the moment a run settles. A REST client's reconnect-cursor
-comparison only matters *after* settle, so every read after that point was
-answering the pruned default (0) regardless of how many events the run
-actually emitted.
+The gateway numbers a run's frames through ``RunSequenceAllocator``, and
+``ThreadModel.last_sequence`` is that same mark, recorded when the run settles
+and served by ``capture_thread_state`` for a run that has not. These tests drive
+the real production seam (``_handle_terminal_event`` against a real SQLite-backed
+session, a real ``RelayHub`` numbering through a real ``RunEventStore``,
+and ``capture_thread_state`` for the read side) and prove the cursor agrees with
+the number the allocator handed out, not with any counter kept beside it.
 
-The fix captures the value before the prune and persists it durably
-(``ThreadModel.last_sequence``) alongside ``failure_reason``/
-``provider_condition``/``repair_status``, which already follow this exact
-pattern for other terminal facts. These tests drive the real production
-seam (``_handle_terminal_event`` against a real SQLite-backed session, a real
-``EventAggregator``, and ``capture_thread_state`` for the read side) and
-prove the *ordering*, not just the value: a durable capture that happened to
-read a stale value because the prune ran first would report 0 here exactly
-as the unfixed code did.
-
-A separate local ``session_factory``/``checkpointer`` fixture pair rather than
-importing the ones from ``test_event_handlers.py`` or ``api/tests/conftest.py``:
-both those files are under concurrent edit by other sessions in this shared
-tree, and this file must not depend on their in-flight state.
+A run no allocator numbers (replay disabled) records no cursor at all rather
+than a number some other counter happened to hold.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
-from ...conftest import materialize_schema
-from ...database import create_control_action, create_thread
-from ...database.models import ThreadModel
-from ...ipc.schemas import DispatchRequest
-from ...streaming.aggregator import EventAggregator
-from ...team.team_config import load_team_config
-from ...tests._checkpoint_seeding import real_checkpoint
+from ...database import (
+    RunEventRecord,
+    RunEventStore,
+    ThreadModel,
+    create_thread,
+)
+from ...graph.enums import AgentLifecycleState
+from ...streaming import RelayHub, RunSequenceAllocator
+from ...testing import seed_completed_authority
 from ...tests._write_authority import make_test_write_authority
-from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.enums import ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
-from ..accepted_input import freeze_accepted_input
-from ..dispatch_receipts import prepare_graph_action_receipt
-from ..event_handlers import _handle_terminal_event
+from ..event_handlers import RelayServices, _handle_terminal_event
 from ..thread_state_service import capture_thread_state
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-
-    from langchain_core.runnables import RunnableConfig
-
-
-@pytest_asyncio.fixture
-async def engine(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncEngine]:
-    """Real SQLite-backed engine, isolated per test."""
-    case_dir = tmp_path_factory.mktemp("terminal-sequence-capture-db")
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    engine: AsyncEngine,
-) -> async_sessionmaker[AsyncSession]:
-    """Async session factory bound to the test engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest_asyncio.fixture
-async def checkpointer(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncSqliteSaver]:
-    """Real AsyncSqliteSaver, isolated per test (matches api/tests/conftest.py)."""
-    case_dir = tmp_path_factory.mktemp("terminal-sequence-capture-checkpoints")
-    db_file = case_dir / "test_checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(db_file)) as cp:
-        yield cp
-
-
-async def _seed_completed_authority(
-    session: AsyncSession, checkpointer: AsyncSqliteSaver, *, title: str
-) -> tuple[str, GraphActionReceipt]:
-    authority = make_test_write_authority()
-    workspace = Path.cwd()
-    thread = await create_thread(
-        session,
-        write_authority=authority,
-        status=ThreadStatus.RUNNING,
-        title=title,
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
     )
-    dispatch = DispatchRequest(
-        dispatch_id=authority.action_receipt_id,
-        action="ingest",
-        thread_id=thread.id,
-        content="sequence fixture",
-        workspace_root=str(workspace),
-        team_preset="mock-success-single",
-        graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=workspace),
-            workspace_root=workspace,
-        ),
-        recursion_limit=25,
+
+
+def _numbered_aggregator(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> RelayHub:
+    """A relay hub whose frames are numbered by the real allocator and store."""
+    aggregator = RelayHub()
+    aggregator.bind_sequence_allocator(
+        RunSequenceAllocator(RunEventStore(session_factory))
     )
-    await create_control_action(
-        session,
-        thread_id=thread.id,
-        action_type=authority.action_type,
-        idempotency_key=f"thread-create:{thread.id}",
-        dispatch_id=authority.action_receipt_id,
-        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-        payload=freeze_accepted_input(dispatch, intent={"content": "sequence fixture"}),
-    )
-    receipt = await prepare_graph_action_receipt(
-        session, thread_id=thread.id, dispatch_id=authority.action_receipt_id
-    )
-    assert receipt is not None
-    await session.commit()
-    config: RunnableConfig = {
-        "configurable": {"thread_id": thread.id, "checkpoint_ns": ""}
-    }
-    checkpoint = await real_checkpoint()
-    checkpoint["id"] = f"cp-{thread.id}"
-    checkpoint["channel_values"] = {
-        "active_graph_action_receipt": receipt.model_dump(mode="json"),
-        "graph_action_receipts": {receipt.dispatch_id: receipt.model_dump(mode="json")},
-        "graph_completion_receipts": {
-            receipt.dispatch_id: GraphCompletionReceipt(
-                schema_version="graph-completion-v1",
-                action=receipt,
-                outcome="completed",
-            ).model_dump(mode="json")
-        },
-    }
-    checkpoint["channel_versions"] = {
-        "active_graph_action_receipt": checkpointer.get_next_version(None, None),
-        "graph_action_receipts": checkpointer.get_next_version(None, None),
-        "graph_completion_receipts": checkpointer.get_next_version(None, None),
-    }
-    await checkpointer.aput(
-        config,
-        checkpoint,
-        {"source": "loop", "step": 1, "parents": {}},
-        checkpoint["channel_versions"],
-    )
-    return thread.id, receipt
+    return aggregator
+
+
+async def _relay_frames(aggregator: RelayHub, thread_id: str, count: int) -> None:
+    """Relay *count* worker frames, each carrying the worker's own ordering."""
+    await aggregator.prepare_run(thread_id)
+    for worker_sequence in range(1, count + 1):
+        aggregator.relay_payload(
+            thread_id,
+            {
+                "type": "agent_status",
+                "event_type": "agent_status",
+                "thread_id": thread_id,
+                "agent_id": "coder",
+                "state": AgentLifecycleState.WORKING.value,
+                "sequence": worker_sequence,
+            },
+        )
+
+
+async def _seed_running_thread(
+    session_factory: async_sessionmaker[AsyncSession], *, title: str
+) -> str:
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            status=ThreadStatus.RUNNING,
+            title=title,
+        )
+        await session.commit()
+        return thread.id
 
 
 @pytest.mark.asyncio
-async def test_the_sequence_is_captured_before_the_prune_discards_it(
+async def test_settle_records_the_number_the_allocator_issued(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """Fails on unfixed code: the durable column reads 0, not the real count.
+    """The durable column holds the allocator's mark, and the mark outlives the purge.
 
-    An aggregator whose sequence counter is genuinely non-zero for this
-    thread proves the ordering, not just the value: `clear_thread_state`
-    (called from the SAME handler's `finally` block, on every exit path)
-    demonstrably ran -- the live counter reads 0 afterward -- yet the durable
-    column holds the pre-prune value. That combination is only reachable if
-    the capture happened before the prune; a capture reading the already-
-    pruned default would durably persist 0 here too, indistinguishable from
-    the defect.
+    The settle handler purges the relay hub's per-run state in its own final
+    step. The allocator forgets the live counter on that purge but keeps the
+    floor it reached, so the mark it issued stays readable afterwards and the
+    column agrees with it.
     """
     async with session_factory() as session:
-        thread_id, _receipt = await _seed_completed_authority(
+        thread_id, _receipt = await seed_completed_authority(
             session, checkpointer, title="terminal sequence capture"
         )
 
-    aggregator = EventAggregator()
-    for _ in range(7):
-        aggregator.advance_sequence(thread_id)
-    assert aggregator.get_sequence(thread_id) == 7
+    aggregator = _numbered_aggregator(session_factory)
+    await _relay_frames(aggregator, thread_id, 7)
+    assert aggregator.issued_sequence(thread_id) == 7
 
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
-        aggregator=aggregator,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
+        services=RelayServices(
+            relay_hub=aggregator,
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+        ),
     )
 
-    # The prune genuinely ran: the live counter is gone.
-    assert aggregator.get_sequence(thread_id) == 0
-
-    # And the durable column holds the value captured before it ran.
     async with session_factory() as session:
         row = await session.get(ThreadModel, thread_id)
         assert row is not None
         assert row.last_sequence == 7
+    assert aggregator.issued_sequence(thread_id) == 7
 
 
 @pytest.mark.asyncio
 async def test_a_reconnecting_client_reads_the_true_cursor_after_settle(
     session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
-    """The only read that matters -- after the run has already settled.
+    """The read a reconnecting client actually makes: after the run has settled.
 
-    A live-run assertion (reading `last_sequence` while the thread is still
-    RUNNING) would pass on unfixed code too, since the in-memory value has
-    not been pruned yet. This asserts the read that actually exercises the
-    reconnect-cursor contract: a SECOND, LATER call, after the aggregator's
-    copy is long gone.
+    A SECOND, LATER call, once the settle handler has purged the relay hub's
+    state for the run: the cursor served is the durable column, not whatever the
+    live allocator still holds.
     """
     async with session_factory() as session:
-        thread_id, _receipt = await _seed_completed_authority(
+        thread_id, _receipt = await seed_completed_authority(
             session, checkpointer, title="reconnect after settle"
         )
 
-    aggregator = EventAggregator()
-    for _ in range(3):
-        aggregator.advance_sequence(thread_id)
+    aggregator = _numbered_aggregator(session_factory)
+    await _relay_frames(aggregator, thread_id, 3)
 
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
-        aggregator=aggregator,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
+        services=RelayServices(
+            relay_hub=aggregator,
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+        ),
     )
-
-    # The live copy is gone -- this is the state a client's REST reconnect
-    # read actually lands in, well after the run's own settle.
-    assert aggregator.get_sequence(thread_id) == 0
 
     async with session_factory() as db:
         capture = await capture_thread_state(
             db,
             thread_id=thread_id,
-            aggregator=aggregator,
+            relay_hub=aggregator,
             checkpointer=checkpointer,
         )
     assert capture is not None
     assert capture.snapshot.last_sequence == 3
-    assert capture.snapshot.last_sequence != 0
 
 
 @pytest.mark.asyncio
-async def test_a_live_run_still_reads_the_aggregators_own_counter(
+async def test_a_live_run_reads_the_allocators_issued_mark(
     session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
-    """Preservation: a non-terminal thread has no durable value to prefer yet.
+    """A non-terminal thread has no durable cursor yet, so the allocator answers.
 
     `ThreadModel.last_sequence` stays NULL until a run settles, so
-    `capture_thread_state` must keep reading the live aggregator for an
-    active run -- there is nothing durable yet, and falling back to 0 instead
-    would make an in-progress run look falsely reset.
+    `capture_thread_state` reads the allocator's mark for an active run -
+    falling back to 0 instead would make an in-progress run look falsely reset.
     """
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            status=ThreadStatus.RUNNING,
-            title="still running",
-        )
-        await session.commit()
-        thread_id = thread.id
+    thread_id = await _seed_running_thread(session_factory, title="still running")
 
-    aggregator = EventAggregator()
-    for _ in range(4):
-        aggregator.advance_sequence(thread_id)
+    aggregator = _numbered_aggregator(session_factory)
+    await _relay_frames(aggregator, thread_id, 4)
 
     async with session_factory() as db:
         capture = await capture_thread_state(
             db,
             thread_id=thread_id,
-            aggregator=aggregator,
+            relay_hub=aggregator,
             checkpointer=checkpointer,
         )
     assert capture is not None
     assert capture.snapshot.last_sequence == 4
+
+
+@pytest.mark.asyncio
+async def test_a_live_run_after_a_gateway_restart_reads_the_retained_mark(
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
+) -> None:
+    """A fresh gateway has issued nothing yet, and must not report a rewound cursor.
+
+    The allocator has not touched the run, so it has no mark of its own; the
+    retained window's greatest sequence is what it would seed from, and what is
+    served.
+    """
+    thread_id = await _seed_running_thread(session_factory, title="restarted gateway")
+    await RunEventStore(session_factory).append(
+        [
+            RunEventRecord(
+                thread_id=thread_id,
+                sequence=sequence,
+                event_type="agent_status",
+                payload_json="{}",
+                created_at=datetime.now(UTC),
+            )
+            for sequence in range(1, 10)
+        ]
+    )
+
+    aggregator = _numbered_aggregator(session_factory)
+    assert aggregator.issued_sequence(thread_id) is None
+
+    async with session_factory() as db:
+        capture = await capture_thread_state(
+            db,
+            thread_id=thread_id,
+            relay_hub=aggregator,
+            checkpointer=checkpointer,
+        )
+    assert capture is not None
+    assert capture.snapshot.last_sequence == 9
+
+
+@pytest.mark.asyncio
+async def test_a_run_no_allocator_numbers_settles_without_a_cursor(
+    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
+) -> None:
+    """Replay disabled: nothing is numbered, so settle records no cursor at all."""
+    async with session_factory() as session:
+        thread_id, _receipt = await seed_completed_authority(
+            session, checkpointer, title="no allocator"
+        )
+
+    aggregator = RelayHub()
+    assert aggregator.issued_sequence(thread_id) is None
+
+    await _handle_terminal_event(
+        thread_id,
+        {"event_type": "thread_terminal", "status": "completed"},
+        services=RelayServices(
+            relay_hub=aggregator,
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+        ),
+    )
+
+    async with session_factory() as session:
+        row = await session.get(ThreadModel, thread_id)
+        assert row is not None
+        assert row.last_sequence is None
+
+    async with session_factory() as db:
+        capture = await capture_thread_state(
+            db,
+            thread_id=thread_id,
+            relay_hub=aggregator,
+            checkpointer=checkpointer,
+        )
+    assert capture is not None
+    assert capture.snapshot.last_sequence == 0

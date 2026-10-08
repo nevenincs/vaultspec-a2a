@@ -14,6 +14,8 @@ import asyncio
 
 import pytest
 
+from ...graph.enums import ProviderCondition
+from ...testing import ACP_PROTOCOL_VERSION, initialize_result, read_acp_frame
 from ...utils.enums import AcpRequestId
 from .._acp_session import (
     _select_desired_config_options,
@@ -24,8 +26,6 @@ from .._acp_session import (
 from .._acp_types import AcpModelConfig, AcpSessionContext, InitializeResult
 from .._json_contract import JsonObject, JsonValue
 from ..acp_exceptions import AcpErrorCode, AcpSessionError
-from ..conditions import ProviderCondition
-from ._acp_frames import read_acp_frame
 
 # An opaque model identifier standing for the value frozen into a run's role
 # assignment. Deliberately a literal rather than a lookup: an external lane's
@@ -55,12 +55,7 @@ def _config(
         mcp_servers=[],
         use_exec=False,
         provider=None,
-        runtime_authority=None,
-        acp_backend=None,
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
         desired_model=desired_model,
     )
@@ -138,7 +133,8 @@ async def _initialize(
     frame = await read_acp_frame(ctx.stdout, AcpRequestId.INITIALIZE, timeout=_TIMEOUT)
     assert frame["method"] == "initialize"
     params = frame.get("params")
-    assert isinstance(params, dict) and params.get("protocolVersion") == 1
+    assert isinstance(params, dict)
+    assert params.get("protocolVersion") == ACP_PROTOCOL_VERSION
     ctx.response_futures[AcpRequestId.INITIALIZE].set_result({"result": result})
     return await task
 
@@ -147,18 +143,14 @@ async def _initialize(
 async def test_initialize_accepts_only_the_requested_protocol_version(
     echo_context: AcpSessionContext,
 ) -> None:
-    accepted = await _initialize(
-        echo_context,
-        _config(None),
-        {"protocolVersion": 1, "agentCapabilities": {}, "authMethods": []},
-    )
+    accepted = await _initialize(echo_context, _config(None), initialize_result())
     assert accepted.agent_capabilities == {}
 
     with pytest.raises(AcpSessionError, match="unsupported protocol version") as caught:
         await _initialize(
             echo_context,
             _config(None),
-            {"protocolVersion": 2, "agentCapabilities": {}, "authMethods": []},
+            initialize_result(protocol_version=ACP_PROTOCOL_VERSION + 1),
         )
     assert caught.value.code == AcpErrorCode.INVALID_PARAMS
 
@@ -205,11 +197,7 @@ async def test_initialize_rejects_missing_or_malformed_protocol_version(
         await _initialize(
             echo_context,
             _config(None),
-            {
-                "protocolVersion": protocol_version,
-                "agentCapabilities": {},
-                "authMethods": [],
-            },
+            initialize_result(protocol_version=protocol_version),
         )
 
 
@@ -219,13 +207,10 @@ async def test_initialize_rejects_missing_or_malformed_protocol_version(
     [
         ([], "without an object result"),
         (
-            {"protocolVersion": 1, "agentCapabilities": [], "authMethods": []},
+            initialize_result(agent_capabilities=[]),
             "malformed agentCapabilities",
         ),
-        (
-            {"protocolVersion": 1, "agentCapabilities": {}, "authMethods": [1]},
-            "malformed authMethods",
-        ),
+        (initialize_result(auth_methods=[1]), "malformed authMethods"),
     ],
 )
 async def test_initialize_rejects_malformed_negotiated_surface(

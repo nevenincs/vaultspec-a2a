@@ -1,36 +1,22 @@
 """Tests for graph.nodes.vault_reader -- the mount node and the context mounter."""
 
-from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
-from ....database import create_thread, seed_task_queue
-from ....database.models import Base
 from ....domain_config import domain_config
-from ....tests._write_authority import make_test_write_authority
 from ....thread.state import TeamState, merge_vault_index
-from ....worker.task_queue_port import SqlTaskQueuePort
 from ...nodes.vault_reader import (
     build_initial_vault_index,
     create_context_mounter,
     create_mount_node,
 )
-from ...protocols import TaskQueuePort
 
 
 async def _mount_pass(
     workspace_root: Path | None,
     state: TeamState,
-    task_queue_port: TaskQueuePort | None = None,
 ) -> tuple[dict[str, Any], str | None]:
     """Run one mount pass the way the compiled graph does.
 
@@ -44,7 +30,7 @@ async def _mount_pass(
             state.get("vault_index") or {}, update.get("vault_index", {})
         ),
     }
-    mounter = create_context_mounter(workspace_root, task_queue_port)
+    mounter = create_context_mounter(workspace_root)
     return update, await mounter(merged)
 
 
@@ -52,12 +38,10 @@ def _make_state(
     active_feature: str | None = "my-feature",
     vault_index: dict[str, list[str]] | None = None,
     pipeline_phase: str | None = None,
-    thread_id: str = "t1",
-    current_task_id: str | None = None,
 ) -> TeamState:
     base: TeamState = {
         "messages": [],
-        "thread_id": thread_id,
+        "thread_id": "t1",
         "active_agent": "worker",
         "artifacts": [],
         "current_plan": [],
@@ -69,8 +53,6 @@ def _make_state(
         base["vault_index"] = vault_index
     if pipeline_phase is not None:
         base["pipeline_phase"] = pipeline_phase
-    if current_task_id is not None:
-        base["current_task_id"] = current_task_id
     return base
 
 
@@ -165,111 +147,6 @@ async def test_mount_refresh_preserves_prior_index_entries(tmp_path: Path) -> No
     assert update["vault_index"] == {"adr": [expected_rel]}
     assert mounted is not None
     assert "Binding." in mounted
-
-
-# ---------------------------------------------------------------------------
-# Database-backed queue injection — real SQLite via SqlTaskQueuePort
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def engine() -> AsyncGenerator[AsyncEngine]:
-    """Fresh in-memory async engine with all tables created."""
-    eng = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    engine: AsyncEngine,
-) -> async_sessionmaker[AsyncSession]:
-    """Async session factory bound to the in-memory engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest_asyncio.fixture
-async def queue_thread(session_factory: async_sessionmaker[AsyncSession]) -> str:
-    """Create a thread with a seeded exec queue; return the thread id."""
-    async with session_factory() as session:
-        thread = await create_thread(
-            session, write_authority=make_test_write_authority(), title="queue"
-        )
-        await seed_task_queue(
-            session,
-            thread_id=thread.id,
-            feature_tag="my-feature",
-            entries=[
-                {"task_key": "Q-1", "description": "Do first", "status": "in_progress"},
-                {"task_key": "Q-2", "description": "Do next", "status": "pending"},
-                {"task_key": "Q-3", "description": "Then this", "status": "pending"},
-                {"task_key": "Q-4", "description": "Later", "status": "pending"},
-            ],
-        )
-        await session.commit()
-        return thread.id
-
-
-@pytest.mark.asyncio
-async def test_mount_injects_db_queue_view_during_exec(
-    tmp_path: Path,
-    session_factory: async_sessionmaker[AsyncSession],
-    queue_thread: str,
-) -> None:
-    port = SqlTaskQueuePort(session_factory)
-    state = _make_state(
-        pipeline_phase="exec",
-        thread_id=queue_thread,
-        current_task_id="Q-1",
-    )
-    _update, context = await _mount_pass(tmp_path, state, port)
-    assert context is not None
-    assert "## Task Queue -- my-feature" in context
-    assert "| Q-1 | in_progress | Do first |" in context
-    assert "| Q-2 | pending | Do next |" in context
-    assert "| Q-3 | pending | Then this |" in context
-    # horizon is 2 pending rows -> Q-4 must not appear
-    assert "Q-4" not in context
-
-
-@pytest.mark.asyncio
-async def test_mount_skips_queue_outside_queue_phases(
-    tmp_path: Path,
-    session_factory: async_sessionmaker[AsyncSession],
-    queue_thread: str,
-) -> None:
-    port = SqlTaskQueuePort(session_factory)
-    state = _make_state(
-        pipeline_phase="research",
-        thread_id=queue_thread,
-        current_task_id="Q-1",
-    )
-    _update, mounted = await _mount_pass(tmp_path, state, port)
-    assert mounted is None
-
-
-@pytest.mark.asyncio
-async def test_mount_no_queue_block_when_empty(
-    tmp_path: Path,
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    async with session_factory() as session:
-        thread = await create_thread(
-            session, write_authority=make_test_write_authority(), title="empty-queue"
-        )
-        await session.commit()
-        thread_id = thread.id
-
-    port = SqlTaskQueuePort(session_factory)
-    state = _make_state(
-        pipeline_phase="exec",
-        thread_id=thread_id,
-        current_task_id=None,
-    )
-    _update, mounted = await _mount_pass(tmp_path, state, port)
-    assert mounted is None
 
 
 def test_the_index_keeps_the_most_recent_records_when_a_stage_exceeds_its_cap(

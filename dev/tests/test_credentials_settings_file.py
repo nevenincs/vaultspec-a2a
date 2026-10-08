@@ -10,7 +10,6 @@ directory and a real child process that reads the settings out of it.
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from typing import TYPE_CHECKING
 
@@ -21,12 +20,14 @@ from dev.credentials import (
     read_env_file,
     resolve,
 )
+from dev.process import run_captured
 from vaultspec_a2a.control.config import Settings
 from vaultspec_a2a.control.settings_base import (
     ENV_FILE_ENV,
     PROJECT_ROOT_ENV,
     env_name,
 )
+from vaultspec_a2a.testing import inherited_environment
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -58,11 +59,9 @@ def _outside_environment() -> dict[str, str]:
     The suite declares settings of its own; a child that inherited them would
     prove nothing about what the scope handed it.
     """
-    return {
-        name: value
-        for name, value in os.environ.items()
-        if not name.startswith("VAULTSPEC_A2A_")
-    }
+    return inherited_environment(
+        dict.fromkeys(name for name in os.environ if name.startswith("VAULTSPEC_A2A_"))
+    )
 
 
 def test_the_name_the_scope_sets_is_the_one_the_settings_read() -> None:
@@ -80,14 +79,11 @@ def test_a_service_scope_hands_the_command_the_checkouts_settings(
     child = resolve(SCOPES["service"], base, read_env_file(env_file), env_file=env_file)
     assert child[ENV_FILE_VARIABLE] == str(env_file)
 
-    completed = subprocess.run(
+    completed = run_captured(
         [sys.executable, "-c", _PROBE],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=_TIMEOUT,
-        check=False,
         env=child | {"PYTHONIOENCODING": "utf-8"},
+        replace_env=True,
+        timeout=_TIMEOUT,
     )
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == _VALUE
@@ -126,16 +122,15 @@ def test_the_test_suite_is_handed_no_settings_file(tmp_path: Path) -> None:
 
 
 def test_development_fixtures_need_no_application_credentials() -> None:
-    """Starting trace/mock fixtures neither requires nor imports service secrets."""
+    """Starting the trace fixture neither requires nor imports service secrets."""
     scope = SCOPES["compose"]
     child = resolve(
         scope,
         {},
         {
-            "POSTGRES_PASSWORD": "synthetic-password",
             "VAULTSPEC_A2A_INTERNAL_TOKEN": "synthetic-token",
-            "VIDAIMOCK_PORT": "18100",
+            "JAEGER_UI_PORT": "18686",
         },
     )
     assert missing_required(scope, child) == []
-    assert child == {"VIDAIMOCK_PORT": "18100"}
+    assert child == {"JAEGER_UI_PORT": "18686"}

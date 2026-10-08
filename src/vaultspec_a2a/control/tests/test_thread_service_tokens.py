@@ -14,56 +14,50 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
-import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport
 from pydantic import ValidationError
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...conftest import materialize_schema
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.direct_control_recovery import redrive_direct_control_actions
+from ...control.leased_dispatch import DispatchTransport
 from ...control.thread_service import (
     ThreadCreationRequest,
     ThreadCreationResult,
-    ThreadDispatchRuntime,
     create_and_dispatch_thread,
 )
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
+    ControlActionModel,
+    ThreadModel,
     ThreadStatusElectionOutcome,
     create_control_action,
     delete_thread,
     elect_thread_status,
+    get_control_action_by_dispatch_id,
+    get_latest_control_action,
     get_thread,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
-from ...database.models import ControlActionModel, ThreadModel
-from ...domain_config import domain_config
+from ...team import load_team_config
+from ...testing import DEFAULT_TEAM_PRESET, adopted_spawner
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from ...control.worker_management import LazyWorkerSpawner
+
 _CODER_TOKEN = "secret-coder-xyz"
 _REVIEWER_TOKEN = "secret-reviewer-xyz"
 _BEARER = "secret-bearer-xyz"
-_PRESET = "mock-success-single"
-
-
-@pytest_asyncio.fixture
-async def session_factory(tmp_path_factory: pytest.TempPathFactory):
-    case_dir = tmp_path_factory.mktemp("token-thread-db")
-    materialize_schema(Path(case_dir / "test.db"))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{case_dir / 'test.db'}")
-    yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    await engine.dispose()
 
 
 def _capturing_worker(
@@ -77,11 +71,10 @@ def _capturing_worker(
         body = await request.json()
         captured["body"] = body
         async with session_factory() as session:
-            action = await session.scalar(
-                select(ControlActionModel).where(
-                    ControlActionModel.thread_id == body["thread_id"],
-                    ControlActionModel.dispatch_id == body["dispatch_id"],
-                )
+            action = await get_control_action_by_dispatch_id(
+                session,
+                thread_id=body["thread_id"],
+                dispatch_id=body["dispatch_id"],
             )
             assert action is not None
             assert action.payload_json is not None
@@ -106,6 +99,7 @@ async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     thread_id = "invalid-initial-dispatch"
+    relative_project = Path("relative-project")
     captured: dict[str, Any] = {}
     async with (
         httpx.AsyncClient(
@@ -121,22 +115,22 @@ async def test_invalid_initial_dispatch_cannot_commit_a_partial_reservation(
                     thread_id=thread_id,
                     title="invalid project",
                     initial_message="must not be accepted",
-                    team_preset=_PRESET,
+                    team_preset=DEFAULT_TEAM_PRESET,
                     autonomous=True,
                     nickname=None,
                     metadata=None,
                     metadata_json=None,
-                    workspace_root=Path("relative-project"),
+                    workspace_root=relative_project,
+                    team_config=load_team_config(
+                        DEFAULT_TEAM_PRESET, workspace_root=relative_project
+                    ),
                 ),
-                runtime=ThreadDispatchRuntime(
+                transport=DispatchTransport(
                     circuit_breaker=WorkerCircuitBreaker(
                         failure_threshold=1, recovery_timeout=1.0
                     ),
-                    worker_spawner=LazyWorkerSpawner(
-                        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-                    ),
+                    worker_spawner=adopted_spawner(),
                     worker_client=client,
-                    recursion_limit=20,
                     trace_headers=None,
                 ),
             )
@@ -176,11 +170,8 @@ def _early_terminal_worker(
                 thread.id,
                 expectation=expectation,
                 status=ThreadStatus.COMPLETED,
-                successor=successor_thread_write_authority(
-                    expectation,
-                    action_type=expectation.authority.action_type,
-                    action_receipt_id=body["dispatch_id"],
-                ),
+                action_type=expectation.authority.action_type,
+                action_receipt_id=body["dispatch_id"],
             )
             assert result.outcome is ThreadStatusElectionOutcome.WON
             await session.commit()
@@ -236,11 +227,8 @@ def _cancelling_capacity_worker(
                 thread.id,
                 expectation=expectation,
                 status=ThreadStatus.CANCELLING,
-                successor=successor_thread_write_authority(
-                    expectation,
-                    action_type=ControlActionType.CANCEL,
-                    action_receipt_id=cancel.dispatch_id,
-                ),
+                action_type=ControlActionType.CANCEL,
+                action_receipt_id=cancel.dispatch_id,
             )
             assert result.outcome is ThreadStatusElectionOutcome.WON
             await session.commit()
@@ -249,16 +237,48 @@ def _cancelling_capacity_worker(
     return app
 
 
+def _initial_dispatch_request(
+    *, thread_id: str, title: str, initial_message: str, tmp_path: Path
+) -> ThreadCreationRequest:
+    """The initial-dispatch creation request the races below share.
+
+    Every field but *thread_id*, *title* and *initial_message* is fixed: the
+    team preset, autonomy, and workspace are what every race below dispatches
+    against, varying only which run and which worker behaviour it provokes.
+    """
+    return ThreadCreationRequest(
+        thread_id=thread_id,
+        title=title,
+        initial_message=initial_message,
+        team_preset=DEFAULT_TEAM_PRESET,
+        autonomous=True,
+        nickname=None,
+        metadata=None,
+        metadata_json=None,
+        workspace_root=tmp_path,
+        team_config=load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
+    )
+
+
+def _fresh_circuit_transport(
+    spawner: LazyWorkerSpawner, worker_client: httpx.AsyncClient
+) -> DispatchTransport:
+    """The fresh-circuit-breaker transport the races below share."""
+    return DispatchTransport(
+        circuit_breaker=WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=1.0),
+        worker_spawner=spawner,
+        worker_client=worker_client,
+        trace_headers=None,
+    )
+
+
 @pytest.mark.asyncio
 async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
     session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
 ) -> None:
     captured: dict[str, Any] = {}
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-    )
-    spawner.replace_process(None)
+    spawner = adopted_spawner()
     circuit_breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=1.0)
     bundle = ActorTokenBundle(
         tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
@@ -279,19 +299,21 @@ async def test_run_start_threads_tokens_to_worker_but_never_persists_them(
                 thread_id=thread_id,
                 title="token run",
                 initial_message="build it",
-                team_preset=_PRESET,
+                team_preset=DEFAULT_TEAM_PRESET,
                 autonomous=True,
                 nickname=None,
                 metadata=None,
                 metadata_json=None,
                 workspace_root=tmp_path,
+                team_config=load_team_config(
+                    DEFAULT_TEAM_PRESET, workspace_root=tmp_path
+                ),
                 actor_tokens=bundle,
             ),
-            runtime=ThreadDispatchRuntime(
+            transport=DispatchTransport(
                 circuit_breaker=circuit_breaker,
                 worker_spawner=spawner,
                 worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
                 trace_headers=None,
             ),
         )
@@ -336,10 +358,7 @@ async def test_early_terminal_initial_dispatch_cannot_be_reopened(
     tmp_path: Path,
 ) -> None:
     captured: dict[str, Any] = {}
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-    )
-    spawner.replace_process(None)
+    spawner = adopted_spawner()
     thread_id = "early-terminal"
     async with (
         httpx.AsyncClient(
@@ -352,26 +371,13 @@ async def test_early_terminal_initial_dispatch_cannot_be_reopened(
     ):
         result = await create_and_dispatch_thread(
             session,
-            ThreadCreationRequest(
+            _initial_dispatch_request(
                 thread_id=thread_id,
                 title="early terminal",
                 initial_message="finish immediately",
-                team_preset=_PRESET,
-                autonomous=True,
-                nickname=None,
-                metadata=None,
-                metadata_json=None,
-                workspace_root=tmp_path,
+                tmp_path=tmp_path,
             ),
-            runtime=ThreadDispatchRuntime(
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=1, recovery_timeout=1.0
-                ),
-                worker_spawner=spawner,
-                worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
-                trace_headers=None,
-            ),
+            transport=_fresh_circuit_transport(spawner, worker_client),
         )
     assert result.dispatched is True
     assert result.status == ThreadStatus.COMPLETED.value
@@ -389,10 +395,7 @@ async def test_initial_dispatch_reports_missing_row_without_refresh_failure(
     session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
 ) -> None:
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-    )
-    spawner.replace_process(None)
+    spawner = adopted_spawner()
     thread_id = "deleted-before-ack"
     async with (
         httpx.AsyncClient(
@@ -403,26 +406,13 @@ async def test_initial_dispatch_reports_missing_row_without_refresh_failure(
     ):
         result = await create_and_dispatch_thread(
             session,
-            ThreadCreationRequest(
+            _initial_dispatch_request(
                 thread_id=thread_id,
                 title="deleted before ack",
                 initial_message="start",
-                team_preset=_PRESET,
-                autonomous=True,
-                nickname=None,
-                metadata=None,
-                metadata_json=None,
-                workspace_root=tmp_path,
+                tmp_path=tmp_path,
             ),
-            runtime=ThreadDispatchRuntime(
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=1, recovery_timeout=1.0
-                ),
-                worker_spawner=spawner,
-                worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
-                trace_headers=None,
-            ),
+            transport=_fresh_circuit_transport(spawner, worker_client),
         )
     assert result.dispatched is True
     assert result.status == ""
@@ -435,10 +425,7 @@ async def test_lost_initial_ack_yields_to_early_terminal_authority(
     tmp_path: Path,
 ) -> None:
     captured: dict[str, Any] = {}
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-    )
-    spawner.replace_process(None)
+    spawner = adopted_spawner()
     thread_id = "terminal-before-lost-ack"
     async with (
         httpx.AsyncClient(
@@ -455,26 +442,13 @@ async def test_lost_initial_ack_yields_to_early_terminal_authority(
     ):
         result = await create_and_dispatch_thread(
             session,
-            ThreadCreationRequest(
+            _initial_dispatch_request(
                 thread_id=thread_id,
                 title="terminal before lost ack",
                 initial_message="finish",
-                team_preset=_PRESET,
-                autonomous=True,
-                nickname=None,
-                metadata=None,
-                metadata_json=None,
-                workspace_root=tmp_path,
+                tmp_path=tmp_path,
             ),
-            runtime=ThreadDispatchRuntime(
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=1, recovery_timeout=1.0
-                ),
-                worker_spawner=spawner,
-                worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
-                trace_headers=None,
-            ),
+            transport=_fresh_circuit_transport(spawner, worker_client),
         )
     assert result.status == ThreadStatus.COMPLETED.value
     assert result.dispatched is True
@@ -487,10 +461,7 @@ async def test_definite_initial_rejection_survives_a_different_winning_action(
     session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
 ) -> None:
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-    )
-    spawner.replace_process(None)
+    spawner = adopted_spawner()
     thread_id = "cancel-wins-before-capacity-response"
     async with (
         httpx.AsyncClient(
@@ -501,26 +472,13 @@ async def test_definite_initial_rejection_survives_a_different_winning_action(
     ):
         result = await create_and_dispatch_thread(
             session,
-            ThreadCreationRequest(
+            _initial_dispatch_request(
                 thread_id=thread_id,
                 title="cancel wins before capacity response",
                 initial_message="start",
-                team_preset=_PRESET,
-                autonomous=True,
-                nickname=None,
-                metadata=None,
-                metadata_json=None,
-                workspace_root=tmp_path,
+                tmp_path=tmp_path,
             ),
-            runtime=ThreadDispatchRuntime(
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=1, recovery_timeout=1.0
-                ),
-                worker_spawner=spawner,
-                worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
-                trace_headers=None,
-            ),
+            transport=_fresh_circuit_transport(spawner, worker_client),
         )
 
     assert result.status == ThreadStatus.CANCELLING.value
@@ -550,11 +508,10 @@ async def test_initial_ingest_keeps_its_fresh_lease_during_a_real_recovery_pass(
     async def _hold_ack(request: Request) -> JSONResponse:
         body = await request.json()
         async with session_factory() as observer:
-            action = await observer.scalar(
-                select(ControlActionModel).where(
-                    ControlActionModel.thread_id == body["thread_id"],
-                    ControlActionModel.dispatch_id == body["dispatch_id"],
-                )
+            action = await get_control_action_by_dispatch_id(
+                observer,
+                thread_id=body["thread_id"],
+                dispatch_id=body["dispatch_id"],
             )
             thread = await get_thread(observer, body["thread_id"])
         assert action is not None
@@ -568,10 +525,7 @@ async def test_initial_ingest_keeps_its_fresh_lease_during_a_real_recovery_pass(
         dispatches.append(body)
         return JSONResponse({"status": "dispatched", "thread_id": thread_id})
 
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-    )
-    spawner.replace_process(None)
+    spawner = adopted_spawner()
     breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=1.0)
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://worker"
@@ -585,18 +539,20 @@ async def test_initial_ingest_keeps_its_fresh_lease_during_a_real_recovery_pass(
                         thread_id=thread_id,
                         title="fresh lease race",
                         initial_message="hold worker acknowledgement",
-                        team_preset=_PRESET,
+                        team_preset=DEFAULT_TEAM_PRESET,
                         autonomous=True,
                         nickname=None,
                         metadata=None,
                         metadata_json=None,
                         workspace_root=tmp_path,
+                        team_config=load_team_config(
+                            DEFAULT_TEAM_PRESET, workspace_root=tmp_path
+                        ),
                     ),
-                    runtime=ThreadDispatchRuntime(
+                    transport=DispatchTransport(
                         circuit_breaker=breaker,
                         worker_spawner=spawner,
                         worker_client=worker_client,
-                        recursion_limit=domain_config.graph_recursion_limit,
                         trace_headers=None,
                     ),
                 )
@@ -613,11 +569,8 @@ async def test_initial_ingest_keeps_its_fresh_lease_during_a_real_recovery_pass(
         assert recovery.dispatched == 0
         assert recovery.refused == 0
         async with session_factory() as observer:
-            action = await observer.scalar(
-                select(ControlActionModel).where(
-                    ControlActionModel.thread_id == thread_id,
-                    ControlActionModel.action_type == ControlActionType.INGEST.value,
-                )
+            action = await get_latest_control_action(
+                observer, thread_id=thread_id, action_type=ControlActionType.INGEST
             )
             thread = await get_thread(observer, thread_id)
         assert action is not None
@@ -643,44 +596,25 @@ async def test_ambiguous_initial_dispatch_retains_its_fresh_lease(
 ) -> None:
     """A connection failure has no non-delivery proof, so the fresh lease remains."""
     thread_id = "ambiguous-initial-dispatch"
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
-    )
-    spawner.replace_process(None)
+    spawner = adopted_spawner()
     async with (
         httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.2) as worker_client,
         session_factory() as session,
     ):
         result = await create_and_dispatch_thread(
             session,
-            ThreadCreationRequest(
+            _initial_dispatch_request(
                 thread_id=thread_id,
                 title="ambiguous delivery",
                 initial_message="do not acknowledge",
-                team_preset=_PRESET,
-                autonomous=True,
-                nickname=None,
-                metadata=None,
-                metadata_json=None,
-                workspace_root=tmp_path,
+                tmp_path=tmp_path,
             ),
-            runtime=ThreadDispatchRuntime(
-                circuit_breaker=WorkerCircuitBreaker(
-                    failure_threshold=1, recovery_timeout=1.0
-                ),
-                worker_spawner=spawner,
-                worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
-                trace_headers=None,
-            ),
+            transport=_fresh_circuit_transport(spawner, worker_client),
         )
     assert result.failure_type is FailureType.UNREACHABLE
     async with session_factory() as observer:
-        action = await observer.scalar(
-            select(ControlActionModel).where(
-                ControlActionModel.thread_id == thread_id,
-                ControlActionModel.action_type == ControlActionType.INGEST.value,
-            )
+        action = await get_latest_control_action(
+            observer, thread_id=thread_id, action_type=ControlActionType.INGEST
         )
     assert action is not None
     assert action.claim_token is not None

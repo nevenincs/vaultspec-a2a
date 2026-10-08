@@ -19,9 +19,11 @@ from langgraph.errors import GraphBubbleUp
 from ..control.config import settings
 from ..control.workspace import configured_workspace_boundary
 from ..desktop._filesystem_authority import confined_file_descriptor
-from ..graph.acp_options import option_id_of, valid_option_ids
+from ..graph.acp_options import option_id_of_kind, valid_option_ids
+from ..graph.enums import PermissionOptionKind
 from ._acp_client_requests import AcpSessionRequest
 from ._acp_fs_read import AcpFileReadRange, AcpFileReadRequest, read_text_lines
+from ._acp_request import jsonrpc_error, jsonrpc_result
 from ._acp_rpc_terminal_handlers import on_terminal_create as on_terminal_create
 from ._acp_rpc_terminal_handlers import on_terminal_kill as on_terminal_kill
 from ._acp_rpc_terminal_handlers import on_terminal_output as on_terminal_output
@@ -35,14 +37,15 @@ from ._acp_types import (
     AcpSessionContext,
     require_workspace_root,
 )
-from ._harness_mcp_registry import harness_tool_is_withheld
 from ._json_contract import (
     JsonObject,
     lenient_json_object,
     lenient_json_object_list,
 )
 from ._native_read_tools import NATIVE_READ_TOOL_NAMES
-from ._project_scope import foreign_project_argument, path_arguments_in_project
+from ._project_scope import path_arguments_in_project
+from ._tool_policy import ToolPermissionRequest, decide
+from .acp_exceptions import AcpErrorCode
 
 __all__: list[str] = []
 
@@ -191,10 +194,9 @@ def _vault_write_denial(rpc_id: AcpRpcId, path: str) -> JsonObject:
     the authoring tools as the correct path — never a bare JSON-RPC error, so
     the agent is steered rather than left retrying a failed write.
     """
-    return {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "result": {
+    return jsonrpc_result(
+        rpc_id,
+        {
             "status": "denied",
             "denial_kind": "forbidden_actor",
             "eligibility": {
@@ -209,7 +211,7 @@ def _vault_write_denial(rpc_id: AcpRpcId, path: str) -> JsonObject:
             },
             "path": path,
         },
-    }
+    )
 
 
 # Kimi's native READ tools that mirror the read floor (Claude's Read/Grep/Glob),
@@ -278,164 +280,50 @@ def _strip_mcp_prefix(tool_name: str) -> str:
     return tool_name
 
 
-def _option_id_at(options: list[JsonObject], index: int, *, default: str) -> str:
-    """Return the id of the option at ``index``, or ``default`` if it has none.
-
-    Positional, never scanning: the caller picks an option by CONVENTION (first
-    is the least restrictive), so silently sliding to a neighbour when the
-    conventional entry is malformed would substitute an option with the opposite
-    meaning. Reading the id through the canonical extractor instead of
-    subscripting is what keeps a malformed entry from raising ``KeyError`` on a
-    path that exists to handle malformed input.
-    """
-    if not options:
-        return default
-    return option_id_of(options[index]) or default
-
-
-def _is_approval_option(option: JsonObject) -> bool:
-    """Whether one offered option would let the tool call proceed.
-
-    Asked by the refusal paths so none of them can answer with an approval. Read
-    from the kind where the backend states one and from the id's own spelling
-    where it does not, because a fail-closed path that trusts only the typed
-    field is one malformed option away from granting what it meant to refuse.
-    """
-    option_id = (option_id_of(option) or "").lower()
-    return option.get("kind") in ("allow_once", "allow_always") or (
-        "allow" in option_id or "approve" in option_id
+def _selected_outcome(rpc_id: AcpRpcId, option_id: str) -> JsonObject:
+    """Build the response frame selecting one offered option."""
+    return jsonrpc_result(
+        rpc_id, {"outcome": {"optionId": option_id, "outcome": "selected"}}
     )
 
 
-def _offered_refusal_option_id(options: list[JsonObject]) -> str | None:
-    """Return an offered refusal of any spelling, or ``None`` if none is offered."""
-    for option in options:
-        option_id = option_id_of(option)
-        if option_id and (
-            option.get("kind") in ("reject_once", "reject_always")
-            or "reject" in option_id.lower()
-            or "deny" in option_id.lower()
-        ):
-            return option_id
-    return None
+def _cancelled_outcome(rpc_id: AcpRpcId) -> JsonObject:
+    """Build the response frame that abandons one tool call.
 
-
-def _refusal_option_id(options: list[JsonObject]) -> str:
-    """Return the id every refusing path answers with.
-
-    An offered refusal first, whatever the backend spells it. Failing that, the
-    last option - conventionally the most restrictive - but ONLY when it is not
-    an approval, and otherwise the literal ``"reject"``. The literal is a
-    deliberate answer rather than a gap: an id the agent does not recognise makes
-    it decline the tool call, which is the direction a refusal must fail in,
-    while any scan that could land on an approval turns one malformed or unusual
-    option list into a grant.
+    The protocol's own ``cancelled`` outcome carries no option id at all, so it
+    cannot be mistaken for a selection, and the adapter aborts the tool use
+    without the model being told that anybody decided anything. It is the answer
+    wherever there IS no decision to report: a run that suspended to ask a
+    person, and a refusal the session can only spell in a way that would outlive
+    the call it answered.
     """
-    offered = _offered_refusal_option_id(options)
-    if offered is not None:
-        return offered
-    if options and not _is_approval_option(options[-1]):
-        return option_id_of(options[-1]) or "reject"
-    return "reject"
-
-
-def _selected_outcome(rpc_id: AcpRpcId, option_id: str) -> JsonObject:
-    """Build the response frame selecting one offered option."""
-    return {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "result": {"outcome": {"optionId": option_id, "outcome": "selected"}},
-    }
+    return jsonrpc_result(rpc_id, {"outcome": {"outcome": "cancelled"}})
 
 
 def _refused_outcome(rpc_id: AcpRpcId, options: list[JsonObject]) -> JsonObject:
     """Build the response frame that refuses one tool call.
 
-    A refusal is expressed by SELECTING an offered refusal wherever the request
-    offers one, because that is the answer the agent can act on: the pinned
-    adapter turns it into a denial the model is told about while the turn
-    continues. Where the request offers nothing to refuse with, the protocol's
-    own ``cancelled`` outcome is the answer - it carries no option id at all, so
-    it cannot be mistaken for a selection, and the adapter aborts the tool use.
+    A refusal is expressed by SELECTING the offered ONCE-ONLY refusal, because
+    that is the answer the agent can act on: the pinned adapter turns it into a
+    denial the model is told about while the turn continues.
+
+    The remembering refusal is deliberately NOT a fallback. The CLI persists
+    ``reject_always`` as a permission rule in the operator's own settings, where
+    it outlives this call, narrows every later run on the machine - including the
+    unattended ones, whose whole posture is that nothing is approved or denied
+    for them in advance - and cannot be seen or retracted by any run. The shared
+    decision already refuses a remembered answer rather than forward it for that
+    reason, so selecting it here would write the exact rule that refusal exists
+    to avoid. Where the session offers no once-only refusal the call is ABANDONED
+    instead: that costs the model the distinction between "refused" and "not
+    decided", and costs the operator nothing.
+
     Never an approval, and never an empty frame.
     """
-    offered = _offered_refusal_option_id(options)
-    if offered is not None:
-        return _selected_outcome(rpc_id, offered)
-    last_id = option_id_of(options[-1]) if options else None
-    if last_id and not _is_approval_option(options[-1]):
-        return _selected_outcome(rpc_id, last_id)
-    return {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "result": {"outcome": {"outcome": "cancelled"}},
-    }
-
-
-def _approval_option_id(options: list[JsonObject]) -> str:
-    """Return the id of the NARROWEST offered approval.
-
-    ``allow_once`` is preferred over ``allow_always`` strictly, never by list
-    order. Taking the first approval-kind option could grant a whole server for
-    a session on the strength of one allowlisted tool, making undeclared verbs
-    reachable through an overly broad approval.
-    """
-    for kind in ("allow_once", "allow_always"):
-        for option in options:
-            option_id = option_id_of(option)
-            if option.get("kind") == kind and option_id:
-                return option_id
-    return _option_id_at(options, 0, default="approve")
-
-
-def _is_always_option(option: JsonObject) -> bool:
-    """Whether one offered option commits the CLI to remember an approval."""
-    option_id = option_id_of(option) or ""
-    return option.get("kind") == "allow_always" or "always" in option_id.lower()
-
-
-def _narrowed_to_one_use(option_id: str, options: list[JsonObject]) -> str:
-    """Return the once-only spelling of a chosen approval.
-
-    An "always" approval is not this project's to give. The CLI persists it as a
-    permission rule in the operator's own settings, outside anything a run can
-    see or retract, and a rule written that way widens every later run on that
-    machine - including the unattended ones, whose whole posture is that nothing
-    is approved that was not approved for them. A human at the prompt is
-    answering for THIS call, so this call is what the answer is applied to.
-
-    The narrowest offered approval is chosen through the same reader the
-    autonomous rung uses, so both rungs answer the same way about the same
-    option list. If a session offers no once-only approval at all, the choice is
-    left as made rather than converted into a refusal the human did not give -
-    and that case is logged, because it is the one where an approval outlives
-    its call.
-    """
-    chosen = next(
-        (
-            option
-            for option in options
-            if option_id_of(option) == option_id and _is_always_option(option)
-        ),
-        None,
-    )
-    if chosen is None:
-        return option_id
-    narrowed = _approval_option_id(options)
-    if narrowed == option_id:
-        logger.warning(
-            "Permission option %r remembers the approval and the session offers "
-            "no single-use alternative; the CLI will persist a rule this run "
-            "cannot retract",
-            option_id,
-        )
-        return option_id
-    logger.info(
-        "Narrowed a remembered permission approval to a single use: %r -> %r",
-        option_id,
-        narrowed,
-    )
-    return narrowed
+    refusal = option_id_of_kind(options, PermissionOptionKind.REJECT_ONCE)
+    if refusal is not None:
+        return _selected_outcome(rpc_id, refusal)
+    return _cancelled_outcome(rpc_id)
 
 
 def _floor_call_is_confined(
@@ -456,57 +344,47 @@ def _floor_call_is_confined(
     call that is genuinely inside the project is already pre-approved against
     the workspace before it would ever reach here.
     """
-    return path_arguments_in_project(args, locations, config).confined
+    return path_arguments_in_project(args, locations, config.project_scope).confined
 
 
-def _autonomous_option_id(
-    name: str,
+def _composed_surface_covers(
+    tool: str,
     config: AcpModelConfig,
-    options: list[JsonObject],
     *,
     args: JsonObject,
     locations: list[JsonObject],
-) -> str:
-    """Return the option id for an autonomous permission decision, on any lane.
+) -> bool:
+    """Whether an ACP run's composed surface covers one call, on any ACP lane.
 
-    An autonomous run has no human rung, so this IS the permission decision.
-    Every lane gets the same rule: auto-approve EXACTLY the composed tools
-    (``config.allowed_tools``, in both the qualified ``mcp__<server>__<tool>``
-    spelling a Claude title carries and the raw spelling Kimi carries), and the
-    lane's native read floor only where the call's own path arguments lie inside
-    the bound project; reject everything else.
+    *tool* is the call's canonical identity. Covered are EXACTLY the composed
+    tools (``config.allowed_tools``, in both the qualified
+    ``mcp__<server>__<tool>`` spelling a Claude title carries and the raw
+    spelling Kimi carries), and the lane's native read floor only where the
+    call's own path arguments lie inside the bound project.
 
-    Rejecting the uncovered case is the point. A permission request only reaches
-    here for a call the CLI's own static pre-approval did not cover, and what a
-    server MOUNTS is wider than what the registry DECLARES - the search server
-    also serves index-rebuild and index-clean verbs beside its three declared
-    reads. Approving the uncovered call, which is what the non-kimi lanes did,
-    made the declared surface advisory and every unadvertised verb reachable.
-
-    The floor was the remaining way past that rule, because it is matched by
-    name and its names carry no scope: a title reducing to exactly ``Grep`` was
-    approved whatever host path the call named. The floor is therefore the one
-    branch that reads the ARGUMENTS as well as the name.
+    The floor is the one branch that reads the ARGUMENTS as well as the name,
+    because it is matched by name and its names carry no scope: a title reducing
+    to exactly ``Grep`` would otherwise be covered whatever host path the call
+    named.
     """
-    canonical = _canonical_tool_identity(name, config)
     composed = set(config.allowed_tools) | {
-        _strip_mcp_prefix(tool) for tool in config.allowed_tools
+        _strip_mcp_prefix(allowed) for allowed in config.allowed_tools
     }
-    if canonical in composed:
-        return _approval_option_id(options)
-    if canonical in _native_read_tools(config):
-        if _floor_call_is_confined(config, args, locations):
-            return _approval_option_id(options)
-        # The refused path is not logged, as above: a caller-chosen path is
-        # agent-supplied payload.
-        logger.warning(
-            "Refused a native read tool at the autonomous rung: tool=%s named no "
-            "path inside the run's bound project (bound=%s)",
-            name,
-            config.bound_project_root(),
-        )
-        return _refusal_option_id(options)
-    return _refusal_option_id(options)
+    if tool in composed:
+        return True
+    if tool not in _native_read_tools(config):
+        return False
+    if _floor_call_is_confined(config, args, locations):
+        return True
+    # The refused path is not logged: a caller-chosen path is agent-supplied
+    # payload.
+    logger.warning(
+        "Refused a native read tool at the autonomous rung: tool=%s named "
+        "no path inside the run's bound project (bound=%s)",
+        tool,
+        config.project_scope.bound_project_root(),
+    )
+    return False
 
 
 async def on_request_permission(
@@ -515,7 +393,12 @@ async def on_request_permission(
     ctx: AcpSessionContext,
     config: AcpModelConfig,
 ) -> JsonObject:
-    """Handle session/request_permission RPC."""
+    """Handle session/request_permission RPC.
+
+    The decision is :func:`._tool_policy.decide`'s. This handler checks the
+    session, names the call, says which calls the lane's composed surface
+    covers, and spells the answer as an ACP outcome.
+    """
     options = lenient_json_object_list(params.get("options"))
     tool_call = lenient_json_object(params.get("toolCall"))
     name_value = tool_call.get("title")
@@ -540,7 +423,7 @@ async def on_request_permission(
         )
         return _refused_outcome(rpc_id, options)
 
-    # Diagnostic (R7: tool name + option ids only, never rawInput/payloads):
+    # Diagnostic (tool name + option ids only, never rawInput/payloads):
     # this handler firing means the SDK's canUseTool rung was reached — i.e. no
     # allow-rule pre-empted the call. Logging it disambiguates which permission
     # rung resolved a bridged authoring tool during headless runs.
@@ -550,90 +433,41 @@ async def on_request_permission(
         sorted(valid_option_ids(options)),
     )
 
-    # Scope enforcement precedes BOTH rungs. A run is bound to one project, and a
-    # call naming another is outside what the run was admitted to do, so neither
-    # an autonomous allowlist nor a human sitting at the supervised rung is the
-    # authority that could permit it. Placing the check first also means the
-    # refusal is the same refusal on every lane.
-    #
-    # The refused ARGUMENT is deliberately not logged, only the fact of the
-    # refusal and the run's own bound project: the R7 discipline this handler
-    # already follows keeps agent-supplied payload out of the log, and a
-    # caller-chosen path is payload.
-    if foreign_project_argument(args, config) is not None:
-        logger.warning(
-            "Refused cross-project tool call: tool=%s named a project outside "
-            "the run's bound project (bound=%s)",
-            name,
-            config.bound_project_root(),
+    # Under autonomy the worker leaves the callback unset, so no callback means
+    # no human rung, on ANY lane.
+    callback = config.permission_callback
+    request = ToolPermissionRequest(
+        tool=_canonical_tool_identity(name, config), arguments=args, options=options
+    )
+    try:
+        option_id = await decide(
+            request,
+            scope=config.project_scope,
+            covered=lambda: _composed_surface_covers(
+                request.tool, config, args=args, locations=locations
+            ),
+            ask=None if callback is None else lambda: callback(name, args, options),
         )
-        return _refused_outcome(rpc_id, options)
-
-    # A withheld harness tool is served by a server the run mounts but is never
-    # callable, so it is refused ahead of the human rung as well: a person at the
-    # prompt cannot see that the call would send vault text off the host, and
-    # the registry's no-egress declaration rests on nobody being asked.
-    if harness_tool_is_withheld(_canonical_tool_identity(name, config)):
-        logger.warning("Refused a withheld harness tool: tool=%s", name)
-        return _refused_outcome(rpc_id, options)
-
-    if config.permission_callback:
+    except GraphBubbleUp as exc:
+        # The human rung suspended the run to ask a person. A park does not
+        # pause the provider: the turn re-raises the suspension, the session
+        # tree is released in its `finally`, and the node re-runs from the top
+        # on resume - so whatever this still-open request is answered with is
+        # the LAST thing the model is told before its session ends. Answering a
+        # refusal would tell it a human said no to a call no human has yet seen,
+        # and invite it to act on that denial inside the same turn. The
+        # abandonment is answered unconditionally, whatever the request offered:
+        # it is what is true, and the option list has no bearing on it.
+        ctx.interrupt_exc.append(exc)
         try:
-            option_id = _narrowed_to_one_use(
-                await config.permission_callback(name, args, options), options
-            )
-        except GraphBubbleUp as exc:
-            ctx.interrupt_exc.append(exc)
-            try:
-                ctx.chunk_queue.put_nowait(None)
-            except asyncio.QueueFull:
-                logger.warning("Chunk queue full — dropping interrupt sentinel")
-            # H9 fix: return a proper JSON-RPC denial response instead of
-            # an empty dict `{}` which would produce a malformed frame.
-            return _refused_outcome(rpc_id, options)
-        except Exception:
-            logger.exception(
-                "Permission callback raised; denying permission (fail-closed)"
-            )
-            # TOAD reference pattern: return a denial outcome (not a JSON-RPC
-            # error) so the ACP subprocess can cleanly decline the tool call.
-            return _refused_outcome(rpc_id, options)
-    else:
-        # Autonomous: no permission_callback means no human rung, on ANY lane.
-        # Under autonomy the worker leaves the callback unset, so every
-        # permission request the CLI raises - and a request is raised only for a
-        # call the CLI's own static pre-approval did not cover - is decided here.
-        # This used to fork: kimi enforced an exact-name read allowlist because
-        # its CLI carries no config allowlist, and every other lane approved the
-        # first offered option unconditionally, which approved an uncovered
-        # mutating call exactly like a read. One rule now covers all of them.
-        option_id = _autonomous_option_id(
-            name, config, options, args=args, locations=locations
-        )
-
-    # M17: validate that option_id is among the offered options before returning.
-    # Reject a callback-supplied id that is not in the options list to prevent
-    # sending an invalid response to the ACP subprocess. The valid set is built
-    # by the canonical predicate, so an option dict missing its id contributes
-    # nothing instead of admitting ``None`` as a "valid" answer.
-    valid_ids = valid_option_ids(options)
-    if valid_ids and option_id not in valid_ids:
-        # An answer naming an option that was never offered is not a decision
-        # this handler can carry out, so the call is REFUSED rather than mapped
-        # onto a neighbour. Substituting the first offered option was the same
-        # bug in two directions: the pinned adapter sorts its options by kind
-        # with the approvals first, so a refusal whose id did not match resolved
-        # to a grant - and any substitution answers a question the decider was
-        # not asked.
-        logger.warning(
-            "Permission answer option_id=%r is not among the offered options %r; "
-            "refusing the tool call rather than substituting one",
-            option_id,
-            sorted(valid_ids),
-        )
+            ctx.chunk_queue.put_nowait(None)
+        except asyncio.QueueFull:
+            logger.warning("Chunk queue full — dropping interrupt sentinel")
+        return _cancelled_outcome(rpc_id)
+    if option_id is None:
+        # A denial outcome rather than a JSON-RPC error, so the ACP subprocess
+        # can cleanly decline the tool call.
         return _refused_outcome(rpc_id, options)
-
-    logger.info("ACP permission decision: tool=%s option=%s", name, option_id)
     return _selected_outcome(rpc_id, option_id)
 
 
@@ -662,13 +496,9 @@ async def on_fs_read_text_file(
             line=request.line,
             limit=request.limit,
         )
-        return {"jsonrpc": "2.0", "id": rpc_id, "result": {"content": text}}
+        return jsonrpc_result(rpc_id, {"content": text})
     except Exception as exc:
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {"code": -32603, "message": str(exc)},
-        }
+        return jsonrpc_error(rpc_id, AcpErrorCode.INTERNAL_ERROR, str(exc))
 
 
 async def on_fs_write_text_file(
@@ -679,12 +509,11 @@ async def on_fs_write_text_file(
 ) -> JsonObject:
     """Handle fs/write_text_file RPC.
 
-    Acquires the global git mutex before writing to prevent races with
-    concurrent git operations. Uses asyncio.to_thread so
-    blocking I/O does not stall the event loop.
+    Holds the run's write lock for the target file, so two writers of one path
+    cannot truncate and fill it at the same time while writers of different
+    paths stay independent. Uses asyncio.to_thread so blocking I/O does not
+    stall the event loop.
     """
-    from ..workspace.concurrency import git_workspace_mutex
-
     try:
         request = AcpSessionRequest.model_validate(params)
         request.require_active_session(ctx)
@@ -696,22 +525,18 @@ async def on_fs_write_text_file(
         # to the authoring tools. Reads (on_fs_read_text_file) stay permitted.
         if _targets_vault(file_path, config):
             logger.info(
-                "Denied .vault/ write via ACP fs (R2 forbidden_actor): %r",
+                "Denied .vault/ write via ACP fs (forbidden_actor): %r",
                 path,
             )
             return _vault_write_denial(rpc_id, path)
 
         content = _required_string(params, "content")
 
-        async with git_workspace_mutex:
+        async with config.write_lock.hold(file_path):
             request.require_active_session(ctx)
             await asyncio.to_thread(_write_workspace_text, path, content, config)
-        return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
+        return jsonrpc_result(rpc_id, {})
     except _VaultWriteDeniedError:
         return _vault_write_denial(rpc_id, _required_string(params, "path"))
     except Exception as exc:
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {"code": -32603, "message": str(exc)},
-        }
+        return jsonrpc_error(rpc_id, AcpErrorCode.INTERNAL_ERROR, str(exc))

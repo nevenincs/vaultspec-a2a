@@ -18,34 +18,30 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-import psutil
-
 if TYPE_CHECKING:
     from pathlib import Path
 
     from ..lifecycle.shutdown import ShutdownDeadline
     from .circuit_breaker import WorkerCircuitBreaker
 
+from ..utils import ProcessContainment, spawn_contained
 from ..utils.async_cleanup import complete_cleanup
-from ..utils.process import ProcessContainment, ProcessContainmentError
 from ..utils.runtime_exec import module_command
 from ._worker_health import (
     GATEWAY_LIFETIME_ID,
     WorkerState,
-    _build_worker_restart_detail,
-    _desktop_worker_port_clear,
-    _internal_auth_headers,
-    _shared_worker_port_clear,
-    _worker_stderr_log_path,
+    build_worker_restart_detail,
+    desktop_worker_port_clear,
+    internal_auth_headers,
     probe_worker_health,
+    shared_worker_port_clear,
     sweep_orphan_worker_logs,
+    worker_credential_authorized,
     worker_liveness,
     worker_ready_and_ours,
+    worker_stderr_log_path,
 )
-from ._worker_process_stop import (
-    _reap_retained_processes,
-    _shutdown_worker_process,
-)
+from ._worker_process_stop import _shutdown_worker_process
 from ._worker_readiness import (
     WorkerReadySpec,
     _await_worker_ready,
@@ -65,8 +61,9 @@ async def _spawn_worker(
     worker_url: str,
     worker_port: int,
     *,
-    containment: ProcessContainment | None = None,
+    containment: ProcessContainment,
     generation: int = 0,
+    internal_token: str | None,
 ) -> subprocess.Popen[bytes] | None:
     """Spawn the worker as a child process if not already running.
 
@@ -76,10 +73,11 @@ async def _spawn_worker(
     became ready is reaped tree-and-all before returning, so a failed spawn
     never leaves an orphan holding the worker port.
 
-    Gateway-owned workers receive *containment*: a new POSIX session/process
-    group or Windows Job Object assigned before descendant work can begin. A
-    failed assignment reaps the exact retained process tree and fails the spawn;
-    the worker is never admitted without that authority.
+    The worker is started inside *containment* - a new POSIX session/process
+    group or a Windows Job Object - before its first instruction, so every
+    descendant it launches is in the tree shutdown reaps. A refused admission
+    kills the exact retained root and fails the spawn; the worker is never run
+    without that authority.
 
     Ownership contract - the caller allocates *containment* and the caller
     releases it. This function never releases it on the caller's behalf, on any
@@ -91,9 +89,10 @@ async def _spawn_worker(
     What this function does guarantee is that nothing it spawned outlives a spawn
     it did not report as successful: any process started here is reaped, tree and
     all, before a ``None`` return or a propagating exception leaves the frame.
-    Reaping through a containment closes the handle as a side effect, which is
-    harmless - :meth:`ProcessContainment.close` is idempotent - but it is the
-    caller's release, not that side effect, that makes the release total.
+    Reaping through a containment, or a refused spawn, closes the handle as a
+    side effect, which is harmless - :meth:`ProcessContainment.close` is
+    idempotent - but it is the caller's release, not that side effect, that
+    makes the release total.
 
     Use :func:`_spawn_worker_owned` rather than calling this directly; it is the
     single seam that honours the contract for both spawn paths.
@@ -108,10 +107,22 @@ async def _spawn_worker(
     # never an adoption), and a FOREIGN or UNIDENTIFIED occupant refuses the
     # spawn loudly with no eviction - it may be serving someone else's runs,
     # and silence is not evidence of ownership.
+    # Pre-spawn the ownership root is this gateway process: a generation it still
+    # owns is one of its descendants, and anything else on the port is not ours
+    # to credential, adopt, or evict.
+    owner_pid = os.getpid()
     if settings.desktop_profile_armed:
-        if not await _desktop_worker_port_clear(worker_url, worker_port, generation):
+        if not await desktop_worker_port_clear(
+            worker_url,
+            worker_port,
+            generation,
+            internal_token=internal_token,
+            owner_pid=owner_pid,
+        ):
             return None
-    elif not await _shared_worker_port_clear(worker_url, worker_port):
+    elif not await shared_worker_port_clear(
+        worker_url, worker_port, internal_token=internal_token, owner_pid=owner_pid
+    ):
         return None
 
     logger.info(
@@ -128,7 +139,7 @@ async def _spawn_worker(
     )
 
     # Explicitly propagate critical config to the worker subprocess.
-    # While Python's subprocess.Popen() inherits the parent env by default,
+    # While a spawned child inherits the parent env by default,
     # the gateway may have auto-derived gateway_url from host+port.  That
     # computed value is NOT in os.environ, so the child would re-derive it
     # and potentially get a different result (e.g. 0.0.0.0 vs 127.0.0.1).
@@ -139,38 +150,36 @@ async def _spawn_worker(
     spawn_env[setting_env("port")] = str(settings.port)
     spawn_env[setting_env("worker_port")] = str(settings.worker_port)
     spawn_env[setting_env("worker_host")] = settings.worker_host
-    if settings.internal_token is not None:
-        spawn_env[setting_env("internal_token")] = settings.internal_token
+    if internal_token is not None:
+        spawn_env[setting_env("internal_token")] = internal_token
     spawn_env[setting_env("gateway_lifetime_id")] = GATEWAY_LIFETIME_ID
     spawn_env[setting_env("worker_generation")] = str(generation)
 
-    stderr_log_path = _worker_stderr_log_path(worker_port)
+    stderr_log_path = worker_stderr_log_path(worker_port)
     settings.prepare_state_dir(stderr_log_path.parent)
-    # POSIX containment seats the worker in a new session/process group at fork;
-    # passed explicitly (rather than via ``**kwargs``) so the ``Popen[bytes]``
-    # overload is preserved. Windows contributes no spawn-time flag - it assigns
-    # the job after spawn.
-    new_session = containment is not None and bool(
-        containment.spawn_kwargs().get("start_new_session")
-    )
     # Freeze-safe worker re-exec: rendered by the runtime's command authority
     # (``python -m vaultspec_a2a.worker`` from source; the binary's own
     # ``run-module`` dispatch when frozen), never assembled interpreter flags.
     worker_command = module_command("vaultspec_a2a.worker")
     with stderr_log_path.open("wb") as stderr_handle:
-        process = subprocess.Popen(
+        process = spawn_contained(
             worker_command,
+            containment,
             stdout=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
             stderr=stderr_handle,
             env=spawn_env,
-            start_new_session=new_session,
         )
     return await _await_worker_ready(
         process,
         containment,
         WorkerReadySpec(
-            worker_url, worker_port, generation, worker_command, stderr_log_path
+            worker_url,
+            worker_port,
+            generation,
+            worker_command,
+            stderr_log_path,
+            internal_token,
         ),
     )
 
@@ -180,7 +189,8 @@ async def _spawn_worker_owned(
     worker_port: int,
     *,
     generation: int,
-) -> tuple[subprocess.Popen[bytes] | None, ProcessContainment | None]:
+    internal_token: str | None,
+) -> tuple[subprocess.Popen[bytes], ProcessContainment] | None:
     """Spawn a worker, holding its OS containment only while it owns a live tree.
 
     The single seam both spawn paths - first dispatch and watchdog restart - go
@@ -190,11 +200,11 @@ async def _spawn_worker_owned(
     never spawned here. The seam releases the handle on every outcome except the
     one that transfers ownership: a live process for the caller to shut down later.
 
-    Returns ``(process, containment)``, where a non-``None`` containment is always
-    paired with the live process it contains. A failed spawn returns
-    ``(None, None)`` - never a containment without a tree, which is the stale
-    handle a caller would otherwise have to remember to drop - and a raised spawn
-    propagates with the handle already released.
+    Returns ``(process, containment)``: the live process paired with the
+    containment that owns its tree. A failed spawn returns ``None`` - never a
+    containment without a tree, which is the stale handle a caller would
+    otherwise have to remember to drop - and a raised spawn propagates with the
+    handle already released.
     """
     containment = ProcessContainment.create()
     owned = False
@@ -204,9 +214,12 @@ async def _spawn_worker_owned(
             worker_port,
             containment=containment,
             generation=generation,
+            internal_token=internal_token,
         )
-        owned = process is not None
-        return (process, containment) if owned else (None, None)
+        if process is None:
+            return None
+        owned = True
+        return process, containment
     finally:
         # One statement covers all three exits - failed spawn, raised spawn, and
         # the success that hands ownership on - because "release unless ownership
@@ -228,6 +241,7 @@ class _WorkerSpawnConfig:
     port: int
     auto_spawn: bool
     stderr_log_path: Path | None
+    internal_token: str | None
 
 
 @dataclass(slots=True)
@@ -264,19 +278,31 @@ class LazyWorkerSpawner:
         worker_url: str,
         worker_port: int,
         auto_spawn: bool,
+        *,
+        internal_token: str | None,
     ) -> None:
-        """Initialise with worker connection details and spawn policy."""
+        """Initialise with worker connection details and spawn policy.
+
+        *internal_token* is the worker-IPC secret the gateway seated: every probe
+        and command this spawner sends presents it, and a worker it spawns is
+        handed it. It is required, with no default, because a spawner built
+        without one behaves exactly like a DEVELOPMENT gateway that has none -
+        its probes go out unauthenticated and its worker is spawned without the
+        secret - so a forgotten argument surfaced as the worker refusing its own
+        gateway. Naming ``None`` is how a caller says it has no secret to
+        present.
+        """
         self._config = _WorkerSpawnConfig(
             url=worker_url,
             port=worker_port,
             auto_spawn=auto_spawn,
             stderr_log_path=(
-                _worker_stderr_log_path(worker_port) if auto_spawn else None
+                worker_stderr_log_path(worker_port) if auto_spawn else None
             ),
+            internal_token=internal_token,
         )
-        # Every worker spawned by this gateway carries OS containment. ``None``
-        # means no owned process or an explicitly restored fallback handle that
-        # shutdown must seat before offering a cooperative interval.
+        # Every worker spawned by this gateway carries OS containment, so the
+        # process and containment handles are set together and cleared together.
         self._process_state = _WorkerProcessState()
         # Incremented before each spawn, so the value a worker carries names the
         # attempt that produced it. A restart yields a distinct generation even
@@ -337,7 +363,10 @@ class LazyWorkerSpawner:
                 # auto-spawn is a misconfiguration and fails closed.
                 self._process_state.spawned = await worker_ready_and_ours(
                     self._config.url,
+                    self._config.port,
                     current_generation=self._synchronization.generation,
+                    internal_token=self._config.internal_token,
+                    owner_pid=self.owner_pid,
                 )
                 if not self._process_state.spawned:
                     logger.warning(
@@ -354,22 +383,26 @@ class LazyWorkerSpawner:
             # whole tree is reaped on shutdown. The spawn seam hands containment
             # back only alongside the live tree it contains.
             generation = self.next_generation()
-            process, containment = await _spawn_worker_owned(
+            owned = await _spawn_worker_owned(
                 self._config.url,
                 self._config.port,
                 generation=generation,
+                internal_token=self._config.internal_token,
             )
-            self._process_state.process = process
-            self._process_state.containment = containment
+            if owned is not None:
+                self._process_state.process, self._process_state.containment = owned
             # Mark as spawned even if _spawn_worker found it already running
             # (returns None when a same-gateway worker was already healthy). The
             # fallback probe must confirm the running worker is OURS: a bare health
             # check here would let a refused-eviction foreign orphan (spawn returned
             # None) be adopted as this gateway's worker.
-            self._process_state.spawned = process is not None or (
+            self._process_state.spawned = owned is not None or (
                 await worker_ready_and_ours(
                     self._config.url,
+                    self._config.port,
                     current_generation=self._synchronization.generation,
+                    internal_token=self._config.internal_token,
+                    owner_pid=self.owner_pid,
                 )
             )
             if self._process_state.spawned:
@@ -400,6 +433,30 @@ class LazyWorkerSpawner:
         """The worker's port number."""
         return self._config.port
 
+    @property
+    def internal_token(self) -> str | None:
+        """The worker-IPC secret this spawner presents, or ``None`` when unset."""
+        return self._config.internal_token
+
+    @property
+    def owner_pid(self) -> int | None:
+        """The pid whose tree must hold the worker listener before any credential.
+
+        The spawned worker itself while this gateway holds its handle, which is
+        the narrowest tree that can be ours; this gateway process otherwise,
+        because every worker it spawns or adopts is started as its own child, so
+        a surviving generation is still one of its descendants.
+
+        ``None`` for an externally managed worker (``auto_spawn_worker=False``):
+        the operator points this gateway at a process it never spawned, so
+        ancestry proves nothing about it and the credential rests on that
+        configuration instead of on a verdict this gateway can reach.
+        """
+        if not self._config.auto_spawn:
+            return None
+        process = self._process_state.process
+        return process.pid if process is not None else os.getpid()
+
     def next_generation(self) -> int:
         """Advance and return the spawn generation for a replacement worker.
 
@@ -419,21 +476,37 @@ class LazyWorkerSpawner:
 
     def replace_process(
         self,
-        process: subprocess.Popen[bytes] | None,
-        containment: ProcessContainment | None = None,
+        process: subprocess.Popen[bytes],
+        containment: ProcessContainment,
     ) -> None:
         """Replace the worker process handle (used by watchdog after restart).
 
         The restart supplies the new tree's containment so shutdown reaps the
-        replacement worker's tree, not a stale one; an adopted worker (no owned
-        process) carries no containment.
+        replacement worker's tree, not a stale one.
+        """
+        self._install_worker(process, containment)
 
-        The containment being replaced is released here, because this is the one
-        place the spawner's reference to it is dropped. The restart path reaches
-        this after shutting the old worker down, which already released it - but
-        only when the old worker was still running. The commonest restart trigger
-        is the opposite case, a worker that already exited, whose handle nothing
-        else would ever close. ``close`` is idempotent, so releasing on both paths
+    def adopt_worker(self) -> None:
+        """Mark a serving worker this spawner did not start as the dispatch target.
+
+        An adopted worker is attached to, never owned: no process handle and no
+        containment are held, so shutdown leaves it to whoever started it.
+        """
+        self._install_worker(None, None)
+
+    def _install_worker(
+        self,
+        process: subprocess.Popen[bytes] | None,
+        containment: ProcessContainment | None,
+    ) -> None:
+        """Seat the worker handles, releasing the containment being replaced.
+
+        The outgoing containment is released here, because this is the one place
+        the spawner's reference to it is dropped. The restart path reaches this
+        after shutting the old worker down, which already released it - but only
+        when the old worker was still running. The commonest restart trigger is
+        the opposite case, a worker that already exited, whose handle nothing else
+        would ever close. ``close`` is idempotent, so releasing on both paths
         costs nothing and removes the distinction as a thing to get right.
         """
         outgoing = self._process_state.containment
@@ -458,7 +531,7 @@ class LazyWorkerSpawner:
 
             try:
                 async with httpx.AsyncClient(
-                    headers=_internal_auth_headers(),
+                    headers=internal_auth_headers(self._config.internal_token),
                     timeout=cooperative_budget,
                 ) as client:
                     response = await client.post(f"{self._config.url}/admin/shutdown")
@@ -480,86 +553,24 @@ class LazyWorkerSpawner:
             with contextlib.suppress(subprocess.TimeoutExpired):
                 await asyncio.to_thread(process.wait, wait_budget)
 
-    @staticmethod
-    def _live_descendants(process: subprocess.Popen[bytes]) -> list[psutil.Process]:
-        try:
-            owner = psutil.Process(process.pid)
-            return [
-                child for child in owner.children(recursive=True) if child.is_running()
-            ]
-        except psutil.NoSuchProcess:
-            return []
-
-    async def _reap_shutdown_process(
-        self,
-        process: subprocess.Popen[bytes],
-        shutdown_containment: ProcessContainment | None,
-        transient_containment: ProcessContainment | None,
-        retained_descendants: list[psutil.Process],
-        deadline: ShutdownDeadline | None,
-    ) -> None:
-        try:
-            if process.poll() is None or shutdown_containment is not None:
-                await complete_cleanup(
-                    _shutdown_worker_process(
-                        process, shutdown_containment, deadline=deadline
-                    )
-                )
-        finally:
-            try:
-                if retained_descendants:
-                    await complete_cleanup(
-                        _reap_retained_processes(
-                            retained_descendants, deadline=deadline
-                        )
-                    )
-            finally:
-                self._process_state.process = None
-                if self._process_state.containment is not None:
-                    self._process_state.containment.close()
-                if transient_containment is not None:
-                    transient_containment.close()
-                self._process_state.containment = None
-
     async def shutdown(self, *, deadline: ShutdownDeadline | None = None) -> None:
         """Cooperatively stop the owned worker, then reap its tree by deadline."""
-        if self._process_state.process is None:
-            return
         process = self._process_state.process
-        shutdown_containment = self._process_state.containment
-        transient_containment: ProcessContainment | None = None
-        retained_descendants: list[psutil.Process] = []
+        containment = self._process_state.containment
+        if process is None or containment is None:
+            return
         try:
-            if shutdown_containment is None and process.poll() is None:
-                retained_descendants = self._live_descendants(process)
-                try:
-                    transient_containment = ProcessContainment.create()
-                    transient_containment.assign_process(process)
-                    shutdown_containment = transient_containment
-                except (OSError, ProcessContainmentError):
-                    if transient_containment is not None:
-                        transient_containment.close()
-                    transient_containment = None
-                    logger.warning(
-                        "Worker lacked retained containment and could not be seated "
-                        "for cooperative shutdown; escalating while its root identity "
-                        "is still live",
-                        exc_info=True,
-                    )
-            if (
-                deadline is not None
-                and process.poll() is None
-                and shutdown_containment is not None
-            ):
+            if deadline is not None and process.poll() is None:
                 await self._cooperative_shutdown(process, deadline)
         finally:
-            await self._reap_shutdown_process(
-                process,
-                shutdown_containment,
-                transient_containment,
-                retained_descendants,
-                deadline,
-            )
+            try:
+                await complete_cleanup(
+                    _shutdown_worker_process(process, containment, deadline=deadline)
+                )
+            finally:
+                self._process_state.process = None
+                self._process_state.containment = None
+                containment.close()
 
 
 # ---------------------------------------------------------------------------
@@ -639,8 +650,23 @@ class WorkerWatchdog:
         return proc is not None and proc.poll() is not None
 
     async def _probe_worker_ready(self) -> bool:
-        """Probe the worker HTTP health endpoint for status promotion checks."""
-        return (await probe_worker_health(self._spawner.worker_url)).healthy
+        """Probe the worker HTTP health endpoint for status promotion checks.
+
+        Runs every tick, so it is also the path a squatter would be credentialed
+        on repeatedly once our worker died and something else took the port. The
+        ownership gate therefore leads the probe; an occupant this gateway cannot
+        confirm reads as not ready, which is the same verdict a dead port gives.
+        """
+        if not await worker_credential_authorized(
+            self._spawner.worker_port,
+            owner_pid=self._spawner.owner_pid,
+            action="a watchdog health probe",
+        ):
+            return False
+        probe = await probe_worker_health(
+            self._spawner.worker_url, internal_token=self._spawner.internal_token
+        )
+        return probe.healthy
 
     @staticmethod
     def _needs_recovery(*, crashed: bool, stale: bool, http_ready: bool) -> bool:
@@ -737,7 +763,7 @@ class WorkerWatchdog:
             return
         detail = None
         if crashed:
-            detail = _build_worker_restart_detail(
+            detail = build_worker_restart_detail(
                 returncode=proc.returncode,
                 stderr_log_path=self._spawner.stderr_log_path,
             )
@@ -844,22 +870,24 @@ class WorkerWatchdog:
             await asyncio.sleep(delay)
 
             # Clean up the old process handle and reap its whole tree through the
-            # containment it was spawned in (if any).
+            # containment it was spawned in.
             old_proc = self._spawner.process
-            if old_proc is not None:
-                await _shutdown_worker_process(old_proc, self._spawner.containment)
+            old_containment = self._spawner.containment
+            if old_proc is not None and old_containment is not None:
+                await _shutdown_worker_process(old_proc, old_containment)
 
             # Spawn a new worker inside fresh containment,
             # and hand it to the spawner so shutdown reaps the replacement's tree.
             # A restart that fails hands back no containment either, so a retry
             # loop cannot accumulate one handle per attempt.
-            new_proc, new_containment = await _spawn_worker_owned(
+            replacement = await _spawn_worker_owned(
                 self._spawner.worker_url,
                 self._spawner.worker_port,
                 generation=self._spawner.next_generation(),
+                internal_token=self._spawner.internal_token,
             )
-            if new_proc is not None:
-                self._spawner.replace_process(new_proc, new_containment)
+            if replacement is not None:
+                self._spawner.replace_process(*replacement)
                 return True, attempt + 1
 
             # Check if an external worker came up. Adoption still requires
@@ -869,9 +897,12 @@ class WorkerWatchdog:
             # worker.
             if await worker_ready_and_ours(
                 self._spawner.worker_url,
+                self._spawner.worker_port,
                 current_generation=self._spawner.generation,
+                internal_token=self._spawner.internal_token,
+                owner_pid=self._spawner.owner_pid,
             ):
-                self._spawner.replace_process(None)
+                self._spawner.adopt_worker()
                 return True, attempt + 1
 
         return False, settings.watchdog_max_retries

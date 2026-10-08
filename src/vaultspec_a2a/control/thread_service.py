@@ -8,7 +8,6 @@ response formatting.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -19,77 +18,67 @@ from langchain_core.messages import AIMessage
 
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
-from ..control.accepted_input import freeze_accepted_input
-from ..control.action_lease import (
-    ControlActionClaim,
-    ControlActionClaimRequest,
-    finalize_control_action_acceptance,
-    prepare_control_action_claim,
-    record_dispatch_failure,
-)
-from ..control.dispatch import DispatchOutcome, safe_dispatch
-from ..control.dispatch_receipts import (
-    bind_graph_action_receipt,
-)
-from ..control.repair_transitions import (
-    mark_ingest_requested,
-)
 from ..database import (
+    ThreadModel,
     ThreadStatusElectionOutcome,
     begin_write_transaction,
-    create_control_action,
     create_thread,
     elect_thread_status,
-    get_artifacts_by_thread,
     get_thread,
-    successor_thread_write_authority,
+    surviving_transcript,
     thread_write_expectation,
 )
-from ..database.checkpoints import surviving_transcript
-from ..database.models import RunWriteAuthority, ThreadModel
 from ..graph.nodes.vault_reader import build_initial_vault_index
 from ..ipc.schemas import (
     DispatchRequest,
     SeedTranscriptMessage,
     to_dispatch_action,
 )
-from ..team.team_config import load_team_config
-from ..thread.creation import requires_dispatch, resolve_autonomous
-from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
+from ..thread import RunWriteAuthority
+from ..thread.creation import resolve_autonomous
+from ..thread.dispatch_policy import FailureType
 from ..thread.enums import (
     CleanupKind,
     ControlActionType,
     ThreadStatus,
 )
-from ..thread.errors import ConfigError, TeamConfigNotFoundError
 from ..thread.executable_graph import freeze_graph_definition
+from ..thread.idempotency import thread_create_action_key
 from ..thread.lifecycle_guards import can_archive, can_delete
+from ..thread.repair_policy import RepairPhase, repair_state_for_action
+from .accepted_input import freeze_accepted_input
+from .action_lease import (
+    ControlActionClaim,
+    ControlActionClaimRequest,
+    prepare_control_action_claim,
+)
 from .cleanup import build_cleanup_manifest, execute_cleanup_manifest
-from .repositories import (
+from .deletion_saga import (
     CleanupItemResult,
     advance_deletion_cleanup_item,
     claim_deletion_saga,
     create_deletion_saga,
     finalize_deletion_saga,
 )
+from .leased_dispatch import accepted_recursion_budget, dispatch_leased
+from .repair_transitions import apply_repair_transition
 from .workspace import require_admitted_workspace_root
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
+    from ..providers.team_selection import FrozenLaneAssignment
+    from ..team import TeamConfig
     from ..thread.actor_tokens import ActorTokenBundle
-    from .circuit_breaker import WorkerCircuitBreaker
-    from .worker_management import LazyWorkerSpawner
+    from .leased_dispatch import DispatchTransport, SettledDispatchFailure
 
 __all__ = [
     "DeleteResult",
     "ThreadCreationRequest",
     "ThreadCreationResult",
-    "ThreadDispatchRuntime",
     "archive_thread",
     "create_and_dispatch_thread",
     "delete_thread_service",
@@ -100,14 +89,13 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
-# Flat request fields are passed through the established admission contract.
-class ThreadCreationRequest:  # pylint: disable=too-many-instance-attributes
+class ThreadCreationRequest:
     """Bundled request fields for :func:`create_and_dispatch_thread`."""
 
     thread_id: str
     title: str | None
     initial_message: str | None
-    team_preset: str | None
+    team_preset: str
     autonomous: bool | None
     nickname: str | None
     metadata: ThreadMetadata | None
@@ -116,9 +104,12 @@ class ThreadCreationRequest:  # pylint: disable=too-many-instance-attributes
     # optional: admission is where the project becomes real, so a creation
     # request that names none is not a run this service can site.
     workspace_root: Path
+    # The preset admission loaded and validated the run against; the initial
+    # dispatch freezes this same configuration rather than reading it again.
+    team_config: TeamConfig
     actor_tokens: ActorTokenBundle | None = None
     # The exact served selection frozen at admission and threaded to the worker.
-    model_assignment: dict[str, dict[str, Any]] = field(default_factory=dict)
+    model_assignment: dict[str, FrozenLaneAssignment] = field(default_factory=dict)
     seed_transcript: list[SeedTranscriptMessage] = field(default_factory=list)
 
 
@@ -135,15 +126,6 @@ class ThreadCreationResult:
 
 
 @dataclass(frozen=True, slots=True)
-class ThreadDispatchRuntime:
-    circuit_breaker: WorkerCircuitBreaker
-    worker_spawner: LazyWorkerSpawner
-    worker_client: httpx.AsyncClient
-    recursion_limit: int
-    trace_headers: dict[str, str] | None
-
-
-@dataclass(frozen=True, slots=True)
 class _CreationDispatchContext:
     request: ThreadCreationRequest
     thread: ThreadModel
@@ -153,11 +135,12 @@ class _CreationDispatchContext:
 def process_metadata(
     metadata: ThreadMetadata | None,
     thread_id: str,
-    team_preset: str | None,
+    team_config: TeamConfig | None,
 ) -> tuple[Path, str, str]:
     """Validate and enrich thread metadata.
 
-    Returns ``(workspace_root, nickname, metadata_json)``.
+    Returns ``(workspace_root, nickname, metadata_json)``. A generated nickname
+    names *team_config*'s topology, or ``default`` when no preset is supplied.
 
     This is the admission seam for the active project. Every run that becomes
     durable passes through here, so the requirement is enforced once, at the
@@ -198,11 +181,7 @@ def process_metadata(
     if metadata.feature_tag and not metadata.context_refs:
         metadata.context_refs = discover_context_refs(ws_root, metadata.feature_tag)
 
-    topology = "default"
-    if team_preset:
-        with contextlib.suppress(ConfigError, TeamConfigNotFoundError):
-            tc = load_team_config(team_preset, workspace_root=ws_root)
-            topology = tc.topology.type
+    topology = team_config.topology.type if team_config is not None else "default"
     nickname = metadata.nickname or generate_nickname(
         metadata.feature_tag, topology, thread_id
     )
@@ -228,7 +207,7 @@ async def successor_seed_transcript(
 
 
 def _initial_dispatch(
-    req: ThreadCreationRequest, *, dispatch_id: str, recursion_limit: int
+    req: ThreadCreationRequest, *, dispatch_id: str
 ) -> DispatchRequest:
     """Resolve the accepted graph input before acquiring a database write lock."""
     context_preamble: str | None = None
@@ -239,9 +218,7 @@ def _initial_dispatch(
             if isinstance(preamble_msg.content, str)
             else str(preamble_msg.content)
         )
-    if req.team_preset is None:
-        raise ValueError("initial graph admission requires an explicit preset")
-    team_config = load_team_config(req.team_preset, workspace_root=req.workspace_root)
+    team_config = req.team_config
     graph_definition = freeze_graph_definition(
         team_config, workspace_root=req.workspace_root
     )
@@ -258,7 +235,7 @@ def _initial_dispatch(
         content=req.initial_message,
         context_preamble=context_preamble,
         seed_transcript=req.seed_transcript,
-        recursion_limit=recursion_limit,
+        recursion_limit=accepted_recursion_budget(graph_definition),
         active_feature=feature_tag,
         feedback_batch_id=(
             (req.metadata.feedback_batch_id or None) if req.metadata else None
@@ -276,24 +253,15 @@ def _initial_dispatch(
 
 
 async def _failed_initial_dispatch(
-    db: AsyncSession, context: _CreationDispatchContext, outcome: DispatchOutcome
+    db: AsyncSession,
+    context: _CreationDispatchContext,
+    failure: SettledDispatchFailure,
 ) -> ThreadCreationResult:
     req = context.request
     thread = context.thread
-    claim = context.claim
-    action_receipt_id = claim.dispatch_id
-    _policy, typed_failure = evaluate_dispatch_failure(outcome.failure_type)
-    if typed_failure is None:
-        raise RuntimeError("failed initial dispatch carries no failure type")
-    await begin_write_transaction(db)
-    await record_dispatch_failure(
-        db,
-        claim,
-        typed_failure,
-        detail=outcome.detail,
-    )
+    action_receipt_id = context.claim.dispatch_id
     await db.commit()
-    current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
+    current_thread = await get_thread(db, thread.id, refresh=True)
     if current_thread is None:
         return ThreadCreationResult(
             thread_id=thread.id,
@@ -303,12 +271,13 @@ async def _failed_initial_dispatch(
             error_detail="Thread disappeared while initial dispatch settled",
             failure_type=FailureType.NOT_FOUND,
         )
-    if (
-        current_thread.writer_action_type == ControlActionType.INGEST.value
-        and current_thread.writer_action_receipt_id == action_receipt_id
-        and current_thread.status
-        in {ThreadStatus.COMPLETED.value, ThreadStatus.FAILED.value}
-    ):
+    ingest_owns_run = thread_write_expectation(current_thread).authority.owned_by(
+        ControlActionType.INGEST, action_receipt_id
+    )
+    if ingest_owns_run and current_thread.status in {
+        ThreadStatus.COMPLETED.value,
+        ThreadStatus.FAILED.value,
+    }:
         return ThreadCreationResult(
             thread_id=thread.id,
             status=current_thread.status,
@@ -322,8 +291,8 @@ async def _failed_initial_dispatch(
         status=current_thread.status,
         nickname=req.nickname,
         dispatched=False,
-        error_detail=outcome.detail,
-        failure_type=typed_failure,
+        error_detail=failure.detail,
+        failure_type=failure.failure_type,
     )
 
 
@@ -331,7 +300,7 @@ async def create_and_dispatch_thread(
     db: AsyncSession,
     req: ThreadCreationRequest,
     *,
-    runtime: ThreadDispatchRuntime,
+    transport: DispatchTransport,
 ) -> ThreadCreationResult:
     """Create a thread row, build dispatch payload, and dispatch to worker.
 
@@ -346,17 +315,9 @@ async def create_and_dispatch_thread(
     action_receipt_id = uuid4().hex
     if not req.thread_id.strip():
         raise ValueError("run admission requires an allocated thread identity")
-    dispatch = (
-        _initial_dispatch(
-            req, dispatch_id=action_receipt_id, recursion_limit=runtime.recursion_limit
-        )
-        if requires_dispatch(req.team_preset)
-        else None
-    )
-    accepted_input = (
-        freeze_accepted_input(dispatch, intent={"initial_message": req.initial_message})
-        if dispatch is not None
-        else None
+    dispatch = _initial_dispatch(req, dispatch_id=action_receipt_id)
+    accepted_input = freeze_accepted_input(
+        dispatch, intent={"initial_message": req.initial_message}
     )
     # Concurrent run starts each read (the nickname check) before they write;
     # only a transaction holding the write lock from its start can wait for
@@ -393,25 +354,6 @@ async def create_and_dispatch_thread(
         },
     )
 
-    if dispatch is None:
-        await create_control_action(
-            db,
-            thread_id=thread.id,
-            action_type=ControlActionType.INGEST,
-            dispatch_id=action_receipt_id,
-            idempotency_key=f"thread-create:{thread.id}",
-            payload={"dispatch_required": False},
-        )
-        await mark_ingest_requested(db, thread.id)
-        await db.commit()
-        return ThreadCreationResult(
-            thread_id=thread.id,
-            status=thread.status,
-            nickname=req.nickname,
-            dispatched=False,
-            error_detail=None,
-        )
-
     # Durable acceptance includes the actual graph input. Recovery cannot
     # reconstruct a user's message from title/preset metadata after a crash.
     # Tokens remain ephemeral; their required presence is an explicit fact.
@@ -423,10 +365,9 @@ async def create_and_dispatch_thread(
         ControlActionClaimRequest(
             thread_id=thread.id,
             action_type=ControlActionType.INGEST,
-            idempotency_key=f"thread-create:{thread.id}",
+            idempotency_key=thread_create_action_key(thread.id),
             payload=accepted_input,
             dispatch_id=action_receipt_id,
-            worker_generation=thread.writer_generation,
             write_expectation=thread_write_expectation(thread),
             recovery_deadline_at=recovery_deadline_at,
         ),
@@ -434,8 +375,11 @@ async def create_and_dispatch_thread(
     if not claim.acquired:
         await db.rollback()
         raise ValueError("initial action could not establish graph receipt authority")
-    await mark_ingest_requested(db, thread.id)
-    await finalize_control_action_acceptance(db, claim)
+    await apply_repair_transition(
+        db,
+        thread.id,
+        repair_state_for_action(ControlActionType.INGEST, RepairPhase.REQUESTED),
+    )
 
     logger.info(
         "Dispatching ingest dispatch_id=%s for thread %s",
@@ -450,21 +394,12 @@ async def create_and_dispatch_thread(
         },
     )
 
-    dispatch = await bind_graph_action_receipt(db, dispatch)
-    # -- Dispatch via safe_dispatch (non-raising) ------------------------------
-    outcome = await safe_dispatch(
-        runtime.worker_client,
-        dispatch,
-        runtime.circuit_breaker,
-        runtime.worker_spawner,
-        trace_headers=runtime.trace_headers,
-    )
-
-    if not outcome.success:
+    failure = await dispatch_leased(db, claim, dispatch, transport)
+    if failure is not None:
         return await _failed_initial_dispatch(
             db,
             _CreationDispatchContext(req, thread, claim),
-            outcome,
+            failure,
         )
 
     # -- Success ---------------------------------------------------------------
@@ -475,14 +410,11 @@ async def create_and_dispatch_thread(
         thread.id,
         expectation=expectation,
         status=ThreadStatus.RUNNING,
-        successor=successor_thread_write_authority(
-            expectation,
-            action_type=ControlActionType.INGEST,
-            action_receipt_id=action_receipt_id,
-        ),
+        action_type=ControlActionType.INGEST,
+        action_receipt_id=action_receipt_id,
     )
     await db.commit()
-    current_thread = await db.get(ThreadModel, thread.id, populate_existing=True)
+    current_thread = await get_thread(db, thread.id, refresh=True)
     if current_thread is None:
         return ThreadCreationResult(
             thread_id=thread.id,
@@ -553,8 +485,8 @@ async def delete_thread_service(
     captures the cleanup manifest and marks the thread ``deleting`` in one
     durable commit before any external effect; a replayed or resumed request on
     an already-``deleting`` thread rejoins the same saga. Cleanup then removes
-    the checkpoint and artifact files from the durable manifest, and the control
-    rows are removed only once every item is done.
+    the checkpoint and run-owned replay state from the durable manifest, and the
+    control rows are removed only once every item is done.
 
     Commits the session at each durable boundary — the service owns its
     transaction boundaries. Does **not** raise ``HTTPException``.
@@ -571,9 +503,7 @@ async def delete_thread_service(
             await db.rollback()
             return DeleteResult(deleted=False, error_detail=eligibility.reason)
         manifest = build_cleanup_manifest(
-            thread,
-            await get_artifacts_by_thread(db, thread_id),
-            include_checkpoint=checkpointer is not None,
+            thread, include_checkpoint=checkpointer is not None
         )
         saga = await create_deletion_saga(
             db,
@@ -581,9 +511,7 @@ async def delete_thread_service(
             manifest=manifest,
         )
         if saga is None:
-            current_thread = await db.get(
-                ThreadModel, thread_id, populate_existing=True
-            )
+            current_thread = await get_thread(db, thread_id, refresh=True)
             if current_thread is None:
                 return DeleteResult(deleted=False, not_found=True)
             if current_thread.status != ThreadStatus.DELETING.value:
@@ -663,7 +591,7 @@ class ArchiveResult:
 
 async def _archive_election_failure(db: AsyncSession, thread_id: str) -> ArchiveResult:
     await db.rollback()
-    current_thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+    current_thread = await get_thread(db, thread_id, refresh=True)
     if current_thread is None:
         return ArchiveResult(archived=False, not_found=True)
     refreshed = can_archive(current_thread.status)
@@ -704,11 +632,8 @@ async def archive_thread(db: AsyncSession, thread_id: str) -> ArchiveResult:
         thread_id,
         expectation=expectation,
         status=ThreadStatus.ARCHIVED,
-        successor=successor_thread_write_authority(
-            expectation,
-            action_type=expectation.authority.action_type,
-            action_receipt_id=expectation.authority.action_receipt_id,
-        ),
+        action_type=expectation.authority.action_type,
+        action_receipt_id=expectation.authority.action_receipt_id,
     )
     if election.outcome is not ThreadStatusElectionOutcome.WON:
         return await _archive_election_failure(db, thread_id)

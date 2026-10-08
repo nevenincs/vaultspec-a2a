@@ -1,0 +1,8 @@
+[agent]
+id           = "deterministic-coder-success"
+display_name = "Deterministic Coder Success"
+role         = "coder"
+description  = "In-process ProviderFactory scenario whose turn completes with fixed content."
+
+[agent.persona]
+system_prompt = "Complete the programmed deterministic turn."

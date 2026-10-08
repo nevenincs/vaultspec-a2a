@@ -2,7 +2,7 @@
 
 Real files, a real subprocess for the "live" registry record, and a real HTTP
 server standing in for a foreign worker being evicted - no mocks. Pins the
-retention half of the observability-lanes plan (P02.S03): a killed/evicted
+retention half of the observability lanes: a killed/evicted
 worker's stderr log must not accumulate forever, and a dev-band worker's past
 instances must not leave permanent orphans under the runtime dir.
 """
@@ -10,21 +10,25 @@ instances must not leave permanent orphans under the runtime dir.
 from __future__ import annotations
 
 import http.server
-import subprocess
+import os
 import sys
-import threading
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ...control._worker_health import (
-    _evict_stale_worker,
-    _worker_stderr_log_path,
+    evict_stale_worker,
     sweep_orphan_worker_logs,
+    worker_stderr_log_path,
 )
 from ...lifecycle.registry import ProcRecord, now_ms, write_record
-from ...testing import settings_override
+from ...testing import (
+    JsonReplyHandler,
+    serve_handler,
+    settings_override,
+)
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -38,36 +42,20 @@ def _a2a_home(path: Path) -> Generator[None]:
         yield
 
 
-def _make_handler() -> type[http.server.BaseHTTPRequestHandler]:
-    class _Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            self.send_response(404)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+class _ForeignWorkerHandler(JsonReplyHandler, http.server.BaseHTTPRequestHandler):
+    """Answers health 404 and accepts every shutdown without ever exiting."""
 
-        def do_POST(self) -> None:
-            self.send_response(202)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+    def do_GET(self) -> None:
+        self._reply_empty(404)
 
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            """Silence the default access log."""
-
-    return _Handler
+    def do_POST(self) -> None:
+        self._reply_empty(202)
 
 
 @contextmanager
 def _foreign_worker() -> Generator[int]:
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _make_handler())
-    port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with serve_handler(_ForeignWorkerHandler) as port:
         yield port
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 @pytest.mark.asyncio
@@ -77,11 +65,19 @@ async def test_evict_stale_worker_deletes_its_stderr_log_once_freed(
     # Scenario 1: the server is still listening, so the port cannot be confirmed
     # free - the log must survive an eviction attempt that does not free it.
     with _a2a_home(tmp_path), _foreign_worker() as still_up_port:
-        still_up_log = _worker_stderr_log_path(still_up_port)
+        still_up_log = worker_stderr_log_path(still_up_port)
         still_up_log.write_text("stale orphan output\n", encoding="utf-8")
 
-        freed = await _evict_stale_worker(
-            f"http://127.0.0.1:{still_up_port}", still_up_port, timeout=0.5
+        # The stand-in occupant is a listener in THIS process, so naming this
+        # process as the ownership root is what the eviction gate needs to admit
+        # the request at all; provenance refusal is pinned in the provenance
+        # tests, and what this one is about is the log the eviction leaves.
+        freed = await evict_stale_worker(
+            f"http://127.0.0.1:{still_up_port}",
+            still_up_port,
+            internal_token=None,
+            owner_pid=os.getpid(),
+            timeout=0.5,
         )
         assert freed is False
         assert still_up_log.exists()
@@ -89,13 +85,17 @@ async def test_evict_stale_worker_deletes_its_stderr_log_once_freed(
     # Scenario 2: the server is torn down (a real freed port), so eviction
     # confirms the port free and deletes the now-genuinely-orphaned log.
     with _a2a_home(tmp_path), _foreign_worker() as torn_down_port:
-        torn_down_log = _worker_stderr_log_path(torn_down_port)
+        torn_down_log = worker_stderr_log_path(torn_down_port)
         torn_down_log.write_text("stale orphan output\n", encoding="utf-8")
     # The `with` block above has exited (server torn down); the port/path
     # captured from it remain valid identifiers to probe against.
     with _a2a_home(tmp_path):
-        freed = await _evict_stale_worker(
-            f"http://127.0.0.1:{torn_down_port}", torn_down_port, timeout=1.0
+        freed = await evict_stale_worker(
+            f"http://127.0.0.1:{torn_down_port}",
+            torn_down_port,
+            internal_token=None,
+            owner_pid=os.getpid(),
+            timeout=1.0,
         )
         assert freed is True
         assert not torn_down_log.exists()
@@ -107,13 +107,16 @@ def test_sweep_orphan_worker_logs_removes_dead_keeps_live_and_current(
     registry_home = tmp_path / "registry"
     a2a_home = tmp_path / "a2a-home"
 
-    live_proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    containment = ProcessContainment.create()
+    live_proc = spawn_contained(
+        [sys.executable, "-c", "import time; time.sleep(30)"], containment
+    )
     try:
         with _a2a_home(a2a_home):
-            orphan_log = _worker_stderr_log_path(18801)
+            orphan_log = worker_stderr_log_path(18801)
             orphan_log.write_text("dead dev-band instance\n", encoding="utf-8")
 
-            live_log = _worker_stderr_log_path(18802)
+            live_log = worker_stderr_log_path(18802)
             live_log.write_text("still running dev-band instance\n", encoding="utf-8")
             write_record(
                 ProcRecord(
@@ -127,7 +130,7 @@ def test_sweep_orphan_worker_logs_removes_dead_keeps_live_and_current(
                 home=registry_home,
             )
 
-            current_log = _worker_stderr_log_path(18803)
+            current_log = worker_stderr_log_path(18803)
             current_log.write_text("this process's own worker\n", encoding="utf-8")
 
             removed = sweep_orphan_worker_logs(
@@ -143,13 +146,12 @@ def test_sweep_orphan_worker_logs_removes_dead_keeps_live_and_current(
             assert live_log.exists()
             assert current_log.exists()
     finally:
-        live_proc.kill()
-        live_proc.wait()
+        reap_contained(live_proc, containment, term_timeout=2.0, kill_timeout=5.0)
 
 
 def test_sweep_orphan_worker_logs_ignores_non_matching_files(tmp_path: Path) -> None:
     with _a2a_home(tmp_path / "a2a-home"):
-        runtime_dir = _worker_stderr_log_path(1).parent
+        runtime_dir = worker_stderr_log_path(1).parent
         runtime_dir.mkdir(parents=True, exist_ok=True)
         stray = runtime_dir / "not-a-worker-log.txt"
         stray.write_text("unrelated file\n", encoding="utf-8")

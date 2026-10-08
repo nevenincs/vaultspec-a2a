@@ -18,9 +18,16 @@ a failure rather than a credential quietly left ungated.
 
 A credential never chains to a shared framework name, so each spelling a field
 accepts is its own entry, canonical a2a name first and the owning tool's own
-name behind it. The non-secret entry is the operator environment file itself -
+name behind it. The non-secret entries are the operator environment file itself -
 a2a's replacement for reading settings out of the workspace, resolved through
-the same accessor so that a blank value means unset here too.
+the same accessor so that a blank value means unset here too - and the lane
+plugins setting, declared so the registry records that a workspace can never
+supply the modules a process imports.
+
+The provider names a2a never registers are declared here too. With the
+registered credentials they are the whole provider-credential vocabulary, so
+the provider-child scrub and the development credential scopes read one list
+rather than each keeping a copy that drifts.
 """
 
 from typing import Final
@@ -34,8 +41,10 @@ from vaultspec_core.config import (
 from .env_prefix import ENV_PREFIX
 
 __all__ = [
+    "CREDENTIAL_ENV_NAMES",
     "CREDENTIAL_VARIABLES",
     "ENV_FILE_VARIABLE",
+    "FOREIGN_PROVIDER_ENV_NAMES",
 ]
 
 #: The distribution name whose install mode gates the workspace ``.env``.
@@ -84,6 +93,21 @@ ENV_FILE_VARIABLE: Final = ConfigVariable(
     ),
 )
 
+#: The modules whose in-process lanes a process imports. A setting, never a
+#: credential: neither a workspace ``.env`` nor the project store may supply it,
+#: so it reaches a process only through the environment its launcher hands it.
+_LANE_PLUGINS_VARIABLE: Final = ConfigVariable(
+    env_name=f"{ENV_PREFIX}LANE_PLUGINS",
+    attr_name=None,
+    var_type=str,
+    default=None,
+    description=(
+        "Comma-separated module paths, each exposing register_lanes(registry). "
+        "Honoured only while the in-process lanes are armed outside the desktop "
+        "profile; any other non-empty value refuses startup."
+    ),
+)
+
 #: Every settings field a workspace ``.env`` may supply, mapped to the names it
 #: is accepted under, canonical first. A field absent from this mapping is a
 #: setting, and the workspace never supplies it.
@@ -115,11 +139,50 @@ CREDENTIAL_VARIABLES: Final[dict[str, tuple[ConfigVariable, ...]]] = {
     ),
 }
 
+#: Every name a credential is accepted under, a2a's own spellings and the
+#: owning tools' alike.
+CREDENTIAL_ENV_NAMES: Final[frozenset[str]] = frozenset(
+    entry.env_name for entries in CREDENTIAL_VARIABLES.values() for entry in entries
+)
+
+#: Provider names a2a never accepts a credential under, which an operator's
+#: environment may still carry for another tool. None is registered, so the
+#: workspace ``.env`` never supplies one, and every one is denied to a provider
+#: child: a lane's auth reaches it only when the provider layer injects it.
+FOREIGN_PROVIDER_ENV_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_LOG",
+        "ZAI_BASE_URL",
+        "ZAI_ANTHROPIC_BASE_URL",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "AWS_SECRET_ACCESS_KEY",
+        "AZURE_OPENAI_API_KEY",
+        "LANGCHAIN_API_KEY",
+        "LANGSMITH_API_KEY",
+        "LANGCHAIN_TRACING_V2",
+        # Kimi Code's temporary-provider definition is an all-or-none unit.
+        # The rest of its current family and its retired spellings are denied
+        # with the registered key, so only the Settings-owned current
+        # definition can be re-injected by the factory.
+        "KIMI_API_KEY",
+        "KIMI_BASE_URL",
+        "KIMI_MODEL_BASE_URL",
+        "KIMI_MODEL_NAME",
+        "KIMI_MODEL_MAX_CONTEXT_SIZE",
+        "KIMI_MODEL_CAPABILITIES",
+    }
+)
+
 
 register_registry(
     PACKAGE,
     (
         ENV_FILE_VARIABLE,
+        _LANE_PLUGINS_VARIABLE,
         *(entry for entries in CREDENTIAL_VARIABLES.values() for entry in entries),
     ),
 )

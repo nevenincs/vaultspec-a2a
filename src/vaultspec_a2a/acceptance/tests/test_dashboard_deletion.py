@@ -24,7 +24,6 @@ import sqlite3
 from typing import TYPE_CHECKING
 
 from ...desktop.profile import derive_state_paths
-from .conftest import wait_for_terminal
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -68,7 +67,7 @@ def _checkpoint_rows_for(app_home: Path, thread_id: str) -> int:
 def test_deletion_removes_the_run_from_control_and_checkpoint_stores(
     gateway: CertifiedGateway,
 ) -> None:
-    """S80: a completed run is deleted from both real stores and stays invisible.
+    """A completed run is deleted from both real stores and stays invisible.
 
     Discriminating across both stores: the run first exists (status 200,
     checkpoint rows present), then after one authenticated delete it is gone from
@@ -77,9 +76,9 @@ def test_deletion_removes_the_run_from_control_and_checkpoint_stores(
     that skipped the checkpoint store would leave a non-zero after-count and fail.
     """
     run_id = "run-deletion-cross-store"
-    started = gateway.start(run_id)
+    started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
-    wait_for_terminal(gateway, run_id)
+    gateway.wait_for_status(run_id)
 
     # The run is durable in both stores before deletion.
     assert gateway.status(run_id).status_code == 200
@@ -103,7 +102,7 @@ def test_deletion_removes_the_run_from_control_and_checkpoint_stores(
 def test_replayed_delete_converges_without_a_second_teardown(
     gateway: CertifiedGateway,
 ) -> None:
-    """S80: replaying a delete after completion converges rather than erroring.
+    """Replaying a delete after completion converges rather than erroring.
 
     Discriminating: the first delete of a real run succeeds (204) and the run is
     gone, and a second identical delete returns a clean 404 - the converged
@@ -112,9 +111,9 @@ def test_replayed_delete_converges_without_a_second_teardown(
     an error masquerading as success.
     """
     run_id = "run-deletion-replay"
-    started = gateway.start(run_id)
+    started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
-    wait_for_terminal(gateway, run_id)
+    gateway.wait_for_status(run_id)
 
     first = gateway.delete_run(run_id)
     assert first.status_code == 204, first.text

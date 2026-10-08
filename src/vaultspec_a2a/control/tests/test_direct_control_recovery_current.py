@@ -2,23 +2,21 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import anyio
 import httpx
 import pytest
-import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...conftest import SqlitePosture
 from ...database import (
+    RecoveryAttemptModel,
+    ThreadStatusElectionOutcome,
     create_control_action,
     create_thread,
     elect_thread_status,
@@ -27,11 +25,15 @@ from ...database import (
     mark_control_action_applied,
     thread_write_expectation,
 )
-from ...database.models import Base, RecoveryAttemptModel, RunWriteAuthority
-from ...database.session import configure_sqlite_transactions
-from ...database.thread_repository import ThreadStatusElectionOutcome
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    adopted_spawner,
+    current_execution_metadata,
+    served_worker,
+)
+from ...thread import RunWriteAuthority
 from ...thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
@@ -40,12 +42,8 @@ from ...thread.enums import (
     ThreadStatus,
 )
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
 from ..accepted_input import freeze_accepted_input
 from ..circuit_breaker import WorkerCircuitBreaker
-from ..config import settings
 from ..direct_control_recovery import (
     DirectControlRecoverySummary,
     redrive_direct_control_actions,
@@ -53,26 +51,17 @@ from ..direct_control_recovery import (
 from ..dispatch_receipts import prepare_graph_action_receipt
 from ..execution_authority import resolve_execution_authority
 from ..recovery import seed_recovery_attempts
-from ..worker_management import LazyWorkerSpawner
-from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from ...providers.team_selection import FrozenLaneAssignment
 
 _TEST_INTERNAL_TOKEN = "direct-control-recovery-test-token"
 
 
-@pytest_asyncio.fixture
-async def sessions(
-    tmp_path: Path,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'recovery.db'}")
-    configure_sqlite_transactions(engine)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    yield factory
-    await engine.dispose()
+pytestmark = pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,9 +75,9 @@ class _AcceptedCase:
 
 def _graph_authority(
     workspace: Path,
-) -> tuple[FrozenGraphDefinition, dict[str, dict[str, object]]]:
+) -> tuple[FrozenGraphDefinition, dict[str, FrozenLaneAssignment]]:
     definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
     assignment = resolve_execution_authority(
@@ -111,7 +100,7 @@ def _accepted_cases(workspace: Path) -> tuple[_AcceptedCase, ...]:
                 agent_id="vaultspec-supervisor",
                 content="continue",
                 workspace_root=str(workspace),
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 graph_definition=definition,
                 recursion_limit=37,
                 model_assignment=assignment,
@@ -128,7 +117,7 @@ def _accepted_cases(workspace: Path) -> tuple[_AcceptedCase, ...]:
                 thread_id="permission-run",
                 option_id={"option_id": "allow_once", "notes": None},
                 workspace_root=str(workspace),
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 graph_definition=definition,
                 recursion_limit=37,
                 model_assignment=assignment,
@@ -185,8 +174,17 @@ async def _persist_case(
         assert receipt is not None
 
 
+async def _recovery_attempt(
+    db: AsyncSession, thread_id: str
+) -> RecoveryAttemptModel | None:
+    """Read the run's one durable retry record as it is stored."""
+    return await db.scalar(
+        select(RecoveryAttemptModel).where(RecoveryAttemptModel.thread_id == thread_id)
+    )
+
+
 async def _run_recovery(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> tuple[DirectControlRecoverySummary, list[dict[str, object]]]:
     received: list[dict[str, object]] = []
     app = FastAPI()
@@ -200,14 +198,12 @@ async def _run_recovery(
         transport=httpx.ASGITransport(app=app), base_url="http://worker"
     ) as client:
         summary = await redrive_direct_control_actions(
-            sessions,
+            session_factory,
             worker_client=client,
             circuit_breaker=WorkerCircuitBreaker(
                 failure_threshold=3, recovery_timeout=30
             ),
-            worker_spawner=LazyWorkerSpawner(
-                worker_url="http://worker", worker_port=8001, auto_spawn=False
-            ),
+            worker_spawner=adopted_spawner(),
             trace_headers=None,
         )
     return summary, received
@@ -217,22 +213,22 @@ async def _run_recovery(
 @pytest.mark.parametrize("status", [ThreadStatus.CANCELLING, ThreadStatus.RECONCILING])
 async def test_cancel_recovery_preserves_receipt_in_startup_state(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
     status: ThreadStatus,
 ) -> None:
     case = _accepted_cases(tmp_path)[2]
     case = _AcceptedCase(
         case.thread_id, case.action_type, status, case.dispatch, case.intent
     )
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, case)
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
     assert summary.dispatched == 1
     assert summary.conflicted == summary.refused == 0
     assert [item["dispatch_id"] for item in received] == ["cancel-stable"]
-    async with sessions() as db:
+    async with session_factory() as db:
         thread = await get_thread(db, case.thread_id)
         action = await get_control_action_by_dispatch_id(
             db, thread_id=case.thread_id, dispatch_id="cancel-stable"
@@ -245,15 +241,15 @@ async def test_cancel_recovery_preserves_receipt_in_startup_state(
 @pytest.mark.asyncio
 async def test_current_message_permission_and_cancel_redrive_stable_ids(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     cases = _accepted_cases(tmp_path)
-    async with sessions() as db:
+    async with session_factory() as db:
         for case in cases:
             await _persist_case(db, case)
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert summary.examined == 3
     assert summary.dispatched == 3
@@ -269,7 +265,7 @@ async def test_current_message_permission_and_cancel_redrive_stable_ids(
     assert delivered["message-stable"]["content"] == "continue"
     assert delivered["message-stable"]["agent_id"] == "vaultspec-supervisor"
     assert delivered["message-stable"]["recursion_limit"] == 37
-    assert delivered["message-stable"]["team_preset"] == "mock-success-single"
+    assert delivered["message-stable"]["team_preset"] == DEFAULT_TEAM_PRESET
     assert delivered["message-stable"]["graph_action_receipt"] is not None
     assert delivered["permission-stable"]["action"] == "resume"
     assert delivered["permission-stable"]["option_id"] == {
@@ -284,7 +280,7 @@ async def test_current_message_permission_and_cancel_redrive_stable_ids(
 @pytest.mark.asyncio
 async def test_unavailable_project_refuses_graph_action_but_allows_cancel(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     missing = tmp_path / "deleted-project"
     cases = list(_accepted_cases(tmp_path))
@@ -304,18 +300,18 @@ async def test_unavailable_project_refuses_graph_action_but_allows_cancel(
         cancel_case.dispatch.model_copy(update={"workspace_root": str(missing)}),
         cancel_case.intent,
     )
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, graph_case)
         await _persist_case(db, cancel_case)
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert summary.examined == 2
     assert summary.dispatched == 1
     assert summary.refused == 1
     assert [item["dispatch_id"] for item in received] == ["cancel-stable"]
-    async with sessions() as db:
+    async with session_factory() as db:
         refused_action = await get_control_action_by_dispatch_id(
             db,
             thread_id=graph_case.thread_id,
@@ -341,10 +337,10 @@ async def test_unavailable_project_refuses_graph_action_but_allows_cancel(
 @pytest.mark.asyncio
 async def test_older_accepted_action_loses_to_newer_exact_authority(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     old = _accepted_cases(tmp_path)[1]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, old)
         thread = await get_thread(db, old.thread_id)
         assert thread is not None
@@ -369,12 +365,13 @@ async def test_older_accepted_action_loses_to_newer_exact_authority(
             old.thread_id,
             expectation=expectation,
             status=ThreadStatus.CANCELLING,
-            successor=RunWriteAuthority(1, 2, ControlActionType.CANCEL, "newer-cancel"),
+            action_type=ControlActionType.CANCEL,
+            action_receipt_id="newer-cancel",
         )
         assert elected.outcome is ThreadStatusElectionOutcome.WON
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert summary.examined == 1
     assert summary.dispatched == 1
@@ -385,10 +382,10 @@ async def test_older_accepted_action_loses_to_newer_exact_authority(
 @pytest.mark.asyncio
 async def test_expired_run_is_quarantined_without_dispatch(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     case = _accepted_cases(tmp_path)[0]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(
             db,
             case,
@@ -401,21 +398,17 @@ async def test_expired_run_is_quarantined_without_dispatch(
         accepted.requested_at = datetime(2019, 1, 1, tzinfo=UTC)
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert not received
     assert summary.examined == 1
     assert summary.refused == 1
-    async with sessions() as db:
+    async with session_factory() as db:
         action = await get_control_action_by_dispatch_id(
             db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
         )
         thread = await get_thread(db, case.thread_id)
-        attempt = await db.scalar(
-            select(RecoveryAttemptModel).where(
-                RecoveryAttemptModel.thread_id == case.thread_id
-            )
-        )
+        attempt = await _recovery_attempt(db, case.thread_id)
     assert action is not None and action.applied_at is not None
     assert thread is not None
     assert thread.status == ThreadStatus.RECONCILING.value
@@ -429,10 +422,10 @@ async def test_expired_run_is_quarantined_without_dispatch(
 @pytest.mark.asyncio
 async def test_applied_action_wins_over_deadline_quarantine(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     case = _accepted_cases(tmp_path)[0]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(
             db,
             case,
@@ -449,18 +442,14 @@ async def test_applied_action_wins_over_deadline_quarantine(
         )
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert not received
     assert summary.examined == 0
     assert summary.refused == 0
-    async with sessions() as db:
+    async with session_factory() as db:
         thread = await get_thread(db, case.thread_id)
-        attempt = await db.scalar(
-            select(RecoveryAttemptModel).where(
-                RecoveryAttemptModel.thread_id == case.thread_id
-            )
-        )
+        attempt = await _recovery_attempt(db, case.thread_id)
     assert thread is not None
     assert thread.status == ThreadStatus.RUNNING.value
     assert thread.repair_status == RepairStatus.HEALTHY.value
@@ -470,10 +459,10 @@ async def test_applied_action_wins_over_deadline_quarantine(
 @pytest.mark.asyncio
 async def test_corrupt_accepted_input_is_atomically_quarantined(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     case = _accepted_cases(tmp_path)[0]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, case)
         action = await get_control_action_by_dispatch_id(
             db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
@@ -482,22 +471,18 @@ async def test_corrupt_accepted_input_is_atomically_quarantined(
         action.payload_json = "{not-json"
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert not received
     assert summary.examined == 1
     assert summary.refused == 1
     assert summary.conflicted == 0
-    async with sessions() as db:
+    async with session_factory() as db:
         action = await get_control_action_by_dispatch_id(
             db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
         )
         thread = await get_thread(db, case.thread_id)
-        attempt = await db.scalar(
-            select(RecoveryAttemptModel).where(
-                RecoveryAttemptModel.thread_id == case.thread_id
-            )
-        )
+        attempt = await _recovery_attempt(db, case.thread_id)
     assert action is not None
     assert action.applied_at is not None
     assert (
@@ -515,14 +500,14 @@ async def test_corrupt_accepted_input_is_atomically_quarantined(
 @pytest.mark.asyncio
 async def test_missing_accepted_action_quarantines_its_exact_run(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     case = _accepted_cases(tmp_path)[0]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, case)
         now = datetime.now(UTC)
         await db.commit()
-    async with sessions() as db:
+    async with session_factory() as db:
         assert await seed_recovery_attempts(db, observed_at=now, limit=1) == 1
         action = await get_control_action_by_dispatch_id(
             db, thread_id=case.thread_id, dispatch_id=case.dispatch.dispatch_id
@@ -531,18 +516,14 @@ async def test_missing_accepted_action_quarantines_its_exact_run(
         await db.delete(action)
         await db.commit()
 
-    summary, received = await _run_recovery(sessions)
+    summary, received = await _run_recovery(session_factory)
 
     assert not received
     assert summary.examined == 1
     assert summary.refused == 1
-    async with sessions() as db:
+    async with session_factory() as db:
         thread = await get_thread(db, case.thread_id)
-        attempt = await db.scalar(
-            select(RecoveryAttemptModel).where(
-                RecoveryAttemptModel.thread_id == case.thread_id
-            )
-        )
+        attempt = await _recovery_attempt(db, case.thread_id)
     assert thread is not None
     # With the receipt absent there is no lawful evidence for a lifecycle
     # election. The last proven status remains while readiness blocks execution.
@@ -560,10 +541,10 @@ async def test_missing_accepted_action_quarantines_its_exact_run(
 @pytest.mark.asyncio
 async def test_capacity_failure_waits_for_durable_next_eligibility(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     case = _accepted_cases(tmp_path)[0]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, case)
         await db.commit()
 
@@ -579,32 +560,26 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
         return JSONResponse({"status": "dispatched"})
 
     breaker = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30)
-    spawner = LazyWorkerSpawner(
-        worker_url="http://worker", worker_port=8001, auto_spawn=False
-    )
+    spawner = adopted_spawner()
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://worker"
     ) as client:
         first = await redrive_direct_control_actions(
-            sessions,
+            session_factory,
             worker_client=client,
             circuit_breaker=breaker,
             worker_spawner=spawner,
             trace_headers=None,
         )
         second = await redrive_direct_control_actions(
-            sessions,
+            session_factory,
             worker_client=client,
             circuit_breaker=breaker,
             worker_spawner=spawner,
             trace_headers=None,
         )
-        async with sessions() as db:
-            attempt = await db.scalar(
-                select(RecoveryAttemptModel).where(
-                    RecoveryAttemptModel.thread_id == case.thread_id
-                )
-            )
+        async with session_factory() as db:
+            attempt = await _recovery_attempt(db, case.thread_id)
             assert attempt is not None
             assert attempt.condition == RecoveryCondition.AT_CAPACITY.value
             assert attempt.attempt_count == 2
@@ -612,29 +587,25 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
             attempt.next_eligible_at = attempt.created_at
             await db.commit()
         third = await redrive_direct_control_actions(
-            sessions,
+            session_factory,
             worker_client=client,
             circuit_breaker=breaker,
             worker_spawner=spawner,
             trace_headers=None,
         )
-        async with sessions() as db:
+        async with session_factory() as db:
             action = await get_control_action_by_dispatch_id(
                 db,
                 thread_id=case.thread_id,
                 dispatch_id=case.dispatch.dispatch_id,
             )
-            attempt = await db.scalar(
-                select(RecoveryAttemptModel).where(
-                    RecoveryAttemptModel.thread_id == case.thread_id
-                )
-            )
+            attempt = await _recovery_attempt(db, case.thread_id)
             assert action is not None and attempt is not None
             await mark_control_action_applied(db, action.id)
             attempt.next_eligible_at = attempt.created_at
             await db.commit()
         fourth = await redrive_direct_control_actions(
-            sessions,
+            session_factory,
             worker_client=client,
             circuit_breaker=breaker,
             worker_spawner=spawner,
@@ -647,57 +618,16 @@ async def test_capacity_failure_waits_for_durable_next_eligibility(
     assert fourth.examined == 1
     assert fourth.dispatched == 0
     assert received == 2
-    async with sessions() as db:
-        attempt = await db.scalar(
-            select(RecoveryAttemptModel).where(
-                RecoveryAttemptModel.thread_id == case.thread_id
-            )
-        )
+    async with session_factory() as db:
+        attempt = await _recovery_attempt(db, case.thread_id)
     assert attempt is not None and attempt.settled_at is not None
 
 
-@pytest.fixture
-def _dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give both sides of real worker dispatch the current IPC credential."""
-    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
-
-
-@asynccontextmanager
-async def _worker_already_running(
-    checkpoint_path: Path, thread_id: str
-) -> AsyncGenerator[httpx.AsyncClient]:
-    """Serve the production worker app with one run's slot genuinely taken.
-
-    The slot is taken through the executor's own reservation verb, so the 409
-    the recovery pass meets is the refusal the worker composes for a run it is
-    already executing rather than a status written here.
-    """
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
-        await saver.setup()
-        bridge = WorkerBridge("http://control", "direct-control-recovery-test")
-        executor = Executor(saver, bridge)
-        reservation, _reason = await executor.reserve_dispatch_capacity(thread_id)
-        assert reservation is not None
-        app = create_worker_app()
-        app.state.executor = executor
-        async with anyio.create_task_group() as tasks:
-            app.state.task_group = tasks
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="http://worker",
-                headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-            ) as client:
-                yield client
-            tasks.cancel_scope.cancel()
-        await executor.shutdown()
-        await bridge.close()
-
-
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("_dispatch_auth")
 async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
     tmp_path: Path,
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A worker executing this run is reporting work in flight, not refusing it.
 
@@ -709,37 +639,31 @@ async def test_a_busy_worker_keeps_the_action_claim_for_the_run_it_is_running(
     still scheduled, under the condition the worker actually served.
     """
     case = _accepted_cases(tmp_path)[0]
-    async with sessions() as db:
+    async with session_factory() as db:
         await _persist_case(db, case)
         await db.commit()
 
-    async with _worker_already_running(
-        tmp_path / "busy-worker.db", case.thread_id
-    ) as client:
+    async with served_worker(
+        checkpointer, token=_TEST_INTERNAL_TOKEN, held_threads=(case.thread_id,)
+    ) as worker:
         summary = await redrive_direct_control_actions(
-            sessions,
-            worker_client=client,
+            session_factory,
+            worker_client=worker.client,
             circuit_breaker=WorkerCircuitBreaker(
                 failure_threshold=3, recovery_timeout=30
             ),
-            worker_spawner=LazyWorkerSpawner(
-                worker_url="http://worker", worker_port=8001, auto_spawn=False
-            ),
+            worker_spawner=adopted_spawner(),
             trace_headers=None,
         )
 
     assert summary.deferred == 1
-    async with sessions() as db:
+    async with session_factory() as db:
         action = await get_control_action_by_dispatch_id(
             db,
             thread_id=case.thread_id,
             dispatch_id=case.dispatch.dispatch_id,
         )
-        attempt = await db.scalar(
-            select(RecoveryAttemptModel).where(
-                RecoveryAttemptModel.thread_id == case.thread_id
-            )
-        )
+        attempt = await _recovery_attempt(db, case.thread_id)
     assert action is not None
     assert action.applied_at is None
     assert action.claim_token is not None

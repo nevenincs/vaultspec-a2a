@@ -1,0 +1,33 @@
+[team]
+id           = "deterministic-revising-loop"
+display_name = "Deterministic Revising Loop"
+description  = """
+Scripted pipeline_loop scenario: the coder's work goes to a reviewer that requests
+revision on every pass, so each turn runs the loop to its ceiling and no further.
+
+Runs on the in-process deterministic provider, so it needs no credential and no
+network.
+"""
+
+[team.topology]
+type      = "pipeline_loop"
+order     = ["vaultspec-coder", "deterministic-revising-reviewer"]
+loop_node = "deterministic-revising-reviewer"
+max_loops = 2
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = "Run the in-process deterministic loop under a reviewer that never passes."
+
+[team.graph]
+step_timeout_seconds = 60
+run_timeout_seconds  = 1200
+recursion_limit      = 20
+
+[[team.workers]]
+agent_id = "vaultspec-coder"
+
+[[team.workers]]
+agent_id = "deterministic-revising-reviewer"

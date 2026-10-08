@@ -1,4 +1,4 @@
-"""Domain enums for thread lifecycle, control actions, and permissions.
+"""Domain enums for thread lifecycle, control actions, permissions, and pauses.
 
 These are Layer 1 domain types — consumed by infrastructure services
 (database, control, api) but defined here as the canonical source.
@@ -12,17 +12,20 @@ __all__ = [
     "RECOVERY_ACTION_TYPES",
     "TERMINAL_STATUSES",
     "TERMINAL_STATUS_VALUES",
+    "VERDICT_APPROVED",
+    "VERDICT_REJECTED",
+    "VERDICT_REQUEST_CHANGES",
     "ApprovalStatus",
     "CleanupKind",
     "ControlActionResultStatus",
     "ControlActionType",
     "DegradedReason",
+    "InterruptType",
     "InvalidTransitionError",
     "PermissionRequestStatus",
     "RecoveryCondition",
     "RepairStatus",
     "ReplayStatus",
-    "TaskQueueStatus",
     "ThreadStatus",
     "TranscriptAvailability",
 ]
@@ -61,10 +64,10 @@ class ThreadStatus(StrEnum):
 class RepairStatus(StrEnum):
     """Repair and readiness classification distinct from lifecycle.
 
-    Types BOTH durable columns that carry this classification:
-    ``threads.repair_status`` and ``threads.execution_readiness``. The two ask
-    different questions — what is wrong with this run, and is it fit to resume —
-    but they answer from this one closed set, so a new member becomes available
+    Types ``threads.repair_status``, the durable answer to what is wrong with a
+    run. A run's served ``execution_readiness`` asks whether it is fit to resume
+    and answers from this same closed set, because it is derived from that repair
+    posture at read time rather than judged on its own; a new member is available
     to both at once and neither can drift into a private vocabulary.
     """
 
@@ -102,12 +105,12 @@ class ReplayStatus(StrEnum):
     Answers a different question from :class:`RepairStatus`: that one classifies
     what is WRONG with a run, this one classifies how far the reader got. A
     ``durable`` replay walked the stored history whole; ``best_effort`` served
-    what the live aggregator held because the durable history was not reachable;
-    ``gap_detected`` walked it and found a hole. ``unknown`` is the honest
-    starting value and the answer whenever the checkpoint could not be read at
-    all - deliberately not collapsed into ``gap_detected``, because "there is a
-    hole here" and "I could not look" are different claims and only the first
-    accuses the store.
+    what the gateway's live relay state held because the durable history was not
+    reachable; ``gap_detected`` walked it and found a hole. ``unknown`` is the
+    honest starting value and the answer whenever the checkpoint could not be
+    read at all - deliberately not collapsed into ``gap_detected``, because
+    "there is a hole here" and "I could not look" are different claims and only
+    the first accuses the store.
     """
 
     DURABLE = "durable"
@@ -128,8 +131,9 @@ class DegradedReason(StrEnum):
     Membership follows the reader's fault lines: what could not be read
     (``*_UNAVAILABLE``, ``*_UNREADABLE``, ``*_TIMEOUT``), what was read but is
     not current (``*_STALE``), what should have been present and was not
-    (``*_MISSING``), and what was present but contradicts another store
-    (the permission residue and cross-store mismatch members).
+    (``*_MISSING``), what was present but contradicts another store (the
+    permission residue and cross-store mismatch members), and what the read
+    PROVED but could not write (``*_CONTENDED``).
     """
 
     AUTHORING_RUN_PRODUCED_NO_PROPOSAL = "authoring_run_produced_no_proposal"
@@ -149,14 +153,28 @@ class DegradedReason(StrEnum):
     EXECUTION_STATE_PROJECTION_TIMEOUT = "execution_state_projection_timeout"
     EXECUTION_STATE_PROJECTION_UNAVAILABLE = "execution_state_projection_unavailable"
     EXECUTION_STATE_PROJECTION_UNREADABLE = "execution_state_projection_unreadable"
+    # One reason for every way stored execution authority fails to resolve:
+    # absent, corrupt, and retired authority all leave the run unable to
+    # re-enter execution, which is the fact a client branches on.
     INCOMPATIBLE_EXECUTION_AUTHORITY = "incompatible_execution_authority"
     INVALID_AGENT_DESCRIPTORS = "invalid_agent_descriptors"
+    INVALID_ASSIGNMENT_DIGEST = "invalid_assignment_digest"
     INTERRUPT_PAYLOAD_UNREADABLE = "interrupt_payload_unreadable"
     INTERRUPT_PAYLOAD_UNTYPED = "interrupt_payload_untyped"
+    MISSING_ASSIGNMENT_DIGEST = "missing_assignment_digest"
     PENDING_PERMISSION_WITHOUT_CHECKPOINT_TRUTH = (
         "pending_permission_without_checkpoint_truth"
     )
+    PERMISSION_OFFERS_NO_USABLE_OPTION = "permission_offers_no_usable_option"
     PERMISSION_PROJECTION_UNREADABLE = "permission_projection_unreadable"
+    REPAIR_STATUS_UNREADABLE = "repair_status_unreadable"
+    # The read proved this run's turn had ended and every attempt at writing
+    # that settlement was refused by a competing writer. The status served is
+    # therefore the run's durable state before the settlement, and the
+    # settlement is still owed: a later pass makes it once the lock is free.
+    # Transient by nature, so a client reads the run again rather than treating
+    # the state as final.
+    SETTLEMENT_STORE_CONTENDED = "settlement_store_contended"
     TERMINAL_THREAD_PENDING_PERMISSION_RESIDUE = (
         "terminal_thread_pending_permission_residue"
     )
@@ -199,8 +217,6 @@ class ControlActionType(StrEnum):
     PERMISSION_RESPONSE_APPLIED = "permission_response_applied"
     MESSAGE_FOLLOWUP_REQUESTED = "message_followup_requested"
     MESSAGE_FOLLOWUP_APPLIED = "message_followup_applied"
-    REPAIR_STARTED = "repair_started"
-    REPAIR_FINISHED = "repair_finished"
 
 
 RECOVERY_ACTION_TYPES: tuple[ControlActionType, ...] = (
@@ -239,6 +255,29 @@ class PermissionRequestStatus(StrEnum):
     EXPIRED_BY_TERMINAL_STATE = "expired_by_terminal_state"
 
 
+class InterruptType(StrEnum):
+    """The ``type`` discriminator of every interrupt a run can park on.
+
+    One closed vocabulary for the producers that raise a pause - the worker's
+    tool-permission rung, the supervisor's plan gate, the document phase gates
+    and the clarification node - and for every reader that tells one pause from
+    another. A run's checkpoint holds interrupts of several kinds side by side,
+    so this discriminator is the only thing that separates them.
+
+    Producers write a member's ``.value`` into the interrupt payload, because
+    that payload is checkpointed with the parked task and the checkpoint
+    serializer does not round-trip enum members.
+
+    Not :class:`~vaultspec_a2a.graph.enums.PermissionType`, which names the
+    ``tool_call`` category of a permission request with different strings.
+    """
+
+    PERMISSION_REQUEST = "permission_request"
+    PLAN_APPROVAL_REQUEST = "plan_approval_request"
+    DOCUMENT_APPROVAL_REQUEST = "document_approval_request"
+    CLARIFICATION_REQUEST = "clarification_request"
+
+
 class ApprovalStatus(StrEnum):
     """Durable lifecycle for plan approval state on a thread."""
 
@@ -246,15 +285,6 @@ class ApprovalStatus(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     SUPERSEDED = "superseded"
-
-
-class TaskQueueStatus(StrEnum):
-    """Durable execution states for a worker task-queue entry."""
-
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
 
 
 class CleanupKind(StrEnum):

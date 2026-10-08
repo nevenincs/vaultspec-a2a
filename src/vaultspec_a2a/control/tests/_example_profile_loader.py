@@ -2,9 +2,10 @@
 
 Run as a child process with an environment that sets no setting, so the only
 values the loader sees are the ones under test: a dotenv profile written from
-the example's lines, read exactly as an operator's ``.env`` is read, including
-every decoder and cross-field validator the settings class carries. Each line is
-then compared with what the same loader yields when nothing is set at all.
+the example's lines, read exactly as an operator's ``.env`` is read by each of
+the service's settings classes, including every decoder and cross-field
+validator they carry. Each line is then compared with what the class that
+declares it yields when nothing is set at all.
 
 Reads ``{"profiles": [[[name, value], ...], ...]}`` on standard input and writes
 one result per profile: the load error, or for each line whether the loaded
@@ -17,26 +18,30 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from ...control.config import Settings
-from ._env_example import setting_field_by_name
+from ...testing import load_settings
+from ._env_example import SERVICE_SETTINGS, declaring_class, setting_field_by_name
+
+if TYPE_CHECKING:
+    from pydantic_settings import BaseSettings
 
 
-class _SettingsFromDotenv(Protocol):
-    """``Settings`` called with pydantic-settings' private ``_env_file`` argument."""
-
-    def __call__(self, *, _env_file: Path | None) -> Settings: ...
-
-
-#: The one call the loader makes, typed once rather than at each use.
-_load = cast("_SettingsFromDotenv", Settings)
+def _load_all(dotenv: Path | None) -> dict[type[BaseSettings], BaseSettings]:
+    """Load every service settings class from one dotenv file, or from none."""
+    return {
+        settings_cls: load_settings(settings_cls, env_file=dotenv)
+        for settings_cls in SERVICE_SETTINGS
+    }
 
 
 def _profile_result(
-    profile: list[list[str]], baseline: Settings, directory: Path, index: int
+    profile: list[list[str]],
+    baseline: dict[type[BaseSettings], BaseSettings],
+    directory: Path,
+    index: int,
 ) -> dict[str, object]:
     fields = setting_field_by_name()
     dotenv = directory / f"profile-{index}.env"
@@ -45,7 +50,7 @@ def _profile_result(
         encoding="utf-8",
     )
     try:
-        loaded = _load(_env_file=dotenv)
+        loaded = _load_all(dotenv)
     except ValidationError as exc:
         errors = exc.errors(include_input=False, include_url=False)
         return {"error": "; ".join(error["msg"] for error in errors), "lines": []}
@@ -54,17 +59,18 @@ def _profile_result(
         "lines": [
             {
                 "name": name,
-                "matches_default": getattr(loaded, fields[name])
-                == getattr(baseline, fields[name]),
+                "matches_default": getattr(loaded[owner], fields[name])
+                == getattr(baseline[owner], fields[name]),
             }
             for name, _value in profile
+            for owner in (declaring_class(fields[name]),)
         ],
     }
 
 
 def main() -> None:
     request = json.load(sys.stdin)
-    baseline = _load(_env_file=None)
+    baseline = _load_all(None)
     # The parent starts this process in a directory of the test's own, so the
     # profiles are written there rather than anywhere the session does not own.
     directory = Path.cwd()

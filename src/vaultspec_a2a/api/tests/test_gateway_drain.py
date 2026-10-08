@@ -11,8 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
@@ -24,23 +23,19 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ...control.drain import DrainGate
-from ...database import get_control_action_by_dispatch_id, get_thread
-from ...tests._checkpoint_seeding import real_checkpoint
-from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
-from ...thread.cancellation_evidence import CancellationEvidence
+from ...database import get_thread
+from ...testing import DEFAULT_TEAM_PRESET, async_run_start_body, serve_on_loopback
 from ...thread.enums import TERMINAL_STATUSES, ThreadStatus
 from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ..routes.gateway import admission_gate
-from .conftest import SessionFactory, async_catalog_run_fields, make_app
-from .test_gateway_live import _live_server
+from ._relay_events import RelayContext, relay_terminal
+from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-_PRESET = "mock-success-single"
 
 # Closed port: the IANA discard service is not listening on the loopback test
 # host, so a dispatch POST to it is refused by the real transport. The repo's
@@ -48,115 +43,24 @@ _PRESET = "mock-success-single"
 _UNREACHABLE_WORKER = "http://127.0.0.1:9"
 
 
-@dataclass(frozen=True, slots=True)
-class _RelayContext:
-    checkpointer: AsyncSqliteSaver
-    worker: Any
-    session_factory: SessionFactory
-
-
 _RUN_SEQ = itertools.count(1)
 
 
 async def _run_body(
     client: httpx.AsyncClient, *, run_id: str | None = None
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """One run-start body, carrying the selection run-start now requires.
 
     Takes an explicit *run_id* where a caller posts twice on purpose - a replay
     must send the SAME id and the same body to be a replay at all - and mints a
     fresh one otherwise, so two unrelated tests never collide on one run.
     """
-    return {
-        "team_preset": _PRESET,
-        "message": "build it",
-        "autonomous": True,
-        "actor_tokens": {"tokens": {"coder": "tok-coder"}, "engine_bearer": "bearer"},
-        "run_id": run_id or f"drain-{next(_RUN_SEQ):02d}",
-        **await async_catalog_run_fields(client),
-    }
-
-
-def _terminal_envelope(run_id: str, status: str = "completed") -> dict[str, Any]:
-    """The worker-IPC envelope carrying one run's terminal event."""
-    return {
-        "type": "event",
-        "thread_id": run_id,
-        "payload": {
-            "type": "thread_terminal",
-            "event_type": "thread_terminal",
-            "thread_id": run_id,
-            "status": status,
-        },
-    }
-
-
-async def _relay_terminal(
-    client: httpx.AsyncClient,
-    run_id: str,
-    relay: _RelayContext,
-    *,
-    status: str = "completed",
-) -> None:
-    """Deliver a run's terminal event over the real worker relay endpoint."""
-    checkpointer = relay.checkpointer
-    worker = relay.worker
-    session_factory = relay.session_factory
-    envelope = _terminal_envelope(run_id, status)
-    payload = envelope["payload"]
-    if status == "completed":
-        async with session_factory() as db:
-            thread = await get_thread(db, run_id)
-            assert thread is not None
-            action = await get_control_action_by_dispatch_id(
-                db,
-                thread_id=run_id,
-                dispatch_id=thread.writer_action_receipt_id,
-            )
-            assert action is not None and action.graph_receipt_json is not None
-            receipt = GraphActionReceipt.model_validate_json(action.graph_receipt_json)
-        config: RunnableConfig = {
-            "configurable": {"thread_id": run_id, "checkpoint_ns": ""}
-        }
-        checkpoint = await real_checkpoint()
-        checkpoint["id"] = f"cp-drain-{run_id}"
-        checkpoint["channel_values"] = {
-            "active_graph_action_receipt": receipt.model_dump(mode="json"),
-            "graph_action_receipts": {
-                receipt.dispatch_id: receipt.model_dump(mode="json")
-            },
-            "graph_completion_receipts": {
-                receipt.dispatch_id: GraphCompletionReceipt(
-                    schema_version="graph-completion-v1",
-                    action=receipt,
-                    outcome="completed",
-                ).model_dump(mode="json")
-            },
-        }
-        checkpoint["channel_versions"] = {
-            "active_graph_action_receipt": checkpointer.get_next_version(None, None),
-            "graph_action_receipts": checkpointer.get_next_version(None, None),
-            "graph_completion_receipts": checkpointer.get_next_version(None, None),
-        }
-        await checkpointer.aput(
-            config,
-            checkpoint,
-            {"source": "loop", "step": 1, "parents": {}},
-            checkpoint["channel_versions"],
-        )
-    elif status == "cancelled":
-        dispatch = next(
-            item
-            for item in reversed(worker.dispatches)
-            if item["thread_id"] == run_id and item["action"] == "cancel"
-        )
-        payload["cancellation_evidence"] = CancellationEvidence(
-            schema_version="cancellation-evidence-v1",
-            dispatch_id=str(dispatch["dispatch_id"]),
-            outcome="no_active_work",
-        ).model_dump(mode="json")
-    resp = await client.post("/internal/events", json=envelope)
-    assert resp.status_code == 200, resp.text
+    return await async_run_start_body(
+        client,
+        run_id or f"drain-{next(_RUN_SEQ):02d}",
+        team_preset=DEFAULT_TEAM_PRESET,
+        tokens={"coder": "tok-coder"},
+    )
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -165,7 +69,7 @@ async def test_run_start_admits_while_open_then_refuses_once_draining(
 ) -> None:
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         # Open gate: the run is admitted and dispatched.
@@ -257,7 +161,7 @@ async def test_unexpected_run_start_failure_releases_admission_and_drain_quiesce
     try:
         app, _agg, worker, _cp = make_app(factory, checkpointer)
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         ):
             resp = await client.post("/v1/runs", json=await _run_body(client))
@@ -287,7 +191,7 @@ async def test_client_run_id_replay_does_not_double_count_admission(
 ) -> None:
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         body = await _run_body(client, run_id="run-drain-replay")
@@ -309,7 +213,7 @@ async def test_normal_completion_releases_admission_and_drain_quiesces(
 
     The whole seam, live: a real gateway on a real socket starts and dispatches a
     run through the real run-start verb, then the worker's terminal event arrives
-    over the real ``/internal/events`` relay endpoint and travels the production
+    over the real ``/internal/events/batch`` relay endpoint and travels the production
     path (endpoint -> ``_relay_single_event`` -> ``relay_event`` ->
     ``_handle_terminal_event``). Real SQLite for the durable status write, real
     in-process dispatch receiver, no mock or monkeypatch anywhere.
@@ -318,9 +222,9 @@ async def test_normal_completion_releases_admission_and_drain_quiesces(
     run stays active for the life of the process and the gate can never quiesce.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
-    relay = _RelayContext(checkpointer, worker, session_factory)
+    relay = RelayContext(checkpointer, worker, session_factory)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         started = await client.post("/v1/runs", json=await _run_body(client))
@@ -338,7 +242,7 @@ async def test_normal_completion_releases_admission_and_drain_quiesces(
         assert not busy.quiescent, busy
         assert busy.active_runs == 1, busy
 
-        await _relay_terminal(client, run_id, relay)
+        await relay_terminal(client, run_id, relay)
 
         # The run left the active set on its terminal event.
         assert not gate.is_active(run_id)
@@ -368,7 +272,7 @@ async def test_ambiguous_start_dispatch_failure_keeps_admission(
     ) as unreachable:
         app.state.worker_client = unreachable
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         ):
             resp = await client.post(
@@ -411,10 +315,10 @@ async def test_a_queued_followup_keeps_the_live_run_admitted(
     worker for this to come back 202 at all.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
-    relay = _RelayContext(checkpointer, worker, session_factory)
+    relay = RelayContext(checkpointer, worker, session_factory)
     run_id = "run-drain-followup-failure"
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         started = await client.post(
@@ -454,12 +358,12 @@ async def test_a_queued_followup_keeps_the_live_run_admitted(
         # waiting turn is promoted and the run keeps its admission. A drain
         # that quiesced here would declare the run over one turn early.
         app.state.worker_client = worker.client
-        await _relay_terminal(client, run_id, relay)
+        await relay_terminal(client, run_id, relay)
         assert gate.is_active(run_id)
 
         # The last turn's terminal is the release, and the promotion left the
         # accounting intact enough to take it.
-        await _relay_terminal(client, run_id, relay)
+        await relay_terminal(client, run_id, relay)
         assert not gate.is_active(run_id)
         result = await gate.drain(timeout=1.0)
         assert result.quiescent and result.active_runs == 0, result
@@ -488,12 +392,12 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
     absorbs it with no coordination.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
-    relay = _RelayContext(checkpointer, worker, session_factory)
+    relay = RelayContext(checkpointer, worker, session_factory)
     cancelled_run = "run-drain-cancelled"
     repeated_run = "run-drain-repeated"
     survivor = "run-drain-survivor"
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         for run_id in (cancelled_run, repeated_run, survivor):
@@ -516,7 +420,7 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
         assert gate.active_run_count == 3
 
         # Its terminal event then releases it - and only it.
-        await _relay_terminal(
+        await relay_terminal(
             client,
             cancelled_run,
             relay,
@@ -527,9 +431,9 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
 
         # A repeated terminal event releases the same run twice; the second
         # delivery takes the already-terminal branch.
-        await _relay_terminal(client, repeated_run, relay)
+        await relay_terminal(client, repeated_run, relay)
         assert not gate.is_active(repeated_run)
-        await _relay_terminal(client, repeated_run, relay)
+        await relay_terminal(client, repeated_run, relay)
         assert not gate.is_active(repeated_run)
 
         # Exactly the two settled runs left; the survivor's accounting is intact.
@@ -542,6 +446,6 @@ async def test_cancel_and_terminal_events_for_one_run_do_not_corrupt_the_set(
         assert not not_yet.quiescent, not_yet
         assert not_yet.active_runs == 1, not_yet
 
-        await _relay_terminal(client, survivor, relay)
+        await relay_terminal(client, survivor, relay)
         result = await gate.drain(timeout=1.0)
         assert result.quiescent and result.active_runs == 0, result

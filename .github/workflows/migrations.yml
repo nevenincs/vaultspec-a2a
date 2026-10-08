@@ -67,6 +67,6 @@ jobs:
         env:
           MIGRATION_URL: sqlite+aiosqlite:///${{ runner.temp }}/migration-round-trip.db
         run: |
-          uv run --no-sync --frozen --no-default-groups --extra server --group tooling alembic -x sqlalchemy_url="$MIGRATION_URL" upgrade head
-          uv run --no-sync --frozen --no-default-groups --extra server --group tooling alembic -x sqlalchemy_url="$MIGRATION_URL" downgrade base
-          uv run --no-sync --frozen --no-default-groups --extra server --group tooling alembic -x sqlalchemy_url="$MIGRATION_URL" upgrade head
+          uv run --no-sync --frozen --no-default-groups --group tooling alembic -x sqlalchemy_url="$MIGRATION_URL" upgrade head
+          uv run --no-sync --frozen --no-default-groups --group tooling alembic -x sqlalchemy_url="$MIGRATION_URL" downgrade base
+          uv run --no-sync --frozen --no-default-groups --group tooling alembic -x sqlalchemy_url="$MIGRATION_URL" upgrade head

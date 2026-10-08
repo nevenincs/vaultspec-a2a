@@ -19,12 +19,27 @@ from weakref import WeakValueDictionary
 
 import aiosqlite
 
-from ..desktop._filesystem_authority import path_is_link_like
+from ..desktop._platform_acl import harden_credential_path
+from ..utils import is_real_directory, path_is_link_like
 from ._ids import derive_idempotency_key
-from ._journal_index import JournalIndex, closed_marker_name, journal_name
+from ._journal_index import (
+    JournalIndex,
+    closed_marker_name,
+    flush_directory,
+    is_unlinked_regular_file,
+    journal_name,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
+
+__all__ = [
+    "ToolCallJournal",
+    "private_tool_call_journal_path",
+    "retire_run_tool_calls",
+    "tool_call_journal_directories",
+    "tool_call_journal_path",
+]
 
 _OWNER_SCHEMA = (
     "CREATE TABLE IF NOT EXISTS owner ("
@@ -54,7 +69,7 @@ def private_tool_call_journal_path(run_id: str, call_scope: str) -> Path:
     from ..control.config import settings
 
     directory = settings.prepare_state_dir(settings.state_layout.authoring_calls_dir)
-    if path_is_link_like(directory) or not directory.is_dir():
+    if not is_real_directory(directory):
         raise ValueError("authoring journal directory is not a real directory")
     identity = derive_idempotency_key(json.dumps([run_id, call_scope]))
     path = directory / (identity.removeprefix("idk:") + ".db")
@@ -67,15 +82,13 @@ def private_tool_call_journal_path(run_id: str, call_scope: str) -> Path:
             raise ValueError(
                 "legacy shared replay state cannot authorize a private run"
             )
-    if os.path.lexists(path) and (
-        path_is_link_like(path) or not path.is_file() or path.stat().st_nlink != 1
-    ):
+    if os.path.lexists(path) and not is_unlinked_regular_file(path):
         raise ValueError("authoring journal must be an unlinked regular file")
     if os.name == "posix":
         metadata = directory.stat()
         if metadata.st_uid != os.getuid():
             raise ValueError("private authoring journal must be owned by the service")
-        directory.chmod(0o700)
+        harden_credential_path(directory)
     return path
 
 
@@ -120,11 +133,7 @@ def tool_call_journal_path(run_id: str, call_scope: str) -> Path:
         try:
             descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o660)
         except FileExistsError:
-            if (
-                path_is_link_like(path)
-                or not path.is_file()
-                or path.stat().st_nlink != 1
-            ):
+            if not is_unlinked_regular_file(path):
                 raise ValueError(
                     "authoring journal must be an unlinked regular file"
                 ) from None
@@ -162,7 +171,7 @@ async def retire_run_tool_calls(run_id: str, *, directory: Path | None = None) -
     for directory in directories:
         if not os.path.lexists(directory):
             continue
-        if path_is_link_like(directory) or not directory.is_dir():
+        if not is_real_directory(directory):
             raise ValueError("authoring journal directory is not a real directory")
         marker = _closed_run_marker(directory, run_id)
         try:
@@ -174,12 +183,7 @@ async def retire_run_tool_calls(run_id: str, *, directory: Path | None = None) -
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
-            if os.name == "posix":
-                directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
-                try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
+            flush_directory(directory)
         failures: list[Exception] = []
         index = JournalIndex(directory)
         for scope in await index.scopes(run_id):
@@ -254,11 +258,7 @@ class ToolCallJournal:
             ):
                 raise ValueError("authoring journal entry is not a file")
         else:
-            if (
-                path_is_link_like(self.path)
-                or not self.path.is_file()
-                or self.path.stat().st_nlink != 1
-            ):
+            if not is_unlinked_regular_file(self.path):
                 raise ValueError("authoring journal must be an unlinked regular file")
             async with (
                 aiosqlite.connect(self.path.as_uri() + "?mode=ro", uri=True) as db,
@@ -308,12 +308,7 @@ class ToolCallJournal:
                     if not (path_is_link_like(sidecar) or sidecar.is_file()):
                         raise ValueError("authoring journal sidecar is not a file")
                     sidecar.unlink()
-            if os.name == "posix":
-                directory_fd = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
-                try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
+            flush_directory(self.path.parent)
         finally:
             temporary.unlink(missing_ok=True)
 

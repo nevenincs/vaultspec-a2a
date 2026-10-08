@@ -8,8 +8,8 @@ import logging
 from typing import TypedDict, Unpack, cast
 
 from ..control.config import settings
-from ..utils.enums import AcpRequestId
-from ..utils.process import ProcessContainmentError
+from ..graph.enums import ProviderCondition
+from ..utils import AcpRequestId, ProcessContainmentError
 from ._acp_auth import (
     auth_hint,
     authenticate_rpc,
@@ -36,7 +36,7 @@ from ._claude_tool_policy import (
 )
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from .acp_exceptions import AcpErrorCode, AcpSessionError
-from .conditions import ProviderCondition, condition_from_acp_error
+from .conditions import condition_from_acp_error
 
 __all__: list[str] = []
 

@@ -8,24 +8,25 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
-import pytest_asyncio
-from langchain_core.language_models.fake_chat_models import (
-    FakeChatModel,
-    FakeListChatModel,
-)
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
+from langchain_core.callbacks import AsyncCallbackHandler
+from langgraph.graph import END, START
 from langgraph.types import RetryPolicy
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import Callable
+    from uuid import UUID
 
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.messages import BaseMessage
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from ...thread.state import TeamState
     from ..protocols import ProviderFactoryProtocol
 
 from ...control.config import settings
-from ...database.tests._backends import migrated_session_factory
-from ...graph.enums import Provider
-from ...providers import AcpPromptError, ProviderCondition
+from ...graph.enums import Provider, ProviderCondition
+from ...providers import AcpPromptError
 from ...providers._codex_protocol import _turn_failure
 from ...providers.cli_resolution import (
     ProviderRuntimeUnavailableError,
@@ -33,9 +34,11 @@ from ...providers.cli_resolution import (
 )
 from ...providers.conditions import condition_from_acp_error, condition_is_retryable
 from ...providers.factory import ProviderFactory
+from ...providers.team_selection import FrozenLaneAssignment, FrozenNativeControl
 from ...team.team_config import (
     TeamConfig,
     TeamGraphConfig,
+    TeamHarnessConfig,
     TopologyConfig,
     TopologyType,
     WorkerRef,
@@ -43,15 +46,23 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    deterministic_model_assignment,
+    frozen_deterministic_selection,
+    new_state_graph,
+)
 from ...thread.errors import (
     ConfigError,
     DocumentConformanceError,
     WorkerExecutionError,
 )
-from ...thread.state import TeamState
+from ...worker.authoring_binding import AuthoringBindingProvider
+from ...worker.catalog_store import RunCatalogStore
 from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
+from ...worker.token_store import RunTokenStore
 from .._compiler_models import (
-    parse_catalog_preferences,
     resolve_model_for_worker,
     resolve_supervisor_model,
 )
@@ -66,21 +77,10 @@ from .._compiler_retry import (
 )
 from ..compiler import (
     STEP_BACKSTOP_GRACE_SECONDS,
-    _loop_route,
     _route_from_supervisor,
     compile_team_graph,
 )
-from ._state_graph_helpers import add_test_node, compile_test_graph
-from .conftest import deterministic_model_assignment
-
-
-@pytest_asyncio.fixture
-async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
-    """Provide an in-memory SQLite checkpointer for tests."""
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        yield saver
-
+from ..nodes.phase_gate import revision_granted
 
 # ---------------------------------------------------------------------------
 # Parametrized compilation (C7 rewrite)
@@ -95,8 +95,8 @@ def _make_team(
 ) -> TeamConfig:
     """Build a TeamConfig inline from real models for topology coverage.
 
-    The multi-role coder presets that used to carry the star, pipeline, and
-    pipeline_loop topologies were retired; this constructs an equivalent config
+    No bundled multi-role coder preset carries the star, pipeline, or
+    pipeline_loop topologies; this constructs an equivalent config
     directly so the real ``compile_team_graph`` paths for those topologies stay
     exercised without depending on a bundled preset.
     """
@@ -118,6 +118,49 @@ def _pipeline_team() -> TeamConfig:
     )
 
 
+class _ObservedFactory:
+    """The real provider factory, with every request it receives recorded.
+
+    A model named in *unavailable* is refused the way a lane whose runtime has
+    gone away refuses, so the frozen fallback chain can be driven through the
+    factory a run really uses.
+    """
+
+    def __init__(self, *, unavailable: frozenset[str] = frozenset()) -> None:
+        self._factory = ProviderFactory()
+        self._unavailable = unavailable
+        self.calls: list[dict[str, Any]] = []
+
+    def create(
+        self,
+        provider: Any,
+        *,
+        model: Any,
+        agent_config: Any | None = None,
+        workspace_root: Any | None = None,
+        **kwargs: Any,
+    ) -> BaseChatModel:
+        self.calls.append(
+            {
+                "provider": provider,
+                "model": model,
+                "agent_config": agent_config,
+                "workspace_root": workspace_root,
+            }
+        )
+        if model in self._unavailable:
+            raise ProviderRuntimeUnavailableError(
+                "current lane is temporarily unavailable"
+            )
+        return self._factory.create(
+            provider,
+            model=model,
+            agent_config=agent_config,
+            workspace_root=workspace_root,
+            **kwargs,
+        )
+
+
 # (preset, topology, expected_worker_nodes, has_supervisor)
 _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
     ("vaultspec-solo-coder", "pipeline", {"vaultspec-coder"}, False),
@@ -134,7 +177,7 @@ async def test_compile_graph_structure(
     checkpointer: AsyncSqliteSaver,
     pf: ProviderFactoryProtocol,
     case: tuple[str, str, set[str], bool],
-    tmp_path: Path,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A non-research graph compiles with the concrete runtime identity port."""
     preset, topology, expected_workers, has_supervisor = case
@@ -144,16 +187,15 @@ async def test_compile_graph_structure(
         load_agent_config("vaultspec-supervisor") if has_supervisor else None
     )
 
-    async with migrated_session_factory("sqlite", tmp_path) as (_target, factory):
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=checkpointer,
-            supervisor_agent_config=supervisor_cfg,
-            provider_factory=pf,
-            model_assignment=deterministic_model_assignment(team),
-            runtime_identity_port=SqlRuntimeIdentityPort(factory),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        supervisor_agent_config=supervisor_cfg,
+        provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
+        runtime_identity_port=SqlRuntimeIdentityPort(migrated_session_factory),
+    )
 
     assert team.topology.type == topology
 
@@ -192,43 +234,13 @@ def test_valid_frozen_fallback_runs_only_after_runtime_unavailability() -> None:
     worker = team.workers[0]
     agent = load_agent_config(worker.agent_id)
 
-    class RuntimeFailingFactory:
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-
-        def create(
-            self, provider: Any, *, model: str, **kwargs: Any
-        ) -> FakeListChatModel:
-            self.calls.append(model)
-            if model == "primary":
-                raise ProviderRuntimeUnavailableError(
-                    "current lane is temporarily unavailable"
-                )
-            return FakeListChatModel(responses=["ok"])
-
-    factory = RuntimeFailingFactory()
-    lane: dict[str, Any] = {
-        "schema_version": 1,
-        "provider": "codex",
-        "execution_mode": "codex-app-server",
-        "catalog_revision": "rev",
-        "entry_id": "primary",
-        "model_name": "primary",
-        "controls": [],
-        "provenance": {"selection_source": "team_selection"},
-        "fallbacks": [
-            {
-                "schema_version": 1,
-                "provider_id": "codex",
-                "execution_mode": "codex-app-server",
-                "catalog_revision": "rev",
-                "entry_id": "fallback",
-                "model_name": "fallback",
-                "controls": [],
-                "defaulted_control_ids": [],
-            }
-        ],
-    }
+    factory = _ObservedFactory(unavailable=frozenset({"primary"}))
+    roles = (worker.agent_id,)
+    primary = frozen_deterministic_selection(roles, model_value="primary")
+    fallback = frozen_deterministic_selection(roles, model_value="fallback")
+    lane = primary.compiler_map()[worker.agent_id].model_copy(
+        update={"fallbacks": (fallback.selection,)}
+    )
     _model, provider, model_name = resolve_model_for_worker(
         worker,
         agent,
@@ -236,8 +248,8 @@ def test_valid_frozen_fallback_runs_only_after_runtime_unavailability() -> None:
         provider_factory=factory,
         frozen_assignment={worker.agent_id: lane},
     )
-    assert factory.calls == ["primary", "fallback"]
-    assert provider is Provider.CODEX
+    assert [call["model"] for call in factory.calls] == ["primary", "fallback"]
+    assert provider is Provider.DETERMINISTIC
     assert model_name == "fallback"
 
 
@@ -260,17 +272,19 @@ def test_frozen_external_assignment_refuses_without_current_proof(
     team = load_team_config("vaultspec-solo-coder")
     worker = team.workers[0]
     agent = load_agent_config(worker.agent_id)
-    frozen: dict[str, Any] = {
-        "schema_version": 1,
-        "provider": provider.value,
-        "execution_mode": execution_mode,
-        "catalog_revision": "frozen-revision",
-        "entry_id": "frozen-entry",
-        "model_name": "frozen-model",
-        "controls": [],
-        "provenance": {"selection_source": "team_selection"},
-        "fallbacks": [],
-    }
+    frozen = FrozenLaneAssignment.model_validate(
+        {
+            "schema_version": 1,
+            "provider_id": provider.value,
+            "execution_mode": execution_mode,
+            "catalog_revision": "frozen-revision",
+            "entry_id": "frozen-entry",
+            "model_name": "frozen-model",
+            "controls": [],
+            "defaulted_control_ids": [],
+            "provenance": {"selection_source": "team_selection"},
+        }
+    )
 
     with pytest.raises(ValueError, match="All frozen provider lanes exhausted") as exc:
         resolve_model_for_worker(
@@ -289,17 +303,19 @@ def test_frozen_external_assignment_refuses_without_current_proof(
 
 
 def test_frozen_supervisor_refuses_without_current_proof() -> None:
-    frozen: dict[str, Any] = {
-        "schema_version": 1,
-        "provider": Provider.CLAUDE.value,
-        "execution_mode": f"claude-agent-acp:{settings.acp_backend}",
-        "catalog_revision": "frozen-revision",
-        "entry_id": "frozen-entry",
-        "model_name": "frozen-model",
-        "controls": [],
-        "provenance": {"selection_source": "team_selection"},
-        "fallbacks": [],
-    }
+    frozen = FrozenLaneAssignment.model_validate(
+        {
+            "schema_version": 1,
+            "provider_id": Provider.CLAUDE.value,
+            "execution_mode": f"claude-agent-acp:{settings.acp_backend}",
+            "catalog_revision": "frozen-revision",
+            "entry_id": "frozen-entry",
+            "model_name": "frozen-model",
+            "controls": [],
+            "defaulted_control_ids": [],
+            "provenance": {"selection_source": "team_selection"},
+        }
+    )
 
     with pytest.raises(ProviderRuntimeUnavailableError) as refusal:
         resolve_supervisor_model(
@@ -315,38 +331,32 @@ def test_impossible_frozen_fallback_refuses_before_primary_provider_contact() ->
     worker = team.workers[0]
     agent = load_agent_config(worker.agent_id)
 
-    class RecordingFactory:
-        calls = 0
-
-        def create(
-            self, provider: Any, *, model: str, **kwargs: Any
-        ) -> FakeListChatModel:
-            self.calls += 1
-            return FakeListChatModel(responses=["must not run"])
-
-    factory = RecordingFactory()
-    lane: dict[str, Any] = {
-        "schema_version": 1,
-        "provider": "codex",
-        "execution_mode": "codex-app-server",
-        "catalog_revision": "rev",
-        "entry_id": "primary",
-        "model_name": "primary",
-        "controls": [],
-        "provenance": {"selection_source": "team_selection"},
-        "fallbacks": [
-            {
-                "schema_version": 1,
-                "provider_id": "claude",
-                "execution_mode": "codex-app-server",
-                "catalog_revision": "rev",
-                "entry_id": "bad",
-                "model_name": "bad",
-                "controls": [],
-                "defaulted_control_ids": [],
-            }
-        ],
-    }
+    factory = _ObservedFactory()
+    lane = FrozenLaneAssignment.model_validate(
+        {
+            "schema_version": 1,
+            "provider_id": "codex",
+            "execution_mode": "codex-app-server",
+            "catalog_revision": "rev",
+            "entry_id": "primary",
+            "model_name": "primary",
+            "controls": [],
+            "defaulted_control_ids": [],
+            "provenance": {"selection_source": "team_selection"},
+            "fallbacks": [
+                {
+                    "schema_version": 1,
+                    "provider_id": "claude",
+                    "execution_mode": "codex-app-server",
+                    "catalog_revision": "rev",
+                    "entry_id": "bad",
+                    "model_name": "bad",
+                    "controls": [],
+                    "defaulted_control_ids": [],
+                }
+            ],
+        }
+    )
     with pytest.raises(ValueError, match="cannot execute mode"):
         resolve_model_for_worker(
             worker,
@@ -355,7 +365,7 @@ def test_impossible_frozen_fallback_refuses_before_primary_provider_contact() ->
             provider_factory=factory,
             frozen_assignment={worker.agent_id: lane},
         )
-    assert factory.calls == 0
+    assert factory.calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -411,19 +421,12 @@ async def test_compile_prevalidates_all_roles_before_any_provider_contact(
     team = _pipeline_team()
     agents = {ref.agent_id: load_agent_config(ref.agent_id) for ref in team.workers}
     assignment = deterministic_model_assignment(team)
-    assignment[team.workers[-1].agent_id]["execution_mode"] = "codex-app-server"
+    last = team.workers[-1].agent_id
+    assignment[last] = assignment[last].model_copy(
+        update={"execution_mode": "codex-app-server"}
+    )
 
-    class RecordingFactory:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def create(
-            self, provider: Any, *, model: str, **kwargs: Any
-        ) -> FakeListChatModel:
-            self.calls += 1
-            return FakeListChatModel(responses=["must not run"])
-
-    factory = RecordingFactory()
+    factory = _ObservedFactory()
     with pytest.raises(ValueError, match="cannot execute mode"):
         compile_team_graph(
             team_config=team,
@@ -432,7 +435,7 @@ async def test_compile_prevalidates_all_roles_before_any_provider_contact(
             provider_factory=factory,
             model_assignment=assignment,
         )
-    assert factory.calls == 0
+    assert factory.calls == []
 
 
 @pytest.mark.asyncio
@@ -443,17 +446,21 @@ async def test_compile_refuses_invalid_controls_before_any_provider_contact(
     team = _pipeline_team()
     agents = {ref.agent_id: load_agent_config(ref.agent_id) for ref in team.workers}
     assignment = deterministic_model_assignment(team)
-    first = assignment[team.workers[0].agent_id]
+    first = team.workers[0].agent_id
+    unsupported = (
+        FrozenNativeControl(
+            control_id="unsupported", option_id="x", provider_value="x"
+        ),
+    )
     if location == "primary":
-        first["controls"] = [
-            {"control_id": "unsupported", "option_id": "x", "provider_value": "x"}
-        ]
+        assignment[first] = assignment[first].model_copy(
+            update={"controls": unsupported}
+        )
     elif location == "later_role":
-        assignment[team.workers[-1].agent_id]["controls"] = [
-            {"control_id": "unsupported", "option_id": "x", "provider_value": "x"}
-        ]
+        last = team.workers[-1].agent_id
+        assignment[last] = assignment[last].model_copy(update={"controls": unsupported})
     else:
-        first["fallbacks"] = [
+        duplicate_effort = FrozenLaneAssignment.model_validate(
             {
                 "schema_version": 1,
                 "provider_id": "codex",
@@ -475,19 +482,12 @@ async def test_compile_refuses_invalid_controls_before_any_provider_contact(
                 ],
                 "defaulted_control_ids": [],
             }
-        ]
+        )
+        assignment[first] = assignment[first].model_copy(
+            update={"fallbacks": (duplicate_effort,)}
+        )
 
-    class RecordingFactory:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def create(
-            self, provider: Any, *, model: str, **kwargs: Any
-        ) -> FakeListChatModel:
-            self.calls += 1
-            return FakeListChatModel(responses=["must not run"])
-
-    factory = RecordingFactory()
+    factory = _ObservedFactory()
     with pytest.raises(ValueError, match=r"native.?control"):
         compile_team_graph(
             team_config=team,
@@ -496,7 +496,41 @@ async def test_compile_refuses_invalid_controls_before_any_provider_contact(
             provider_factory=factory,
             model_assignment=assignment,
         )
-    assert factory.calls == 0
+    assert factory.calls == []
+
+
+@pytest.mark.asyncio
+async def test_compile_refuses_an_authoring_bridge_with_no_attach_surface(
+    checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """A harness-armed preset on a lane with no attach surface refuses at compile.
+
+    The deterministic lane exposes neither ``with_mcp_servers`` nor
+    ``with_authoring_mcp_server`` - only the ACP and Codex lanes do - so an
+    ``authoring_bridge`` preset resolving to it must be refused before the run
+    starts, with the same served ``ConfigError`` text the per-turn attach
+    raises, rather than one turn later inside the run (R5 test obligation #8).
+    """
+    team = _pipeline_team().model_copy(
+        update={"harness": TeamHarnessConfig(authoring_bridge=True)}
+    )
+    agents = {ref.agent_id: load_agent_config(ref.agent_id) for ref in team.workers}
+    provider = AuthoringBindingProvider(
+        engine_base_url="http://127.0.0.1:1",
+        token_store=RunTokenStore(),
+        catalog_store=RunCatalogStore(),
+    )
+
+    with pytest.raises(ConfigError, match="no authoring attachment surface"):
+        compile_team_graph(
+            team_config=team,
+            agent_configs=agents,
+            checkpointer=checkpointer,
+            provider_factory=pf,
+            model_assignment=deterministic_model_assignment(team),
+            authoring_binding_provider=provider,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -687,30 +721,27 @@ async def test_compile_pipeline_empty_order_raises(
         )
 
 
-def test_loop_route_follows_the_loop_verdict_under_the_guard() -> None:
-    """The real ``_loop_route`` decision, exercised directly (not compile-only).
+def test_revision_granted_follows_the_verdict_under_the_budget() -> None:
+    """The one review-budget rule, exercised directly (not compile-only).
 
-    The loop goes round again only when the loop node's own verdict asks for
-    revision, and the max_loops guard forces FINISH once the counter reaches
-    the ceiling whatever the verdict says.
+    A review loop goes round again only when its reviewer's verdict asks for
+    revision, and a spent budget ends it whatever the verdict says.
     """
     # A verdict that asks for nothing more ends the loop early.
-    assert _loop_route(revision_requested=False, loop_count=0, max_loops=3) == (
-        "FINISH"
-    )
-    assert _loop_route(revision_requested=False, loop_count=2, max_loops=3) == (
-        "FINISH"
-    )
-    # A revision request sends the loop round again while below the guard.
-    assert _loop_route(revision_requested=True, loop_count=0, max_loops=3) == ("revise")
-    assert _loop_route(revision_requested=True, loop_count=2, max_loops=3) == ("revise")
-    # The guard wins over any verdict once the ceiling is reached.
-    assert _loop_route(revision_requested=True, loop_count=3, max_loops=3) == ("FINISH")
-    assert _loop_route(revision_requested=True, loop_count=4, max_loops=3) == ("FINISH")
+    assert not revision_granted(revision_requested=False, spent=0, budget=2)
+    assert not revision_granted(revision_requested=False, spent=2, budget=2)
+    # A revision request sends the loop round again while the budget lasts.
+    assert revision_granted(revision_requested=True, spent=0, budget=2)
+    assert revision_granted(revision_requested=True, spent=2, budget=2)
+    # The budget wins over any verdict once it is spent.
+    assert not revision_granted(revision_requested=True, spent=3, budget=2)
+    assert not revision_granted(revision_requested=True, spent=4, budget=2)
+    # A zero budget refuses even the first revision asked for.
+    assert not revision_granted(revision_requested=True, spent=1, budget=0)
 
 
 # ---------------------------------------------------------------------------
-# T01 -- star topology conditional edge with missing 'next' field
+# Star topology conditional edge with missing 'next' field
 # ---------------------------------------------------------------------------
 
 
@@ -757,7 +788,7 @@ def test_route_from_supervisor_honors_approval_then_the_next_decision() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T05 -- _worker_retry_on predicate
+# _worker_retry_on predicate
 # ---------------------------------------------------------------------------
 
 
@@ -808,25 +839,25 @@ def test_worker_retry_on_worker_error_with_runtime_cause_not_retried() -> None:
 
 
 # ---------------------------------------------------------------------------
-# T11 -- step_timeout wired to compiled graph
+# step_timeout wired to compiled graph
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_compile_team_graph_step_timeout_set(pf: ProviderFactoryProtocol) -> None:
+async def test_compile_team_graph_step_timeout_set(
+    pf: ProviderFactoryProtocol, checkpointer: AsyncSqliteSaver
+) -> None:
     """The step budget caps every node, and the graph backstop sits above it."""
     team = _pipeline_team()
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=cp,
-            step_timeout=42.0,
-            provider_factory=pf,
-            model_assignment=deterministic_model_assignment(team),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        step_timeout=42.0,
+        provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
+    )
     assert _node_run_timeouts(graph) == {42.0}
     # The backstop covers the RETRY budget, not one attempt of it: every
     # attempt gets the whole per-node budget and the loop waits between them.
@@ -840,21 +871,20 @@ async def test_compile_team_graph_step_timeout_set(pf: ProviderFactoryProtocol) 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_compile_team_graph_step_timeout_falls_back_to_toml(
     pf: ProviderFactoryProtocol,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """When step_timeout=None, the team TOML step_timeout_seconds is used."""
     team = load_team_config("vaultspec-solo-coder")
     assert team.graph.step_timeout_seconds == 120
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=cp,
-            step_timeout=None,
-            provider_factory=pf,
-            model_assignment=deterministic_model_assignment(team),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        step_timeout=None,
+        provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
+    )
     assert _node_run_timeouts(graph) == {120.0}
     assert graph.step_timeout == (
         node_occupancy_ceiling(120.0) + STEP_BACKSTOP_GRACE_SECONDS
@@ -864,6 +894,7 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml(
 @pytest.mark.asyncio(loop_scope="function")
 async def test_a_compiled_graph_is_named_for_the_team_it_came_from(
     pf: ProviderFactoryProtocol,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Every compiled graph says which team produced it.
 
@@ -873,44 +904,41 @@ async def test_a_compiled_graph_is_named_for_the_team_it_came_from(
     """
     team = load_team_config("vaultspec-solo-coder")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=cp,
-            provider_factory=pf,
-            model_assignment=deterministic_model_assignment(team),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
+    )
     assert graph.name == "vaultspec-solo-coder"
 
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_the_superstep_backstop_covers_every_attempt_a_node_may_make(
     pf: ProviderFactoryProtocol,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The graph bound cannot cut a node's own retries short.
 
     Every attempt gets the whole per-node run budget and the loop waits
     between attempts, so the backstop has to cover the budget times the
-    attempts plus those waits. It used to be one budget plus a fixed grace: a
-    node that spent its budget on the first attempt had the grace - about
-    thirty seconds - for the two more it was configured for, so the graph
-    bound fired first and reported an anonymous step timeout.
+    attempts plus those waits. One budget plus a fixed grace would fail this: a
+    node that spent its budget on the first attempt would have the grace - about
+    thirty seconds - for the two more it is configured for, so the graph
+    bound would fire first and report an anonymous step timeout.
     """
     team = load_team_config("vaultspec-solo-coder")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     budget = 90.0
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=cp,
-            step_timeout=budget,
-            provider_factory=pf,
-            model_assignment=deterministic_model_assignment(team),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        step_timeout=budget,
+        provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
+    )
 
     attempts = _NODE_RETRY_POLICY.max_attempts
     assert _node_run_timeouts(graph) == {budget}
@@ -993,34 +1021,10 @@ async def test_compile_team_graph_passes_supervisor_agent_config_to_provider_fac
     checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Supervisor model resolution must preserve the supervisor agent identity."""
-
-    class _RecordingProviderFactory:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, object]] = []
-
-        def create(
-            self,
-            provider: object,
-            *,
-            model: object | None = None,
-            agent_config: object | None = None,
-            workspace_root: object | None = None,
-            **kwargs: object,
-        ) -> FakeChatModel:
-            self.calls.append(
-                {
-                    "provider": provider,
-                    "model": model,
-                    "agent_config": agent_config,
-                    "workspace_root": workspace_root,
-                }
-            )
-            return FakeChatModel()
-
-    team = load_team_config("mock-supervisor-human-in-loop")
+    team = load_team_config("deterministic-supervisor-routing")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     supervisor_cfg = load_agent_config("vaultspec-supervisor")
-    factory = _RecordingProviderFactory()
+    factory = _ObservedFactory()
 
     graph = compile_team_graph(
         team_config=team,
@@ -1038,6 +1042,7 @@ async def test_compile_team_graph_passes_supervisor_agent_config_to_provider_fac
 @pytest.mark.asyncio(loop_scope="function")
 async def test_compile_team_graph_does_not_set_recursion_limit(
     pf: ProviderFactoryProtocol,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """compile_team_graph leaves recursion_limit at LangGraph default.
 
@@ -1047,26 +1052,22 @@ async def test_compile_team_graph_does_not_set_recursion_limit(
     team = load_team_config("vaultspec-solo-coder")
     assert team.graph.recursion_limit == 10
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=cp,
-            provider_factory=pf,
-            model_assignment=deterministic_model_assignment(team),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        model_assignment=deterministic_model_assignment(team),
+    )
     # recursion_limit is passed at runtime via config, not set on graph.
     assert not hasattr(graph, "recursion_limit")
 
 
 def test_catalog_preferences_preserve_exact_mode_model_and_controls() -> None:
-    from ...graph.enums import Provider
-
-    provider, model_name, execution_mode, controls = parse_catalog_preferences(
+    lane = FrozenLaneAssignment.model_validate(
         {
             "schema_version": 1,
-            "provider": "codex",
+            "provider_id": "codex",
             "execution_mode": "codex-app-server",
             "catalog_revision": "rev",
             "entry_id": "entry",
@@ -1078,18 +1079,18 @@ def test_catalog_preferences_preserve_exact_mode_model_and_controls() -> None:
                     "provider_value": "brief",
                 }
             ],
-            "fallbacks": [],
+            "defaulted_control_ids": [],
             "provenance": {"selection_source": "team_selection"},
         }
     )
-    assert provider == Provider.CODEX
-    assert model_name == "provider-model"
-    assert execution_mode == "codex-app-server"
-    assert controls == {"reasoning_effort:entry": "brief"}
+    assert lane.provider_id is Provider.CODEX
+    assert lane.model_name == "provider-model"
+    assert lane.execution_mode == "codex-app-server"
+    assert lane.native_controls() == {"reasoning_effort:entry": "brief"}
 
 
 # ---------------------------------------------------------------------------
-# T15 -- GraphRecursionError excluded from retry
+# GraphRecursionError excluded from retry
 # ---------------------------------------------------------------------------
 
 
@@ -1218,7 +1219,7 @@ def _counting_failure_graph(
             worker="coder", model="acp:test", message_count=1, cause=cause
         ) from cause
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, "coder", failing_node, retry_policy=policy)
     builder.add_edge(START, "coder")
     builder.add_edge("coder", END)
@@ -1400,7 +1401,7 @@ async def test_every_model_backed_node_carries_the_production_retry_policy(
         ),
         worker_ids=["vaultspec-plan-author", "vaultspec-coder"],
     )
-    research_adr = load_team_config("vaultspec-adr-research-mock")
+    research_adr = load_team_config("vaultspec-adr-research-deterministic")
 
     cases: list[tuple[str, Any, dict[str, Any]]] = [
         ("pipeline", _pipeline_team(), {}),
@@ -1438,8 +1439,27 @@ async def test_every_model_backed_node_carries_the_production_retry_policy(
         )
 
 
+class _TurnRecorder(AsyncCallbackHandler):
+    """Records the exact message list of every chat-model turn it observes."""
+
+    def __init__(self) -> None:
+        self.turns: list[list[BaseMessage]] = []
+
+    @override
+    async def on_chat_model_start(
+        self,
+        serialized: dict[str, Any],
+        messages: list[list[BaseMessage]],
+        *,
+        run_id: UUID,
+        **kwargs: Any,
+    ) -> None:
+        del serialized, run_id, kwargs
+        self.turns.extend(list(batch) for batch in messages)
+
+
 @pytest.mark.asyncio
-async def test_research_producer_injects_scoped_conventions(tmp_path: Any) -> None:
+async def test_research_producer_injects_scoped_conventions(tmp_path: Path) -> None:
     """The researcher's model turn receives the role-scoped bundled conventions.
 
     The researcher is the fourth research_adr document persona but runs through
@@ -1447,31 +1467,17 @@ async def test_research_producer_injects_scoped_conventions(tmp_path: Any) -> No
     behavior that wires the scoped document-authoring conventions into its turn so
     it is not conventions-blind.
     """
-    from typing import cast
-
-    from langchain_core.messages import AIMessage, BaseMessage
-    from langchain_core.outputs import ChatGeneration, ChatResult
-
-    captured: dict[str, list[BaseMessage]] = {}
-
-    class _RecordingModel(FakeChatModel):
-        @override
-        async def _agenerate(
-            self,
-            messages: Any,
-            stop: Any = None,
-            run_manager: Any = None,
-            **kwargs: Any,
-        ) -> ChatResult:
-            captured["messages"] = list(messages)
-            return ChatResult(
-                generations=[ChatGeneration(message=AIMessage(content="finding"))]
-            )
+    recorder = _TurnRecorder()
+    model = ProviderFactory().create(
+        Provider.DETERMINISTIC,
+        model="deterministic",
+        agent_config=load_agent_config("vaultspec-researcher"),
+    )
 
     # A bare tmp workspace with no .vaultspec rules: the scoped conventions can
     # only arrive from the shipped bundled default.
     producer = _make_research_producer(
-        cast("Any", _RecordingModel()),
+        model.model_copy(update={"callbacks": [recorder]}),
         "RESEARCHER SYSTEM PROMPT",
         workspace_root=tmp_path,
     )
@@ -1480,7 +1486,8 @@ async def test_research_producer_injects_scoped_conventions(tmp_path: Any) -> No
         {"thread_id": "t", "topic": "x", "instructions": "y"},
     )
 
-    texts = "\n".join(str(m.content) for m in captured["messages"])
+    assert len(recorder.turns) == 1
+    texts = "\n".join(str(m.content) for m in recorder.turns[0])
     assert "RESEARCHER SYSTEM PROMPT" in texts
     # A stable heading from the bundled document-authoring conventions.
     assert "Emission mechanics" in texts

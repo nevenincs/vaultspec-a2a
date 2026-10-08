@@ -21,6 +21,7 @@ import tomllib
 from enum import StrEnum
 from importlib import resources
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -35,19 +36,15 @@ from ..thread.clarification import (
     ClarificationRequest,
     topology_honours_clarification,
 )
+from ..thread.constants import ROLE_ID_PATTERN
 from ..thread.errors import (
     AgentConfigNotFoundError,
     ConfigError,
     TeamConfigNotFoundError,
 )
 
-# Safe agent_id pattern — alphanumeric, underscores, hyphens only.
-# Prevents path traversal attacks via crafted agent_id values (e.g. "../../etc").
-# Must be a valid Python identifier (validated in
-# AgentConfig.validate_id_is_identifier), but this pattern adds an explicit
-# safeguard for use in load_agent_config.
-_SAFE_AGENT_ID_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_\-]{0,62}$")
-
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "DEFAULT_AUTHORING_SURFACES",
@@ -68,7 +65,6 @@ __all__ = [
     "WorkerRef",
     "authoring_capability",
     "discover_team_preset_ids",
-    "is_mock_preset",
     "load_agent_config",
     "load_team_config",
     "supported_capabilities",
@@ -100,6 +96,11 @@ class TopologyType(StrEnum):
     PIPELINE_LOOP = "pipeline_loop"
     RESEARCH_ADR = "research_adr"
 
+    @property
+    def requires_supervisor(self) -> bool:
+        """Whether a graph of this topology is compiled around a supervisor agent."""
+        return self in (TopologyType.STAR, TopologyType.PIPELINE_LOOP)
+
 
 # Bundled preset directories, resolved from the installed ``vaultspec_a2a.team``
 # package rather than a checkout-relative ``__file__`` path, so preset discovery
@@ -129,16 +130,6 @@ def discover_team_preset_ids(workspace_root: Path | None = None) -> frozenset[st
     if _PRESET_TEAMS_DIR.is_dir():
         ids.update(p.stem for p in _PRESET_TEAMS_DIR.glob("*.toml"))
     return frozenset(ids)
-
-
-def is_mock_preset(preset_id: str) -> bool:
-    """Return whether a preset id follows the source-side mock convention.
-
-    Source and Compose discovery may include these certification presets. The
-    desktop product wheel excludes them at packaging time; this helper remains
-    useful to source-side callers that need to label the wider inventory.
-    """
-    return preset_id.startswith("mock-")
 
 
 class AuthoringCapability(StrEnum):
@@ -179,7 +170,10 @@ class DocumentCapability(StrEnum):
     PLAN_DOCUMENT = "plan_document"
 
 
-def authoring_capability(team_config: "TeamConfig") -> AuthoringCapability:
+def authoring_capability(
+    team_config: "TeamConfig",
+    agents: "Mapping[str, AgentConfig] | None" = None,
+) -> AuthoringCapability:
     """Return the coarse authoring capability a preset delivers.
 
     Keyed on the DECLARED ROLES of the preset's workers, not on its topology. A
@@ -201,20 +195,31 @@ def authoring_capability(team_config: "TeamConfig") -> AuthoringCapability:
     the symptom of one key answering both questions, and answering one of them
     wrongly.
 
-    Fails closed toward ``coding``: a worker whose agent config cannot be loaded
-    is skipped rather than raised on, matching the role-based predicate the
-    run-status projection already uses. A preset that is entirely unloadable
-    never reaches this function - the listing reports it ``loadable=False`` with
-    no descriptive fields at all - so the fail-closed path here covers only the
-    narrower case of one bad agent reference inside an otherwise valid preset.
-    The consequence is an understatement (``coding`` for a preset that may
-    author), never a false authoring claim.
+    *agents* maps worker ids to their agent configs. A run's frozen definition
+    passes the agents it was accepted with, so the answer is the one the run
+    executes under and no config file is read; left out, each worker's bundled
+    config is loaded.
+
+    Fails closed toward ``coding``: a worker whose agent config cannot be loaded,
+    or that *agents* does not carry, is skipped rather than raised on, so the
+    run-status completion check never breaks a read over a config problem. A
+    preset that is entirely unloadable never reaches this function - the listing
+    reports it ``loadable=False`` with no descriptive fields at all - so the
+    fail-closed path here covers only the narrower case of one bad agent
+    reference inside an otherwise valid preset. The consequence is an
+    understatement (``coding`` for a preset that may author), never a false
+    authoring claim.
     """
     for worker in team_config.workers:
-        try:
-            agent_config = load_agent_config(worker.agent_id)
-        except (ConfigError, ValidationError):
-            continue
+        if agents is None:
+            try:
+                agent_config = load_agent_config(worker.agent_id)
+            except (ConfigError, ValidationError):
+                continue
+        else:
+            agent_config = agents.get(worker.agent_id)
+            if agent_config is None:
+                continue
         if is_document_authoring_role(agent_config.role):
             return AuthoringCapability.DOCUMENT_AUTHORING
     return AuthoringCapability.CODING
@@ -320,11 +325,11 @@ class AgentConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_id_is_identifier(self) -> "AgentConfig":
-        """Ensure agent.id matches _SAFE_AGENT_ID_RE."""
-        if not _SAFE_AGENT_ID_RE.match(self.id):
+        """Ensure agent.id matches the role-id grammar."""
+        if not re.fullmatch(ROLE_ID_PATTERN, self.id):
             raise ValueError(
                 f"Invalid agent.id {self.id!r}: must match pattern "
-                f"{_SAFE_AGENT_ID_RE.pattern!r} (alphanumeric, underscores, hyphens)."
+                f"{ROLE_ID_PATTERN!r} (alphanumeric, underscores, hyphens)."
             )
         return self
 
@@ -675,6 +680,17 @@ class TeamConfig(BaseModel):
             return TeamHarnessConfig()
         return None
 
+    def harness_mcp_servers(self) -> list[str]:
+        """Return the harness MCP servers composed into every worker's session.
+
+        Flat and team-level: the harness schema carries no per-role server field,
+        so every worker of every topology is handed the same declaration. Empty
+        when no harness applies, which composes to a no-op rather than to some
+        inherited default.
+        """
+        harness = self.effective_harness()
+        return list(harness.mcp_servers) if harness is not None else []
+
     @classmethod
     def from_toml(cls, path: Path) -> "TeamConfig":
         """Load and validate a TeamConfig from a TOML file.
@@ -757,10 +773,10 @@ def load_agent_config(
     """
     # Validate agent_id before using it in path construction to prevent
     # path traversal attacks (e.g. agent_id="../../etc/passwd").
-    if not _SAFE_AGENT_ID_RE.match(agent_id):
+    if not re.fullmatch(ROLE_ID_PATTERN, agent_id):
         raise ConfigError(
             f"Invalid agent_id {agent_id!r}: must match pattern "
-            r"[a-zA-Z_][a-zA-Z0-9_\-]{{0,62}} (alphanumeric, underscores, hyphens)."
+            f"{ROLE_ID_PATTERN!r} (alphanumeric, underscores, hyphens)."
         )
 
     path = _resolve_preset_path(
@@ -791,10 +807,9 @@ def load_team_config(
                                   bundled preset exists.
         pydantic.ValidationError: If the TOML data fails schema validation.
     """
-    if not _SAFE_AGENT_ID_RE.match(team_id):
+    if not re.fullmatch(ROLE_ID_PATTERN, team_id):
         raise ConfigError(
-            f"Invalid team_id {team_id!r}: must match pattern "
-            r"[a-zA-Z_][a-zA-Z0-9_\-]{{0,62}}."
+            f"Invalid team_id {team_id!r}: must match pattern {ROLE_ID_PATTERN!r}."
         )
 
     path = _resolve_preset_path(

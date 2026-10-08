@@ -1,7 +1,7 @@
 """Regression pin: the context package must import in a cold interpreter.
 
 ``context.token_budget`` imports ``thread.state``, which (via ``thread``'s
-package ``__init__`` reaching ``snapshots``/``permission_fsm``) imports the
+package ``__init__`` reaching ``snapshots``) imports the
 Layer-1 leaf ``graph.enums``. Importing that leaf runs ``graph``'s package
 ``__init__``; if that eagerly loaded the ``.compiler`` tree it would close a
 cycle back through a partially-initialized ``context.token_budget`` and make the
@@ -18,7 +18,7 @@ import sys
 
 import pytest
 
-# The modules whose cold-import order previously formed the cycle. Each must
+# The modules whose cold-import order is prone to forming a cycle. Each must
 # import cleanly from an empty module cache.
 _COLD_IMPORT_TARGETS = [
     "vaultspec_a2a.context",

@@ -18,9 +18,11 @@ from pydantic import TypeAdapter, ValidationError
 
 __all__ = [
     "coerce_int",
+    "coerce_nonempty_str",
     "coerce_object_list",
     "coerce_object_mapping",
     "coerce_string_list",
+    "decode_json_object",
 ]
 
 _OBJECT_MAPPING: TypeAdapter[dict[str, object]] = TypeAdapter(dict[str, object])
@@ -51,6 +53,27 @@ def coerce_int(value: object) -> int | None:
     return None
 
 
+def coerce_nonempty_str(value: object) -> str | None:
+    """Return *value* when it is a non-empty ``str``, or ``None`` otherwise.
+
+    The scalar counterpart to :func:`coerce_string_list`'s ``drop_empty``: an
+    empty string names nothing, so a field holding one is read as absent rather
+    than as a blank value that travels on as though it were an identifier. The
+    string is returned exactly as given - never stripped - so a whitespace-only
+    string is non-empty here, and a caller that treats blank text as absent
+    decides that at its own site. Every non-``str`` value, ``bytes`` included,
+    is refused rather than converted.
+
+    Args:
+        value: A parsed JSON scalar or unstructured runtime value of unknown type.
+
+    Returns:
+        *value* unchanged when it is a ``str`` with at least one character,
+        otherwise ``None``.
+    """
+    return value if isinstance(value, str) and value else None
+
+
 def coerce_object_mapping(value: object) -> dict[str, object] | None:
     """Return *value* as a string-keyed object mapping, or ``None`` when it is not one.
 
@@ -74,6 +97,31 @@ def coerce_object_mapping(value: object) -> dict[str, object] | None:
     """
     try:
         return _OBJECT_MAPPING.validate_python(value, strict=True)
+    except ValidationError:
+        return None
+
+
+def decode_json_object(encoded: str | None) -> dict[str, object] | None:
+    """Return the JSON object *encoded* holds, or ``None`` when it holds none.
+
+    The text-shaped counterpart to :func:`coerce_object_mapping`, validated
+    through the same adapter so a stored column and an already-parsed value
+    narrow identically. An absent column, malformed JSON, and JSON that is not
+    an object are one outcome - the record names no object - and the caller
+    decides what that means for it.
+
+    Args:
+        encoded: JSON text read from a column or a file, or ``None`` when the
+            column is absent.
+
+    Returns:
+        The decoded ``dict``, or ``None`` when *encoded* is absent, is not valid
+        JSON, or does not decode to a string-keyed object.
+    """
+    if encoded is None:
+        return None
+    try:
+        return _OBJECT_MAPPING.validate_json(encoded, strict=True)
     except ValidationError:
         return None
 

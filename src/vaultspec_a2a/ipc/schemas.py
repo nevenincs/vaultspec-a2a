@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from pydantic import (
@@ -16,23 +16,33 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    field_validator,
     model_validator,
 )
 
-from ..thread.action_receipts import GraphActionReceipt
+from ..providers.team_selection import ModelAssignment
+from ..thread.action_receipts import GRAPH_ACTION_VERB, GraphActionReceipt
 from ..thread.actor_tokens import ActorTokenBundle
-from ..thread.constants import DEFAULT_SUPERVISOR_ID
-from ..thread.enums import ControlActionType
+from ..thread.constants import (
+    DEFAULT_SUPERVISOR_ID,
+    MAX_AGENT_ID_CHARS,
+    MAX_FEEDBACK_BATCH_ID_CHARS,
+    MAX_RUN_ID_CHARS,
+    MAX_RUN_MESSAGE_CHARS,
+    MAX_SEED_TRANSCRIPT_MESSAGES,
+)
+from ..thread.enums import ControlActionType, DegradedReason
 from ..thread.executable_graph import FrozenGraphDefinition
+from ..thread.snapshots import ExecutionTaskSnapshot
 
 __all__ = [
     "DispatchApplicationReceiptPayload",
     "DispatchRequest",
     "DispatchResponse",
     "ExecutionStateProjectionPayload",
-    "ExecutionTaskProjectionPayload",
     "HeartbeatRequest",
+    "SeedTranscriptMessage",
+    "WorkerEventBatch",
+    "WorkerEventEnvelope",
     "canonical_project_root",
     "to_dispatch_action",
 ]
@@ -102,56 +112,46 @@ def canonical_project_root(value: str | os.PathLike[str]) -> str:
 # put an unminted spelling on a dispatch.
 ActiveProjectRoot = Annotated[str, AfterValidator(canonical_project_root)]
 
-_FALLBACK_FIELDS = frozenset(
-    {
-        "provider_id",
-        "execution_mode",
-        "catalog_revision",
-        "entry_id",
-        "model_name",
-        "controls",
-        "defaulted_control_ids",
-        "schema_version",
-    }
-)
-_FALLBACK_OPTIONAL_FIELDS = frozenset({"provider_display_name", "model_display_name"})
-_CONTROL_FIELDS = frozenset({"control_id", "option_id", "provider_value"})
-_CONTROL_OPTIONAL_FIELDS = frozenset({"display_name", "option_display_name"})
+# Bounds local to one field below, named so none of them is a bare literal.
+# None of these cross a layer the way thread.constants' grammars do: each
+# shapes exactly one gateway<->worker IPC field and nothing else reads it.
 
+#: The dispatch envelope's own correlation id. Wider than the 64-character
+#: DispatchIdentity the immutable receipt type uses for the same concept -
+#: a known, accepted divergence (the shipped width predates that type and
+#: narrowing it is a separate, persisted-row-census question) - so this is
+#: named on its own rather than borrowed from that stricter type.
+_MAX_DISPATCH_ID_CHARS: int = 128
 
-def _validate_model_assignment_control(raw_selected: object) -> None:
-    if not isinstance(raw_selected, dict):
-        raise ValueError("model_assignment control has invalid fields")
-    selected = cast("dict[str, object]", raw_selected)
-    if not _CONTROL_FIELDS.issubset(selected) or (
-        set(selected) - _CONTROL_FIELDS - _CONTROL_OPTIONAL_FIELDS
-    ):
-        raise ValueError("model_assignment control has invalid fields")
+#: Wider than the edge's published ``MAX_TEAM_PRESET_CHARS`` (64) on purpose:
+#: narrowing this internal field needs a census of persisted accepted-action
+#: rows for a preset id longer than 64 characters first, so it stays at its
+#: shipped width, named, until that census runs.
+_LEGACY_TEAM_PRESET_CHARS: int = 128
 
+#: Hard ceiling on the recursion budget one dispatch may carry, independent
+#: of ``domain_config.graph_recursion_limit`` (the operator-configured
+#: default a run is held to the lower of).
+_MAX_GRAPH_RECURSION_LIMIT: int = 500
 
-def _validate_model_assignment_candidate(
-    raw_candidate: object, *, fallback: bool
-) -> None:
-    if not isinstance(raw_candidate, dict):
-        raise ValueError("model_assignment fallback is invalid")
-    candidate = cast("dict[str, object]", raw_candidate)
-    if fallback and (
-        not _FALLBACK_FIELDS.issubset(candidate)
-        or set(candidate) - _FALLBACK_FIELDS - _FALLBACK_OPTIONAL_FIELDS
-    ):
-        raise ValueError("model_assignment fallback has invalid fields")
-    controls: object = candidate.get("controls")
-    if not isinstance(controls, list):
-        raise ValueError("model_assignment controls are invalid")
-    for raw_selected in cast("list[object]", controls):
-        _validate_model_assignment_control(raw_selected)
+#: The worker's own self-minted liveness identity in one heartbeat.
+_MAX_WORKER_ID_CHARS: int = 128
+
+#: How many live thread ids one heartbeat may list.
+_MAX_HEARTBEAT_ACTIVE_THREADS: int = 1024
+
+#: The worker's monotonic stamp, carried as text.
+_MAX_HEARTBEAT_TIMESTAMP_CHARS: int = 128
+
+#: The checkpoint id a dispatch-applied receipt names.
+_MAX_DISPATCH_APPLIED_CHECKPOINT_ID_CHARS: int = 128
 
 
 class SeedTranscriptMessage(BaseModel):
     """A bounded conversation turn copied into a successor's first graph input."""
 
     role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=65536)
+    content: str = Field(min_length=1, max_length=MAX_RUN_MESSAGE_CHARS)
 
 
 class DispatchRequest(BaseModel):
@@ -160,22 +160,26 @@ class DispatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dispatch_id: str = Field(
-        default_factory=lambda: uuid4().hex, min_length=1, max_length=128
+        default_factory=lambda: uuid4().hex,
+        min_length=1,
+        max_length=_MAX_DISPATCH_ID_CHARS,
     )
     action: Literal["ingest", "resume", "cancel"] = Field(
         description="'ingest' | 'resume' | 'cancel'"
     )
-    thread_id: str = Field(min_length=1, max_length=128)
+    thread_id: str = Field(min_length=1, max_length=MAX_RUN_ID_CHARS)
     graph_action_receipt: GraphActionReceipt | None = None
     graph_definition: FrozenGraphDefinition | None = None
-    agent_id: str = Field(default=DEFAULT_SUPERVISOR_ID, min_length=1, max_length=128)
+    agent_id: str = Field(
+        default=DEFAULT_SUPERVISOR_ID, min_length=1, max_length=MAX_AGENT_ID_CHARS
+    )
     # For ingest: user message content
-    content: str | None = Field(default=None, max_length=65536)
+    content: str | None = Field(default=None, max_length=MAX_RUN_MESSAGE_CHARS)
     # For resume: permission response option
     # (str for tool perms, dict for plan approval)
     option_id: str | dict[str, object] | None = None
     # For initial thread creation
-    team_preset: str | None = Field(default=None, max_length=128)
+    team_preset: str | None = Field(default=None, max_length=_LEGACY_TEAM_PRESET_CHARS)
     # The run's active project. Optional on the model because a cancel names no
     # project and a resume rejoins a graph that already holds one; an ingest
     # without it is refused below. Whatever spelling a construction site holds,
@@ -185,22 +189,29 @@ class DispatchRequest(BaseModel):
     metadata_json: str | None = None
     context_preamble: str | None = None
     seed_transcript: list[SeedTranscriptMessage] = Field(
-        default_factory=list, max_length=100
+        default_factory=list, max_length=MAX_SEED_TRANSCRIPT_MESSAGES
     )
-    recursion_limit: int = Field(ge=1, le=500)
+    # The budget one graph invocation runs under. A cancel enters no graph and
+    # the worker never reads it there, so only the actions that run the graph
+    # must carry it; that is refused below.
+    recursion_limit: int | None = Field(
+        default=None, ge=1, le=_MAX_GRAPH_RECURSION_LIMIT
+    )
     # SDD blackboard fields
     active_feature: str | None = None
     # feedback-loop: the OPAQUE engine feedback-batch id for a revision run,
     # forwarded to the worker so it retrieves the authoritative batch from the
     # engine read route. a2a never parses it; None when not
     # feedback-driven.
-    feedback_batch_id: str | None = Field(default=None, max_length=256)
+    feedback_batch_id: str | None = Field(
+        default=None, max_length=MAX_FEEDBACK_BATCH_ID_CHARS
+    )
     pipeline_phase: str | None = None
     vault_index: dict[str, list[str]] = Field(default_factory=dict)
     validation_errors: list[str] = Field(default_factory=list)
     # The exact catalog selection frozen at admission. Compilation consumes this
     # verbatim and never re-resolves provider or model policy from presets.
-    model_assignment: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    model_assignment: ModelAssignment = Field(default_factory=dict)
     # Engine-provisioned per-role actor tokens forwarded from run-start.
     # The bundle's redacting repr keeps raw tokens out of any dispatch log line;
     # model_dump still emits them for the gateway->worker loopback transport. The
@@ -208,83 +219,56 @@ class DispatchRequest(BaseModel):
     # end — they are never checkpointed.
     actor_tokens: ActorTokenBundle | None = None
 
+    def encoded_envelope(self) -> bytes:
+        """The exact body one delivery of this dispatch sends.
+
+        Measured and sent as the same bytes, so a size budget compares the
+        number the receiver will count rather than an estimate of it.
+        """
+        return self.model_dump_json().encode("utf-8")
+
+    @property
+    def requires_graph_receipt(self) -> bool:
+        """Whether this dispatch delivers graph input, which needs its receipt.
+
+        A cancel stops a run without entering its graph, so it is the one
+        dispatch that crosses the wire with no receipt, no accepted definition
+        and no project to admit, and holds no execution slot on the worker.
+        """
+        return self.action in GRAPH_ACTION_VERB.values()
+
+    def graph_receipt_if_required(self) -> GraphActionReceipt | None:
+        """Return the validated receipt of a graph dispatch; a cancel has none.
+
+        Raises:
+            ValueError: When a graph dispatch carries no accepted definition or
+                no receipt matching it.
+        """
+        if not self.requires_graph_receipt:
+            return None
+        return self.require_graph_action_receipt()
+
     def require_graph_action_receipt(self) -> GraphActionReceipt:
         """Require a matching current receipt before graph execution admission."""
         self.require_graph_definition()
         receipt = self.graph_action_receipt
-        allowed_ingest = (
-            self.action == "ingest"
-            and receipt is not None
-            and (
-                receipt.action_type
-                in {
-                    ControlActionType.INGEST,
-                    ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-                }
-            )
-        )
-        allowed_resume = (
-            self.action == "resume"
-            and receipt is not None
-            and (
-                receipt.action_type
-                in {
-                    ControlActionType.RESUME,
-                    ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-                }
-            )
-        )
         if (
             receipt is None
             or receipt.thread_id != self.thread_id
             or receipt.dispatch_id != self.dispatch_id
-            or not (allowed_ingest or allowed_resume)
+            or GRAPH_ACTION_VERB.get(receipt.action_type) != self.action
         ):
             raise ValueError("incompatible graph dispatch authority")
         return receipt
 
     def require_graph_definition(self) -> FrozenGraphDefinition:
         """Require the accepted executable program before compiling or running."""
-        if self.action == "cancel" or self.graph_definition is None:
+        definition = self.graph_definition
+        if not self.requires_graph_receipt or definition is None:
             raise ValueError("graph execution requires its accepted definition")
-        definition = FrozenGraphDefinition.model_validate(
-            self.graph_definition.model_dump(mode="json")
-        )
-        if definition.team["id"] != self.team_preset:
+        if definition.team_id != self.team_preset:
             raise ValueError("accepted graph definition does not match the run preset")
         return definition
-
-    @field_validator("model_assignment")
-    @classmethod
-    def _closed_model_assignment(
-        cls, value: dict[str, dict[str, Any]]
-    ) -> dict[str, dict[str, Any]]:
-        primary = {
-            "provider",
-            "execution_mode",
-            "catalog_revision",
-            "entry_id",
-            "model_name",
-            "controls",
-            "fallbacks",
-            "provenance",
-            "schema_version",
-        }
-        for lane in value.values():
-            if set(lane) != primary:
-                raise ValueError("model_assignment lane has invalid fields")
-            provenance: object = lane.get("provenance")
-            if not isinstance(provenance, dict):
-                raise ValueError("model_assignment provenance has invalid fields")
-            if set(cast("dict[str, object]", provenance)) != {"selection_source"}:
-                raise ValueError("model_assignment provenance has invalid fields")
-            raw_fallbacks: object = lane.get("fallbacks") or []
-            if not isinstance(raw_fallbacks, list):
-                raise ValueError("model_assignment fallback is invalid")
-            candidates: list[object] = [lane, *cast("list[object]", raw_fallbacks)]
-            for index, raw_candidate in enumerate(candidates):
-                _validate_model_assignment_candidate(raw_candidate, fallback=index > 0)
-        return value
 
     @model_validator(mode="after")
     def _ingest_names_its_project(self) -> DispatchRequest:
@@ -306,16 +290,34 @@ class DispatchRequest(BaseModel):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def _graph_run_names_its_budget(self) -> DispatchRequest:
+        """Refuse a graph-running dispatch that carries no recursion budget.
+
+        The budget is decided once at acceptance and frozen into the accepted
+        input, so a dispatch that reaches the worker without one has no number
+        to run the graph under and would silently take the engine's default.
+        """
+        if self.requires_graph_receipt and self.recursion_limit is None:
+            msg = (
+                f"a {self.action} dispatch runs the graph and must carry its "
+                "recursion_limit"
+            )
+            raise ValueError(msg)
+        return self
+
 
 class HeartbeatRequest(BaseModel):
     """Bound the worker liveness projection before updating gateway state."""
 
     type: Literal["heartbeat"] = "heartbeat"
-    worker_id: str = Field(default="", max_length=128)
-    active_threads: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(
-        default_factory=list, max_length=1024
+    worker_id: str = Field(default="", max_length=_MAX_WORKER_ID_CHARS)
+    active_threads: list[
+        Annotated[str, Field(min_length=1, max_length=MAX_RUN_ID_CHARS)]
+    ] = Field(default_factory=list, max_length=_MAX_HEARTBEAT_ACTIVE_THREADS)
+    timestamp: str | None = Field(
+        default=None, max_length=_MAX_HEARTBEAT_TIMESTAMP_CHARS
     )
-    timestamp: str | None = Field(default=None, max_length=128)
     uptime_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
@@ -337,21 +339,9 @@ class DispatchApplicationReceiptPayload(BaseModel):
     dispatch_id: str
     action: Literal["ingest", "resume"]
     graph_action_receipt: GraphActionReceipt
-    checkpoint_id: str = Field(min_length=1, max_length=128)
-
-
-class ExecutionTaskProjectionPayload(BaseModel):
-    """Normalized task summary emitted internally by the worker."""
-
-    task_id: str
-    name: str
-    path: list[str] = Field(default_factory=list)
-    has_error: bool = False
-    error_type: str | None = None
-    interrupt_ids: list[str] = Field(default_factory=list)
-    interrupt_types: list[str] = Field(default_factory=list)
-    has_nested_state: bool = False
-    has_result: bool = False
+    checkpoint_id: str = Field(
+        min_length=1, max_length=_MAX_DISPATCH_APPLIED_CHECKPOINT_ID_CHARS
+    )
 
 
 class ExecutionStateProjectionPayload(BaseModel):
@@ -360,10 +350,32 @@ class ExecutionStateProjectionPayload(BaseModel):
     type: str = "execution_state_projection"
     checkpoint_id: str | None = None
     parent_checkpoint_id: str | None = None
-    snapshot_created_at: str | None = None
     next_nodes: list[str] = Field(default_factory=list)
-    interrupt_types: list[str] = Field(default_factory=list)
     interrupt_count: int = 0
     task_count: int = 0
-    tasks: list[ExecutionTaskProjectionPayload] = Field(default_factory=list)
-    degraded_reasons: list[str] = Field(default_factory=list)
+    tasks: list[ExecutionTaskSnapshot] = Field(default_factory=list)
+    degraded_reasons: list[DegradedReason] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Worker -> gateway event ingress
+# ---------------------------------------------------------------------------
+
+
+class WorkerEventEnvelope(BaseModel):
+    """One worker event on its way to the gateway relay.
+
+    ``ts`` is the worker's monotonic stamp: the gateway orders a batch by it, so
+    an entry assembled out of order still relays in the order it was emitted.
+    The default keeps an unstamped entry sorting first rather than refusing it.
+    """
+
+    thread_id: str = Field(min_length=1, max_length=MAX_RUN_ID_CHARS)
+    payload: dict[str, Any] = Field(min_length=1)
+    ts: float = Field(default=0.0, allow_inf_nan=False)
+
+
+class WorkerEventBatch(BaseModel):
+    """The body the worker posts to the gateway's batch ingress route."""
+
+    events: list[WorkerEventEnvelope]

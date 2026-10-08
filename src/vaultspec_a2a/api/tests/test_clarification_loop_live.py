@@ -18,8 +18,8 @@ into a real ``Executor``/``worker.app.create_worker_app()``, and the
 gateway's ``app.state.worker_client`` is pointed at that real worker instead
 of the stub, so ``/respond`` drives a genuine ``Command(resume=answers)``
 through the real dispatch/executor path. The assertion is on the graph's OWN
-state (``clarification_answers`` actually written by the real node), not a
-recorded stub call.
+state (the transcript turn the real node actually appended), not a recorded
+stub call.
 """
 
 from __future__ import annotations
@@ -41,67 +41,67 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...control.accepted_input import freeze_accepted_input
 from ...control.action_lease import (
-    CONTROL_ACTION_LEASE_TTL,
     ControlActionClaim,
     ControlActionClaimRequest,
     finalize_control_action_acceptance,
     prepare_control_action_claim,
 )
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.clarification_service import (
-    ClarificationRecoverySummary,
-    ClarificationRuntime,
-    redrive_clarification_actions,
+from ...control.direct_control_recovery import (
+    DirectControlRecoverySummary,
+    redrive_direct_control_actions,
 )
-from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.execution_authority import resolve_execution_authority
 from ...control.graph_definition import read_accepted_graph_definition
-from ...control.tests._catalog_authority import current_execution_metadata
-from ...control.worker_management import LazyWorkerSpawner
+from ...control.leased_dispatch import accepted_recursion_budget
+from ...control.reconciliation import reconcile_threads_on_startup
 from ...database import (
-    create_control_action,
-    create_thread,
+    CONTROL_ACTION_LEASE_TTL,
+    ControlActionModel,
     get_control_action_by_idempotency_key,
-    get_thread_metadata,
+    get_thread,
     thread_write_expectation,
 )
-from ...database.models import ControlActionModel
 from ...ipc.schemas import DispatchRequest
-from ...team.team_config import load_team_config
-from ...tests._write_authority import make_test_write_authority
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    adopted_spawner,
+    async_catalog_run_fields,
+    clarification_graph,
+    loopback_callback_bridge,
+    park_clarification,
+    seed_accepted_thread,
+    served_worker,
+    wait_for_run_status_async,
+)
 from ...thread.clarification import (
     CLARIFICATION_DECLINE_MARKER,
     ClarificationAnswers,
 )
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from .clarification_harness import (
-    clarification_graph,
-    loopback_callback_bridge,
-    park_clarification,
+from ...thread.idempotency import (
+    CLARIFICATION_RESPONSE_KEY_PREFIX,
+    clarification_response_action_key,
 )
-from .conftest import async_catalog_run_fields, make_app
+from .conftest import make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator, Sequence
 
     from fastapi import FastAPI
     from langchain_core.messages import BaseMessage
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from ...database.models import ThreadModel
+    from ...database import ThreadModel
+    from ...testing import ParkedClarification
     from ...worker.graph_lifecycle import (
         GraphCompilationKey,
         GraphStateSnapshot,
         RegisteredCompiledGraph,
     )
-    from .clarification_harness import ParkedClarification
 
-_BUNDLE_FREE_PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
 
 type SessionFactory = async_sessionmaker[AsyncSession]
@@ -112,40 +112,17 @@ async def _cache_key_for_thread(
 ) -> GraphCompilationKey:
     """Bind the registered real graph to the run's exact durable authority."""
     async with session_factory() as db:
-        metadata_json = await get_thread_metadata(db, thread_id)
+        thread = await get_thread(db, thread_id)
         graph_definition = await read_accepted_graph_definition(db, thread_id)
-    authority = resolve_execution_authority(metadata_json)
+    assert thread is not None
+    authority = resolve_execution_authority(thread.thread_metadata)
     return (
-        _BUNDLE_FREE_PRESET,
+        DEFAULT_TEAM_PRESET,
         None,
         False,
         authority.model_assignment_digest,
         graph_definition.digest(),
     )
-
-
-@asynccontextmanager
-async def _worker_test_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """No-op: ``httpx.ASGITransport`` never runs FastAPI's real lifespan
-    protocol, so state/task-group wiring is done explicitly by the caller."""
-    yield
-
-
-async def _wait_for_answered_clarification(
-    graph: RegisteredCompiledGraph, config: RunnableConfig
-) -> GraphStateSnapshot:
-    """Wait until the real graph records answers AND runs on to its end.
-
-    The answers commit a superstep before the run finishes, so waiting on
-    them alone returns a snapshot still positioned at the node that follows,
-    and every assertion about where the run ended up races it.
-    """
-    with anyio.fail_after(15.0):
-        while True:
-            snap = await graph.aget_state(config)
-            if snap.values.get("clarification_answers") and snap.next == ():
-                return snap
-            await anyio.sleep(0.05)
 
 
 async def _wait_for_terminal_graph(
@@ -191,7 +168,6 @@ class _ParkedRun:
 class _ExpiredClaim:
     """An accepted clarification resume whose lease has already expired."""
 
-    request_id: str
     idempotency_key: str
     claim: ControlActionClaim
 
@@ -200,9 +176,9 @@ class _ExpiredClaim:
 class _RecoveryOutcome:
     """The two recovery summaries and settled graph snapshot."""
 
-    first: ClarificationRecoverySummary
+    first: DirectControlRecoverySummary
     settled: GraphStateSnapshot
-    second: ClarificationRecoverySummary
+    second: DirectControlRecoverySummary
 
 
 async def _create_parked_run(
@@ -213,7 +189,7 @@ async def _create_parked_run(
     create_resp = await gateway_client.post(
         "/v1/runs",
         json={
-            "team_preset": _BUNDLE_FREE_PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "plan it",
             "run_id": f"clarify-loop-{next(_RUN_SEQ):02d}",
             **await async_catalog_run_fields(gateway_client),
@@ -271,26 +247,17 @@ async def _real_worker(
     With *relay_to_gateway* the worker's own callback frames reach *app*'s real
     internal routes instead of being accepted and dropped.
     """
-    async with loopback_callback_bridge(app if relay_to_gateway else None) as bridge:
-        executor = Executor(checkpointer=checkpointer, bridge=bridge)
-        executor.register_compiled_graph(
-            target.thread_id, target.cache_key, target.graph
-        )
-        worker_app = create_worker_app(lifespan=_worker_test_lifespan)
-        worker_app.state.executor = executor
-        try:
-            async with (
-                httpx.AsyncClient(
-                    transport=ASGITransport(app=worker_app), base_url="http://worker"
-                ) as worker_client,
-                anyio.create_task_group() as tg,
-            ):
-                worker_app.state.task_group = tg
-                if app is not None:
-                    app.state.worker_client = worker_client
-                yield worker_client
-        finally:
-            await executor.shutdown()
+    async with (
+        loopback_callback_bridge(app if relay_to_gateway else None) as bridge,
+        served_worker(
+            checkpointer,
+            gateway=app,
+            bridge=bridge,
+            graphs={target.thread_id: (target.cache_key, target.graph)},
+            drain_dispatches=True,
+        ) as worker,
+    ):
+        yield worker.client
 
 
 @pytest.mark.asyncio
@@ -311,6 +278,7 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
     ) as gateway_client:
         run = await _create_parked_run(gateway_client, session_factory, checkpointer)
         request_id = run.parked.request.request_id
+        initial_messages = await _initial_messages(run)
 
         # Disclosure still works normally (unaffected by the worker swap below).
         status_resp = await gateway_client.get(f"/v1/runs/{run.thread_id}")
@@ -354,18 +322,18 @@ async def test_respond_resumes_through_a_real_worker_and_executor(
 
             # The dispatch is fire-and-forget inside the worker; poll the
             # REAL graph's own state (not a recorded receiver call) until
-            # the real clarification node observes the resume.
-            snap = await _wait_for_answered_clarification(run.parked.graph, run.config)
+            # the real clarification node observes the resume and the run
+            # reaches its end.
+            _, messages = await _wait_for_terminal_graph(
+                run.parked.graph, run.config, initial_messages
+            )
 
-            assert snap.values["clarification_answers"] == {
-                request_id: {"provider": "codex"}
-            }
-            assert snap.next == (), "the graph did not reach its terminal state"
-            # The answered questionnaire also reaches the transcript - the
-            # one state downstream model turns actually read.
-            transcript = cast("list[BaseMessage]", snap.values["messages"])
-            assert transcript[-1].type == "human"
-            assert transcript[-1].content == (
+            # The answered questionnaire reaches the transcript - the one
+            # state downstream model turns actually read.
+            appended = messages[len(initial_messages) :]
+            assert len(appended) == 1
+            assert appended[0].type == "human"
+            assert appended[0].content == (
                 "Answers to the clarification questionnaire:\n"
                 "- Which provider should author the plan?: codex"
             )
@@ -411,11 +379,6 @@ async def test_new_prompt_resumes_the_parked_graph_as_a_real_human_turn(
             assert appended[0].content == prompt
             assert settled.values.get("clarification_request") is None
             assert settled.values.get("clarification_request_id") is None
-            recorded_answers = cast(
-                "dict[str, dict[str, str]]",
-                settled.values.get("clarification_answers", {}),
-            )
-            assert request_id not in recorded_answers
 
 
 @pytest.mark.asyncio
@@ -426,9 +389,9 @@ async def test_decline_resumes_the_parked_graph_with_the_fixed_marker(
 
     The refusal crosses the real gateway, worker app, Executor,
     ``Command(resume=...)``, and clarification gate. The durable graph state
-    proves the outcome: the run reached its terminal state, exactly one fixed
-    marker turn was appended, and no answer was fabricated for the declined
-    request.
+    proves the outcome: the run reached its terminal state and exactly one
+    fixed marker turn was appended, with no answer turn fabricated for the
+    declined request.
     """
     app, _agg, _recording_worker, _cp = make_app(session_factory, checkpointer)
 
@@ -458,58 +421,18 @@ async def test_decline_resumes_the_parked_graph_with_the_fixed_marker(
             assert appended[0].content == CLARIFICATION_DECLINE_MARKER
             assert settled.values.get("clarification_request") is None
             assert settled.values.get("clarification_request_id") is None
-            recorded_answers = cast(
-                "dict[str, dict[str, str]]",
-                settled.values.get("clarification_answers", {}),
-            )
-            assert request_id not in recorded_answers
 
 
 async def _seed_clarification_run(
     session_factory: SessionFactory,
 ) -> tuple[ThreadModel, str]:
     async with session_factory() as db:
-        authority = make_test_write_authority()
-        metadata = current_execution_metadata(Path.cwd())
-        thread = await create_thread(
-            db,
-            write_authority=authority,
-            status=ThreadStatus.RUNNING,
-            team_preset=_BUNDLE_FREE_PRESET,
-            metadata=metadata,
-        )
-        dispatch = DispatchRequest(
-            action="ingest",
-            thread_id=thread.id,
-            content="initial clarification run",
-            workspace_root=str(Path.cwd()),
-            recursion_limit=25,
-            team_preset=_BUNDLE_FREE_PRESET,
-            graph_definition=freeze_graph_definition(
-                load_team_config(_BUNDLE_FREE_PRESET, workspace_root=Path.cwd()),
-                workspace_root=Path.cwd(),
-            ),
-            model_assignment=resolve_execution_authority(metadata).model_assignment,
-        )
-        await create_control_action(
-            db,
-            thread_id=thread.id,
-            action_type=authority.action_type,
-            idempotency_key=f"thread-create:{thread.id}",
-            dispatch_id=authority.action_receipt_id,
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-            payload=freeze_accepted_input(
-                dispatch, intent={"content": "initial clarification run"}
-            ),
-        )
-        assert (
-            await prepare_graph_action_receipt(
-                db, thread_id=thread.id, dispatch_id=authority.action_receipt_id
-            )
-            is not None
-        )
+        thread_id, _receipt = await seed_accepted_thread(db)
         await db.commit()
-        return thread, metadata
+        thread = await get_thread(db, thread_id)
+    assert thread is not None
+    assert thread.thread_metadata is not None
+    return thread, thread.thread_metadata
 
 
 async def _prepare_expired_claim(
@@ -523,7 +446,7 @@ async def _prepare_expired_claim(
         request_id=request_id,
         answers={"provider": "codex"},
     )
-    idempotency_key = f"clarification-response:{request_id}"
+    idempotency_key = clarification_response_action_key(request_id)
     async with session_factory() as db:
         definition = await read_accepted_graph_definition(db, run.thread_id)
         resume = DispatchRequest(
@@ -531,8 +454,8 @@ async def _prepare_expired_claim(
             thread_id=run.thread_id,
             option_id=resolution.as_resume_value(),
             workspace_root=str(Path.cwd()),
-            recursion_limit=100,
-            team_preset=_BUNDLE_FREE_PRESET,
+            recursion_limit=accepted_recursion_budget(definition),
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=definition,
             model_assignment=resolve_execution_authority(metadata).model_assignment,
         )
@@ -548,7 +471,6 @@ async def _prepare_expired_claim(
                 ),
                 dispatch_id=idempotency_key,
                 write_expectation=thread_write_expectation(thread),
-                worker_generation=thread.repair_generation,
                 now=datetime.now(UTC) - CONTROL_ACTION_LEASE_TTL - timedelta(seconds=1),
                 recovery_timeout_seconds=300,
             ),
@@ -558,10 +480,25 @@ async def _prepare_expired_claim(
         await db.commit()
     assert claim.acquired is True
     return _ExpiredClaim(
-        request_id=request_id,
         idempotency_key=idempotency_key,
         claim=claim,
     )
+
+
+async def _clarification_resumes(
+    db: AsyncSession, thread_id: str
+) -> Sequence[ControlActionModel]:
+    """Every accepted clarification resolution this run has journaled."""
+    return (
+        await db.scalars(
+            select(ControlActionModel).where(
+                ControlActionModel.thread_id == thread_id,
+                ControlActionModel.idempotency_key.like(
+                    f"{CLARIFICATION_RESPONSE_KEY_PREFIX}%"
+                ),
+            )
+        )
+    ).all()
 
 
 async def _wait_for_terminal_state(
@@ -577,39 +514,32 @@ async def _wait_for_terminal_state(
 
 
 async def _redrive_expired_claim(
+    app: FastAPI,
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
     run: _ParkedRun,
-    claim: _ExpiredClaim,
 ) -> _RecoveryOutcome:
     circuit_breaker = WorkerCircuitBreaker(
         failure_threshold=3,
         recovery_timeout=30.0,
     )
-    worker_spawner = LazyWorkerSpawner(
-        worker_url="http://worker",
-        worker_port=8001,
-        auto_spawn=False,
-    )
-    worker_spawner.replace_process(None)
-    async with _real_worker(None, run.target, checkpointer) as worker_client:
-        runtime = ClarificationRuntime(
-            checkpointer,
-            worker_client,
-            circuit_breaker,
-            worker_spawner,
-            100,
-            None,
-        )
-        first = await redrive_clarification_actions(
-            session_factory,
-            runtime=runtime,
-        )
+    worker_spawner = adopted_spawner()
+    async with _real_worker(
+        app, run.target, checkpointer, relay_to_gateway=True
+    ) as worker_client:
+
+        async def redrive() -> DirectControlRecoverySummary:
+            return await redrive_direct_control_actions(
+                session_factory,
+                worker_client=worker_client,
+                circuit_breaker=circuit_breaker,
+                worker_spawner=worker_spawner,
+                trace_headers=None,
+            )
+
+        first = await redrive()
         settled = await _wait_for_terminal_state(run.parked.graph, run.config)
-        second = await redrive_clarification_actions(
-            session_factory,
-            runtime=runtime,
-        )
+        second = await redrive()
     return _RecoveryOutcome(first=first, settled=settled, second=second)
 
 
@@ -617,36 +547,35 @@ async def _redrive_expired_claim(
 async def test_restart_redrives_an_expired_committed_clarification_lease(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """Startup recovery resumes a parked graph after claim-before-dispatch loss.
+    """One recovery owner redrives a clarification resume, as it does every verb.
 
     The database and checkpointer are both file-backed.  The first process is
     represented by the production lease claim committed with an already-expired
-    ownership window, then disappearing before dispatch.  A new recovery pass
-    uses the stored typed payload and stable dispatch identity to drive the real
-    worker and Executor.  A second pass settles from checkpoint truth without
-    dispatching again.
+    ownership window, then disappearing before dispatch.  The durable recovery
+    sweep every accepted action shares then uses the stored typed payload and
+    stable dispatch identity to drive the real worker and Executor; a clarification
+    resume has no redrive of its own.  The worker's own application receipt reaches
+    the gateway's real internal route, which is what settles the journal row, so a
+    second pass finds it applied and dispatches nothing.
     """
+    app, _hub, _stub, _cp = make_app(session_factory, checkpointer)
     thread, metadata = await _seed_clarification_run(session_factory)
     run = await _load_parked_run(session_factory, checkpointer, thread.id)
     # This current-schema run predates checkpoint evidence. The production
     # resume command must bind the exact durable digest atomically with the
     # interrupt response, without an update_state call that invalidates it.
     claim = await _prepare_expired_claim(session_factory, thread, metadata, run)
-    outcome = await _redrive_expired_claim(
-        session_factory,
-        checkpointer,
-        run,
-        claim,
+    outcome = await _redrive_expired_claim(app, session_factory, checkpointer, run)
+    assert outcome.first.examined == 1, outcome.first
+    assert outcome.first.dispatched == 1, outcome.first
+    transcript = cast("list[BaseMessage]", outcome.settled.values["messages"])
+    assert transcript[-1].type == "human"
+    assert transcript[-1].content == (
+        "Answers to the clarification questionnaire:\n"
+        "- Which provider should author the plan?: codex"
     )
-    assert outcome.first.examined == 1
-    assert outcome.first.dispatched == 1
-    assert outcome.settled.values["clarification_answers"] == {
-        claim.request_id: {"provider": "codex"}
-    }
     assert outcome.settled.values["model_assignment_digest"] == run.cache_key[3]
-    assert outcome.second.examined == 1
-    assert outcome.second.applied == 1
-    assert outcome.second.dispatched == 0
+    assert outcome.second.dispatched == 0, outcome.second
 
     async with session_factory() as db:
         action = await get_control_action_by_idempotency_key(
@@ -654,31 +583,136 @@ async def test_restart_redrives_an_expired_committed_clarification_lease(
             thread_id=run.thread_id,
             idempotency_key=claim.idempotency_key,
         )
+        resumes = await _clarification_resumes(db, run.thread_id)
     assert action is not None
     assert action.dispatch_id == claim.claim.dispatch_id
+    # The receipt settled the row, so nothing redrives it a second time.
     assert action.applied_at is not None
+    # One resolution, one accepted action, one delivery identity.
+    assert [row.dispatch_id for row in resumes] == [claim.claim.dispatch_id]
 
 
-async def _wait_for_run_status(
-    client: httpx.AsyncClient,
-    run_id: str,
-    predicate: Callable[[dict[str, object]], bool],
-) -> dict[str, object]:
-    """Poll the real run-status read until *predicate* holds; return that body."""
-    last: dict[str, object] = {}
-    try:
-        with anyio.fail_after(15.0):
-            while True:
-                response = await client.get(f"/v1/runs/{run_id}")
-                assert response.status_code == 200, response.text
-                last = response.json()
-                if predicate(last):
-                    return last
-                await anyio.sleep(0.05)
-    except TimeoutError as exc:
-        raise AssertionError(
-            f"run {run_id} never matched; last status: {last}"
-        ) from exc
+async def _read_run_status(client: httpx.AsyncClient, run_id: str) -> dict[str, object]:
+    """Read the real run-status body, which every wait here requires be served."""
+    response = await client.get(f"/v1/runs/{run_id}")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def _parked_request_id(client: httpx.AsyncClient, run_id: str) -> str:
+    """Wait until the run reads parked and name the request it is parked on."""
+    parked = await wait_for_run_status_async(
+        lambda: _read_run_status(client, run_id),
+        lambda body: body["status"] == ThreadStatus.INPUT_REQUIRED.value,
+        timeout=15.0,
+        interval=0.05,
+        label=f"run {run_id}",
+    )
+    pending = cast("dict[str, object]", parked["pending_clarification"])
+    request_id = pending["request_id"]
+    assert isinstance(request_id, str)
+    return request_id
+
+
+async def _start_clarifying_run(client: httpx.AsyncClient, run_id: str) -> None:
+    """Start one run over the real gateway under a chosen run id."""
+    created = await client.post(
+        "/v1/runs",
+        json={
+            "team_preset": DEFAULT_TEAM_PRESET,
+            "message": "plan it",
+            "run_id": run_id,
+            **await async_catalog_run_fields(client),
+        },
+    )
+    assert created.status_code == 201, created.text
+
+
+@pytest.mark.asyncio
+async def test_a_clarification_park_survives_a_gateway_restart(
+    session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
+) -> None:
+    """A real park outlives the gateway that observed it and stays answerable.
+
+    The pause is durable state, not process state: the run row says
+    ``input_required`` because its checkpoint holds the questionnaire, so a
+    gateway that never saw the park must read the same thing and must be able
+    to answer it. The restart is real - the first gateway app, its client and
+    its worker are all gone before the second one runs the production startup
+    reconciliation pass over the same two stores - and the answer is then
+    submitted through the SECOND gateway and proven on the real graph's own
+    terminal state.
+    """
+    first_app, _first_hub, first_stub, _cp = make_app(session_factory, checkpointer)
+    run_id = f"clarify-restart-{next(_RUN_SEQ):02d}"
+    cache_key = None
+    request_id = ""
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=first_app), base_url="http://gateway"
+    ) as first_client:
+        await _start_clarifying_run(first_client, run_id)
+        ingest = first_stub.dispatches[-1]
+        cache_key = await _cache_key_for_thread(session_factory, run_id)
+        async with _real_worker(
+            first_app,
+            _WorkerTarget(run_id, cache_key, clarification_graph(checkpointer)),
+            checkpointer,
+            relay_to_gateway=True,
+        ) as first_worker:
+            delivered = await first_worker.post("/dispatch", json=ingest)
+            assert delivered.is_success, delivered.text
+            request_id = await _parked_request_id(first_client, run_id)
+
+    # --- the restart: nothing of the first gateway survives it ---
+    async with session_factory() as db:
+        summary = await reconcile_threads_on_startup(db, checkpointer)
+        await db.commit()
+    # A run a human is answering is not repair backlog, and the pass must not
+    # settle or re-dispatch it.
+    assert summary["paused_resumable"] == 1, summary
+    assert summary["checkpoint_unavailable"] == 0, summary
+
+    second_app, _hub2, _stub2, _cp2 = make_app(session_factory, checkpointer)
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=second_app), base_url="http://gateway"
+    ) as second_client:
+        after = await _read_run_status(second_client, run_id)
+        assert after["status"] == ThreadStatus.INPUT_REQUIRED.value, after
+        disclosed = cast("dict[str, object]", after["pending_clarification"])
+        assert disclosed["request_id"] == request_id
+
+        # A follow-up turn is still refused toward the respond verb, so the
+        # restart did not turn the pause into an idle run.
+        refused = await second_client.post(
+            f"/v1/runs/{run_id}/messages",
+            json={"content": "go on"},
+            headers={"Idempotency-Key": f"{run_id}-after-restart"},
+        )
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["detail"]["code"] == FailureType.INPUT_REQUIRED.value
+
+        async with _real_worker(
+            second_app,
+            _WorkerTarget(run_id, cache_key, clarification_graph(checkpointer)),
+            checkpointer,
+            relay_to_gateway=True,
+        ):
+            answered = await second_client.post(
+                f"/v1/runs/{run_id}/clarifications/{request_id}/respond",
+                json={"answers": {"provider": "codex"}},
+            )
+            assert answered.status_code == 200, answered.text
+            assert answered.json()["accepted"] is True
+
+            resumed = await wait_for_run_status_async(
+                lambda: _read_run_status(second_client, run_id),
+                lambda body: body["status"] != ThreadStatus.INPUT_REQUIRED.value,
+                timeout=15.0,
+                interval=0.05,
+                label=f"run {run_id}",
+            )
+    assert resumed["pending_clarification"] is None
 
 
 @pytest.mark.asyncio
@@ -700,7 +734,7 @@ async def test_a_worker_reported_park_reads_input_required_and_refuses_followups
         create_resp = await gateway_client.post(
             "/v1/runs",
             json={
-                "team_preset": _BUNDLE_FREE_PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "plan it",
                 "run_id": f"clarify-pause-{next(_RUN_SEQ):02d}",
                 **await async_catalog_run_fields(gateway_client),
@@ -721,10 +755,12 @@ async def test_a_worker_reported_park_reads_input_required_and_refuses_followups
             delivered = await worker_client.post("/dispatch", json=ingest)
             assert delivered.is_success, delivered.text
 
-            parked = await _wait_for_run_status(
-                gateway_client,
-                thread_id,
+            parked = await wait_for_run_status_async(
+                lambda: _read_run_status(gateway_client, thread_id),
                 lambda body: body["status"] == ThreadStatus.INPUT_REQUIRED.value,
+                timeout=15.0,
+                interval=0.05,
+                label=f"run {thread_id}",
             )
             pending = cast("dict[str, object]", parked["pending_clarification"])
             request_id = pending["request_id"]
@@ -758,9 +794,11 @@ async def test_a_worker_reported_park_reads_input_required_and_refuses_followups
             assert answered.status_code == 200, answered.text
             assert answered.json()["accepted"] is True
 
-            resumed = await _wait_for_run_status(
-                gateway_client,
-                thread_id,
+            resumed = await wait_for_run_status_async(
+                lambda: _read_run_status(gateway_client, thread_id),
                 lambda body: body["status"] != ThreadStatus.INPUT_REQUIRED.value,
+                timeout=15.0,
+                interval=0.05,
+                label=f"run {thread_id}",
             )
     assert resumed["pending_clarification"] is None

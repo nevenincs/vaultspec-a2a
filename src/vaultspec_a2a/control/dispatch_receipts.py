@@ -5,8 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, cast
 
-from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import select
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
 from ..database import (
@@ -14,30 +13,29 @@ from ..database import (
     ThreadStatusElectionOutcome,
     elect_thread_status,
     get_control_action_by_dispatch_id,
-    successor_thread_write_authority,
+    get_thread,
+    persist_graph_action_receipt,
     thread_write_expectation,
 )
-from ..database.graph_receipt_repository import persist_graph_action_receipt
 from ..thread.action_receipts import (
+    GRAPH_ACTION_VERB,
     GraphActionReceipt,
     control_action_payload_fingerprint,
 )
 from ..thread.enums import NON_ACTIVE_STATUSES, ControlActionType
-from .accepted_input import AcceptedActionInput, dispatch_matches_accepted_input
+from ..utils.coercion import decode_json_object
+from .accepted_input import (
+    AcceptedActionInput,
+    dispatch_matches_accepted_input,
+    read_accepted_input,
+)
 
 if TYPE_CHECKING:
-    from ..database.models import ControlActionModel
-    from ..database.thread_repository import ThreadWriteExpectation
+    from ..database import ControlActionModel
     from ..ipc.schemas import DispatchRequest
+    from ..thread import ThreadWriteExpectation
 
 logger = logging.getLogger(__name__)
-_PAYLOAD = TypeAdapter(dict[str, object])
-_GRAPH_ACTIONS = {
-    ControlActionType.INGEST: "ingest",
-    ControlActionType.MESSAGE_FOLLOWUP_REQUESTED: "ingest",
-    ControlActionType.RESUME: "resume",
-    ControlActionType.PERMISSION_RESPONSE_SUBMITTED: "resume",
-}
 
 
 def validate_current_graph_receipt(
@@ -53,45 +51,28 @@ def validate_current_graph_receipt(
         return None
     try:
         receipt = GraphActionReceipt.model_validate_json(action.graph_receipt_json)
-        accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+        accepted = read_accepted_input(action)
         if accepted.dispatch["thread_id"] != thread.id or accepted.dispatch[
             "action"
-        ] != _GRAPH_ACTIONS.get(receipt.action_type):
+        ] != GRAPH_ACTION_VERB.get(receipt.action_type):
             return None
-        fingerprint = control_action_payload_fingerprint(
-            _PAYLOAD.validate_json(action.payload_json)
-        )
+        payload = decode_json_object(action.payload_json)
+        if payload is None:
+            return None
+        fingerprint = control_action_payload_fingerprint(payload)
         expectation = thread_write_expectation(thread)
     except (ValueError, ValidationError):
         return None
-    if not _receipt_matches_current_writer(
-        receipt, thread, action, fingerprint, expectation
+    if not receipt.matches(
+        thread_id=thread.id,
+        action_id=action.id,
+        action_type=action.action_type,
+        dispatch_id=action.dispatch_id,
+        payload_fingerprint=fingerprint,
+        authority=expectation.authority,
     ):
         return None
     return receipt
-
-
-def _receipt_matches_current_writer(
-    receipt: GraphActionReceipt,
-    thread: ThreadModel,
-    action: ControlActionModel,
-    fingerprint: str,
-    expectation: ThreadWriteExpectation,
-) -> bool:
-    if (
-        receipt.thread_id != thread.id
-        or receipt.action_id != action.id
-        or receipt.payload_fingerprint != fingerprint
-        or action.action_type != receipt.action_type
-    ):
-        return False
-    authority = expectation.authority
-    return (
-        receipt.action_type == authority.action_type
-        and receipt.dispatch_id == authority.action_receipt_id
-        and receipt.writer_generation == authority.writer_generation
-        and receipt.run_revision <= authority.run_revision
-    )
 
 
 def _accepted_graph_action(
@@ -101,15 +82,17 @@ def _accepted_graph_action(
         return None
     try:
         action_type = ControlActionType(action.action_type)
-        payload = _PAYLOAD.validate_json(action.payload_json)
+        payload = decode_json_object(action.payload_json)
+        if payload is None:
+            return None
         accepted = AcceptedActionInput.model_validate(payload)
         if accepted.dispatch["thread_id"] != thread_id or accepted.dispatch[
             "action"
-        ] != _GRAPH_ACTIONS.get(action_type):
+        ] != GRAPH_ACTION_VERB.get(action_type):
             return None
     except (ValueError, ValidationError):
         return None
-    if action_type not in _GRAPH_ACTIONS:
+    if action_type not in GRAPH_ACTION_VERB:
         return None
     return action_type, payload
 
@@ -128,11 +111,7 @@ async def prepare_graph_action_receipt(
     an older action over a newer writer. Missing evidence stays absent so the
     dispatch boundary returns its typed incompatible-authority refusal.
     """
-    thread = await db.scalar(
-        select(ThreadModel)
-        .where(ThreadModel.id == thread_id)
-        .execution_options(populate_existing=True)
-    )
+    thread = await get_thread(db, thread_id, refresh=True)
     action = await get_control_action_by_dispatch_id(
         db, thread_id=thread_id, dispatch_id=dispatch_id
     )
@@ -143,11 +122,7 @@ async def prepare_graph_action_receipt(
         return None
     action_type, payload = accepted_graph_action
     expectation = thread_write_expectation(thread)
-    matches = (
-        expectation.authority.action_type == action_type
-        and expectation.authority.action_receipt_id == dispatch_id
-    )
-    if not matches:
+    if not expectation.authority.owned_by(action_type, dispatch_id):
         if install_from is None:
             return None
         election = await elect_thread_status(
@@ -155,11 +130,8 @@ async def prepare_graph_action_receipt(
             thread_id,
             expectation=install_from,
             status=install_from.status,
-            successor=successor_thread_write_authority(
-                install_from,
-                action_type=action_type,
-                action_receipt_id=dispatch_id,
-            ),
+            action_type=action_type,
+            action_receipt_id=dispatch_id,
         )
         if election.outcome is not ThreadStatusElectionOutcome.WON:
             return None
@@ -194,7 +166,7 @@ def _matching_dispatch_receipt(
 ) -> GraphActionReceipt | None:
     if receipt is None or action is None or action.payload_json is None:
         return receipt
-    accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+    accepted = read_accepted_input(action)
     return receipt if dispatch_matches_accepted_input(dispatch, accepted) else None
 
 
@@ -203,7 +175,7 @@ async def bind_graph_action_receipt(
     dispatch: DispatchRequest,
 ) -> DispatchRequest:
     """Read committed acceptance evidence; delivery creates no receipt or writer."""
-    if dispatch.action == "cancel":
+    if not dispatch.requires_graph_receipt:
         return dispatch
     bind = cast("AsyncEngine | AsyncConnection | None", db.bind)
     if bind is None:
@@ -211,7 +183,7 @@ async def bind_graph_action_receipt(
     # A separate read transaction sees only committed acceptance and is closed
     # before network delivery. It cannot publish or discard the caller's writes.
     async with AsyncSession(bind=db.bind) as reader:
-        thread = await reader.get(ThreadModel, dispatch.thread_id)
+        thread = await get_thread(reader, dispatch.thread_id)
         action = await get_control_action_by_dispatch_id(
             reader,
             thread_id=dispatch.thread_id,
@@ -223,6 +195,9 @@ async def bind_graph_action_receipt(
             else None
         )
         receipt = _matching_dispatch_receipt(dispatch, receipt, action)
-    if receipt is not None and _GRAPH_ACTIONS[receipt.action_type] != dispatch.action:
+    if (
+        receipt is not None
+        and GRAPH_ACTION_VERB[receipt.action_type] != dispatch.action
+    ):
         receipt = None
     return dispatch.model_copy(update={"graph_action_receipt": receipt})

@@ -12,23 +12,21 @@ authoring tool names without dropping either.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from langchain_core.messages import HumanMessage
 
 from ....providers._acp_authoring import authoring_allowed_tool_names
-from ...nodes.worker import create_worker_node
+from ....testing import simulator_command
+from ...nodes.worker import WorkerNodeOptions, create_worker_node
 from ._native_read_floor import scoped_read_floor
 from .test_worker_authoring_wiring import binding, stdio_provider
 
 if TYPE_CHECKING:
-    from ....thread.state import TeamState
+    from pathlib import Path
 
-SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
-PYTHON_EXE = sys.executable
+    from ....thread.state import TeamState
 
 
 def _make_state() -> TeamState:
@@ -47,14 +45,12 @@ def _model(record_file: Path, tmp_path: Path):
     from ....providers.acp_chat_model import AcpChatModel
 
     return AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
+        command=simulator_command(
             "--response",
             "researched",
             "--record-session-new",
             str(record_file),
-        ],
+        ),
         # Armed run: an env auth token so config-home isolation engages, which the
         # harness-armed spawn assertion now requires. Production-faithful - a real
         # armed run always carries its lane token.
@@ -78,8 +74,7 @@ async def test_document_role_autonomous_permits_native_read_builtins(
         model=_model(record_file, tmp_path),
         system_prompt="You are a researcher.",
         name="researcher",
-        autonomous=True,
-        role="researcher",
+        options=WorkerNodeOptions(autonomous=True, role="researcher"),
     )
 
     result = await node(_make_state())
@@ -105,10 +100,12 @@ async def test_native_read_tools_union_with_authoring_allowlist(
         model=_model(record_file, tmp_path),
         system_prompt="You are a researcher.",
         name="researcher",
-        autonomous=True,
-        role="researcher",
-        authoring_binding_provider=stdio_provider(
-            thread_id="test-thread-native-read", agent_id="researcher"
+        options=WorkerNodeOptions(
+            autonomous=True,
+            role="researcher",
+            authoring_binding_provider=stdio_provider(
+                thread_id="test-thread-native-read", agent_id="researcher"
+            ),
         ),
     )
 
@@ -132,8 +129,7 @@ async def test_non_document_role_gets_no_native_read_builtins(
         model=_model(record_file, tmp_path),
         system_prompt="You are a coder.",
         name="coder",
-        autonomous=True,
-        role=None,
+        options=WorkerNodeOptions(autonomous=True, role=None),
     )
 
     await node(_make_state())
@@ -152,8 +148,7 @@ async def test_human_in_loop_document_role_gets_no_allowlist(
         model=_model(record_file, tmp_path),
         system_prompt="You are a researcher.",
         name="researcher",
-        autonomous=False,
-        role="researcher",
+        options=WorkerNodeOptions(autonomous=False, role="researcher"),
     )
 
     await node(_make_state())

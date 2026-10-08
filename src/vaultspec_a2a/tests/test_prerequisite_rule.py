@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ..conftest import EXTERNAL_PREREQUISITES
+from ..testing import combined_output, inherited_environment
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -41,16 +42,47 @@ def _pytest(
     with_env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a real nested pytest, optionally with env vars stripped."""
-    env = {k: v for k, v in os.environ.items() if k not in without}
-    if with_env is not None:
-        env.update(with_env)
     return subprocess.run(
         [sys.executable, "-m", "pytest", *args],
         cwd=REPO_ROOT,
-        env=env,
+        env=inherited_environment({**dict.fromkeys(without), **(with_env or {})}),
         capture_output=True,
         text=True,
         timeout=600,
+        check=False,
+    )
+
+
+def _nested_session(
+    workdir: Path, source: str, *args: str, env: Mapping[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run *source* as a real test module in a real session carrying the rule.
+
+    The rule loads as a plugin outside this repository, where nothing else can
+    explain the outcome. The session loads no seat of its own, so its temporary
+    trees are placed under *workdir* explicitly.
+    """
+    workdir.mkdir(parents=True, exist_ok=True)
+    target = workdir / "test_nested_gate.py"
+    target.write_text(source, encoding="utf-8")
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "vaultspec_a2a.conftest",
+            "--basetemp",
+            str(workdir / "nested-basetemp"),
+            *args,
+            "-ra",
+            str(target),
+        ],
+        cwd=workdir,
+        env=dict(os.environ) if env is None else dict(env),
+        capture_output=True,
+        text=True,
+        timeout=300,
         check=False,
     )
 
@@ -94,7 +126,7 @@ def test_prerequisite_import_does_not_load_live_catalog_validation() -> None:
         timeout=60,
         check=False,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 0, combined_output(result)
 
 
 def test_unknown_declaration_is_a_usage_error() -> None:
@@ -102,8 +134,8 @@ def test_unknown_declaration_is_a_usage_error() -> None:
     result = _pytest(
         "--require-prerequisite=not-a-prerequisite", "--collect-only", "-q"
     )
-    assert result.returncode == _USAGE_ERROR, result.stdout + result.stderr
-    combined = result.stdout + result.stderr
+    assert result.returncode == _USAGE_ERROR, combined_output(result)
+    combined = combined_output(result)
     assert "unknown prerequisites: not-a-prerequisite" in combined, combined
     assert "dashboard-engine" in combined, combined
 
@@ -116,8 +148,8 @@ def test_declaring_an_absent_prerequisite_aborts_before_collection() -> None:
         "-q",
         without=("VAULTSPEC_A2A_ENGINE_SERVE_CMD",),
     )
-    assert result.returncode == _USAGE_ERROR, result.stdout + result.stderr
-    combined = result.stdout + result.stderr
+    assert result.returncode == _USAGE_ERROR, combined_output(result)
+    combined = combined_output(result)
     assert "prerequisites this host does not have: dashboard-engine" in combined
     assert "VAULTSPEC_A2A_ENGINE_SERVE_CMD" in combined, combined
 
@@ -146,7 +178,7 @@ def test_absent_cross_repo_engine_is_disclosed_never_a_red_gate() -> None:
         _LOST_ACK,
         without=("VAULTSPEC_A2A_ENGINE_SERVE_CMD",),
     )
-    combined = result.stdout + result.stderr
+    combined = combined_output(result)
     assert result.returncode == 0, combined
     assert "withheld 1 live proof(s)" in combined, combined
     assert "dashboard-engine" in combined, combined
@@ -172,7 +204,7 @@ def test_live_provider_proofs_deselect_until_every_resource_is_declared() -> Non
             "VAULTSPEC_A2A_LIVE_OPTION_ID",
         ),
     )
-    combined = result.stdout + result.stderr
+    combined = combined_output(result)
     # Withheld, disclosed, and NOT red. Exit 5 would be the same red gate the
     # rule refuses, reached through the exit status: a host with no dashboard
     # repository would fail the service tier over a resource it was never
@@ -200,7 +232,7 @@ def test_declared_live_provider_selector_fails_before_collection_when_unset() ->
             "VAULTSPEC_A2A_LIVE_OPTION_ID",
         ),
     )
-    combined = result.stdout + result.stderr
+    combined = combined_output(result)
     assert result.returncode == _USAGE_ERROR, combined
     assert "provider-catalog-live-selection" in combined, combined
     assert "VAULTSPEC_A2A_LIVE_OPTION_ID" in combined, combined
@@ -228,7 +260,7 @@ def test_live_provider_proofs_collect_only_after_all_resources_are_declared() ->
         *_LIVE_PROVIDER_TESTS,
         with_env=required_env,
     )
-    combined = result.stdout + result.stderr
+    combined = combined_output(result)
     assert result.returncode == 0, combined
     assert "test_production_engine_recovers_lost_run_start_ack_exactly_once" in combined
     assert "test_dashboard_catalog_selection_completes_and_replays" in combined
@@ -249,48 +281,83 @@ def test_a_gate_that_skips_despite_its_declaration_fails_the_session(
     loads as a plugin outside this repository, where nothing else can explain
     the outcome.
     """
-    target = tmp_path / "test_gate_that_skips.py"
-    target.write_text(
-        "import pytest\n\n\n"
-        "def test_gate() -> None:\n"
-        '    pytest.skip("codex CLI not on PATH")\n',
-        encoding="utf-8",
-    )
     fake_codex = tmp_path / ("codex.cmd" if os.name == "nt" else "codex")
     if os.name == "nt":
         fake_codex.write_text("@echo off\r\nexit /b 0\r\n", encoding="utf-8")
     else:
         fake_codex.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         fake_codex.chmod(0o755)
-    env = dict(os.environ)
-    env["PATH"] = os.pathsep.join(
-        part for part in (str(tmp_path), env.get("PATH", "")) if part
+    env = inherited_environment(
+        {
+            "PATH": os.pathsep.join(
+                part for part in (str(tmp_path), os.environ.get("PATH", "")) if part
+            )
+        }
     )
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-p",
-            "vaultspec_a2a.conftest",
-            # This run loads no session seat of its own, so its temporary trees
-            # are placed under this test's directory explicitly.
-            "--basetemp",
-            str(tmp_path / "nested-basetemp"),
-            "--require-prerequisite=codex-cli",
-            "-ra",
-            str(target),
-        ],
-        cwd=tmp_path,
+    result = _nested_session(
+        tmp_path,
+        "import pytest\n\n\n"
+        "def test_gate() -> None:\n"
+        '    pytest.skip("codex CLI not on PATH")\n',
+        "--require-prerequisite=codex-cli",
         env=env,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        check=False,
     )
-    combined = result.stdout + result.stderr
+    combined = combined_output(result)
     # Nothing failed, and yet the session must not report success.
     assert "1 skipped" in combined, combined
     assert result.returncode != 0, combined
     assert "declared prerequisites that did not run" in combined, combined
     assert "codex-cli" in combined, combined
+
+
+def test_a_suite_probed_absence_skips_unless_the_caller_guaranteed_it(
+    tmp_path: Path,
+) -> None:
+    """A prerequisite only the suite can probe is judged by the declaration alone.
+
+    The engine's vault is read by the proof itself, so the proof reports its
+    absence through the rule. Undeclared, that is a skip carrying the canonical
+    reason; declared, the same report is a failure, because the caller promised
+    the resource and the run's environment broke the promise.
+    """
+    prerequisite = next(p for p in EXTERNAL_PREREQUISITES if p.id == "engine-vault-adr")
+    assert prerequisite.probe is None
+    source = (
+        "def test_gate(external_prerequisite) -> None:\n"
+        '    external_prerequisite.absent("engine-vault-adr", "no ADR to name")\n'
+    )
+    # A skip's summary line is cut to the terminal width, which would clip the
+    # runbook line this test exists to read.
+    wide = inherited_environment({"COLUMNS": "400"})
+
+    undeclared = _nested_session(tmp_path / "undeclared", source, env=wide)
+    skipped = combined_output(undeclared)
+    assert undeclared.returncode == 0, skipped
+    assert "1 skipped" in skipped, skipped
+    assert prerequisite.absence_reason("no ADR to name") in skipped, skipped
+
+    declared = _nested_session(
+        tmp_path / "declared", source, "--require-prerequisite=engine-vault-adr"
+    )
+    failed = combined_output(declared)
+    assert declared.returncode != 0, failed
+    assert "1 failed" in failed, failed
+    assert "--require-prerequisite=engine-vault-adr guarantees it is present" in failed
+    assert prerequisite.absence_reason("no ADR to name") in failed, failed
+
+
+def test_declaring_docker_without_a_resolvable_cli_aborts_before_collection(
+    tmp_path: Path,
+) -> None:
+    """The Docker probe fails closed when the one lookup resolves nothing."""
+    bare = tmp_path / "bare-path"
+    bare.mkdir()
+    result = _pytest(
+        "--require-prerequisite=docker",
+        "--collect-only",
+        "-q",
+        with_env={"PATH": str(bare)},
+    )
+    assert result.returncode == _USAGE_ERROR, combined_output(result)
+    combined = combined_output(result)
+    assert "prerequisites this host does not have: docker" in combined, combined

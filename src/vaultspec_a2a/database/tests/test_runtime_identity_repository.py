@@ -1,4 +1,4 @@
-"""Runtime identity is durable, write-once evidence on both database backends."""
+"""Runtime identity is durable, write-once evidence in the migrated store."""
 
 from __future__ import annotations
 
@@ -15,17 +15,12 @@ from ..runtime_identity_repository import (
     record_provider_runtime_identity,
 )
 from ..thread_repository import create_thread
-from ._backends import (
-    BACKENDS,
-    backend,
-    downgrade,
-    migrated_session_factory,
-    synchronous_url,
-    upgrade,
-)
+from ._migration_target import downgrade, empty_database_url, synchronous_url, upgrade
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 _RUN = "runtime-identity-proof"
 _TABLE = "provider_runtime_identities"
@@ -58,53 +53,48 @@ def _identity(*, version: str = "2.1.286") -> ProviderRuntimeIdentityModel:
     )
 
 
-@pytest.mark.parametrize("backend_name", BACKENDS)
-def test_runtime_identity_migration_is_reversible(
-    backend_name: str, tmp_path: Path
-) -> None:
+def test_runtime_identity_migration_is_reversible(tmp_path: Path) -> None:
     """A real migration adds the table and its predecessor can remove it."""
-    with backend(backend_name, tmp_path) as target:
-        upgrade(target.url, "0024")
-        assert not _table_present(target.url)
-        upgrade(target.url, "0025")
-        assert _table_present(target.url)
-        downgrade(target.url, "0024")
-        assert not _table_present(target.url)
-        upgrade(target.url)
-        assert _table_present(target.url)
+    url = empty_database_url(tmp_path)
+    upgrade(url, "0024")
+    assert not _table_present(url)
+    upgrade(url, "0025")
+    assert _table_present(url)
+    downgrade(url, "0024")
+    assert not _table_present(url)
+    upgrade(url)
+    assert _table_present(url)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend_name", BACKENDS)
 async def test_runtime_identity_accepts_exact_retry_and_refuses_changed_evidence(
-    backend_name: str, tmp_path: Path
+    migrated_session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
 ) -> None:
     """A retry cannot turn one completed run into a different binary claim."""
-    async with migrated_session_factory(backend_name, tmp_path) as (_target, factory):
-        async with factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id=_RUN,
-                status=ThreadStatus.RUNNING,
+    async with migrated_session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=_RUN,
+            status=ThreadStatus.RUNNING,
+        )
+        await session.commit()
+
+    async with migrated_session_factory() as session:
+        first = await record_provider_runtime_identity(session, _identity())
+        assert first.cli_version == "2.1.286"
+        await session.commit()
+
+    async with migrated_session_factory() as session:
+        repeated = await record_provider_runtime_identity(session, _identity())
+        assert repeated.cli_version == "2.1.286"
+        with pytest.raises(RuntimeIdentityConflictError):
+            await record_provider_runtime_identity(
+                session, _identity(version="2.1.287")
             )
-            await session.commit()
+        await session.commit()
 
-        async with factory() as session:
-            first = await record_provider_runtime_identity(session, _identity())
-            assert first.cli_version == "2.1.286"
-            await session.commit()
-
-        async with factory() as session:
-            repeated = await record_provider_runtime_identity(session, _identity())
-            assert repeated.cli_version == "2.1.286"
-            with pytest.raises(RuntimeIdentityConflictError):
-                await record_provider_runtime_identity(
-                    session, _identity(version="2.1.287")
-                )
-            await session.commit()
-
-        async with factory() as session:
-            rows = (await session.scalars(select(ProviderRuntimeIdentityModel))).all()
-            assert len(rows) == 1
-            assert rows[0].cli_version == "2.1.286"
+    async with migrated_session_factory() as session:
+        rows = (await session.scalars(select(ProviderRuntimeIdentityModel))).all()
+        assert len(rows) == 1
+        assert rows[0].cli_version == "2.1.286"

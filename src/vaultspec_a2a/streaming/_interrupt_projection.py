@@ -5,18 +5,30 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
+from typing import TYPE_CHECKING, Any, TypeGuard
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
+
+from ..database import read_latest_checkpoint
 from ..domain_config import domain_config
-from ..graph.acp_options import option_id_of
-from ..graph.enums import AgentLifecycleState, PermissionOptionKind, PermissionType
-from ..thread.clarification import CLARIFICATION_INTERRUPT_TYPE
-from .types import StreamableGraph, resolve_acp_option_kind
+from ..graph.acp_options import (
+    APPROVAL_OPTIONS,
+    option_display_name,
+    option_id_of,
+    option_kind,
+)
+from ..graph.enums import AgentLifecycleState, PermissionType
+from ..thread import InterruptType, live_interrupts
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from ..database import Checkpointer
+    from ..thread import LiveInterrupt
     from .emitters import EventEmitters
+    from .types import StreamableGraph
+
+__all__ = ["emit_interrupt_events"]
 
 logger = logging.getLogger(__name__)
 
@@ -28,44 +40,31 @@ class _InterruptEmission:
     thread_id: str
     agent_id: str
     request_id: str
-    interrupt_type: str
+    interrupt_type: InterruptType
     payload: dict[str, Any]
-
-
-class _InterruptTask(Protocol):
-    """The task fields exposed by LangGraph state snapshots."""
-
-    name: str
-    interrupts: Sequence[object]
-
-
-_INTERRUPT_TYPES = frozenset(
-    {
-        "permission_request",
-        "plan_approval_request",
-        "document_approval_request",
-        CLARIFICATION_INTERRUPT_TYPE,
-    }
-)
 
 
 async def emit_interrupt_events(
     thread_id: str,
-    _agent_id: str,
     graph: StreamableGraph,
     config: dict[str, Any],
     emitters: EventEmitters,
 ) -> bool:
-    """Inspect graph state after streaming and project every known interrupt."""
+    """Inspect graph state after streaming and project every open question.
+
+    A fanned-out branch that was answered and ran on keeps its interrupt in
+    the snapshot until the superstep commits, so the questions are read
+    against the checkpoint's held writes: an answered one is not asked again.
+    """
     state = await _read_graph_state(thread_id, graph, config)
     if state is None:
         return False
 
-    tasks = _interrupted_tasks(state)
-    if not tasks or not any(task.interrupts for task in tasks):
+    interrupts = live_interrupts(state, await _held_writes(thread_id, graph))
+    if not interrupts:
         return False
 
-    for emission in _interrupt_emissions(thread_id, tasks):
+    for emission in _interrupt_emissions(thread_id, interrupts):
         if not emitters.has_pending_permission(emission.request_id):
             await _emit_interrupt(emission, emitters)
     return True
@@ -92,48 +91,50 @@ async def _read_graph_state(
     return None
 
 
+async def _held_writes(thread_id: str, graph: StreamableGraph) -> tuple[object, ...]:
+    """The writes the store holds against the run's latest checkpoint.
+
+    The run's own ingest is finishing, so nothing else writes this thread
+    between the state read and this one. A store that cannot be read returns
+    nothing, which leaves every question the snapshot lists reading as open:
+    the snapshot's own reading, and the one that discloses a question rather
+    than hiding one.
+    """
+    checkpointer: object = getattr(graph, "checkpointer", None)
+    if not _is_checkpointer(checkpointer):
+        return ()
+    stored = await read_latest_checkpoint(checkpointer, thread_id)
+    if stored.checkpoint_tuple is None:
+        return ()
+    return tuple(stored.checkpoint_tuple.pending_writes or ())
+
+
 def _interrupt_emissions(
-    thread_id: str, tasks: Sequence[_InterruptTask]
+    thread_id: str, interrupts: Sequence[LiveInterrupt]
 ) -> list[_InterruptEmission]:
-    """Normalize recognized task interrupts while retaining their graph position."""
+    """Normalize the recognized open questions while retaining the task that asked."""
     emissions: list[_InterruptEmission] = []
-    for task_index, task in enumerate(tasks):
-        for interrupt_index, interrupt in enumerate(task.interrupts):
-            payload = _interrupt_payload(interrupt)
-            if payload is None:
-                continue
-            interrupt_type = payload.get("type")
-            if interrupt_type not in _INTERRUPT_TYPES:
-                continue
-            emissions.append(
-                _InterruptEmission(
-                    thread_id=thread_id,
-                    agent_id=task.name,
-                    request_id=_request_id(
-                        thread_id, task_index, interrupt_index, interrupt, payload
-                    ),
-                    interrupt_type=interrupt_type,
-                    payload=payload,
-                )
+    for interrupt in interrupts:
+        if interrupt.payload is None or interrupt.interrupt_type not in InterruptType:
+            continue
+        if interrupt.request_id is None:
+            logger.warning(
+                "Thread %s parked on a %s interrupt that names no request; it "
+                "cannot be answered, so it is not disclosed",
+                thread_id,
+                interrupt.interrupt_type,
             )
+            continue
+        emissions.append(
+            _InterruptEmission(
+                thread_id=thread_id,
+                agent_id=interrupt.task_name,
+                request_id=interrupt.request_id,
+                interrupt_type=InterruptType(interrupt.interrupt_type),
+                payload=interrupt.payload,
+            )
+        )
     return emissions
-
-
-def _interrupt_payload(interrupt: object) -> dict[str, Any] | None:
-    """Return a LangGraph interrupt payload when it has the expected mapping shape."""
-    payload: object = getattr(interrupt, "value", interrupt)
-    return payload if _is_payload(payload) else None
-
-
-def _interrupted_tasks(state: object) -> Sequence[_InterruptTask]:
-    """Return the sequence of pending LangGraph tasks, if a snapshot supplies one."""
-    tasks: object = getattr(state, "tasks", None)
-    return tasks if _is_task_sequence(tasks) else ()
-
-
-def _is_task_sequence(value: object) -> TypeGuard[Sequence[_InterruptTask]]:
-    """Recognize the list/tuple task collection used by graph state snapshots."""
-    return isinstance(value, list | tuple)
 
 
 def _is_payload(value: object) -> TypeGuard[dict[str, Any]]:
@@ -141,30 +142,24 @@ def _is_payload(value: object) -> TypeGuard[dict[str, Any]]:
     return isinstance(value, dict)
 
 
-def _request_id(
-    thread_id: str,
-    task_index: int,
-    interrupt_index: int,
-    interrupt: object,
-    payload: dict[str, Any],
-) -> str:
-    """Resolve the durable request identity in the established precedence order."""
-    return str(
-        payload.get("request_id")
-        or getattr(interrupt, "id", None)
-        or f"{thread_id}:task{task_index}:int{interrupt_index}"
-    )
+def _is_checkpointer(value: object) -> TypeGuard[Checkpointer]:
+    """Narrow a graph's ``checkpointer`` attribute to a real saver.
+
+    The attribute also takes ``False`` (checkpointing off) and ``True`` (a
+    subgraph inheriting its parent's), neither of which holds any writes.
+    """
+    return isinstance(value, BaseCheckpointSaver)
 
 
 async def _emit_interrupt(
     emission: _InterruptEmission, emitters: EventEmitters
 ) -> None:
     """Route one recognized interrupt to its explicit projection branch."""
-    if emission.interrupt_type == CLARIFICATION_INTERRUPT_TYPE:
+    if emission.interrupt_type is InterruptType.CLARIFICATION_REQUEST:
         await _emit_clarification(emission, emitters)
-    elif emission.interrupt_type == "plan_approval_request":
+    elif emission.interrupt_type is InterruptType.PLAN_APPROVAL_REQUEST:
         await _emit_plan_approval(emission, emitters)
-    elif emission.interrupt_type == "document_approval_request":
+    elif emission.interrupt_type is InterruptType.DOCUMENT_APPROVAL_REQUEST:
         await _emit_document_approval(emission, emitters)
     else:
         await _emit_tool_permission(emission, emitters)
@@ -245,17 +240,10 @@ async def _emit_approval_request(
 
 def _approval_options(subject: str) -> list[dict[str, Any]]:
     """Return the stable approve/reject pair for a plan or document decision."""
+    approve, reject = APPROVAL_OPTIONS
     return [
-        {
-            "option_id": "approve",
-            "name": f"Approve {subject}",
-            "kind": PermissionOptionKind.ALLOW_ONCE,
-        },
-        {
-            "option_id": "reject",
-            "name": f"Reject — Revise {subject}",
-            "kind": PermissionOptionKind.REJECT_ONCE,
-        },
+        {**approve, "name": f"Approve {subject}"},
+        {**reject, "name": f"Reject — Revise {subject}"},
     ]
 
 
@@ -276,12 +264,22 @@ async def _emit_tool_permission(
 
 
 def _permission_options(raw_options: object) -> list[dict[str, Any]]:
-    """Normalize ACP option identities and honor valid declared permission kinds."""
+    """Normalize the ACP options the worker offered, adding and inventing none.
+
+    The worker-offered set is the only option authority, and a request with no
+    option a human could pick is refused at the worker rather than parked. So
+    there is nothing here to substitute for: an option whose id cannot be read
+    is dropped, and an empty offer stays empty. The pair this used to invent was
+    persisted and then validated the human's pick against itself, so the worker
+    rejected that pick against the real offer and the run stalled.
+    """
     options: list[dict[str, Any]] = []
     if _is_object_list(raw_options):
         for option in raw_options:
-            options.append(_permission_option(option))
-    return options or _default_permission_options()
+            projected = _permission_option(option)
+            if projected is not None:
+                options.append(projected)
+    return options
 
 
 def _is_object_list(value: object) -> TypeGuard[list[object]]:
@@ -289,12 +287,24 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
-def _permission_option(option: object) -> dict[str, Any]:
-    """Project one ACP option, deriving a kind only for an invalid declaration."""
+def _permission_option(option: object) -> dict[str, Any] | None:
+    """Project one ACP option, or ``None`` when it names no id to answer with.
+
+    An answer is addressed to an option id, so an option carrying none could
+    only be offered under an invented one - and the id this used to invent,
+    ``allow_once``, is an APPROVAL. A malformed refusal was therefore shown and
+    persisted as a grant. It is dropped instead.
+    """
     fields: dict[str, Any] = option if _is_payload(option) else {}
     option_id = option_id_of(option)
+    if not option_id:
+        logger.warning(
+            "Dropping a permission option that names no id; it could not be "
+            "answered, and naming one for it would decide the request"
+        )
+        return None
     declared_kind = fields.get("kind")
-    kind = resolve_acp_option_kind(declared_kind, option_id or "")
+    kind = option_kind(option)
     if declared_kind and kind != declared_kind:
         logger.warning(
             "Permission option %r declared unrecognised kind %r; "
@@ -304,26 +314,10 @@ def _permission_option(option: object) -> dict[str, Any]:
             kind.value,
         )
     return {
-        "option_id": option_id or "allow_once",
-        "name": fields.get("label", fields.get("name", option_id or "Allow")),
+        "option_id": option_id,
+        "name": option_display_name(option),
         "kind": kind,
     }
-
-
-def _default_permission_options() -> list[dict[str, Any]]:
-    """Keep an omitted provider option list answerable."""
-    return [
-        {
-            "option_id": "allow_once",
-            "name": "Allow",
-            "kind": PermissionOptionKind.ALLOW_ONCE,
-        },
-        {
-            "option_id": "deny_once",
-            "name": "Deny",
-            "kind": PermissionOptionKind.REJECT_ONCE,
-        },
-    ]
 
 
 def _payload_text(payload: dict[str, Any], key: str, default: str) -> str:

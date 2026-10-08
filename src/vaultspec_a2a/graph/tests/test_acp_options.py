@@ -11,7 +11,14 @@ from __future__ import annotations
 
 import pytest
 
-from ..acp_options import OPTION_ID_KEYS, option_id_of, valid_option_ids
+from ..acp_options import (
+    OPTION_ID_KEYS,
+    option_display_name,
+    option_id_of,
+    option_id_of_kind,
+    valid_option_ids,
+)
+from ..enums import PermissionOptionKind
 
 
 @pytest.mark.parametrize("key", OPTION_ID_KEYS)
@@ -77,3 +84,36 @@ def test_a_malformed_option_contributes_nothing_to_the_valid_set() -> None:
 def test_a_non_list_offers_nothing(options: object) -> None:
     """An empty set reads as "nothing to validate against", never as a crash."""
     assert valid_option_ids(options) == set()
+
+
+@pytest.mark.parametrize("key", OPTION_ID_KEYS)
+def test_the_option_of_the_requested_kind_is_selected_under_either_spelling(
+    key: str,
+) -> None:
+    """The first option declaring the kind answers, whichever id spelling it uses."""
+    options = [
+        {key: "opt-once", "name": "Allow once", "kind": "allow_once"},
+        {key: "opt-always", "name": "Allow always", "kind": "allow_always"},
+        {key: "opt-deny", "name": "Deny", "kind": "reject_always"},
+    ]
+    assert option_id_of_kind(options, PermissionOptionKind.ALLOW_ALWAYS) == "opt-always"
+    assert option_id_of_kind(options, PermissionOptionKind.REJECT_ALWAYS) == "opt-deny"
+    assert option_id_of_kind(options, PermissionOptionKind.ALLOW_ONCE) == "opt-once"
+    assert option_id_of_kind([], PermissionOptionKind.ALLOW_ALWAYS) is None
+
+
+@pytest.mark.parametrize(
+    ("option", "expected"),
+    [
+        ({"optionId": "go", "label": "Go ahead", "name": "Proceed"}, "Go ahead"),
+        ({"optionId": "go", "name": "Proceed"}, "Proceed"),
+        ({"option_id": "go"}, "go"),
+        ({"kind": "allow_once"}, "Allow"),
+        ("not-a-dict", "Allow"),
+    ],
+)
+def test_the_display_name_prefers_the_label_then_the_name_then_the_id(
+    option: object, expected: str
+) -> None:
+    """Every surface renders one option under the same human-facing name."""
+    assert option_display_name(option) == expected

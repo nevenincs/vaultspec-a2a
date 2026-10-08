@@ -19,15 +19,14 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
+from ...testing import DEFAULT_TEAM_PRESET, catalog_run_fields, park_clarification
 from ...thread.clarification import MAX_ANSWER_CHARS
-from .clarification_harness import park_clarification
-from .conftest import catalog_run_fields, make_app
+from .conftest import make_app
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-_BUNDLE_FREE_PRESET = "mock-success-single"
 
 type SessionFactory = async_sessionmaker[AsyncSession]
 
@@ -44,7 +43,7 @@ class TestClarificationRoundTrip:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-01",
                     **catalog_run_fields(client),
@@ -104,7 +103,7 @@ class TestClarificationRoundTrip:
             create_resp = client1.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-02",
                     **catalog_run_fields(client1),
@@ -115,11 +114,11 @@ class TestClarificationRoundTrip:
         parked = asyncio.run(park_clarification(checkpointer, thread_id=thread_id))
         request_id = parked.request.request_id
 
-        # A second, independent app — its own EventAggregator, its own
+        # A second, independent app — its own RelayHub, its own
         # TestClient lifecycle — reading the SAME durable session_factory and
         # checkpointer, simulating a reload/reconnect.
         app2, _agg2, _worker2, _cp2 = make_app(
-            session_factory, checkpointer, aggregator=EventAggregator()
+            session_factory, checkpointer, relay_hub=RelayHub()
         )
         with TestClient(app2, raise_server_exceptions=True) as client2:
             status_resp = client2.get(f"/v1/runs/{thread_id}")
@@ -139,7 +138,7 @@ class TestClarificationRoundTrip:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-03",
                     **catalog_run_fields(client),
@@ -170,7 +169,7 @@ class TestClarificationRoundTrip:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-04",
                     **catalog_run_fields(client),
@@ -200,7 +199,7 @@ class TestClarificationRoundTrip:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-05",
                     **catalog_run_fields(client),
@@ -234,7 +233,7 @@ class TestClarificationRoundTrip:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-06",
                     **catalog_run_fields(client),
@@ -277,7 +276,7 @@ class TestClarificationRoundTrip:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-07",
                     **catalog_run_fields(client),
@@ -313,7 +312,7 @@ class TestClarificationRoundTrip:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-08",
                     **catalog_run_fields(client),
@@ -375,7 +374,7 @@ class TestClarificationRoundTrip:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-09",
                     **catalog_run_fields(client),
@@ -405,7 +404,7 @@ class TestClarificationRoundTrip:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-10",
                     **catalog_run_fields(client),
@@ -440,7 +439,7 @@ class TestClarificationRoundTrip:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-11",
                     **catalog_run_fields(client),
@@ -479,7 +478,7 @@ class TestClarificationRoundTrip:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-12",
                     **catalog_run_fields(client),
@@ -513,7 +512,7 @@ class TestClarificationRoundTrip:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "plan it",
                     "run_id": "clarify-ep-13",
                     **catalog_run_fields(client),

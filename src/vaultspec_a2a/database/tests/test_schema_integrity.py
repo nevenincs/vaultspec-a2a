@@ -21,9 +21,13 @@ each one a decision that would otherwise survive only as a comment:
 * That every reader of the workspace-root selector enforces the width the
   COLUMN declares, measured off the mapped column rather than off a number
   repeated in the test.
+* That the accounting table records provider-reported counts and nothing
+  priced or derived, in the model and in the migrated database alike.
+* That the permission request table records the request's lifecycle and nothing
+  about the answer, which the response journal owns.
 
-Everything drives real SQLite databases, the real revision chain, and the real
-Pydantic models.
+Everything drives real SQLite databases, the real revision chain, the real
+Pydantic models, and the real stream catalog.
 """
 
 from __future__ import annotations
@@ -34,24 +38,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
-from alembic import command
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 from sqlalchemy import Connection, String, create_engine, inspect, select, text
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
-from ...api.schemas.events import (
-    MAX_TOOL_CALL_CHARS,
-    PermissionRequestEvent,
-)
 from ...api.schemas.gateway import (
     ActiveRunRecord,
     ProviderCatalogSelection,
@@ -60,18 +51,21 @@ from ...api.schemas.gateway import (
 )
 from ...control.run_discovery_service import discover_active_runs
 from ...graph.enums import ServerEventType
+from ...streaming.sse_frames import enforce_progress_allowlist
 from ...tests._write_authority import (
     make_test_thread_authority_columns,
     make_test_write_authority,
 )
-from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
+from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS, MAX_TOOL_CALL_CHARS
 from ...thread.enums import ControlActionResultStatus, RepairStatus, ThreadStatus
-from ..migrate import build_migration_config
 from ..models import Base, ControlActionModel, ThreadModel
 from ..thread_repository import create_thread, list_active_thread_page
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Iterator
+    from collections.abc import Iterator, Mapping
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 # The four partial indexes revision 0009 created descending, and the ordering it
 # gave each one. Newest-first listing is the access pattern they exist for, so
@@ -92,36 +86,12 @@ _FK_CONVENTION = {"fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_na
 
 
 @pytest.fixture(scope="module")
-def migrated_database(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A real file-backed SQLite database migrated through the real chain.
-
-    File-backed rather than ``:memory:`` because only a file forces the Alembic
-    chain, which is what production replays and what these tests are about.
-    """
-    database = tmp_path_factory.mktemp("schema-integrity") / "migrated.db"
-    command.upgrade(build_migration_config(f"sqlite+aiosqlite:///{database}"), "head")
-    return database
-
-
-@pytest.fixture(scope="module")
-def migrated_connection(migrated_database: Path) -> Iterator[Connection]:
-    """An open sync connection to the migrated database."""
-    engine = create_engine(f"sqlite:///{migrated_database}")
+def migrated_connection(migrated_template: Path) -> Iterator[Connection]:
+    """An open sync connection to the session's migrated database, read only."""
+    engine = create_engine(f"sqlite:///{migrated_template}")
     with engine.connect() as connection:
         yield connection
     engine.dispose()
-
-
-@pytest_asyncio.fixture
-async def session() -> AsyncGenerator[AsyncSession]:
-    """A real session over the live declarative schema."""
-    engine: AsyncEngine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as sess:
-        yield sess
-    await engine.dispose()
 
 
 def _index_ddl(connection: Connection, index_name: str) -> str:
@@ -200,34 +170,32 @@ class TestUnnamedForeignKeysAreTargetable:
         )
 
     def test_batch_naming_convention_drops_an_unnamed_foreign_key(
-        self, migrated_database: Path, tmp_path: Path
+        self, migrated_database_file: Path
     ) -> None:
         """Alembic's batch ``naming_convention`` targets an unnamed FK for real.
 
         This is the whole remedy ``Base`` points at, exercised end to end: a
         real migrated database, a real ``Operations`` context, a real batch
         rebuild, and a reflection afterwards proving the constraint is gone.
-        Run against a copy so the module-scoped database stays pristine.
+        Run against the test's own copy so the shared template stays pristine.
         """
-        working = tmp_path / "fk-drop.db"
-        working.write_bytes(migrated_database.read_bytes())
-        engine = create_engine(f"sqlite:///{working}")
+        engine = create_engine(f"sqlite:///{migrated_database_file}")
         try:
             with engine.connect() as connection:
-                before = inspect(connection).get_foreign_keys("artifacts")
+                before = inspect(connection).get_foreign_keys("permission_logs")
                 assert [key["constrained_columns"] for key in before] == [
                     ["thread_id"]
-                ], f"expected one unnamed thread_id FK on artifacts, got {before}"
+                ], f"expected one unnamed thread_id FK on permission_logs, got {before}"
 
                 operations = Operations(MigrationContext.configure(connection))
                 with operations.batch_alter_table(
-                    "artifacts", naming_convention=_FK_CONVENTION
+                    "permission_logs", naming_convention=_FK_CONVENTION
                 ) as batch_op:
                     batch_op.drop_constraint(
-                        "fk_artifacts_thread_id_threads", type_="foreignkey"
+                        "fk_permission_logs_thread_id_threads", type_="foreignkey"
                     )
 
-                after = inspect(connection).get_foreign_keys("artifacts")
+                after = inspect(connection).get_foreign_keys("permission_logs")
 
             assert after == [], (
                 "the unnamed foreign key survived a batch drop that named it "
@@ -235,6 +203,129 @@ class TestUnnamedForeignKeysAreTargetable:
             )
         finally:
             engine.dispose()
+
+
+#: Every column ``cost_tracking`` is allowed to carry: the row's identity, the
+#: lane that reported it, the five provider-reported counts, and when it landed.
+_ACCOUNTING_COLUMNS = frozenset(
+    {
+        "id",
+        "thread_id",
+        "agent_id",
+        "provider",
+        "model",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "reasoning_tokens",
+        "created_at",
+    }
+)
+
+
+class TestAccountingRecordsOnlyWhatAProviderReported:
+    """``cost_tracking`` holds measured counts and nothing priced or derived.
+
+    The decision this pins is one no comparison of the two schemas can state: no
+    column records a cost the system did not measure. Every served lane is a
+    subscription-authenticated CLI agent and the project holds no rate table for
+    any model, so a price column can only ever hold a structural zero - and a
+    SUM over structural zeros reads back as a measured total of zero dollars.
+    That is why a column recording a measurement nobody takes is worse than an
+    absent one, and why one was removed rather than left unwritten.
+
+    Asserted as an EXACT column set rather than as the absence of one name, so a
+    price re-added under any spelling fails here. Asserted against the migrated
+    database as well as the model, because the model alone cannot prove the
+    column left the stores that already have it.
+    """
+
+    def test_the_model_declares_exactly_the_reported_counts(self) -> None:
+        """The mapped table carries no priced or derived column."""
+        declared = set(Base.metadata.tables["cost_tracking"].columns.keys())
+
+        assert declared == set(_ACCOUNTING_COLUMNS), (
+            "cost_tracking's mapped columns are no longer exactly the "
+            f"provider-reported record: {sorted(declared ^ _ACCOUNTING_COLUMNS)}"
+        )
+
+    def test_the_migrated_table_declares_exactly_the_reported_counts(
+        self, migrated_connection: Connection
+    ) -> None:
+        """Head agrees, so the chain really dropped it rather than stopping writing."""
+        migrated = {
+            column["name"]
+            for column in inspect(migrated_connection).get_columns("cost_tracking")
+        }
+
+        assert migrated == set(_ACCOUNTING_COLUMNS), (
+            "the migrated cost_tracking table is no longer exactly the "
+            f"provider-reported record: {sorted(migrated ^ _ACCOUNTING_COLUMNS)}"
+        )
+
+
+#: Every column ``permission_requests`` is allowed to carry: the request's
+#: identity, the run it belongs to, the question as it was asked, the lifecycle
+#: state of the ask, and the three instants that state moved through.
+_PERMISSION_REQUEST_COLUMNS = frozenset(
+    {
+        "request_id",
+        "thread_id",
+        "pause_reason_type",
+        "tool_call",
+        "description",
+        "allowed_options_json",
+        "request_status",
+        "created_at",
+        "responded_at",
+        "applied_at",
+    }
+)
+
+
+class TestThePermissionRequestRowHoldsNoCopyOfTheAnswer:
+    """``permission_requests`` records the ask; the answer lives elsewhere.
+
+    Two columns here used to hold a second copy of a decision: the option the
+    responder chose and the journal key its response action was filed under. The
+    settlement reads neither - it reads the answer off the frozen envelope of the
+    accepted response action, deliberately, so a row rewritten after acceptance
+    cannot change which option a run is settled under - and ``permission_logs``
+    is the durable record of the decision itself. What remained was write-only
+    storage of a fact with an owner elsewhere: a reader that trusted it could be
+    told a different answer than the one the run was resumed with.
+
+    Asserted as an EXACT column set rather than as the absence of two names, so a
+    second copy re-added under any spelling fails here. Asserted against the
+    migrated database as well as the model, because the model alone cannot prove
+    the columns left the stores that already have them.
+    """
+
+    def test_the_model_declares_only_the_request_lifecycle(self) -> None:
+        """The mapped table carries no column about the answer."""
+        declared = set(Base.metadata.tables["permission_requests"].columns.keys())
+
+        assert declared == set(_PERMISSION_REQUEST_COLUMNS), (
+            "permission_requests' mapped columns are no longer exactly the "
+            f"request's own record: {sorted(declared ^ _PERMISSION_REQUEST_COLUMNS)}"
+        )
+
+    def test_the_migrated_table_declares_only_the_request_lifecycle(
+        self, migrated_connection: Connection
+    ) -> None:
+        """Head agrees, so the chain dropped them rather than stopping writing."""
+        migrated = {
+            column["name"]
+            for column in inspect(migrated_connection).get_columns(
+                "permission_requests"
+            )
+        }
+
+        assert migrated == set(_PERMISSION_REQUEST_COLUMNS), (
+            "the migrated permission_requests table is no longer exactly the "
+            f"request's own record: {sorted(migrated ^ _PERMISSION_REQUEST_COLUMNS)}"
+        )
 
 
 class TestStatusDefaultsComeFromEnums:
@@ -274,10 +365,10 @@ class TestStatusDefaultsComeFromEnums:
         """The column round-trips every ``RepairStatus`` member.
 
         ``execution_readiness`` shares ``RepairStatus`` with ``repair_status``
-        rather than owning a parallel enum, because every producer in the
-        codebase already writes a ``RepairStatus`` member into it. This asserts
-        the whole vocabulary survives the column, so the sharing is a fact about
-        the schema and not just a convention.
+        rather than owning a parallel enum, because it is written from the
+        repair status and so can only ever hold a ``RepairStatus`` member. This
+        asserts the whole vocabulary survives the column, so the sharing is a
+        fact about the schema and not just a convention.
         """
         for index, member in enumerate(RepairStatus):
             session.add(
@@ -330,21 +421,23 @@ class TestStatusDefaultsComeFromEnums:
         assert stored.result_status == ControlActionResultStatus.ACCEPTED_NOT_APPLIED
 
 
-def _permission_event(
+def _served_permission_frame(
     *, description: str, tool_call: str | None
-) -> PermissionRequestEvent:
-    """Build a permission frame the way ``api/event_adapter`` builds one."""
-    return PermissionRequestEvent(
-        type=ServerEventType.PERMISSION_REQUEST,
-        thread_id="thread-1",
-        agent_id="agent-1",
-        timestamp=datetime.now(UTC),
-        sequence=1,
-        request_id="req-1",
-        description=description,
-        options=[],
-        tool_call=tool_call,
-    )
+) -> Mapping[str, object]:
+    """Project a permission frame through the catalog the stream serves it with."""
+    payload: dict[str, object] = {
+        "type": ServerEventType.PERMISSION_REQUEST,
+        "thread_id": "thread-1",
+        "agent_id": "agent-1",
+        "timestamp": 1.0,
+        "sequence": 1,
+        "request_id": "req-1",
+        "description": description,
+        "options": [],
+    }
+    if tool_call is not None:
+        payload["tool_call"] = tool_call
+    return enforce_progress_allowlist(payload)
 
 
 class TestPermissionTextIsBounded:
@@ -353,39 +446,45 @@ class TestPermissionTextIsBounded:
     def test_oversize_description_is_truncated_not_refused(self) -> None:
         """A pathological description is shortened and still delivered.
 
-        The delivery half matters as much as the bound. ``event_adapter`` builds
-        this frame with no error handling, and the frame is the only signal that
-        a run is waiting on an operator, so a cap that raised would convert an
-        over-long description into a silently hung run.
+        The delivery half matters as much as the bound. The frame is the only
+        signal that a run is waiting on an operator, so a cap that refused it
+        would convert an over-long description into a silently hung run.
         """
-        event = _permission_event(
-            description="d" * (MAX_PERMISSION_DESCRIPTION_CHARS * 3), tool_call=None
-        )
+        description = "d" * (MAX_PERMISSION_DESCRIPTION_CHARS * 3)
+        frame = _served_permission_frame(description=description, tool_call=None)
 
-        assert len(event.description) == MAX_PERMISSION_DESCRIPTION_CHARS
+        served = frame["description"]
+        assert isinstance(served, str)
+        assert frame["request_id"] == "req-1"
+        assert 0 < len(served) <= MAX_PERMISSION_DESCRIPTION_CHARS
+        assert description.startswith(served)
 
     def test_oversize_tool_call_is_truncated_not_refused(self) -> None:
         """An over-long tool identifier is shortened rather than fatal."""
-        event = _permission_event(
-            description="fine", tool_call="t" * (MAX_TOOL_CALL_CHARS * 3)
-        )
+        tool_call = "t" * (MAX_TOOL_CALL_CHARS * 3)
+        frame = _served_permission_frame(description="fine", tool_call=tool_call)
 
-        assert event.tool_call is not None
-        assert len(event.tool_call) == MAX_TOOL_CALL_CHARS
+        served = frame["tool_call"]
+        assert isinstance(served, str)
+        assert frame["request_id"] == "req-1"
+        assert len(served) == MAX_TOOL_CALL_CHARS
+        assert tool_call.startswith(served)
 
     def test_text_within_the_bound_is_untouched(self) -> None:
         """The cap shortens only what exceeds it."""
         description = "a permission is required" * 8
-        event = _permission_event(description=description, tool_call="write_file")
+        frame = _served_permission_frame(
+            description=description, tool_call="write_file"
+        )
 
-        assert event.description == description
-        assert event.tool_call == "write_file"
+        assert frame["description"] == description
+        assert frame["tool_call"] == "write_file"
 
     def test_absent_tool_call_stays_absent(self) -> None:
-        """The bound leaves the optional field's ``None`` alone."""
-        event = _permission_event(description="fine", tool_call=None)
+        """The bound leaves the optional field's absence alone."""
+        frame = _served_permission_frame(description="fine", tool_call=None)
 
-        assert event.tool_call is None
+        assert "tool_call" not in frame
 
 
 class TestWorkspaceRootBoundIsTheColumn:
@@ -467,7 +566,7 @@ class TestWorkspaceRootBoundIsTheColumn:
 
     @pytest.mark.asyncio
     async def test_the_discovery_edge_admits_the_width_and_refuses_past_it(
-        self, session: AsyncSession
+        self, session: AsyncSession, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Discovery refuses at the edge rather than deep in a transaction.
 
@@ -478,20 +577,18 @@ class TestWorkspaceRootBoundIsTheColumn:
         """
         width = self._column_width()
 
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-            await checkpointer.setup()
+        await discover_active_runs(
+            session,
+            checkpointer=checkpointer,
+            workspace_root=Path(self._root_of_length(width)),
+        )
+
+        with pytest.raises(ValueError, match="workspace_root must be between"):
             await discover_active_runs(
                 session,
                 checkpointer=checkpointer,
-                workspace_root=Path(self._root_of_length(width)),
+                workspace_root=Path(self._root_of_length(width + 1)),
             )
-
-            with pytest.raises(ValueError, match="workspace_root must be between"):
-                await discover_active_runs(
-                    session,
-                    checkpointer=checkpointer,
-                    workspace_root=Path(self._root_of_length(width + 1)),
-                )
 
 
 class TestFeatureTagBoundIsTheColumn:
@@ -591,21 +688,19 @@ class TestFeatureTagBoundIsTheColumn:
 
     @pytest.mark.asyncio
     async def test_the_discovery_edge_admits_the_width_and_refuses_past_it(
-        self, session: AsyncSession
+        self, session: AsyncSession, checkpointer: AsyncSqliteSaver
     ) -> None:
         """Discovery refuses at the edge rather than deep in a transaction."""
         width = self._column_width()
 
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-            await checkpointer.setup()
-            await discover_active_runs(
-                session, checkpointer=checkpointer, feature_tag="f" * width
-            )
+        await discover_active_runs(
+            session, checkpointer=checkpointer, feature_tag="f" * width
+        )
 
-            with pytest.raises(ValueError, match="feature_tag must be between"):
-                await discover_active_runs(
-                    session, checkpointer=checkpointer, feature_tag="f" * (width + 1)
-                )
+        with pytest.raises(ValueError, match="feature_tag must be between"):
+            await discover_active_runs(
+                session, checkpointer=checkpointer, feature_tag="f" * (width + 1)
+            )
 
     def test_the_wire_records_carry_a_tag_the_column_can_hold(self) -> None:
         """Every tag the column accepts survives onto the wire records.

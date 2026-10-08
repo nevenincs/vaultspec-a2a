@@ -1,28 +1,26 @@
-"""Pure dispatch-failure classification — no I/O, no database.
-
-Consolidates the inconsistent failure policies previously scattered
-across thread_service, message_service, cancel_service, and
-permission_service into a single authoritative lookup.
-"""
+"""Pure dispatch-failure vocabulary and policy — no I/O, no database."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
 
 __all__ = [
     "FailureType",
-    "classify_dispatch_failure",
     "evaluate_dispatch_failure",
+    "resolve_failure_type",
 ]
 
 
 class FailureType(StrEnum):
-    """Typed dispatch failure categories.
+    """Typed run-refusal categories.
 
-    Each value corresponds to a ``DispatchOutcome.failure_type`` string
+    Most values correspond to a ``_DispatchOutcome.failure_type`` string
     produced by :func:`safe_dispatch`.  Route handlers use these to map
-    failures to HTTP status codes without string parsing.
+    failures to HTTP status codes without string parsing. A few name a
+    condition the gateway settles BEFORE any dispatch, where nothing was
+    attempted and no worker was involved; each says so where it is declared.
+    They live in the same vocabulary because a consumer branches on one code
+    set per verb, not one per layer.
     """
 
     CIRCUIT_OPEN = "circuit_open"
@@ -51,83 +49,78 @@ class FailureType(StrEnum):
     # so it carries the same status as the equivalent refusal at run creation
     # rather than a transport error.
     NO_ACTIVE_PROJECT = "no_active_project"
+    # A document-authoring topology asked of a gateway that runs no authoring
+    # verdict subscriber. Decided at run start, before any dispatch: the run's
+    # gates park on an engine proposal and only the subscriber can resume them,
+    # so admitting the run would accept work nothing could finish.
+    AUTHORING_SUBSCRIBER_UNAVAILABLE = "authoring_subscriber_unavailable"
     INCOMPATIBLE_STATE = "incompatible_state"
     CREDENTIALS_REQUIRED = "credentials_required"
     DEADLINE_EXCEEDED = "deadline_exceeded"
+    # Every attempt at the verb's durable write was refused because another
+    # writer held the store's write lock throughout. Distinct from AT_CAPACITY,
+    # which is the worker's own refusal: no worker was involved and nothing was
+    # applied, so the caller simply retries.
+    STORE_BUSY = "store_busy"
+    # The encoded dispatch envelope is larger than the receiver admits. The one
+    # condition on this list a retry cannot change: the bytes are the same every
+    # time, so the run's accumulated input has to shrink for it to be deliverable.
+    ENVELOPE_TOO_LARGE = "envelope_too_large"
 
 
-@dataclass(frozen=True, slots=True)
-class FailureAction:
-    """Describes how the caller should react to a dispatch failure."""
-
-    should_mark_failed: bool
-    """Whether the thread should transition to FAILED status."""
-
-    is_circuit_open: bool
-    """Whether the caller should surface a 503 / circuit-open error."""
-
-
-_POLICY: dict[str, FailureAction] = {
+# Whether a dispatch failure of each type moves the run to FAILED. A type absent
+# from the table does, so a new failure fails the run until it is judged.
+_MARKS_RUN_FAILED: dict[FailureType, bool] = {
     # An open circuit, a saturated worker and an unreachable one are all
     # conditions that pass. The accepted work stays alive for the retry the
     # recovery coordinator already scheduled, so none of them may move the run
     # to a failed status: doing so quarantines a run that nothing is wrong with
     # and strands work that was going to be delivered.
-    FailureType.CIRCUIT_OPEN: FailureAction(
-        should_mark_failed=False, is_circuit_open=True
-    ),
-    FailureType.AT_CAPACITY: FailureAction(
-        should_mark_failed=False, is_circuit_open=False
-    ),
-    FailureType.UNREACHABLE: FailureAction(
-        should_mark_failed=False, is_circuit_open=False
-    ),
-    FailureType.REJECTED: FailureAction(should_mark_failed=True, is_circuit_open=False),
+    FailureType.CIRCUIT_OPEN: False,
+    FailureType.AT_CAPACITY: False,
+    FailureType.UNREACHABLE: False,
+    FailureType.REJECTED: True,
     # The worker already holds this run's slot, so the dispatch was a duplicate
     # of work that IS being done. Failing the run here would kill the very turn
     # the refusal is reporting as alive.
-    FailureType.RUN_BUSY: FailureAction(
-        should_mark_failed=False, is_circuit_open=False
-    ),
+    FailureType.RUN_BUSY: False,
+    # A contended store wrote nothing and says nothing about the run.
+    FailureType.STORE_BUSY: False,
 }
 
-_DEFAULT = FailureAction(should_mark_failed=True, is_circuit_open=False)
 
-
-def classify_dispatch_failure(failure_type: str | None) -> FailureAction:
-    """Return the canonical failure action for a dispatch outcome.
-
-    Args:
-        failure_type: The ``DispatchOutcome.failure_type`` string, or None
-            on success.
-
-    Returns:
-        A frozen descriptor the caller uses to decide status transitions
-        and error responses.
-    """
-    if failure_type is None:
-        return FailureAction(should_mark_failed=False, is_circuit_open=False)
-    return _POLICY.get(failure_type, _DEFAULT)
+def resolve_failure_type(value: str | None) -> FailureType | None:
+    """Return the failure type *value* names, or ``None`` when it names none."""
+    try:
+        return FailureType(value)
+    except ValueError:
+        return None
 
 
 def evaluate_dispatch_failure(
     failure_type: str | None,
-) -> tuple[FailureAction, FailureType | None]:
-    """Classify a dispatch failure and resolve its typed form together.
+) -> tuple[bool, FailureType | None]:
+    """Classify a dispatch outcome and resolve its typed failure together.
 
-    Every dispatch caller (run creation, message follow-up, permission resume,
-    cancel) pairs the failure-action classification with the same typed-failure
-    resolution. Returning both from one call keeps those callers from deriving
-    the pair differently.
+    The leased delivery sequence is the one consumer: it reports the typed
+    failure and acts on the policy, and getting both from one call keeps it
+    from deriving the pair differently.
 
     Args:
-        failure_type: The ``DispatchOutcome.failure_type`` string, or None.
+        failure_type: The ``_DispatchOutcome.failure_type`` string, or None on
+            success.
 
     Returns:
-        The canonical :class:`FailureAction` and the :class:`FailureType` the
-        string maps to (``None`` when there is no failure type).
+        Whether the failure moves the run to FAILED, and the
+        :class:`FailureType` the string maps to (``None`` when there is no
+        failure type).
+
+    Raises:
+        ValueError: If *failure_type* names no :class:`FailureType`.
     """
-    return (
-        classify_dispatch_failure(failure_type),
-        FailureType(failure_type) if failure_type else None,
-    )
+    if not failure_type:
+        return False, None
+    typed = resolve_failure_type(failure_type)
+    if typed is None:
+        raise ValueError(f"{failure_type!r} is not a valid FailureType")
+    return _MARKS_RUN_FAILED.get(typed, True), typed

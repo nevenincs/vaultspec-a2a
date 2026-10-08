@@ -9,8 +9,8 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..control.provider_execution import native_execution_refusal_reason
-from ..utils.process import ProcessContainmentError
+from ..control.provider_execution import NativeExecutionRefusedError
+from ..utils import ProcessContainmentError
 from ..workspace.environment import scrub_agent_environment
 from ._provider_execution import provider_execution_launch
 
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BinaryVersionProbeError",
+    "binary_version_text",
     "next_minor_version",
     "parse_binary_version",
     "probe_binary_version",
@@ -26,6 +27,7 @@ __all__ = [
 
 _VERSION = re.compile(r"(?<![\w.])(\d+)\.(\d+)\.(\d+)(?![\w.+-])")
 _PROBE_TIMEOUT_SECONDS = 5
+_AUTHORITY_UNAVAILABLE = "provider execution authority is unavailable"
 
 
 class BinaryVersionProbeError(RuntimeError):
@@ -39,6 +41,12 @@ def parse_binary_version(value: str) -> tuple[int, int, int] | None:
         return None
     major, minor, patch = matches[0]
     return int(major), int(minor), int(patch)
+
+
+def binary_version_text(value: str) -> str | None:
+    """Read one CLI version from its report in dotted form, or ``None``."""
+    version = parse_binary_version(value)
+    return None if version is None else ".".join(map(str, version))
 
 
 def next_minor_version(version: tuple[int, int, int]) -> tuple[int, int, int]:
@@ -98,9 +106,7 @@ def _reported_version(
         return None
     if completed.returncode != 0:
         return None
-    reported = f"{completed.stdout}\n{completed.stderr}"
-    version = parse_binary_version(reported)
-    return ".".join(map(str, version)) if version is not None else None
+    return binary_version_text(f"{completed.stdout}\n{completed.stderr}")
 
 
 def probe_binary_version(
@@ -111,10 +117,10 @@ def probe_binary_version(
     The path and file stat are the launch identity. A Scoop shim also includes
     its sidecar and current target, since the EXE itself stays unchanged across
     package updates. A changed identity is probed again.
+
+    The launch boundary is consulted on every call, so a cached version never
+    outlives a later refusal; its profile refusal keeps its own safe reason.
     """
-    reason = native_execution_refusal_reason()
-    if reason is not None:
-        raise BinaryVersionProbeError(reason)
     path = Path(executable)
     if not path.is_absolute():
         raise BinaryVersionProbeError("provider binary path is not absolute")
@@ -129,10 +135,12 @@ def probe_binary_version(
             cwd=None,
             native_authority=native_authority,
         )
+    except NativeExecutionRefusedError as exc:
+        # Other containment refusals can name configured launcher paths, so only
+        # the profile refusal's own sentence is carried through.
+        raise BinaryVersionProbeError(str(exc)) from exc
     except (OSError, ValueError, ProcessContainmentError) as exc:
-        raise BinaryVersionProbeError(
-            "provider execution authority is unavailable"
-        ) from exc
+        raise BinaryVersionProbeError(_AUTHORITY_UNAVAILABLE) from exc
     result = _reported_version(str(path), identity, native_authority)
     if result is None:
         raise BinaryVersionProbeError("provider binary version is unavailable")

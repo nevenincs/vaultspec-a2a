@@ -1,7 +1,7 @@
-"""Unit tests for the ACP authoring-tool binding and mcpServers builder (R4).
+"""Unit tests for the ACP authoring-tool binding and mcpServers builder.
 
 Pure tests over real catalog objects — no mocks, no network. They pin the
-loopback-only invariant, the no-vault-write-path guard, token redaction (R7),
+loopback-only invariant, the no-vault-write-path guard, token redaction,
 and the exact ``mcpServers`` entry shape the claude-agent-acp CLI consumes.
 """
 
@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import SecretStr, TypeAdapter
 
-from ...authoring import ACTOR_TOKEN_HEADER, BEARER_HEADER, AgentTool, CatalogSnapshot
+from ...authoring import ACTOR_TOKEN_HEADER, AgentTool, CatalogSnapshot
 from ...authoring.catalog import parse_catalog, snapshot_to_catalog_payload
 from ...protocols.mcp.authoring_stdio import (
     ENV_ACTOR_TOKEN,
@@ -44,10 +44,10 @@ from .._acp_authoring import (
 from .._acp_rpc_handlers import on_fs_write_text_file
 from .._acp_types import AcpModelConfig, AcpSessionContext
 from .._json_contract import JsonObject
+from .._write_lock import ProviderWriteLock
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
 _LOOPBACK_URL = "http://127.0.0.1:8200/mcp"
@@ -88,7 +88,7 @@ def _binding(
 
 
 class TestWriteToolGuard:
-    """The binding refuses any raw filesystem-write tool (R2)."""
+    """The binding refuses any raw filesystem-write tool."""
 
     @pytest.mark.parametrize(
         "name",
@@ -118,7 +118,7 @@ class TestWriteToolGuard:
 
 
 class TestLoopbackInvariant:
-    """Only a loopback http(s) server URL is accepted (R4)."""
+    """Only a loopback http(s) server URL is accepted."""
 
     @pytest.mark.parametrize(
         "url",
@@ -148,7 +148,7 @@ class TestLoopbackInvariant:
 
 
 class TestTokenHygiene:
-    """Tokens never appear in repr (R7)."""
+    """Tokens never appear in repr."""
 
     def test_repr_redacts_tokens(self) -> None:
         binding = _binding(bearer="SECRET-BEARER", actor="SECRET-ACTOR")
@@ -189,7 +189,7 @@ class TestBuildMcpServers:
             assert isinstance(name, str)
             assert isinstance(value, str)
             headers[name] = value
-        assert headers[BEARER_HEADER] == "Bearer mb"
+        assert headers["Authorization"] == "Bearer mb"
         assert headers[ACTOR_TOKEN_HEADER] == "at"
 
     def test_tool_names_expose_no_write_path(self) -> None:
@@ -225,7 +225,7 @@ def _stdio_binding(
 
 
 class TestConfigHomeAuthoringEntry:
-    """Admit the run's stdio authoring bridge into the isolated home (S18).
+    """Admit the run's stdio authoring bridge into the isolated home.
 
     Driven through the real seam: a real ``AuthoringToolBinding`` ->
     ``build_authoring_stdio_mcp_servers`` -> ``config_home_authoring_entry``, so a
@@ -332,7 +332,9 @@ class TestConfigHomeAuthoringEntry:
             config_home_authoring_entry([no_env])
 
 
-def _config_with_authoring(workspace_root: str) -> AcpModelConfig:
+def _config_with_authoring(
+    workspace_root: str, *, write_lock: ProviderWriteLock | None = None
+) -> AcpModelConfig:
     """Build an ACP config whose session advertises the bridged authoring tools."""
     binding = _binding("read_context", "propose_changeset")
     return AcpModelConfig(
@@ -345,13 +347,9 @@ def _config_with_authoring(workspace_root: str) -> AcpModelConfig:
         allowed_tools=[],
         use_exec=False,
         provider=None,
-        runtime_authority=None,
-        acp_backend=None,
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
+        write_lock=write_lock if write_lock is not None else ProviderWriteLock(),
     )
 
 
@@ -360,7 +358,7 @@ class TestAuthoringVisibleButVaultWriteDenied:
 
     The config advertises the authoring MCP server (propose/read tools visible),
     yet the ACP fs write RPC still returns the value-typed forbidden_actor denial
-    for a ``.vault`` path — the two halves of R2 + R4 hold together.
+    for a ``.vault`` path — the two halves hold together.
     """
 
     @pytest.mark.asyncio
@@ -389,87 +387,99 @@ class TestAuthoringVisibleButVaultWriteDenied:
         assert not (tmp_path / ".vault" / "plan" / "x.md").exists()
 
 
-class TestAcpWriteGitSerialization:
-    """ACP writes serialize through the shared workspace mutex.
+def _write_task(
+    path: str,
+    content: str,
+    ctx: AcpSessionContext,
+    config: AcpModelConfig,
+) -> asyncio.Task[JsonObject]:
+    """Launch one real ACP filesystem write as a concurrent task."""
+    return asyncio.create_task(
+        on_fs_write_text_file(
+            1,
+            {"path": path, "content": content, "sessionId": ctx.session_id},
+            ctx,
+            config,
+        )
+    )
 
-    The workspace-global ``git_workspace_mutex`` (in ``workspace/concurrency.py``)
-    serializes every subsystem that writes the working tree; the ACP fs-write
-    handler acquires it, so a write cannot proceed while a repository-wide holder
-    of that lock is in its critical section. This proves the contention through
-    the production handler and the production lock, not a stand-in.
+
+class TestAcpWriteLockIsPerPath:
+    """ACP writes serialize by target file, and never across files.
+
+    The handler takes its write lock from the run's config, so a test holds the
+    very lock a write will acquire - the production API, on the test's own loop,
+    with no process-global attribute to swap and no reset to restore. Holding one
+    path proves both halves at once: a second write to that path waits, while a
+    write to any other path proceeds.
     """
 
-    @pytest.fixture
-    def loop_bound_mutex(self) -> Iterator[asyncio.Lock]:
-        """A fresh workspace mutex bound to the running test loop.
-
-        ``git_workspace_mutex`` is a process-global ``asyncio.Lock`` - correct
-        for the single production uvicorn loop, but pytest gives each test its
-        own loop, and a lock binds to the first loop that uses it. Reset it to a
-        fresh instance so this test's hold and the handler's acquisition (which
-        re-imports the module attribute on every call) contend on the same loop,
-        then restore the original so the global is never left mutated.
-        """
-        from ...workspace import concurrency
-
-        original = concurrency.git_workspace_mutex
-        fresh = asyncio.Lock()
-        concurrency.git_workspace_mutex = fresh
-        try:
-            yield fresh
-        finally:
-            concurrency.git_workspace_mutex = original
-
     @pytest.mark.asyncio
-    async def test_acp_write_is_serialized_behind_a_held_git_mutex(
+    async def test_other_paths_proceed_while_one_path_is_held(
         self,
         tmp_path: Path,
-        loop_bound_mutex: asyncio.Lock,
         acp_session_context: AcpSessionContext,
     ) -> None:
-        """A concurrent ACP write cannot proceed while the shared mutex is held.
+        write_lock = ProviderWriteLock()
+        config = _config_with_authoring(str(tmp_path), write_lock=write_lock)
 
-        Hold the shared workspace mutex, launch a real write through the
-        production handler, and prove it is serialized behind the lock: it stays
-        pending while the lock is held and completes only once it is released. A
-        handler acquiring a different lock would finish during the hold and fail
-        the not-done assertion, so this pins the shared-lock routing, not just
-        that some lock exists.
+        async with write_lock.hold(tmp_path / "contended.txt"):
+            contended = _write_task(
+                "contended.txt", "waits its turn", acp_session_context, config
+            )
+            free = _write_task("free.txt", "needs no turn", acp_session_context, config)
+
+            # A write to an unheld path owes the held path nothing and completes
+            # inside the hold. Under one process-global mutex it could not.
+            assert await asyncio.wait_for(free, timeout=10) == {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {},
+            }
+            assert (tmp_path / "free.txt").read_text(encoding="utf-8") == (
+                "needs no turn"
+            )
+
+            # Ample opportunity to run if the held path were not serialized.
+            await asyncio.sleep(0.1)
+            assert not contended.done(), "a write ran while its own path was held"
+
+        assert await asyncio.wait_for(contended, timeout=10) == {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {},
+        }
+        assert (tmp_path / "contended.txt").read_text(encoding="utf-8") == (
+            "waits its turn"
+        )
+
+    @pytest.mark.asyncio
+    async def test_two_writes_to_one_path_take_turns(
+        self,
+        tmp_path: Path,
+        acp_session_context: AcpSessionContext,
+    ) -> None:
+        """Two real handler writes to one path run one after the other.
+
+        Nothing holds the lock here: both writes are production calls racing for
+        the same file, and the session is closed once both have started. The
+        first holds the path and finishes; the second can only re-read the
+        session after that hold frees, so it must refuse. A second writer that
+        did NOT wait would have re-read the session before the close and landed
+        its own payload - which is what this asserts against.
         """
         config = _config_with_authoring(str(tmp_path))
-        order: list[str] = []
+        first = _write_task("turns.txt", "first writer", acp_session_context, config)
+        second = _write_task("turns.txt", "second writer", acp_session_context, config)
 
-        async with loop_bound_mutex:
-            order.append("holder-acquired")
-            write = asyncio.create_task(
-                on_fs_write_text_file(
-                    1,
-                    {
-                        "path": "serialized.txt",
-                        "content": "written after the lock frees",
-                        "sessionId": acp_session_context.session_id,
-                    },
-                    acp_session_context,
-                    config,
-                )
-            )
-            # Ample opportunity to run if the write were NOT serialized.
-            await asyncio.sleep(0.1)
-            # If the handler used a different lock it would finish during the
-            # hold; serialization on the shared mutex keeps it pending.
-            assert not write.done(), "ACP write ran while the shared git lock was held"
-            order.append("holder-still-holding")
+        # One scheduling slice each: the first takes the path, the second waits.
+        await asyncio.sleep(0)
+        acp_session_context.closing = True
 
-        result = await write
-        order.append("write-completed")
-
-        assert order == ["holder-acquired", "holder-still-holding", "write-completed"]
-        payload = result["result"]
-        assert isinstance(payload, dict)
-        assert payload == {}
-        assert (tmp_path / "serialized.txt").read_text(encoding="utf-8") == (
-            "written after the lock frees"
-        )
+        leader, follower = await asyncio.gather(first, second)
+        assert leader.get("result") == {}
+        assert "error" in follower and "result" not in follower
+        assert (tmp_path / "turns.txt").read_text(encoding="utf-8") == "first writer"
 
 
 class TestAttachAuthoringTools:

@@ -6,24 +6,41 @@ documents and generating human-friendly thread nicknames.
 """
 
 import glob
-import hashlib
 import re
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
 from ..domain_config import domain_config
+from ..thread import sha256_hex
+from ..thread.constants import (
+    MAX_CALLEE_CHARS,
+    MAX_FEEDBACK_BATCH_ID_CHARS,
+    MAX_SOURCE_BRANCH_CHARS,
+)
 from .stage import VAULT_STAGE_PATTERNS
 
 __all__ = [
+    "MAX_NICKNAME_SLUG_CHARS",
     "ContextRef",
     "ThreadMetadata",
     "discover_context_refs",
     "generate_nickname",
 ]
 
-# Nickname slug: lowercase alphanumeric + hyphens, 3-64 characters.
-_NICKNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9\-]{1,62}[a-z0-9]$")
+MAX_NICKNAME_SLUG_CHARS: int = 64
+"""Longest nickname slug, for the generator and the validator alike.
+
+Declared once because the generator has to fit inside the bound the validator
+enforces, and the two are the same fact: a generator that merely concatenated
+its inputs produced a nickname the model then refused, which is what the
+``feature_tag`` column's much wider bound makes reachable.
+"""
+
+# Nickname slug: lowercase alphanumeric + hyphens, 3 to the bound above.
+_NICKNAME_PATTERN = re.compile(
+    rf"^[a-z0-9][a-z0-9\-]{{1,{MAX_NICKNAME_SLUG_CHARS - 2}}}[a-z0-9]$"
+)
 
 
 class ContextRef(BaseModel):
@@ -52,8 +69,8 @@ class ThreadMetadata(BaseModel):
     # --- Provenance ---
     workspace_root: str
     source_repo: str = ""
-    source_branch: str = ""
-    callee: str = ""
+    source_branch: str = Field(default="", max_length=MAX_SOURCE_BRANCH_CHARS)
+    callee: str = Field(default="", max_length=MAX_CALLEE_CHARS)
     continues_run_id: str | None = None
 
     # --- SDD Pipeline Context ---
@@ -63,7 +80,7 @@ class ThreadMetadata(BaseModel):
     # persisted so a worker restart re-retrieves the same batch. a2a transports
     # the id only and never owns batch content; empty when the run
     # is not feedback-driven.
-    feedback_batch_id: str = ""
+    feedback_batch_id: str = Field(default="", max_length=MAX_FEEDBACK_BATCH_ID_CHARS)
 
     @field_validator("nickname")
     @classmethod
@@ -129,6 +146,31 @@ def discover_context_refs(
     return refs
 
 
+def _slug_segment(value: str) -> str:
+    """Reduce one nickname segment to the slug grammar.
+
+    Every run of characters the grammar forbids becomes the separator it already
+    uses, rather than being deleted: a topology named ``research_adr`` reads as
+    ``research-adr`` instead of ``researchadr``, so the operator still recognises
+    the shape of the run from its nickname.
+    """
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+def _bounded_nickname(lead: str, suffix: str) -> str:
+    """Fit ``lead`` + ``suffix`` inside the slug bound, spending the lead first.
+
+    The suffix carries the run's shape and the hash that identifies the run, so
+    it is what must survive; the lead is the feature tag, whose own column admits
+    more than twice the slug's width. Trailing separators left by the cut are
+    removed, because the grammar admits neither a leading nor a trailing hyphen.
+    """
+    room = MAX_NICKNAME_SLUG_CHARS - len(suffix)
+    if room >= 1:
+        return f"{lead[:room].rstrip('-')}{suffix}"
+    return f"{lead}{suffix}"[:MAX_NICKNAME_SLUG_CHARS].rstrip("-")
+
+
 def generate_nickname(
     feature_tag: str,
     topology: str,
@@ -141,11 +183,19 @@ def generate_nickname(
 
     Args:
         feature_tag: The feature grouping key.
-        topology: The topology type (e.g. ``"star"``, ``"pipeline"``).
+        topology: The topology type (e.g. ``"star"``, ``"research_adr"``).
         thread_id: The thread's own id, hashed for the 4-char suffix.
 
     Returns:
-        A nickname string conforming to the slug pattern.
+        A nickname conforming to the slug pattern :class:`ThreadMetadata`
+        enforces, for every input. Nothing between here and the stored record
+        re-checks: the run-creation seam assigns this onto an already-built
+        model, which does not validate on assignment, so a non-conforming
+        nickname was persisted and then made the whole record unreadable - every
+        later read of it reported the run's provenance absent. Two inputs reached
+        that: a topology whose name carries an underscore, which every
+        document-authoring run has, and a feature tag longer than the slug bound,
+        which the tag's own column admits.
     """
     # P10 finding: a positional thread_id[:4] slice discriminates real UUIDs
     # fine, but collides identically for every caller whose id scheme shares a
@@ -157,9 +207,7 @@ def generate_nickname(
     # convention, present or future - and, as a side effect, always produces
     # a full 4-hex-char slug (H2's short/empty guard collapses into the one
     # "no thread_id at all" case below).
-    short_hash = (
-        hashlib.sha256(thread_id.encode()).hexdigest()[:4] if thread_id else "0000"
-    )
+    short_hash = sha256_hex(thread_id.encode())[:4] if thread_id else "0000"
     # M1: sanitize feature_tag — lowercase and strip all non-alphanumeric-hyphen
     # characters so the generated nickname always satisfies _NICKNAME_PATTERN.
     # Uppercase feature_tags would fail ThreadMetadata validation without this.
@@ -171,6 +219,8 @@ def generate_nickname(
         tag = re.sub(r"-{2,}", "-", tag).strip("-")
     else:
         tag = ""
-    if tag:
-        return f"{tag}-{topology}-{short_hash}"
-    return f"thread-{topology}-{short_hash}"
+    # A topology whose name slugifies to nothing names nothing, so the segment is
+    # dropped rather than filled with an invented one or left as an empty gap.
+    shape = _slug_segment(topology)
+    suffix = f"-{shape}-{short_hash}" if shape else f"-{short_hash}"
+    return _bounded_nickname(tag or "thread", suffix)

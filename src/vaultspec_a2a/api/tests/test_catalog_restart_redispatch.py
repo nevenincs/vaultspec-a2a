@@ -5,32 +5,24 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-import time
-from contextlib import suppress
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
 
-from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.dispatch import redispatch_reconciling_threads
-from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
     close_db,
     create_control_action,
+    create_thread,
     get_session_factory,
     get_thread,
     init_db,
 )
-from ...database.thread_repository import create_thread
-from ...desktop.profile import derive_state_paths
-from ...ipc.schemas import DispatchRequest
-from ...providers.in_process_catalog import discover_in_process_catalog
 from ...providers.provider_catalog import (
     AdmissionState,
     AuthenticationState,
@@ -48,30 +40,32 @@ from ...providers.provider_catalog import (
     SelectionReference,
     StructuredProviderHealth,
 )
-from ...providers.team_selection import (
-    FrozenTeamSelection,
-    freeze_team_selection,
-    model_assignment_digest,
-)
-from ...team.team_config import load_team_config
-from ...testing.tests._support.catalog_selection import in_process_selection
-from ...tests._write_authority import make_test_write_authority
-from ...tests.gateway_boot import (
+from ...providers.provider_catalog_service import stamp_catalog_expiry
+from ...providers.team_selection import FrozenTeamSelection, model_assignment_digest
+from ...testing import (
+    DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    RunVerbs,
+    adopted_spawner,
+    booted_gateway,
     broker_gateway_env,
+    fetch_in_process_selection,
+    frozen_deterministic_selection,
     gateway_script,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
-    spawn_gateway,
-    spawn_until_ready,
+    log_tail,
+    seat_app_home,
+    seed_create_action,
+    wait_for_run_status,
 )
+from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
+from ...thread.idempotency import thread_create_action_key
+from ...utils import bearer_header
 from ..schemas.gateway import FrozenTeamAssignmentSummary
 from .conftest import _InProcessWorker
 
 if TYPE_CHECKING:
-    import subprocess
     from pathlib import Path
 
 
@@ -79,49 +73,9 @@ def _current_metadata(
     workspace: Path,
     *,
     catalog_revision: str | None = None,
-    model_value: str = "deterministic",
+    model_value: str | None = None,
 ) -> tuple[dict[str, object], FrozenTeamSelection]:
-    key = ProviderCatalogKey("deterministic", "in-process-deterministic")
-    discovered = discover_in_process_catalog(key)
     now = datetime.now(UTC)
-    catalog = discovered.catalog
-    if model_value != catalog.models[0].provider_value:
-        catalog = replace(
-            catalog,
-            models=(
-                replace(
-                    catalog.models[0],
-                    provider_value=model_value,
-                    display_name=f"Historical {model_value}",
-                ),
-            ),
-        )
-    if catalog_revision is not None:
-        catalog = replace(
-            catalog,
-            state=replace(
-                catalog.state,
-                revision=catalog_revision,
-                expires_at=datetime.now(UTC) + timedelta(minutes=5),
-            ),
-        )
-    record = ProviderRecord(
-        provider_id=key.provider_id,
-        display_name="Deterministic (in-process)",
-        execution_mode=key.execution_mode,
-        health=StructuredProviderHealth.derive(
-            axes=ProviderHealthAxes(
-                configured=HealthState.AVAILABLE,
-                transport=HealthState.AVAILABLE,
-                authentication=AuthenticationState.NOT_APPLICABLE,
-                catalog=CatalogStatus.AVAILABLE,
-                admission=AdmissionState.ADMITTED,
-            ),
-            checked_at=now,
-        ),
-        catalog=catalog,
-    )
-    model = record.catalog.models[0]
     codex_key = ProviderCatalogKey("codex", "codex-app-server")
     codex_revision = "frozen-unused-codex-fallback"
     codex_record = ProviderRecord(
@@ -138,58 +92,56 @@ def _current_metadata(
             ),
             checked_at=now,
         ),
-        catalog=ProviderCatalog(
-            key=codex_key,
-            state=CatalogState(
-                status=CatalogStatus.AVAILABLE,
-                checked_at=now,
-                revision=codex_revision,
-                expires_at=now + timedelta(minutes=5),
-            ),
-            models=(
-                ModelCatalogEntry(
-                    entry_id="unused-codex-entry",
-                    provider_value="unused-codex-model",
-                    display_name="Unused Codex fallback",
-                    native_control_ids=("reasoning_effort",),
+        catalog=stamp_catalog_expiry(
+            ProviderCatalog(
+                key=codex_key,
+                state=CatalogState(
+                    status=CatalogStatus.AVAILABLE,
+                    checked_at=now,
+                    revision=codex_revision,
                 ),
-            ),
-            native_controls=(
-                NativeControl(
-                    control_id="reasoning_effort",
-                    kind=ControlKind.THOUGHT_LEVEL,
-                    display_name="Reasoning effort",
-                    options=(
-                        NativeControlOption(
-                            option_id="medium",
-                            provider_value="medium",
-                            display_name="Medium",
-                        ),
+                models=(
+                    ModelCatalogEntry(
+                        entry_id="unused-codex-entry",
+                        provider_value="unused-codex-model",
+                        display_name="Unused Codex fallback",
+                        native_control_ids=("reasoning_effort",),
                     ),
-                    default_option_id="medium",
+                ),
+                native_controls=(
+                    NativeControl(
+                        control_id="reasoning_effort",
+                        kind=ControlKind.THOUGHT_LEVEL,
+                        display_name="Reasoning effort",
+                        options=(
+                            NativeControlOption(
+                                option_id="medium",
+                                provider_value="medium",
+                                display_name="Medium",
+                            ),
+                        ),
+                        default_option_id="medium",
+                    ),
+                ),
+            )
+        ),
+    )
+    frozen = frozen_deterministic_selection(
+        (DEFAULT_REQUIRED_ROLE,),
+        model_value=model_value,
+        catalog_revision=catalog_revision,
+        pinned_roles=(DEFAULT_REQUIRED_ROLE,),
+        fallbacks=(
+            (
+                codex_record,
+                SelectionReference(
+                    provider_id=codex_key.provider_id,
+                    execution_mode=codex_key.execution_mode,
+                    catalog_revision=codex_revision,
+                    entry_id="unused-codex-entry",
                 ),
             ),
         ),
-    )
-    primary = SelectionReference(
-        provider_id=key.provider_id,
-        execution_mode=key.execution_mode,
-        catalog_revision=record.catalog.state.revision or "",
-        entry_id=model.entry_id,
-    )
-    frozen = freeze_team_selection(
-        selection=primary,
-        overrides={"mock-coder-success": primary},
-        fallbacks=(
-            SelectionReference(
-                provider_id=codex_key.provider_id,
-                execution_mode=codex_key.execution_mode,
-                catalog_revision=codex_revision,
-                entry_id="unused-codex-entry",
-            ),
-        ),
-        required_roles=("mock-coder-success",),
-        records=(record, codex_record),
     )
     return (
         {
@@ -219,17 +171,11 @@ class _RestartCase:
 
 def _prepare_restart_case(tmp_path: Path) -> _RestartCase:
     app_home = tmp_path / "app-home"
-    workspace = app_home / "workspaces" / "project"
-    app_home.mkdir()
+    attach = DEFAULT_ATTACH_CREDENTIAL
+    state = seat_app_home(app_home, attach=attach)
+    workspace = state.workspaces_root / "project"
     workspace.mkdir(parents=True)
-    attach = "attach-restart-proof-0123456789abcdef"
-    seed_credentials(
-        app_home,
-        attach=attach,
-        ownership="ownership-restart-proof-fedcba9876543210",
-    )
-    seat_valid_database(app_home)
-    database_path = derive_state_paths(app_home).database_path
+    database_path = state.database_path
     frozen_revision = "frozen-revision-no-longer-served"
     metadata, frozen_selection = _current_metadata(
         workspace, catalog_revision=frozen_revision
@@ -281,106 +227,65 @@ async def _seed_restart_case(case: _RestartCase) -> None:
     await init_db(str(case.database_path))
     try:
         async with get_session_factory()() as session:
-            definition = freeze_graph_definition(
-                load_team_config("mock-success-single", workspace_root=case.workspace),
-                workspace_root=case.workspace,
-            )
-            for thread_id, thread_metadata, selection in (
-                ("current-schema-restart", case.metadata, case.frozen_selection),
-                ("same-assignment-restart", case.metadata, case.frozen_selection),
-                (
-                    "other-assignment-restart",
-                    case.other_metadata,
-                    case.other_frozen_selection,
-                ),
+            for thread_id, thread_metadata in (
+                ("current-schema-restart", case.metadata),
+                ("same-assignment-restart", case.metadata),
+                ("other-assignment-restart", case.other_metadata),
             ):
-                authority = make_test_write_authority()
                 await create_thread(
                     session,
-                    write_authority=authority,
+                    write_authority=make_test_write_authority(),
                     thread_id=thread_id,
                     status=ThreadStatus.RECONCILING,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     metadata=json.dumps(thread_metadata),
                 )
-                dispatch = DispatchRequest(
-                    action="ingest",
-                    thread_id=thread_id,
-                    content="recover after restart",
-                    workspace_root=str(case.workspace),
-                    recursion_limit=25,
-                    team_preset="mock-success-single",
-                    graph_definition=definition,
-                    model_assignment=selection.compiler_map(),
-                )
-                await create_control_action(
-                    session,
-                    thread_id=thread_id,
-                    action_type=authority.action_type,
-                    idempotency_key=f"thread-create:{thread_id}",
-                    dispatch_id=authority.action_receipt_id,
-                    recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-                    payload=freeze_accepted_input(
-                        dispatch, intent={"content": "recover after restart"}
-                    ),
-                )
-                assert (
-                    await prepare_graph_action_receipt(
-                        session,
-                        thread_id=thread_id,
-                        dispatch_id=authority.action_receipt_id,
-                    )
-                    is not None
-                )
+                await seed_create_action(session, thread_id, workspace=case.workspace)
             await session.commit()
     finally:
         await close_db()
 
 
-def _await_terminal(client: httpx.Client, run_id: str) -> dict[str, Any]:
-    deadline = time.monotonic() + 30.0
-    observed: dict[str, Any] = {}
-    while time.monotonic() < deadline:
+def _await_terminal(
+    client: httpx.Client, run_id: str, log_path: Path
+) -> dict[str, Any]:
+    def _read() -> dict[str, Any]:
         response = client.get(f"/v1/runs/{run_id}")
         assert response.status_code == 200, response.text
-        observed = cast("dict[str, Any]", response.json())
-        if observed["status"] in {"completed", "failed", "error"}:
-            return observed
-        time.sleep(0.1)
-    return observed
+        return cast("dict[str, Any]", response.json())
+
+    try:
+        return wait_for_run_status(
+            _read, timeout=30.0, interval=0.1, label=f"run {run_id}"
+        )
+    except AssertionError as stalled:
+        raise AssertionError(
+            f"{stalled}\ngateway log tail: {log_tail(log_path, limit=8000)}"
+        ) from stalled
 
 
 def _assert_restart_runs(
     client: httpx.Client, case: _RestartCase, log_path: Path
 ) -> None:
-    catalog = client.get(
-        "/v1/provider-catalog", params={"workspace_root": str(case.workspace)}
-    )
-    assert catalog.status_code == 200, catalog.text
-    live_selection = in_process_selection(catalog.json())
+    live_selection = fetch_in_process_selection(client, str(case.workspace))
     assert live_selection["catalog_revision"] != case.frozen_revision
 
     # A real start is the production dispatch-demand edge. It starts the
     # worker and releases the gateway's deferred startup recovery only
     # after the worker has answered its readiness probe.
-    trigger = client.post(
-        "/v1/runs",
-        json={
-            "stage": "start",
-            "run_id": "restart-demand",
-            "team_preset": "mock-success-single",
-            "message": "release startup recovery",
-            "autonomous": True,
-            "selection": live_selection,
-            "metadata": {"workspace_root": str(case.workspace)},
-        },
-    )
+    trigger = RunVerbs(
+        base_url=str(client.base_url),
+        authorization=client.headers["Authorization"],
+        team_preset=DEFAULT_TEAM_PRESET,
+        workspace_root=str(case.workspace),
+        selection=lambda _workspace: live_selection,
+    ).start("restart-demand", message="release startup recovery")
     assert trigger.status_code == 201, trigger.text
 
-    snapshot = _await_terminal(client, "current-schema-restart")
+    snapshot = _await_terminal(client, "current-schema-restart", log_path)
     assert snapshot["status"] == "completed", (
         snapshot,
-        log_path.read_text(encoding="utf-8", errors="replace")[-8000:],
+        log_tail(log_path, limit=8000),
     )
     # Semantic object equality covers every nested identity and value;
     # JSON object key order is deliberately not part of the contract.
@@ -397,8 +302,8 @@ def _assert_restart_runs(
     assert history.json()["state"]["model_assignment_digest"] == (
         case.exact_assignment_digest
     )
-    same_snapshot = _await_terminal(client, "same-assignment-restart")
-    other_snapshot = _await_terminal(client, "other-assignment-restart")
+    same_snapshot = _await_terminal(client, "same-assignment-restart", log_path)
+    other_snapshot = _await_terminal(client, "other-assignment-restart", log_path)
     assert same_snapshot["status"] == "completed"
     assert other_snapshot["status"] == "completed"
 
@@ -469,39 +374,20 @@ def test_current_schema_restart_reaches_a_fresh_production_worker(
     case = _prepare_restart_case(tmp_path)
     asyncio.run(_seed_restart_case(case))
     log_path = tmp_path / "gateway.log"
-    log_handle = log_path.open("wb")
-    script = gateway_script(log_level="info")
-
-    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        environment = broker_gateway_env(
-            case.app_home,
-            gateway_port=gateway_port,
-            worker_port=worker_port,
-            gateway_token=case.attach,
-        )
-        environment["VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES"] = "true"
-        return spawn_gateway(
-            script=script,
-            gateway_port=gateway_port,
-            env=environment,
-            log_handle=log_handle,
-            new_session=True,
-        )
-
-    process = None
-    try:
-        process, _gateway_port, _worker_port, base_url = spawn_until_ready(
-            _spawn, log_path=log_path
-        )
-        headers = {"Authorization": f"Bearer {case.attach}"}
-        with httpx.Client(base_url=base_url, headers=headers, timeout=240.0) as client:
-            _assert_restart_runs(client, case, log_path)
-            _assert_stored_restart_metadata(case)
-    finally:
-        if process is not None:
-            reap_gateway(process)
-        with suppress(Exception):
-            log_handle.close()
+    headers = bearer_header(case.attach)
+    with (
+        booted_gateway(
+            broker_gateway_env(case.app_home, gateway_token=case.attach),
+            log_path=log_path,
+            script=gateway_script(log_level="info"),
+            detached=True,
+        ) as gateway,
+        httpx.Client(
+            base_url=gateway.base_url, headers=headers, timeout=240.0
+        ) as client,
+    ):
+        _assert_restart_runs(client, case, log_path)
+        _assert_stored_restart_metadata(case)
 
 
 @pytest.mark.asyncio
@@ -511,7 +397,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
     """All retired durable authority shapes fail closed during startup recovery."""
     await close_db()
     await init_db(str(tmp_path / "retired-restart.db"))
-    worker = _InProcessWorker()
+    worker = _InProcessWorker(None)
     retired_cases: tuple[tuple[str, tuple[str, ...], str, object], ...] = (
         ("root-profile-id", (), "profile_id", "retired"),
         ("root-default-profile", (), "default_profile_id", "retired"),
@@ -545,7 +431,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                     write_authority=authority,
                     thread_id=thread_id,
                     status=ThreadStatus.RECONCILING,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     metadata=json.dumps(
                         {
                             "workspace_root": str(tmp_path),
@@ -557,7 +443,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                     session,
                     thread_id=thread_id,
                     action_type=authority.action_type,
-                    idempotency_key=f"thread-create:{thread_id}",
+                    idempotency_key=thread_create_action_key(thread_id),
                     dispatch_id=authority.action_receipt_id,
                     recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
                 )
@@ -567,7 +453,7 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                 write_authority=authority,
                 thread_id="retired-durable-model-profile-sentinel",
                 status=ThreadStatus.RECONCILING,
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(
                     {
                         "workspace_root": str(tmp_path),
@@ -579,17 +465,16 @@ async def test_retired_durable_state_is_terminal_before_worker_contact(
                 session,
                 thread_id="retired-durable-model-profile-sentinel",
                 action_type=authority.action_type,
-                idempotency_key="thread-create:retired-durable-model-profile-sentinel",
+                idempotency_key=thread_create_action_key(
+                    "retired-durable-model-profile-sentinel"
+                ),
                 dispatch_id=authority.action_receipt_id,
                 recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             )
             await session.commit()
 
         contacts: list[float] = []
-        spawner = LazyWorkerSpawner(
-            worker_url="http://test-worker:8001", worker_port=8001, auto_spawn=False
-        )
-        spawner.replace_process(None)
+        spawner = adopted_spawner("http://test-worker:8001")
         await redispatch_reconciling_threads(
             worker.client,
             WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=30.0),

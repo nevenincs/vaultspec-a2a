@@ -18,15 +18,12 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING
 
 import pytest
 
-from ..factory import (
-    ProviderCatalogDiscovery,
-    ProviderCatalogRegistration,
-    ProviderFactory,
-)
+from ...testing import LaneInventoryFactory
+from ..factory import ProviderCatalogRegistration
 from ..provider_catalog import (
     AuthenticationState,
     CacheFreshness,
@@ -40,6 +37,9 @@ from ..provider_catalog import (
     ProviderCatalogKey,
 )
 from ..provider_catalog_service import ProviderCatalogService
+
+if TYPE_CHECKING:
+    from .._catalog_discovery import ProviderCatalogDiscovery
 
 _LANE = ProviderCatalogKey("openai", "openai-api")
 
@@ -156,7 +156,7 @@ async def test_suppression_never_discards_the_last_good_catalog() -> None:
     """The served answer is unchanged; only the cost of producing it drops.
 
     A caller handles a failed refresh by falling back to ``peek``. If the negative
-    entry displaced the lane's last real catalog, this fix would have turned a
+    entry displaced the lane's last real catalog, the suppression would turn a
     stale-but-real answer into no answer at all - a behaviour change wearing a
     performance fix's clothes.
     """
@@ -250,50 +250,38 @@ async def test_a_zero_failure_ttl_disables_the_backoff_entirely() -> None:
     assert lane.attempts == 3
 
 
-class _FailingLaneFactory(ProviderFactory):
-    """The real factory presenting one registered lane that cannot be reached.
-
-    Subclassing the injected factory is the service's own composition seam: the
-    registration and its awaited callback are the production contract, and the
-    failure is a real exception raised from a real coroutine. Only the lane
-    inventory is pinned, because a host-dependent broken provider would make the
-    measurement below unreproducible.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.attempts = 0
-
-    @override
-    def catalog_registrations(
-        self, workspace_root: Path, *, serve_in_process_lanes: bool | None = None
-    ) -> tuple[ProviderCatalogRegistration, ...]:
-        async def discover() -> ProviderCatalogDiscovery:
-            self.attempts += 1
-            await asyncio.sleep(0.05)
-            raise _LaneOutageError("lane transport refused")
-
-        return (ProviderCatalogRegistration(key=_LANE, discover=discover),)
-
-
 @pytest.mark.asyncio
 async def test_the_service_serves_a_failing_lane_warm_and_unchanged() -> None:
     """Through the real service: repeated reads cost one attempt, same answer.
 
-    Both halves matter. The count is the fix; the identical record is the proof
-    the fix is invisible to a client, which is the only way a caching change is
-    allowed to be correct.
+    Both halves matter. The count is the saving; the identical record is the
+    proof the saving is invisible to a client, which is the only way a caching
+    change is allowed to be correct.
+
+    The failure is a real exception raised from a real registered coroutine.
+    Only the lane inventory is pinned, because a host-dependent broken provider
+    would make the measurement unreproducible.
     """
-    factory = _FailingLaneFactory()
-    service = ProviderCatalogService(factory=factory)
+    attempts = 0
+
+    async def discover() -> ProviderCatalogDiscovery:
+        nonlocal attempts
+        attempts += 1
+        await asyncio.sleep(0.05)
+        raise _LaneOutageError("lane transport refused")
+
+    failing = ProviderCatalogRegistration(key=_LANE, discover=discover)
+    service = ProviderCatalogService(
+        factory=LaneInventoryFactory(lambda _served: (failing,))
+    )
     workspace = str(Path(__file__).resolve().parents[3])
 
     first = await service.records(workspace)
-    assert factory.attempts == 1
+    assert attempts == 1
 
     for _ in range(5):
         later = await service.records(workspace)
-        assert factory.attempts == 1
+        assert attempts == 1
         assert [record.provider_id for record in later] == [
             record.provider_id for record in first
         ]

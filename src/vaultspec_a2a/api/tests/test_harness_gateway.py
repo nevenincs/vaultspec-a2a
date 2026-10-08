@@ -15,7 +15,6 @@ no worker double is exercised on the proven path.
 
 from __future__ import annotations
 
-import shutil
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -23,13 +22,21 @@ import pytest
 
 from ...cli.provision import provision_workspace
 from ...team.team_config import load_team_config
-from .conftest import SessionFactory, async_catalog_run_fields, make_app
-from .test_gateway_live import _live_server
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    actor_tokens_body,
+    async_catalog_run_fields,
+    role_tokens,
+    serve_on_loopback,
+)
+from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from ...conftest import ExternalPrerequisiteRule
 
 _AUTHORING = "vaultspec-adr-research"
 
@@ -46,18 +53,15 @@ def _authoring_roles() -> tuple[str, ...]:
     return tuple(worker.agent_id for worker in load_team_config(_AUTHORING).workers)
 
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("vaultspec-core") is None and shutil.which("uvx") is None,
-    reason="vaultspec-core CLI not resolvable; cannot provision a real workspace",
-)
+@pytest.fixture(autouse=True)
+def _require_core(external_prerequisite: ExternalPrerequisiteRule) -> None:
+    """Every test here provisions a real workspace with a genuine core install."""
+    external_prerequisite("vaultspec-core")
 
 
-def _full_bundle() -> dict[str, Any]:
+def _full_bundle() -> dict[str, object]:
     """A complete per-role actor-token bundle so only the harness can refuse."""
-    return {
-        "tokens": {role: f"tok-{role}" for role in _authoring_roles()},
-        "engine_bearer": "bearer",
-    }
+    return actor_tokens_body(role_tokens(_authoring_roles()))
 
 
 async def _run_start_body(
@@ -96,7 +100,7 @@ async def test_unprovisioned_workspace_refused_at_run_start(
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=30.0) as client,
     ):
         resp = await client.post(
@@ -125,7 +129,7 @@ async def test_unprovisioned_preset_discovery_exposes_no_runtime_policy(
     """Preset discovery stays descriptive; run admission owns harness readiness."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=30.0) as client,
     ):
         resp = await client.get("/v1/presets", params={"workspace_root": str(tmp_path)})
@@ -148,7 +152,7 @@ async def test_provisioned_workspace_clears_the_harness_gate_at_run_start(
 
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=30.0) as client,
     ):
         resp = await client.post(
@@ -156,11 +160,14 @@ async def test_provisioned_workspace_clears_the_harness_gate_at_run_start(
             json=await _run_start_body(client, ws, run_id="harness-provisioned"),
         )
         # The harness gate is cleared: the run either dispatches (201) or is
-        # refused for a NON-harness reason (e.g. provider readiness), but never
-        # for the harness.
+        # refused for a NON-harness reason (provider readiness, or this gateway
+        # running no authoring verdict subscriber), but never for the harness.
+        # A refusal a consumer branches on carries a typed object instead of a
+        # sentence, so the reason is read out of whichever shape arrived.
         if resp.status_code != 201:
             detail = resp.json()["detail"]
-            assert "harness" not in detail.lower()
+            reason = detail["message"] if isinstance(detail, dict) else detail
+            assert "harness" not in reason.lower()
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -174,7 +181,7 @@ async def test_provisioned_preset_discovery_exposes_no_runtime_policy(
 
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=30.0) as client,
     ):
         resp = await client.get("/v1/presets", params={"workspace_root": str(ws)})
@@ -202,7 +209,7 @@ def test_probe_harness_is_none_for_non_authoring_without_workspace() -> None:
     from ...team.team_config import load_team_config
     from ..routes.gateway import _probe_harness
 
-    assert _probe_harness(load_team_config("mock-success-single"), None) is None
+    assert _probe_harness(load_team_config(DEFAULT_TEAM_PRESET), None) is None
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -226,7 +233,7 @@ async def test_workspaceless_authoring_run_is_refused(
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=30.0) as client,
     ):
         resp = await client.post(

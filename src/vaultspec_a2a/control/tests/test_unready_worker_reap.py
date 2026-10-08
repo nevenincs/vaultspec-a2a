@@ -8,9 +8,8 @@ merely leaking a process.
 
 These drive the production reap seam with REAL process trees: a parent that
 spawns real grandchildren, reaped through the same function the readiness
-timeout calls. Gateway-owned workers retain OS containment in every profile;
-the fallback case starts without retained authority and seats the live root
-before beginning cooperative shutdown.
+timeout calls. Every stand-in is started through the same contained spawn as a
+gateway-owned worker, so its containment is the only authority for the tree.
 
 The grandchildren are what make these tests discriminating. A bare
 ``Popen.terminate`` fells the parent and passes any parent-only assertion, so a
@@ -21,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import socket
+import re
 import subprocess
 import sys
 import time
@@ -33,16 +32,23 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from ...control._worker_process_stop import _shutdown_worker_process
-from ...control._worker_readiness import (
-    WorkerReadySpec,
-    _await_worker_ready,
-    _reap_unready_worker,
-)
+from ...control._worker_readiness import _reap_unready_worker
 from ...control.worker_management import LazyWorkerSpawner
-from ...lifecycle.discovery import is_pid_alive
 from ...lifecycle.shutdown import ShutdownDeadline
-from ...utils import kill_pid_tree_async
-from ...utils.process import ProcessContainment, ProcessContainmentError
+from ...testing import (
+    ProgressDeadline,
+    ProgressStalledError,
+    free_port,
+    wait_for_async,
+)
+from ...utils import (
+    ProcessContainment,
+    ProcessContainmentError,
+    kill_pid_tree_async,
+    reap_contained,
+    spawn_contained,
+)
+from ...utils._process_tree import pid_is_live, port_has_listener_async, wait_pid_gone
 
 # A stand-in for the half-started worker: spawns real grandchildren, prints their
 # pids so the test can watch them independently of the parent, then sleeps well
@@ -58,12 +64,6 @@ _WORKER_WITH_CHILDREN = (
     "print(' '.join(str(k.pid) for k in kids), flush=True)\n"
     "time.sleep(300)\n"
 )
-
-
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-        listener.bind(("127.0.0.1", 0))
-        return int(listener.getsockname()[1])
 
 
 def _cooperative_worker_script(port: int, marker: Path) -> str:
@@ -104,25 +104,23 @@ def _late_child_worker_script(port: int, marker: Path) -> str:
     )
 
 
-def _spawn_tree(
-    containment: ProcessContainment | None,
-) -> tuple[subprocess.Popen[bytes], list[int]]:
-    """Spawn the stand-in worker and return it with its real grandchild pids."""
+def _base_interpreter() -> str:
     # A uv-managed Windows venv executable is a redirector process.  Use the
     # retained base interpreter so the returned Popen is the actual worker root
     # whose identity and descendants production cleanup must own.
-    interpreter = getattr(sys, "_base_executable", sys.executable)
-    new_session = containment is not None and bool(
-        containment.spawn_kwargs().get("start_new_session")
-    )
-    process = subprocess.Popen(
-        [interpreter, "-c", _WORKER_WITH_CHILDREN],
+    return getattr(sys, "_base_executable", sys.executable)
+
+
+def _spawn_tree(
+    containment: ProcessContainment,
+) -> tuple[subprocess.Popen[bytes], list[int]]:
+    """Spawn the stand-in worker and return it with its real grandchild pids."""
+    process = spawn_contained(
+        [_base_interpreter(), "-c", _WORKER_WITH_CHILDREN],
+        containment,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
-        start_new_session=new_session,
     )
-    if containment is not None:
-        containment.assign(process.pid)
     assert process.stdout is not None
     line = process.stdout.readline().decode("utf-8").strip()
     child_pids = [int(p) for p in line.split()]
@@ -130,69 +128,74 @@ def _spawn_tree(
     return process, child_pids
 
 
+async def _serving_contained_worker(
+    script: str, port: int
+) -> tuple[subprocess.Popen[bytes], ProcessContainment, LazyWorkerSpawner]:
+    """Run *script* in real containment, owned by a spawner, once it serves *port*."""
+    containment = ProcessContainment.create()
+    process = spawn_contained(
+        [_base_interpreter(), "-c", script],
+        containment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    spawner = LazyWorkerSpawner(
+        worker_url=f"http://127.0.0.1:{port}",
+        worker_port=port,
+        auto_spawn=False,
+        internal_token=None,
+    )
+    spawner.replace_process(process, containment)
+
+    async def _serving() -> bool | None:
+        return await port_has_listener_async(port, timeout=0.5) or None
+
+    try:
+        await wait_for_async(
+            _serving,
+            deadline=ProgressDeadline(idle_window_s=5.0),
+            interval_s=0.02,
+            stalled=lambda: "contained worker socket did not become ready",
+        )
+    except ProgressStalledError:
+        await containment.terminate(term_timeout=2.0, kill_timeout=2.0)
+        raise
+    return process, containment, spawner
+
+
 def _await_gone(pids: list[int], *, timeout: float = 20.0) -> list[int]:
     """Wait for every pid to die, returning any survivors."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and any(is_pid_alive(p) for p in pids):
-        time.sleep(0.05)
-    return [p for p in pids if is_pid_alive(p)]
+    wait_pid_gone(*pids, timeout=timeout)
+    return [p for p in pids if pid_is_live(p)]
 
 
 async def _force_cleanup(pids: list[int]) -> None:
     """Last-resort teardown so a failing assertion cannot leak real processes."""
     for pid in pids:
-        if is_pid_alive(pid):
+        if pid_is_live(pid):
             with contextlib.suppress(Exception):
                 await kill_pid_tree_async(pid, term_timeout=2.0, kill_timeout=2.0)
 
 
-@pytest.mark.asyncio
-async def test_unready_worker_tree_is_reaped_without_a_containment() -> None:
-    """The unassigned fallback reaps the whole tree, not just the root.
-
-    This direct failure seam has no OS containment, which is exactly where a
-    bare ``Popen.terminate`` used to leave both grandchildren running.
-    """
-    process, child_pids = _spawn_tree(None)
-    try:
-        await _reap_unready_worker(process, None)
-
-        assert process.poll() is not None, "the worker root survived the reap"
-        survivors = _await_gone(child_pids)
-        assert not survivors, f"worker descendants survived the reap: {survivors}"
-    finally:
-        await _force_cleanup([process.pid, *child_pids])
-
-
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows Job assignment proof")
-@pytest.mark.asyncio
-async def test_failed_containment_assignment_reaps_exact_tree_and_propagates(
+def test_refused_admission_kills_the_root_before_its_first_instruction(
     tmp_path: Path,
 ) -> None:
-    """A real closed Job authority cannot admit or strand its live process."""
-    process, child_pids = _spawn_tree(None)
+    """A real closed Job cannot admit the worker root, and the root never runs."""
+    marker = tmp_path / "worker-first-instruction"
+    script = f"from pathlib import Path; Path({str(marker)!r}).touch()"
     containment = ProcessContainment.create()
     containment.close()
-    started = asyncio.get_running_loop().time()
-    try:
-        with pytest.raises(ProcessContainmentError):
-            await _await_worker_ready(
-                process,
-                containment,
-                WorkerReadySpec(
-                    "http://127.0.0.1:9",
-                    9,
-                    1,
-                    ["assignment-failure-worker"],
-                    tmp_path / "assignment-failure.log",
-                ),
-            )
-        elapsed = asyncio.get_running_loop().time() - started
-        assert elapsed < 15.2, f"assignment-failure reap took {elapsed:.4f}s"
-        assert process.poll() is not None, "failed assignment left root live"
-        assert not _await_gone(child_pids), "failed assignment left descendants live"
-    finally:
-        await _force_cleanup([process.pid, *child_pids])
+    started = time.monotonic()
+    with pytest.raises(ProcessContainmentError, match="no job object") as caught:
+        spawn_contained([_base_interpreter(), "-c", script], containment)
+    elapsed = time.monotonic() - started
+    assert elapsed < 10.5, f"refused-admission reap took {elapsed:.4f}s"
+    pid_match = re.search(r"process (\d+)", str(caught.value))
+    assert pid_match is not None
+    assert not marker.exists(), "the worker root ran before its admission failed"
+    assert not pid_is_live(int(pid_match.group(1))), "refused root left live"
 
 
 @pytest.mark.asyncio
@@ -218,15 +221,17 @@ async def test_the_reaped_handle_is_waited_so_no_zombie_remains() -> None:
     ``returncode`` is only populated by a successful wait, so asserting it is
     set is the portable way to prove the handle was actually collected.
     """
-    process, child_pids = _spawn_tree(None)
+    containment = ProcessContainment.create()
+    process, child_pids = _spawn_tree(containment)
     try:
-        await _reap_unready_worker(process, None)
+        await _reap_unready_worker(process, containment)
 
         assert process.returncode is not None, (
             "the worker handle was never waited; a zombie would remain on POSIX"
         )
     finally:
         await _force_cleanup([process.pid, *child_pids])
+        containment.close()
 
 
 @pytest.mark.asyncio
@@ -236,7 +241,7 @@ async def test_shutdown_reaps_descendants_after_worker_root_crashes() -> None:
     try:
         process.kill()
         process.wait(timeout=5)
-        assert all(is_pid_alive(pid) for pid in child_pids)
+        assert all(pid_is_live(pid) for pid in child_pids)
 
         await _shutdown_worker_process(process, containment)
 
@@ -253,7 +258,10 @@ async def test_spawner_shutdown_clears_crashed_tree_before_replacement() -> None
     containment = ProcessContainment.create()
     process, child_pids = _spawn_tree(containment)
     spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+        worker_url="http://127.0.0.1:9",
+        worker_port=9,
+        auto_spawn=False,
+        internal_token=None,
     )
     spawner.replace_process(process, containment)
     try:
@@ -270,6 +278,76 @@ async def test_spawner_shutdown_clears_crashed_tree_before_replacement() -> None
         containment.close()
         if process.stdout is not None:
             process.stdout.close()
+
+
+def _spawn_sleeper(
+    containment: ProcessContainment,
+) -> subprocess.Popen[bytes]:
+    """Spawn a contained root that outlives any reap window the gateway allows."""
+    return spawn_contained(
+        [_base_interpreter(), "-c", "import time; time.sleep(300)"],
+        containment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+@pytest.mark.asyncio
+async def test_shutdown_of_a_reaped_tree_survives_a_root_that_outlives_the_wait() -> (
+    None
+):
+    """A completed containment reap must not fail on the root-handle wait.
+
+    The containment is the authority for the tree. Once it reports the tree
+    gone it releases its owned identity, so a later terminate is the documented
+    no-op that returns ``True`` without touching a process. The root handle's
+    own wait is bounded far below that reap, and it exists only to collect an
+    exit status, so a root still in the process table when it runs - a loaded
+    host, a root whose tree an earlier pass already reaped - must not turn a
+    successful shutdown into a raised one.
+
+    The sleeping root is what makes this discriminating: it is guaranteed to be
+    in the window, so a wait that propagates ``TimeoutExpired`` fails here
+    instead of only in a loaded batch.
+    """
+    owner = ProcessContainment.create()
+    process = _spawn_sleeper(owner)
+    # The state a completed reap leaves behind: no owned process identity.
+    reaped = ProcessContainment.create()
+    try:
+        assert await reaped.terminate(term_timeout=0.0, kill_timeout=0.0)
+
+        await _shutdown_worker_process(process, reaped)
+
+        assert process.poll() is None, (
+            "the root exited by itself; the reap window was never exceeded"
+        )
+    finally:
+        assert reap_contained(process, owner, term_timeout=2.0, kill_timeout=2.0)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Job accounting proof")
+@pytest.mark.asyncio
+async def test_shutdown_reports_the_containment_failure_not_the_handle_wait() -> None:
+    """A reap that cannot be verified raises its own diagnostic, not a timeout.
+
+    Closing the Job is the last termination backstop; afterwards descendant
+    quiescence can no longer be verified through that closed handle, so every
+    later terminate reports failure. The caller must see that failure, so the
+    best-effort root wait may not stand in for it with a ``TimeoutExpired``
+    that names no tree.
+    """
+    containment = ProcessContainment.create()
+    process = _spawn_sleeper(containment)
+    try:
+        containment.close()
+
+        with pytest.raises(ProcessContainmentError, match="did not terminate"):
+            await _shutdown_worker_process(process, containment)
+    finally:
+        await _force_cleanup([process.pid])
+        process.wait(timeout=5)
 
 
 @pytest.mark.asyncio
@@ -299,35 +377,11 @@ async def test_spawner_cooperates_then_reaps_the_remaining_owned_tree(
     tmp_path: Path,
 ) -> None:
     """A real 202 stop precedes bounded containment escalation for descendants."""
-    port = _free_port()
+    port = free_port()
     marker = tmp_path / "cooperative-stop.txt"
-    containment = ProcessContainment.create()
-    base_interpreter = getattr(sys, "_base_executable", sys.executable)
-    process = subprocess.Popen(
-        [base_interpreter, "-c", _cooperative_worker_script(port, marker)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=sys.platform != "win32",
+    process, containment, spawner = await _serving_contained_worker(
+        _cooperative_worker_script(port, marker), port
     )
-    containment.assign_process(process)
-    spawner = LazyWorkerSpawner(
-        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
-    )
-    spawner.replace_process(process, containment)
-    ready_deadline = time.monotonic() + 5.0
-    while time.monotonic() < ready_deadline:
-        try:
-            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
-        except OSError:
-            await asyncio.sleep(0.02)
-            continue
-        writer.close()
-        await writer.wait_closed()
-        break
-    else:
-        await _force_cleanup([process.pid])
-        raise AssertionError("cooperative worker socket did not become ready")
 
     started = asyncio.get_running_loop().time()
     deadline = ShutdownDeadline.start(4.0)
@@ -338,7 +392,7 @@ async def test_spawner_cooperates_then_reaps_the_remaining_owned_tree(
         child_pid = int(marker.read_text(encoding="utf-8"))
         assert elapsed < 4.2, f"owned worker teardown took {elapsed:.4f}s"
         assert process.poll() is not None
-        assert not is_pid_alive(child_pid), "owned descendant survived escalation"
+        assert not pid_is_live(child_pid), "owned descendant survived escalation"
         assert spawner.process is None and spawner.containment is None
     finally:
         child_pids: list[int] = []
@@ -349,43 +403,15 @@ async def test_spawner_cooperates_then_reaps_the_remaining_owned_tree(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("precontained", [False, True])
 async def test_shutdown_reaps_child_created_after_cooperative_request(
     tmp_path: Path,
-    precontained: bool,
 ) -> None:
     """Containment authority survives a root that exits after creating a child."""
-    port = _free_port()
-    marker = tmp_path / f"late-child-{precontained}.txt"
-    containment = ProcessContainment.create() if precontained else None
-    base_interpreter = getattr(sys, "_base_executable", sys.executable)
-    start_new_session = sys.platform != "win32"
-    process = subprocess.Popen(
-        [base_interpreter, "-c", _late_child_worker_script(port, marker)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=start_new_session,
+    port = free_port()
+    marker = tmp_path / "late-child.txt"
+    process, containment, spawner = await _serving_contained_worker(
+        _late_child_worker_script(port, marker), port
     )
-    if containment is not None:
-        containment.assign_process(process)
-    spawner = LazyWorkerSpawner(
-        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
-    )
-    spawner.replace_process(process, containment)
-    ready_deadline = time.monotonic() + 5.0
-    while time.monotonic() < ready_deadline:
-        try:
-            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
-        except OSError:
-            await asyncio.sleep(0.02)
-            continue
-        writer.close()
-        await writer.wait_closed()
-        break
-    else:
-        await _force_cleanup([process.pid])
-        raise AssertionError("late-child worker socket did not become ready")
 
     started = asyncio.get_running_loop().time()
     deadline = ShutdownDeadline.start(4.0)
@@ -396,60 +422,10 @@ async def test_shutdown_reaps_child_created_after_cooperative_request(
         child_pid = int(marker.read_text(encoding="utf-8"))
         assert elapsed < 4.2, f"late-child teardown took {elapsed:.4f}s"
         assert process.poll() is not None
-        assert not is_pid_alive(child_pid), "late descendant survived root exit"
+        assert not pid_is_live(child_pid), "late descendant survived root exit"
     finally:
         child_pids: list[int] = []
         if marker.exists():
             child_pids.append(int(marker.read_text(encoding="utf-8")))
         await _force_cleanup([process.pid, *child_pids])
-        if containment is not None:
-            containment.close()
-
-
-@pytest.mark.asyncio
-async def test_spawner_snapshots_uncontained_tree_before_root_exits(
-    tmp_path: Path,
-) -> None:
-    """The Windows/dev fallback cannot lose children after cooperative exit."""
-    port = _free_port()
-    marker = tmp_path / "uncontained-cooperative-stop.txt"
-    base_interpreter = getattr(sys, "_base_executable", sys.executable)
-    process = subprocess.Popen(
-        [base_interpreter, "-c", _cooperative_worker_script(port, marker)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=sys.platform != "win32",
-    )
-    spawner = LazyWorkerSpawner(
-        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
-    )
-    spawner.replace_process(process)
-    ready_deadline = time.monotonic() + 5.0
-    while time.monotonic() < ready_deadline:
-        try:
-            _reader, writer = await asyncio.open_connection("127.0.0.1", port)
-        except OSError:
-            await asyncio.sleep(0.02)
-            continue
-        writer.close()
-        await writer.wait_closed()
-        break
-    else:
-        await _force_cleanup([process.pid])
-        raise AssertionError(
-            "uncontained cooperative worker socket did not become ready"
-        )
-
-    deadline = ShutdownDeadline.start(4.0)
-    try:
-        await spawner.shutdown(deadline=deadline)
-        assert marker.exists(), "the cooperative shutdown route was not reached"
-        child_pid = int(marker.read_text(encoding="utf-8"))
-        assert process.poll() is not None
-        assert not is_pid_alive(child_pid), "uncontained descendant survived teardown"
-    finally:
-        child_pids: list[int] = []
-        if marker.exists():
-            child_pids.append(int(marker.read_text(encoding="utf-8")))
-        await _force_cleanup([process.pid, *child_pids])
+        containment.close()

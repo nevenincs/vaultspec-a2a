@@ -14,40 +14,47 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast, overri
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
+from ..database import CheckpointRead, read_latest_checkpoint
 from ..domain_config import domain_config
-from ..graph._compiler_models import resolve_model_for_worker
 from ..graph.compiler import compile_team_graph
 from ..ipc.schemas import canonical_project_root
 from ..providers.team_selection import model_assignment_digest
 from ..providers.warmup import warm_model_imports
 from ..streaming import StreamableGraph, node_metadata_from_graph
 from ..team.team_config import (
-    AgentConfig,
     TopologyType,
 )
-from ..telemetry import ws_span
+from ..telemetry import operation_span
 from ..thread.errors import (
     ConfigError,
 )
 from ..thread.snapshots import stamp_message_created_at
-from ._graph_lifecycle_options import (
-    GraphLifecycleOptions,
-    bind_graph_lifecycle_options,
-)
 from ._graph_lifecycle_state import GraphLifecyclePorts, GraphLifecycleState
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from langchain_core.runnables import RunnableConfig
     from langgraph.types import Command, Interrupt
 
-    from ..authoring import DocumentProposalSubmitter, FeedbackContextReader
-    from ..database.checkpoints import Checkpointer
+    from ..authoring import (
+        DocumentProposalSubmitter,
+        EngineEndpoint,
+        FeedbackContextReader,
+    )
+    from ..database import Checkpointer
     from ..ipc.schemas import DispatchRequest
-    from ..streaming.aggregator import EventAggregator
+    from ..streaming import RunEventProducer
     from .authoring_binding import AuthoringBindingProvider
+    from .catalog_store import RunCatalogStore
     from .ipc import WorkerBridge
+    from .token_store import RunTokenStore
+
+    #: A real, blocking engine-discovery callable, offloaded via
+    #: ``asyncio.to_thread``. Defaults to ``resolve_engine_with_retry``; a
+    #: real-behavior test can install its own bounded stand-in instead of
+    #: patching the production resolver.
+    EngineResolver = Callable[[], EngineEndpoint | None]
 
 __all__ = [
     "GraphCacheKey",
@@ -139,86 +146,6 @@ class RegisteredCompiledGraph(StreamableGraph, Protocol):
     ) -> object: ...
 
 
-class _AuthoringAttachOptional(TypedDict, total=False):
-    frozen_assignment: dict[str, dict[str, Any]] | None
-
-
-class _AuthoringAttachArgs(_AuthoringAttachOptional):
-    harness: Any
-    provider_factory: Any
-
-
-def assert_armed_authoring_attachable(
-    team_config: Any,
-    agent_configs: dict[str, AgentConfig],
-    ws_root: Path | None,
-    **kwargs: Unpack[_AuthoringAttachArgs],
-) -> None:
-    """Refuse an authoring-bridge-armed preset a worker cannot mount the bridge onto.
-
-    ``providers._acp_authoring.attach_authoring_tools`` dispatches the run's
-    authoring binding onto the resolved model's own surface (``with_mcp_servers``
-    for the ACP lane, ``with_authoring_mcp_server`` for Codex) and, since the
-    codex-authoring-bridge-attachment fix, raises loud when a model exposes
-    neither — but that raise fires per-turn, inside the worker node, only once
-    the run has already started and begun burning its step timeout waiting on an
-    agent that will never see its tools. This gate asks the identical question
-    at COMPILE time, for every worker in an ``authoring_bridge``-armed preset,
-    so a provider with no attachment surface at all is refused with a served
-    compile-time reason before the run ever starts — never a live-run timeout.
-
-    A no-op when *harness* does not arm the authoring bridge. The scope is
-    authoring_bridge specifically because the mcp_servers-only case fails
-    SOFTLY: ``compose_harness_mcp_servers`` returns a model with no delivery
-    mechanism unchanged rather than raising, so there is no per-turn error for a
-    compile-time gate to pull forward. That is a weaker guarantee than a gate,
-    and it is deliberately not restated as one here - this docstring previously
-    claimed the mcp_servers path was "already proven to reach every known
-    provider", which was untrue on three of the four topologies at the time it
-    was written, because only the research_adr compiler read the declaration at
-    all. The forwarding now happens in every worker-compiling topology; what
-    remains unguarded here is a lane whose model exposes neither delivery
-    surface, and that stays a silent no-op by design rather than by omission.
-    """
-    harness = kwargs["harness"]
-    provider_factory = kwargs["provider_factory"]
-    frozen_assignment = kwargs.get("frozen_assignment")
-    if harness is None or not harness.authoring_bridge:
-        return
-    unsupported: list[str] = []
-    for worker_ref in team_config.workers:
-        agent_config = agent_configs.get(worker_ref.agent_id)
-        if agent_config is None:
-            continue
-        try:
-            model, _resolved_provider, _frozen_model = resolve_model_for_worker(
-                worker_ref,
-                agent_config,
-                team_config,
-                ws_root,
-                provider_factory=provider_factory,
-                frozen_assignment=frozen_assignment,
-            )
-        except ValueError:
-            # Provider exhaustion is a distinct failure surfaced by compile.
-            continue
-        has_attach_surface = (
-            getattr(model, "with_mcp_servers", None) is not None
-            or getattr(model, "with_authoring_mcp_server", None) is not None
-        )
-        if not has_attach_surface:
-            unsupported.append(f"{worker_ref.agent_id!r} ({type(model).__name__})")
-    if unsupported:
-        raise ConfigError(
-            f"harness-armed preset {team_config.id!r} declares "
-            "[team.harness] authoring_bridge = true, but the following worker(s) "
-            f"resolved to a provider with no authoring attachment surface: "
-            f"{'; '.join(unsupported)}. The declared authoring tools cannot "
-            "mount onto this provider; refusing before the run starts rather "
-            "than spawning an agent whose tools silently never attach."
-        )
-
-
 def _validated_checkpoint_digest(values: dict[str, object], field: str) -> str:
     """Return one validated compilation digest from checkpoint channel values."""
     digest = values.get(field)
@@ -231,6 +158,18 @@ def _validated_checkpoint_digest(values: dict[str, object], field: str) -> str:
     return digest
 
 
+class _GraphLifecycleRequired(TypedDict):
+    token_store: RunTokenStore
+    catalog_store: RunCatalogStore
+
+
+class _GraphLifecycleOptions(_GraphLifecycleRequired, total=False):
+    """Keyword options of ``GraphLifecycleManager`` beyond its three collaborators."""
+
+    checkpoint_read_timeout_seconds: float | None
+    engine_resolver: EngineResolver | None
+
+
 class GraphLifecycleManager:
     """Manages graph compilation, LRU caching, and input construction.
 
@@ -240,35 +179,29 @@ class GraphLifecycleManager:
         Shared LangGraph checkpointer for graph compilation.
     bridge:
         ``WorkerBridge`` for forwarding graph_registered events.
-    aggregator:
-        ``EventAggregator`` for registering compiled graphs.
+    producer:
+        ``RunEventProducer`` for registering compiled graphs.
     """
 
     def __init__(
         self,
         checkpointer: Checkpointer,
         bridge: WorkerBridge,
-        aggregator: EventAggregator,
-        *args: object,
-        **options: Unpack[GraphLifecycleOptions],
+        producer: RunEventProducer,
+        **options: Unpack[_GraphLifecycleOptions],
     ) -> None:
         from ..database import get_session_factory
         from ..providers.factory import ProviderFactory
         from .cost_port import SqlCostPort
         from .runtime_identity_port import SqlRuntimeIdentityPort
-        from .task_queue_port import SqlTaskQueuePort
 
-        (
-            token_store,
-            catalog_store,
-            checkpoint_read_timeout_seconds,
-        ) = bind_graph_lifecycle_options(args, options)
+        checkpoint_read_timeout_seconds = options.get("checkpoint_read_timeout_seconds")
         self._ports = GraphLifecyclePorts(
             checkpointer=checkpointer,
             bridge=bridge,
-            aggregator=aggregator,
-            token_store=token_store,
-            catalog_store=catalog_store,
+            producer=producer,
+            token_store=options["token_store"],
+            catalog_store=options["catalog_store"],
             provider_factory=ProviderFactory(),
         )
         self._checkpoint_read_timeout_seconds = (
@@ -276,10 +209,10 @@ class GraphLifecycleManager:
             if checkpoint_read_timeout_seconds is not None
             else domain_config.aget_state_timeout_seconds
         )
-        self._task_queue_port = SqlTaskQueuePort(get_session_factory())
         self._cost_port = SqlCostPort(get_session_factory())
         self._runtime_identity_port = SqlRuntimeIdentityPort(get_session_factory())
         self._state = GraphLifecycleState()
+        self._engine_resolver: EngineResolver | None = options.get("engine_resolver")
 
     # ------------------------------------------------------------------
     # Public accessors
@@ -349,7 +282,7 @@ class GraphLifecycleManager:
 
         This is the only public graph-injection seam.  It maintains the same
         cache and thread mapping invariant as normal compilation, then makes
-        the graph available to event aggregation before dispatch can resume it.
+        the graph available to the event producer before dispatch can resume it.
         That invariant includes the project spelling: an injected key is minted
         here so a graph installed through this seam shares the entry a dispatch
         for the same workspace would find, rather than shadowing it.
@@ -369,7 +302,7 @@ class GraphLifecycleManager:
         self._state.graph_cache[cache_key] = graph
         self._state.graph_cache.move_to_end(cache_key)
         self._state.thread_to_cache_key[thread_id] = cache_key
-        self._ports.aggregator.register_graph(thread_id, graph)
+        self._ports.producer.register_graph(thread_id, graph)
 
     # ------------------------------------------------------------------
     # Graph cache lookup and compilation
@@ -385,7 +318,7 @@ class GraphLifecycleManager:
 
         If the thread already maps to a cached graph, return it (LRU touch).
         If the preset is known but no graph is cached (eviction or first use),
-        compile a new one, cache it, and register with the aggregator.
+        compile a new one, cache it, and register it with the event producer.
         Missing accepted graph authority is a compilation refusal.
         """
         lock = self._state.thread_compile_locks.setdefault(
@@ -511,9 +444,9 @@ class GraphLifecycleManager:
 
         graph = await self._get_or_compile_cache_key(req, new_key, team_preset)
         self._state.thread_to_cache_key[req.thread_id] = new_key
-        self._ports.aggregator.register_graph(req.thread_id, graph)
-        # Relay node metadata to the control-surface aggregator so
-        # REST /team-status and WS team_status events include role/display_name.
+        self._ports.producer.register_graph(req.thread_id, graph)
+        # Relay node metadata to the gateway's live-state mirror so its
+        # team-status read and the team_status frames include role/display_name.
         await self._send_graph_registered(req.thread_id, graph)
         return graph
 
@@ -535,7 +468,7 @@ class GraphLifecycleManager:
                     self._state.graph_cache.move_to_end(cache_key)
                     return cached
 
-                async with ws_span(
+                async with operation_span(
                     "executor.compile_graph", thread_id=req.thread_id
                 ) as span:
                     span.set_attribute("team_preset", team_preset)
@@ -548,7 +481,7 @@ class GraphLifecycleManager:
                             req.thread_id,
                             team_preset,
                         )
-                        span.record_exception(exc)
+                        # The span records the propagating error on exit.
                         span.set_attribute("error", True)
                         raise GraphCompilationError(str(exc)) from exc
 
@@ -564,10 +497,13 @@ class GraphLifecycleManager:
             else:
                 self._state.cache_key_compile_lock_users[cache_key] = users
 
-    async def _checkpoint_present(
+    async def _durable_checkpoint(
         self, thread_id: str, *, checkpoint_deadline: float | None
-    ) -> bool:
-        """Check that a bound resume has a durable checkpoint to resume."""
+    ) -> CheckpointRead:
+        """Read the run's latest durable checkpoint within the dispatch deadline.
+
+        A timeout refuses the compilation; any other read failure propagates.
+        """
         timeout = self._checkpoint_read_timeout_seconds
         if checkpoint_deadline is not None:
             timeout = min(
@@ -575,50 +511,39 @@ class GraphLifecycleManager:
             )
         if timeout <= 0:
             raise GraphCompilationError("durable checkpoint read timed out")
+        checkpoint = await read_latest_checkpoint(
+            self._ports.checkpointer, thread_id, timeout=timeout
+        )
         try:
-            checkpoint_tuple = await asyncio.wait_for(
-                self._ports.checkpointer.aget_tuple(
-                    {"configurable": {"thread_id": thread_id}}
-                ),
-                timeout=timeout,
-            )
+            checkpoint.tuple_or_raise()
         except TimeoutError as exc:
             raise GraphCompilationError("durable checkpoint read timed out") from exc
-        return checkpoint_tuple is not None
+        return checkpoint
+
+    async def _checkpoint_present(
+        self, thread_id: str, *, checkpoint_deadline: float | None
+    ) -> bool:
+        """Check that a bound resume has a durable checkpoint to resume."""
+        checkpoint = await self._durable_checkpoint(
+            thread_id, checkpoint_deadline=checkpoint_deadline
+        )
+        return checkpoint.checkpoint_tuple is not None
 
     async def _checkpoint_compilation_digests(
         self, thread_id: str, *, checkpoint_deadline: float | None
     ) -> tuple[str, str] | None:
         """Read and validate the current assignment binding from checkpoint state."""
-        timeout = self._checkpoint_read_timeout_seconds
-        if checkpoint_deadline is not None:
-            timeout = min(
-                timeout, checkpoint_deadline - asyncio.get_running_loop().time()
-            )
-        if timeout <= 0:
-            raise GraphCompilationError("durable checkpoint read timed out")
-        try:
-            checkpoint_tuple = await asyncio.wait_for(
-                self._ports.checkpointer.aget_tuple(
-                    {"configurable": {"thread_id": thread_id}}
-                ),
-                timeout=timeout,
-            )
-        except TimeoutError as exc:
-            raise GraphCompilationError("durable checkpoint read timed out") from exc
-        if checkpoint_tuple is None:
+        checkpoint = await self._durable_checkpoint(
+            thread_id, checkpoint_deadline=checkpoint_deadline
+        )
+        if checkpoint.checkpoint_tuple is None:
             return None
-        checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
-        if not isinstance(checkpoint, dict):
+        values = checkpoint.strict_channel_values
+        if values is None:
             raise GraphCompilationError("durable checkpoint state is incompatible")
-        checkpoint_obj = cast("dict[str, object]", checkpoint)
-        values = checkpoint_obj.get("channel_values")
-        if not isinstance(values, dict):
-            raise GraphCompilationError("durable checkpoint state is incompatible")
-        values_obj = cast("dict[str, object]", values)
         return (
-            _validated_checkpoint_digest(values_obj, "model_assignment_digest"),
-            _validated_checkpoint_digest(values_obj, "graph_definition_digest"),
+            _validated_checkpoint_digest(values, "model_assignment_digest"),
+            _validated_checkpoint_digest(values, "graph_definition_digest"),
         )
 
     async def _send_graph_registered(
@@ -626,9 +551,9 @@ class GraphLifecycleManager:
     ) -> None:
         """Send a ``graph_registered`` event with node metadata via the bridge.
 
-        The control-surface aggregator uses this to populate its
-        ``_node_metadata`` cache so that ``emit_team_status`` and the REST
-        ``/team-status`` endpoint include role/display_name/description.
+        The gateway's live-state mirror records the nodes it carries, so the
+        team-status read and the run snapshot include
+        role/display_name/description.
         """
         nodes = node_metadata_from_graph(graph)
         if nodes:
@@ -697,53 +622,23 @@ class GraphLifecycleManager:
         # binding provider, built here behind the same fail-closed contract as the
         # submitter: a run that cannot reach the engine to fetch its catalog never
         # starts vague. Only a coding topology can arm this (the config validator
-        # rejects authoring_bridge on document-authoring presets).
+        # rejects authoring_bridge on document-authoring presets). Compilation
+        # refuses a worker whose built model cannot mount the binding.
         authoring_binding_provider = None
         harness = team_config.effective_harness()
         if harness is not None and harness.authoring_bridge:
             authoring_binding_provider = await self._build_authoring_binding_provider()
-
-        # Compile gate: an ARMED preset - one declaring the authoring bridge OR
-        # harness MCP servers - must have an attachment surface on every worker.
-        # No credential gate runs here: providers authenticate themselves from
-        # the ambient environment they inherit, and an unauthenticated lane
-        # reports its own failure at run time. The declared-surface invariant is
-        # enforced at spawn by the run-workspace MCP projection and confinement
-        # settings, not by refusing the run for a missing credential.
-        armed = harness is not None and (
-            harness.authoring_bridge or bool(harness.mcp_servers)
-        )
-        if armed:
-            assert_armed_authoring_attachable(
-                team_config,
-                agent_configs,
-                ws_root,
-                harness=harness,
-                provider_factory=self._ports.provider_factory,
-                frozen_assignment=req.model_assignment,
-            )
-
-        from ..database.checkpoints import concurrent_checkpointer
-
-        # A graph is compiled per run, so it gets a saver of its own over the
-        # shared pool: one saver serializes every statement it issues behind a
-        # single lock, which would put every concurrent run's checkpoint writes
-        # back in one queue however many connections the pool holds.
-        run_checkpointer = await concurrent_checkpointer(self._ports.checkpointer)
 
         return cast(
             "RegisteredCompiledGraph",
             compile_team_graph(
                 team_config=team_config,
                 agent_configs=agent_configs,
-                checkpointer=run_checkpointer,
+                checkpointer=self._ports.checkpointer,
                 supervisor_agent_config=supervisor_config,
                 workspace_root=ws_root,
                 autonomous=req.autonomous,
                 step_timeout=definition.step_timeout_seconds,
-                # Thread feature_tag so vault indexing works in worker
-                feature_tag=req.active_feature,
-                task_queue_port=self._task_queue_port,
                 cost_port=self._cost_port,
                 runtime_identity_port=self._runtime_identity_port,
                 provider_factory=self._ports.provider_factory,
@@ -809,7 +704,8 @@ class GraphLifecycleManager:
         # stall watchdog exist precisely because a blocking call here used to
         # freeze the whole worker (heartbeats included) for the full retry
         # window on every first compile of a preset+workspace cache key.
-        engine = await asyncio.to_thread(resolve_engine_with_retry)
+        resolver = self._engine_resolver or resolve_engine_with_retry
+        engine = await asyncio.to_thread(resolver)
         if engine is None:
             raise EngineUnavailableError(
                 "research_adr run requires a reachable authoring engine to submit "
@@ -858,7 +754,8 @@ class GraphLifecycleManager:
         from ..authoring import EngineUnavailableError, resolve_engine_with_retry
         from .authoring_binding import AuthoringBindingProvider
 
-        engine = await asyncio.to_thread(resolve_engine_with_retry)
+        resolver = self._engine_resolver or resolve_engine_with_retry
+        engine = await asyncio.to_thread(resolver)
         if engine is None:
             raise EngineUnavailableError(
                 "authoring_bridge run requires a reachable engine to fetch the "
@@ -940,8 +837,8 @@ class GraphLifecycleManager:
                 ``_thread_to_cache_key`` before this call).
 
         Returns:
-            A ``dict`` suitable for passing directly to
-            ``EventAggregator.ingest()`` as *graph_input*.
+            A ``dict`` suitable as the ``graph_input`` of the
+            ``GraphInvocation`` handed to ``RunEventProducer.ingest()``.
         """
         messages: list[BaseMessage] = []
         if req.context_preamble:

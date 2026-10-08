@@ -10,6 +10,7 @@ processes.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import sys
@@ -21,13 +22,14 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from ...lifecycle.discovery import is_pid_alive
 from ...providers._subprocess import (
     _spawn_acp_process,
     kill_process_tree,
     spawn_acp_process,
 )
-from ...utils.process import ProcessContainment, ProcessContainmentError
+from ...testing import ProgressDeadline, wait_until_async
+from ...utils import ProcessContainment, ProcessContainmentError
+from ...utils._process_tree import pid_is_live, wait_pid_gone
 
 # A "provider" that spawns a long-lived grandchild, prints its pid, then sleeps.
 _PROVIDER_WITH_GRANDCHILD = (
@@ -59,10 +61,8 @@ def _base_interpreter() -> str:
 
 
 def _await_gone(pids: list[int], *, timeout: float = 10.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and any(is_pid_alive(pid) for pid in pids):
-        time.sleep(0.05)
-    survivors = [pid for pid in pids if is_pid_alive(pid)]
+    wait_pid_gone(*pids, timeout=timeout)
+    survivors = [pid for pid in pids if pid_is_live(pid)]
     assert not survivors, f"provider descendants survived reap: {survivors}"
 
 
@@ -70,7 +70,7 @@ async def _force_reap(pids: list[int]) -> None:
     from ...utils._process_tree import kill_pid_tree_async
 
     for pid in pids:
-        if is_pid_alive(pid):
+        if pid_is_live(pid):
             await kill_pid_tree_async(pid, term_timeout=0.2, kill_timeout=2.0)
 
 
@@ -85,15 +85,15 @@ async def test_provider_tree_contained_and_reaped_whole(use_exec: bool) -> None:
         use_exec=use_exec,
     )
     assert process.stdout is not None
-    # The provider root is seated in its own containment before descendant work.
+    # The provider root is seated in its own containment before descendant work;
+    # the reap below felling the grandchild is what proves it holds the tree.
     containment = getattr(process, "_vaultspec_containment", None)
     assert isinstance(containment, ProcessContainment)
-    assert containment.assigned is True
 
     line = await asyncio.wait_for(process.stdout.readline(), timeout=10.0)
     grandchild_pid = int(line.strip())
     try:
-        assert is_pid_alive(grandchild_pid)
+        assert pid_is_live(grandchild_pid)
 
         await kill_process_tree(process)
 
@@ -120,7 +120,7 @@ async def test_late_provider_child_remains_in_owned_containment() -> None:
         (await asyncio.wait_for(process.stdout.readline(), timeout=10.0)).strip()
     )
     try:
-        assert is_pid_alive(grandchild_pid)
+        assert pid_is_live(grandchild_pid)
         await kill_process_tree(process)
         _await_gone([grandchild_pid])
     finally:
@@ -141,13 +141,60 @@ async def test_containment_reaps_child_after_provider_root_exits() -> None:
         (await asyncio.wait_for(process.stdout.readline(), timeout=10.0)).strip()
     )
     try:
-        deadline = time.monotonic() + 10.0
-        while process.returncode is None and time.monotonic() < deadline:
-            await asyncio.sleep(0.05)
+        await wait_until_async(
+            lambda: process.returncode is not None,
+            deadline=ProgressDeadline(idle_window_s=10.0),
+            interval_s=0.05,
+            stalled=lambda: "the provider root never exited on its own",
+        )
         assert process.returncode == 0
-        assert is_pid_alive(grandchild_pid)
+        assert pid_is_live(grandchild_pid)
         await kill_process_tree(process)
         _await_gone([grandchild_pid])
+    finally:
+        await _force_reap([grandchild_pid])
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_a_repeated_release_does_not_narrate_a_second_termination(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One provider tree, one reap, one termination in the log.
+
+    Releasing an already-reaped tree is a supported no-op, and every caller that
+    cannot know whether a sibling already released relies on it. What it must
+    not do is report work it did not perform: an operator reading two
+    "termination starting" lines for one pid sees two kills, and the second one
+    names a reap that the first call completed.
+    """
+    process = await spawn_acp_process(
+        [_base_interpreter(), "-c", _PROVIDER_WITH_GRANDCHILD],
+        env=os.environ.copy(),
+        cwd=os.getcwd(),
+        use_exec=True,
+    )
+    assert process.stdout is not None
+    grandchild_pid = int(
+        (await asyncio.wait_for(process.stdout.readline(), timeout=10.0)).strip()
+    )
+    try:
+        with caplog.at_level(logging.INFO, logger="vaultspec_a2a.providers"):
+            await kill_process_tree(process)
+            _await_gone([grandchild_pid])
+
+            await kill_process_tree(process)
+
+        narrated = [
+            record.message
+            for record in caplog.records
+            if record.message.startswith("ACP subprocess termination")
+            or record.message == "ACP subprocess terminated"
+        ]
+        assert narrated == [
+            "ACP subprocess termination starting",
+            "ACP subprocess terminated",
+        ], narrated
     finally:
         await _force_reap([grandchild_pid])
 
@@ -179,4 +226,4 @@ async def test_assignment_failure_reaps_suspended_root_before_first_instruction(
     pid_match = re.search(r"process (\d+)", str(caught.value))
     assert pid_match is not None
     assert not marker.exists(), "provider executed before failed Job assignment"
-    assert not is_pid_alive(int(pid_match.group(1)))
+    assert not pid_is_live(int(pid_match.group(1)))

@@ -7,7 +7,6 @@ so a failure in one must not skip the others.
 """
 
 import asyncio
-import sys
 
 from ..utils.enums import AcpRequestId
 from ._acp_auth import runtime_log_extra
@@ -82,9 +81,6 @@ async def cleanup_session(
                 process=ctx.process,
                 handshake_step="cleanup",
                 stderr_event_count=ctx.stderr_event_count,
-                kill_strategy="taskkill_tree"
-                if sys.platform == "win32"
-                else "sigterm_then_sigkill",
             ),
         )
 

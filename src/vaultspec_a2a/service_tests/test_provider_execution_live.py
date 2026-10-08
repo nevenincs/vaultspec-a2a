@@ -29,8 +29,7 @@ from langchain_core.messages import HumanMessage
 from ..graph.enums import Provider
 from ..providers.factory import ProviderFactory
 from ..providers.lane_admission import PROVEN_TURN_LANES
-from ..testing import session_scratch_dir
-from ._provider_catalog_live import declared_lane_model_value
+from ..testing import declared_lane_model_value, session_scratch_dir
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
@@ -47,7 +46,7 @@ async def test_the_claude_lane_completes_a_turn_inside_the_runs_project(
     training data can supply it. The only way to answer is to read the file in
     the workspace the run was sited in.
     """
-    if Provider.CLAUDE.value not in {str(lane) for lane in PROVEN_TURN_LANES}:
+    if Provider.CLAUDE not in PROVEN_TURN_LANES:
         pytest.skip("the claude lane is not declared turn-proven")
     external_prerequisite("claude-credential")
 

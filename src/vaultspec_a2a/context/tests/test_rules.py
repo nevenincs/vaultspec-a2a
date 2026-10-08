@@ -338,15 +338,14 @@ class TestCompileCache:
 
 
 class TestRealSyncedCorpus:
-    """Prove the fix against the ACTUAL synced flat rule corpus.
+    """Prove the rules path against the ACTUAL synced flat rule corpus.
 
     Not a hand-built fixture: this points ``RuleManager`` at the repository's real
-    ``.vaultspec/rules/`` corpus as ``vaultspec-core`` synced it. Before the
-    path-alignment fix, ``_RULES_SUBDIR`` targeted a nonexistent nested
-    ``rules/rules/`` directory, so ``compile()`` returned ``None`` against this
-    same real corpus and these assertions would have failed - this is the
-    regression that catches the defect. The enrolled repository corpus is a
-    required integration-test precondition.
+    ``.vaultspec/rules/`` corpus as ``vaultspec-core`` synced it. A
+    ``_RULES_SUBDIR`` targeting a nonexistent nested ``rules/rules/`` directory
+    would make ``compile()`` return ``None`` against this same real corpus and
+    fail these assertions. The enrolled repository corpus is a required
+    integration-test precondition.
     """
 
     def test_compile_returns_real_corpus_content(self) -> None:
@@ -357,7 +356,7 @@ class TestRealSyncedCorpus:
 
         result = RuleManager(root).compile()
 
-        # The defect made this None (nested path missing); the fix makes it real.
+        # A misaligned (nested) rules path would make this None.
         assert result is not None, (
             "compile() returned None against the real synced corpus - the flat "
             "rules path is misaligned"

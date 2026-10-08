@@ -3,26 +3,38 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
-from uuid import uuid4
+from typing import TYPE_CHECKING, Unpack
 
-from sqlalchemy import exists, or_, select, update
-
-from ..database.models import (
-    ControlActionModel,
-    RecoveryAttemptModel,
-    RunWriteAuthority,
-    ThreadModel,
+from ..database import (
+    claim_recovery_attempt,
+    due_recovery_attempt_ids,
+    lease_free_from,
+    new_claim_token,
+    release_recovery_claim,
+    require_lease_window,
+    reschedule_recovery_claim,
+    schedule_recovery_attempt,
+    settle_expired_recovery_attempt,
+    settle_recovery_claim,
+    thread_write_expectation,
+    unscheduled_recovery_actions,
 )
+from ..thread import RunWriteAuthority
 from ..thread.enums import RECOVERY_ACTION_TYPES, ControlActionType, RecoveryCondition
 
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from sqlalchemy.engine import CursorResult
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ..database import (
+        RecoveryAttemptModel,
+        RecoveryFailureArgs,
+        RecoveryRescheduleArgs,
+    )
+
 __all__ = [
+    "RecoveryAttemptClaim",
     "RecoveryAuthorityLostError",
     "acquire_due_recovery_attempts",
     "record_recovery_deadline",
@@ -32,8 +44,6 @@ __all__ = [
     "seed_recovery_attempts",
     "settle_recovery_attempt",
 ]
-
-_MAX_DETAIL_CHARS = 2048
 
 
 class RecoveryAuthorityLostError(ValueError):
@@ -53,10 +63,9 @@ class RecoveryAttemptClaim:
     deadline_at: datetime
 
 
-def _bounded_detail(detail: str | None) -> str | None:
-    if detail is None:
-        return None
-    return detail.replace("\r", " ").replace("\n", " ")[:_MAX_DETAIL_CHARS]
+def _validate_page_limit(limit: int) -> None:
+    if limit < 1:
+        raise ValueError("limit must be positive")
 
 
 def _validate_recovery_window(
@@ -75,99 +84,22 @@ def _validate_recovery_window(
         raise ValueError("action type is not recoverable")
 
 
-class _RecoveryFailureArgs(TypedDict):
-    thread_id: str
-    authority: RunWriteAuthority
-    condition: RecoveryCondition
-    observed_at: datetime
-    next_eligible_at: datetime
-    deadline_at: datetime
-    detail: str | None
-
-
 async def record_recovery_failure(
     session: AsyncSession,
-    **kwargs: Unpack[_RecoveryFailureArgs],
+    **kwargs: Unpack[RecoveryFailureArgs],
 ) -> RecoveryAttemptModel:
     """Create or advance the sole retry record for an exact run writer."""
-    thread_id = kwargs["thread_id"]
-    authority = kwargs["authority"]
-    condition = kwargs["condition"]
-    observed_at = kwargs["observed_at"]
-    next_eligible_at = kwargs["next_eligible_at"]
-    deadline_at = kwargs["deadline_at"]
-    detail = kwargs["detail"]
     _validate_recovery_window(
-        observed_at, next_eligible_at, deadline_at, authority.action_type
+        kwargs["observed_at"],
+        kwargs["next_eligible_at"],
+        kwargs["deadline_at"],
+        kwargs["authority"].action_type,
     )
-
-    owns_thread = await session.scalar(
-        select(ThreadModel.id)
-        .where(
-            ThreadModel.id == thread_id,
-            ThreadModel.is_active.is_(True),
-            ThreadModel.run_revision == authority.run_revision,
-            ThreadModel.writer_generation == authority.writer_generation,
-            ThreadModel.writer_action_type == authority.action_type.value,
-            ThreadModel.writer_action_receipt_id == authority.action_receipt_id,
-        )
-        .with_for_update()
-    )
-    owns_action = await session.scalar(
-        select(ControlActionModel.id).where(
-            ControlActionModel.thread_id == thread_id,
-            ControlActionModel.action_type == authority.action_type.value,
-            ControlActionModel.dispatch_id == authority.action_receipt_id,
-            ControlActionModel.applied_at.is_(None),
-            ControlActionModel.recovery_deadline_at == deadline_at,
-        )
-    )
-    if owns_thread is None or owns_action is None:
+    row = await schedule_recovery_attempt(session, **kwargs)
+    if row is None:
         raise RecoveryAuthorityLostError(
             "recovery failure does not own the current accepted action"
         )
-
-    identity = (
-        RecoveryAttemptModel.thread_id == thread_id,
-        RecoveryAttemptModel.run_revision == authority.run_revision,
-        RecoveryAttemptModel.writer_generation == authority.writer_generation,
-        RecoveryAttemptModel.action_receipt_id == authority.action_receipt_id,
-    )
-    row = await session.scalar(
-        select(RecoveryAttemptModel).where(*identity).with_for_update()
-    )
-    if row is None:
-        row = RecoveryAttemptModel(
-            id=uuid4().hex,
-            thread_id=thread_id,
-            run_revision=authority.run_revision,
-            writer_generation=authority.writer_generation,
-            action_type=authority.action_type.value,
-            action_receipt_id=authority.action_receipt_id,
-            condition=condition.value,
-            attempt_count=1,
-            next_eligible_at=next_eligible_at,
-            deadline_at=deadline_at,
-            detail=_bounded_detail(detail),
-            created_at=observed_at,
-            updated_at=observed_at,
-        )
-        session.add(row)
-    else:
-        if row.settled_at is not None:
-            raise ValueError("settled recovery attempt cannot be reopened")
-        if row.action_type != authority.action_type.value:
-            raise ValueError("recovery action type is immutable")
-        if row.deadline_at != deadline_at:
-            raise ValueError("recovery deadline is immutable")
-        row.condition = condition.value
-        row.attempt_count += 1
-        row.next_eligible_at = next_eligible_at
-        row.detail = _bounded_detail(detail)
-        row.claim_token = None
-        row.claim_expires_at = None
-        row.updated_at = observed_at
-    await session.flush()
     return row
 
 
@@ -182,62 +114,15 @@ async def record_recovery_deadline(
     """Close the exact retry ledger when its accepted run budget expires."""
     if deadline_at > observed_at:
         raise ValueError("recovery deadline has not expired")
-    action = await session.scalar(
-        select(ControlActionModel).where(
-            ControlActionModel.thread_id == thread_id,
-            ControlActionModel.action_type == authority.action_type.value,
-            ControlActionModel.dispatch_id == authority.action_receipt_id,
-            ControlActionModel.recovery_deadline_at == deadline_at,
-        )
-    )
-    thread = await session.scalar(
-        select(ThreadModel)
-        .where(
-            ThreadModel.id == thread_id,
-            ThreadModel.run_revision == authority.run_revision,
-            ThreadModel.writer_generation == authority.writer_generation,
-            ThreadModel.writer_action_type == authority.action_type.value,
-            ThreadModel.writer_action_receipt_id == authority.action_receipt_id,
-        )
-        .with_for_update()
-    )
-    if action is None or thread is None:
-        raise ValueError("expired recovery does not own the current accepted action")
-    identity = (
-        RecoveryAttemptModel.thread_id == thread_id,
-        RecoveryAttemptModel.run_revision == authority.run_revision,
-        RecoveryAttemptModel.writer_generation == authority.writer_generation,
-        RecoveryAttemptModel.action_receipt_id == authority.action_receipt_id,
-    )
-    row = await session.scalar(
-        select(RecoveryAttemptModel).where(*identity).with_for_update()
+    row = await settle_expired_recovery_attempt(
+        session,
+        thread_id=thread_id,
+        authority=authority,
+        observed_at=observed_at,
+        deadline_at=deadline_at,
     )
     if row is None:
-        row = RecoveryAttemptModel(
-            id=uuid4().hex,
-            thread_id=thread_id,
-            run_revision=authority.run_revision,
-            writer_generation=authority.writer_generation,
-            action_type=authority.action_type.value,
-            action_receipt_id=authority.action_receipt_id,
-            condition=RecoveryCondition.DEADLINE_EXCEEDED.value,
-            attempt_count=1,
-            next_eligible_at=deadline_at,
-            deadline_at=deadline_at,
-            detail="accepted run deadline expired before application",
-            settled_at=observed_at,
-            created_at=action.requested_at,
-            updated_at=observed_at,
-        )
-        session.add(row)
-    elif row.settled_at is None:
-        row.condition = RecoveryCondition.DEADLINE_EXCEEDED.value
-        row.detail = "accepted run deadline expired before application"
-        row.claim_token = None
-        row.claim_expires_at = None
-        row.settled_at = observed_at
-        row.updated_at = observed_at
-    await session.flush()
+        raise ValueError("expired recovery does not own the current accepted action")
     return row
 
 
@@ -248,61 +133,23 @@ async def seed_recovery_attempts(
     limit: int,
 ) -> int:
     """Create the missing durable schedule for current accepted work."""
-    if limit < 1:
-        raise ValueError("limit must be positive")
-    rows = (
-        await session.execute(
-            select(ControlActionModel, ThreadModel)
-            .join(ThreadModel, ThreadModel.id == ControlActionModel.thread_id)
-            .where(
-                ControlActionModel.action_type.in_(
-                    action.value for action in RECOVERY_ACTION_TYPES
-                ),
-                ControlActionModel.applied_at.is_(None),
-                ControlActionModel.recovery_deadline_at.is_not(None),
-                ControlActionModel.recovery_deadline_at > observed_at,
-                ThreadModel.is_active.is_(True),
-                ThreadModel.run_revision >= 0,
-                ThreadModel.writer_generation >= 1,
-                ThreadModel.writer_action_type == ControlActionModel.action_type,
-                ThreadModel.writer_action_receipt_id == ControlActionModel.dispatch_id,
-                ~exists(
-                    select(RecoveryAttemptModel.id).where(
-                        RecoveryAttemptModel.thread_id == ThreadModel.id,
-                        RecoveryAttemptModel.run_revision == ThreadModel.run_revision,
-                        RecoveryAttemptModel.writer_generation
-                        == ThreadModel.writer_generation,
-                        RecoveryAttemptModel.action_receipt_id
-                        == ControlActionModel.dispatch_id,
-                    )
-                ),
-            )
-            .order_by(ControlActionModel.requested_at, ControlActionModel.id)
-            .limit(limit)
-        )
-    ).all()
+    _validate_page_limit(limit)
     seeded = 0
-    for action, thread in rows:
-        if action.dispatch_id is None or action.recovery_deadline_at is None:
+    for action, thread in await unscheduled_recovery_actions(
+        session, observed_at=observed_at, limit=limit
+    ):
+        if action.recovery_deadline_at is None:
             continue
-        next_eligible_at = max(
-            observed_at,
-            action.claim_expires_at or observed_at,
-        )
-        if next_eligible_at > action.recovery_deadline_at:
-            next_eligible_at = action.recovery_deadline_at
         await record_recovery_failure(
             session,
             thread_id=thread.id,
-            authority=RunWriteAuthority(
-                thread.run_revision,
-                thread.writer_generation,
-                ControlActionType(thread.writer_action_type),
-                thread.writer_action_receipt_id,
-            ),
+            authority=thread_write_expectation(thread).authority,
             condition=RecoveryCondition.DISPATCH_PENDING,
             observed_at=observed_at,
-            next_eligible_at=next_eligible_at,
+            next_eligible_at=min(
+                lease_free_from(action.claim_expires_at, observed_at),
+                action.recovery_deadline_at,
+            ),
             deadline_at=action.recovery_deadline_at,
             detail="accepted dispatch has no durable application receipt",
         )
@@ -318,61 +165,20 @@ async def acquire_due_recovery_attempts(
     limit: int,
 ) -> tuple[RecoveryAttemptClaim, ...]:
     """Claim a bounded due page using an exact compare-and-set per row."""
-    if limit < 1:
-        raise ValueError("limit must be positive")
-    if claim_expires_at <= acquired_at:
-        raise ValueError("claim_expires_at must be later than acquired_at")
+    _validate_page_limit(limit)
+    require_lease_window(acquired_at, claim_expires_at)
 
-    candidates = (
-        await session.scalars(
-            select(RecoveryAttemptModel.id)
-            .where(
-                RecoveryAttemptModel.settled_at.is_(None),
-                RecoveryAttemptModel.next_eligible_at <= acquired_at,
-                RecoveryAttemptModel.deadline_at > acquired_at,
-                or_(
-                    RecoveryAttemptModel.claim_token.is_(None),
-                    RecoveryAttemptModel.claim_expires_at.is_(None),
-                    RecoveryAttemptModel.claim_expires_at <= acquired_at,
-                ),
-            )
-            .order_by(
-                RecoveryAttemptModel.next_eligible_at,
-                RecoveryAttemptModel.created_at,
-                RecoveryAttemptModel.id,
-            )
-            .limit(limit)
-        )
-    ).all()
     claims: list[RecoveryAttemptClaim] = []
-    for attempt_id in candidates:
-        claim_token = uuid4().hex
-        won = cast(
-            "CursorResult[Any]",
-            await session.execute(
-                update(RecoveryAttemptModel)
-                .where(
-                    RecoveryAttemptModel.id == attempt_id,
-                    RecoveryAttemptModel.settled_at.is_(None),
-                    RecoveryAttemptModel.next_eligible_at <= acquired_at,
-                    RecoveryAttemptModel.deadline_at > acquired_at,
-                    or_(
-                        RecoveryAttemptModel.claim_token.is_(None),
-                        RecoveryAttemptModel.claim_expires_at.is_(None),
-                        RecoveryAttemptModel.claim_expires_at <= acquired_at,
-                    ),
-                )
-                .values(
-                    claim_token=claim_token,
-                    claim_expires_at=claim_expires_at,
-                    updated_at=acquired_at,
-                )
-            ),
-        )
-        if won.rowcount != 1:
-            continue
-        row = await session.get(
-            RecoveryAttemptModel, attempt_id, populate_existing=True
+    for attempt_id in await due_recovery_attempt_ids(
+        session, at=acquired_at, limit=limit
+    ):
+        claim_token = new_claim_token()
+        row = await claim_recovery_attempt(
+            session,
+            attempt_id,
+            claim_token=claim_token,
+            acquired_at=acquired_at,
+            claim_expires_at=claim_expires_at,
         )
         if row is None:
             continue
@@ -402,62 +208,30 @@ async def release_recovery_attempt(
     released_at: datetime,
 ) -> bool:
     """Release an owned attempt without changing its schedule or count."""
-    result = cast(
-        "CursorResult[Any]",
-        await session.execute(
-            update(RecoveryAttemptModel)
-            .where(
-                RecoveryAttemptModel.id == claim.attempt_id,
-                RecoveryAttemptModel.claim_token == claim.claim_token,
-                RecoveryAttemptModel.settled_at.is_(None),
-            )
-            .values(claim_token=None, claim_expires_at=None, updated_at=released_at)
-        ),
+    return await release_recovery_claim(
+        session,
+        claim.attempt_id,
+        claim_token=claim.claim_token,
+        released_at=released_at,
     )
-    return result.rowcount == 1
-
-
-class _RescheduleArgs(TypedDict):
-    condition: RecoveryCondition
-    observed_at: datetime
-    next_eligible_at: datetime
-    detail: str | None
 
 
 async def reschedule_recovery_attempt(
     session: AsyncSession,
     claim: RecoveryAttemptClaim,
-    **kwargs: Unpack[_RescheduleArgs],
+    **kwargs: Unpack[RecoveryRescheduleArgs],
 ) -> bool:
     """Advance one claimed retry after another classified failure."""
-    condition = kwargs["condition"]
-    observed_at = kwargs["observed_at"]
     next_eligible_at = kwargs["next_eligible_at"]
-    detail = kwargs["detail"]
-    if next_eligible_at < observed_at or next_eligible_at > claim.deadline_at:
+    if next_eligible_at < kwargs["observed_at"] or next_eligible_at > claim.deadline_at:
         raise ValueError("next eligibility must fall between observation and deadline")
-    result = cast(
-        "CursorResult[Any]",
-        await session.execute(
-            update(RecoveryAttemptModel)
-            .where(
-                RecoveryAttemptModel.id == claim.attempt_id,
-                RecoveryAttemptModel.claim_token == claim.claim_token,
-                RecoveryAttemptModel.settled_at.is_(None),
-                RecoveryAttemptModel.deadline_at == claim.deadline_at,
-            )
-            .values(
-                condition=condition.value,
-                attempt_count=RecoveryAttemptModel.attempt_count + 1,
-                next_eligible_at=next_eligible_at,
-                detail=_bounded_detail(detail),
-                claim_token=None,
-                claim_expires_at=None,
-                updated_at=observed_at,
-            )
-        ),
+    return await reschedule_recovery_claim(
+        session,
+        claim.attempt_id,
+        claim_token=claim.claim_token,
+        deadline_at=claim.deadline_at,
+        **kwargs,
     )
-    return result.rowcount == 1
 
 
 async def settle_recovery_attempt(
@@ -469,25 +243,11 @@ async def settle_recovery_attempt(
     detail: str | None = None,
 ) -> bool:
     """Close an exact claimed schedule after dispatch or terminal reconciliation."""
-    values: dict[str, object | None] = {
-        "settled_at": settled_at,
-        "claim_token": None,
-        "claim_expires_at": None,
-        "updated_at": settled_at,
-    }
-    if condition is not None:
-        values["condition"] = condition.value
-        values["detail"] = _bounded_detail(detail)
-    result = cast(
-        "CursorResult[Any]",
-        await session.execute(
-            update(RecoveryAttemptModel)
-            .where(
-                RecoveryAttemptModel.id == claim.attempt_id,
-                RecoveryAttemptModel.claim_token == claim.claim_token,
-                RecoveryAttemptModel.settled_at.is_(None),
-            )
-            .values(**values)
-        ),
+    return await settle_recovery_claim(
+        session,
+        claim.attempt_id,
+        claim_token=claim.claim_token,
+        settled_at=settled_at,
+        condition=condition,
+        detail=detail,
     )
-    return result.rowcount == 1

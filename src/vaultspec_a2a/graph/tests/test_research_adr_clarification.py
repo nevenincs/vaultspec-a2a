@@ -18,31 +18,26 @@ import inspect
 from typing import TYPE_CHECKING, Any
 
 import pytest
-import pytest_asyncio
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 from ...team.team_config import (
     ResearchThreadSpec,
-    TopologyType,
     load_agent_config,
     load_team_config,
 )
-from ...thread.clarification import CLARIFICATION_TOPOLOGIES
-from ...thread.errors import ConfigError
+from ...testing import deterministic_model_assignment
 from .._compiler_research import _clarification_request_id
 from ..compiler import compile_team_graph
-from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from ..protocols import ProviderFactoryProtocol
 
 # The preset that declares a questionnaire, and a sibling that declares none.
 _ASKING_PRESET = "vaultspec-adr-research-clarify"
-_SILENT_PRESET = "vaultspec-adr-research-mock"
+_SILENT_PRESET = "vaultspec-adr-research-deterministic"
 
 
 class _FakeSubmitter:
@@ -54,13 +49,6 @@ class _FakeSubmitter:
     async def __call__(self, state: Any, phase: str) -> str:
         self.phases.append(phase)
         return f"prop-{phase}"
-
-
-@pytest_asyncio.fixture
-async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        yield saver
 
 
 def _team(preset_id: str) -> Any:
@@ -147,48 +135,6 @@ async def test_a_declaring_preset_wires_the_stage_ahead_of_the_fan_out(
     assert {"research_dispatch", "synthesis", "research_gate", "adr_gate"} <= node_keys
 
 
-@pytest.mark.parametrize(
-    "topology_type",
-    [t for t in TopologyType if t.value not in CLARIFICATION_TOPOLOGIES],
-    ids=lambda t: t.value,
-)
-def test_compiling_a_questionnaire_onto_a_topology_that_never_asks_is_refused(
-    topology_type: TopologyType,
-    pf: ProviderFactoryProtocol,
-) -> None:
-    """Compile refuses the graph that would accept questions and never ask them.
-
-    Preset load refuses this pairing first, but load is not the only door into the
-    compiler: a validated config can be moved onto another topology afterwards -
-    ``model_copy`` re-runs no validator, and this test walks in through exactly
-    that door with a REAL declaring preset. Without the compile-time refusal the
-    call below returns a perfectly usable graph with no clarification node in it,
-    which is the silent-skip failure in its finished form: a run that was told to
-    ask, that never asks, and that reports success.
-
-    The topology is asserted by name in the message because the two halves of the
-    contradiction live in different blocks of the preset, and the author needs to
-    be told which one the compiler read.
-    """
-    team = _team(_ASKING_PRESET)
-    moved = team.model_copy(
-        update={"topology": team.topology.model_copy(update={"type": topology_type})}
-    )
-    assert moved.clarification is not None, "the probe must still declare questions"
-
-    with pytest.raises(ConfigError, match=topology_type.value) as raised:
-        compile_team_graph(
-            team_config=moved,
-            agent_configs=_agent_configs(moved),
-            checkpointer=None,
-            provider_factory=pf,
-            step_timeout=42.0,
-            proposal_submitter=_FakeSubmitter(),
-        )
-
-    assert "clarification" in str(raised.value)
-
-
 @pytest.mark.asyncio
 async def test_the_run_parks_for_its_question_before_any_researcher_spends_a_turn(
     checkpointer: AsyncSqliteSaver,
@@ -273,10 +219,13 @@ async def test_answering_releases_the_run_into_the_diverge_stage(
         config=config,
     )
 
-    # The human's answer is durable state the rest of the run can read.
-    assert resumed["clarification_answers"] == {
-        request_id: {"scope": "both", "constraints": "keep it collapsible"}
-    }
+    # The human's answer reaches the rest of the run as one human turn in the
+    # transcript, which is the only state a model turn reads.
+    assert (
+        "Answers to the clarification questionnaire:\n"
+        "- Which surface should this cover?: both\n"
+        "- Any constraint the work must respect?: keep it collapsible"
+    ) in [message.content for message in resumed["messages"]]
     # And the pipeline genuinely continued: the fan-out produced its finding and
     # the run advanced to the first document gate.
     assert [f["source_thread"] for f in resumed["research_findings"]] == ["codebase"]

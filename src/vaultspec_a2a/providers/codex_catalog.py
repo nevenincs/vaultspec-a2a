@@ -8,36 +8,43 @@ budget across stdout and stderr, and always reaps the contained process tree.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final, TypedDict, Unpack
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import datetime
 
     from ..desktop.native_isolation import NativeLaunchAuthority
+    from ._cleanup import CleanupStep
     from ._json_contract import JsonObject, JsonValue
 
+from ..thread import canonical_digest
 from ..utils import package_version
+from ._acp_request import encode_frame
+from ._catalog_discovery import (
+    ProviderCatalogDiscovery,
+    available_catalog,
+    finish_discovery,
+    unavailable_catalog,
+)
 from ._catalog_fields import (
+    MAX_DISCOVERY_FRAMES,
+    MAX_DISCOVERY_READ_BYTES,
     CatalogFieldReader,
     display_label,
     display_text,
     local_id,
     optional_description,
 )
-from ._cleanup import CleanupStep, run_independent_cleanups
-from ._stdio_rpc import OutputBudget, cancel_task, drain_stderr, read_response
+from ._cleanup import cancel_owned_tasks
+from ._stdio_rpc import OutputBudget, drain_stderr, read_response
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .provider_catalog import (
     MAX_CONTROLS,
     MAX_MODELS,
     MAX_OPTIONS,
     AuthenticationState,
-    CatalogState,
-    CatalogStatus,
     ControlKind,
     ModelCatalogEntry,
     NativeControl,
@@ -52,11 +59,8 @@ __all__ = [
     "discover_codex_catalog",
 ]
 
-_MAX_FRAME_BYTES: Final = 1_048_576
-_MAX_FRAMES_PER_RESPONSE: Final = 64
 _MAX_PAGES: Final = 16
 _MODEL_PAGE_SIZE: Final = 100
-_CATALOG_TTL: Final = timedelta(minutes=5)
 _CLIENT_INFO: JsonObject = {
     "title": "Vaultspec A2A Catalog",
     "name": "vaultspec-a2a-catalog",
@@ -68,36 +72,12 @@ class CodexCatalogProtocolError(RuntimeError):
     """The Codex discovery surface was malformed or exceeded a safety bound."""
 
 
-@dataclass(frozen=True, slots=True)
-class CodexCatalogDiscovery:
-    """Prompt-free catalog result plus factual account authentication evidence."""
-
-    catalog: ProviderCatalog
-    authentication: AuthenticationState
-
-
 def _protocol_error(message: str) -> CodexCatalogProtocolError:
     """Raise Codex's own dialect of a discovery protocol refusal."""
     return CodexCatalogProtocolError(f"Codex {message}")
 
 
 _FIELDS: Final = CatalogFieldReader(_protocol_error)
-
-
-def _objects(
-    value: JsonValue | None, *, field: str, limit: int
-) -> tuple[JsonObject, ...]:
-    if not isinstance(value, list):
-        raise CodexCatalogProtocolError(f"Codex catalog field {field!r} must be a list")
-    if len(value) > limit:
-        raise CodexCatalogProtocolError(
-            f"Codex catalog field {field!r} exceeds {limit} items"
-        )
-    if not all(isinstance(item, dict) for item in value):
-        raise CodexCatalogProtocolError(
-            f"Codex catalog field {field!r} contains a non-object item"
-        )
-    return tuple(item for item in value if isinstance(item, dict))
 
 
 def _capabilities(result: JsonObject) -> tuple[str, ...]:
@@ -174,7 +154,7 @@ def _control(
 def _reasoning_values(model: JsonObject) -> tuple[tuple[str, str, str | None], ...]:
     values: list[tuple[str, str, str | None]] = []
     for index, option in enumerate(
-        _objects(
+        _FIELDS.required_objects(
             model.get("supportedReasoningEfforts"),
             field="supportedReasoningEfforts",
             limit=MAX_OPTIONS,
@@ -191,12 +171,11 @@ def _reasoning_values(model: JsonObject) -> tuple[tuple[str, str, str | None], .
 def _service_tier_values(
     model: JsonObject,
 ) -> tuple[tuple[str, str, str | None], ...]:
-    service_tiers = model.get("serviceTiers")
-    if service_tiers is None:
-        return ()
     values: list[tuple[str, str, str | None]] = []
     for index, option in enumerate(
-        _objects(service_tiers, field="serviceTiers", limit=MAX_OPTIONS)
+        _FIELDS.optional_objects(
+            model.get("serviceTiers"), field="serviceTiers", limit=MAX_OPTIONS
+        )
     ):
         value = _FIELDS.required_text(
             option.get("id"), field=f"serviceTiers[{index}].id"
@@ -236,8 +215,7 @@ def _revision(
             for control in controls
         ],
     }
-    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_digest(payload)
 
 
 @dataclass(slots=True)
@@ -251,7 +229,7 @@ class _CatalogBuilder:
     def add_page(self, page: JsonObject, page_index: int) -> None:
         """Validate one bounded page before adding its models in source order."""
         remaining = MAX_MODELS - len(self.models)
-        page_models = _objects(
+        page_models = _FIELDS.required_objects(
             page.get("data"), field=f"pages[{page_index}].data", limit=MAX_MODELS
         )
         if len(page_models) > remaining:
@@ -340,29 +318,20 @@ def catalog_from_app_server(
     builder = _CatalogBuilder(key, _capabilities(capabilities_result))
     for page_index, page in enumerate(model_pages):
         builder.add_page(page, page_index)
-    now = (checked_at or datetime.now(UTC)).astimezone(UTC)
     if not builder.models:
-        return ProviderCatalog(
-            key=key,
-            state=CatalogState(
-                status=CatalogStatus.UNAVAILABLE,
-                checked_at=now,
-                reason="Codex app-server advertised no models",
-            ),
-            models=(),
+        return unavailable_catalog(
+            key,
+            reason="Codex app-server advertised no models",
+            checked_at=checked_at,
         )
     normalized_controls = tuple(builder.controls)
     normalized_models = tuple(builder.models)
-    return ProviderCatalog(
-        key=key,
-        state=CatalogState(
-            status=CatalogStatus.AVAILABLE,
-            checked_at=now,
-            revision=_revision(key, normalized_models, normalized_controls),
-            expires_at=now + _CATALOG_TTL,
-        ),
+    return available_catalog(
+        key,
+        revision=_revision(key, normalized_models, normalized_controls),
         models=normalized_models,
         native_controls=normalized_controls,
+        checked_at=checked_at,
     )
 
 
@@ -390,24 +359,6 @@ def _rpc_error(method: str, _error: JsonValue) -> CodexCatalogProtocolError:
     return CodexCatalogProtocolError(f"Codex {method} failed with a provider error")
 
 
-async def _read_response(
-    stdout: asyncio.StreamReader,
-    *,
-    request_id: int,
-    timeout: float,
-    output_budget: OutputBudget,
-) -> JsonObject:
-    return await read_response(
-        stdout,
-        request_id=request_id,
-        timeout=timeout,
-        output_budget=output_budget,
-        max_frames=_MAX_FRAMES_PER_RESPONSE,
-        max_frame_bytes=_MAX_FRAME_BYTES,
-        protocol_error=_protocol_error,
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class _CatalogRpc:
     process: asyncio.subprocess.Process
@@ -421,13 +372,16 @@ class _CatalogRpc:
         if self.process.stdin is None or self.process.stdout is None:
             raise CodexCatalogProtocolError("Codex discovery stdio is unavailable")
         request: JsonObject = {"id": request_id, "method": method, "params": params}
-        self.process.stdin.write(json.dumps(request).encode() + b"\n")
+        self.process.stdin.write(encode_frame(request))
         await self.process.stdin.drain()
-        response = await _read_response(
+        response = await read_response(
             self.process.stdout,
             request_id=request_id,
             timeout=self.timeout,
             output_budget=self.output_budget,
+            max_frames=MAX_DISCOVERY_FRAMES,
+            max_frame_bytes=MAX_DISCOVERY_READ_BYTES,
+            protocol_error=_protocol_error,
         )
         if "error" in response:
             raise _rpc_error(method, response["error"])
@@ -440,9 +394,7 @@ class _CatalogRpc:
 async def _notify_initialized(process: asyncio.subprocess.Process) -> None:
     if process.stdin is None:
         raise CodexCatalogProtocolError("Codex discovery stdin is unavailable")
-    process.stdin.write(
-        json.dumps({"method": "initialized", "params": {}}).encode() + b"\n"
-    )
+    process.stdin.write(encode_frame({"method": "initialized", "params": {}}))
     await process.stdin.drain()
 
 
@@ -484,65 +436,6 @@ async def _read_model_pages(
     return tuple(pages), request_id
 
 
-async def _cleanup_codex_process(
-    process: asyncio.subprocess.Process,
-    metadata: Mapping[str, object] | None,
-    stderr_task: asyncio.Task[None],
-) -> list[tuple[str, Exception]]:
-    cleanup_steps: list[CleanupStep] = []
-    if process.stdin is not None:
-        cleanup_steps.append(("codex-catalog-stdin", process.stdin.close))
-    cleanup_steps.extend(
-        [
-            ("codex-catalog-process", lambda: kill_process_tree(process, metadata)),
-            ("codex-catalog-stderr", lambda: cancel_task(stderr_task)),
-        ]
-    )
-    return await run_independent_cleanups(*cleanup_steps)
-
-
-def _stderr_protocol_failure(
-    cleanup_failures: list[tuple[str, Exception]],
-) -> CodexCatalogProtocolError | None:
-    return next(
-        (
-            exc
-            for name, exc in cleanup_failures
-            if name == "codex-catalog-stderr"
-            and isinstance(exc, CodexCatalogProtocolError)
-        ),
-        None,
-    )
-
-
-def _finish_codex_discovery(
-    outcome: CodexCatalogDiscovery | None,
-    failure: BaseException | None,
-    cleanup_failures: list[tuple[str, Exception]],
-) -> CodexCatalogDiscovery:
-    if failure is not None:
-        output_failure = _stderr_protocol_failure(cleanup_failures)
-        if output_failure is not None:
-            output_failure.add_note(
-                f"Codex discovery also failed with {type(failure).__name__}"
-            )
-            raise output_failure
-        if cleanup_failures:
-            failure.add_note(
-                "Codex catalog cleanup also failed: "
-                + ", ".join(name for name, _ in cleanup_failures)
-            )
-        raise failure
-    if cleanup_failures:
-        raise RuntimeError(
-            "Codex catalog cleanup failed: "
-            + ", ".join(name for name, _ in cleanup_failures)
-        )
-    if outcome is None:
-        raise RuntimeError("Codex catalog discovery completed without an outcome")
-    return outcome
-
-
 class _DiscoverCodexCatalogRequired(TypedDict):
     env: Mapping[str, str]
     cwd: str
@@ -558,7 +451,7 @@ class _DiscoverCodexCatalogOptions(_DiscoverCodexCatalogRequired, total=False):
 async def discover_codex_catalog(
     command: tuple[str, ...],
     **options: Unpack[_DiscoverCodexCatalogOptions],
-) -> CodexCatalogDiscovery:
+) -> ProviderCatalogDiscovery:
     """Discover Codex models and controls without starting a completion."""
     key = options["key"]
     metadata = options.get("metadata")
@@ -577,7 +470,7 @@ async def discover_codex_catalog(
     stderr_task = asyncio.create_task(
         drain_stderr(process.stderr, process, metadata, output_budget)
     )
-    outcome: CodexCatalogDiscovery | None = None
+    outcome: ProviderCatalogDiscovery | None = None
     failure: BaseException | None = None
     try:
         request_id = 1
@@ -600,12 +493,25 @@ async def discover_codex_catalog(
             "modelProvider/capabilities/read",
             {},
         )
-        outcome = CodexCatalogDiscovery(
+        outcome = ProviderCatalogDiscovery(
             catalog=catalog_from_app_server(pages, capabilities, key=key),
             authentication=_authentication(account),
         )
     except BaseException as exc:
         failure = exc
 
-    cleanup_failures = await _cleanup_codex_process(process, metadata, stderr_task)
-    return _finish_codex_discovery(outcome, failure, cleanup_failures)
+    cleanup_steps: list[CleanupStep] = []
+    if process.stdin is not None:
+        cleanup_steps.append(("codex-catalog-stdin", process.stdin.close))
+    cleanup_steps.extend(
+        [
+            ("codex-catalog-process", lambda: kill_process_tree(process, metadata)),
+            (
+                "codex-catalog-stderr",
+                lambda: cancel_owned_tasks((stderr_task,), reraise=True),
+            ),
+        ]
+    )
+    return await finish_discovery(
+        "Codex", outcome, failure, cleanup_steps, CodexCatalogProtocolError
+    )

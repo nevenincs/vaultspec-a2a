@@ -28,7 +28,7 @@ from ..providers._acp_mcp import compose_harness_mcp_servers, harness_allowed_to
 from ..providers._harness_mcp_registry import declared_harness_tools
 from ..providers.factory import ProviderFactory
 from ..providers.lane_admission import PROVEN_TURN_LANES
-from ._provider_catalog_live import declared_lane_model_value
+from ..testing import declared_lane_model_value
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
@@ -46,7 +46,7 @@ async def test_an_agent_completes_a_turn_through_the_core_read_surface(
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """A real turn calls a declared core tool and reports what it returned."""
-    if Provider.CLAUDE.value not in {str(lane) for lane in PROVEN_TURN_LANES}:
+    if Provider.CLAUDE not in PROVEN_TURN_LANES:
         pytest.skip("the claude lane is not declared turn-proven")
     external_prerequisite("claude-credential")
 

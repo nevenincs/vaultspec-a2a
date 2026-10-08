@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
@@ -14,10 +13,18 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
-from ...control.tests._catalog_authority import current_execution_metadata
 from ...domain_config import domain_config
-from ...ipc.schemas import DispatchRequest
+from ...ipc.schemas import DispatchRequest, WorkerEventEnvelope
 from ...team.team_config import load_team_config
+from ...testing import (
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    ProgressDeadline,
+    current_execution_metadata,
+    loopback_callback_bridge,
+    wait_for,
+    wait_until,
+)
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -40,11 +47,11 @@ def _accepted_graph_dispatch(
     request: DispatchRequest, workspace: Path
 ) -> DispatchRequest:
     definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
     request = request.model_copy(
-        update={"team_preset": "mock-success-single", "graph_definition": definition}
+        update={"team_preset": DEFAULT_TEAM_PRESET, "graph_definition": definition}
     )
     intent: dict[str, object] = (
         {"content": request.content}
@@ -88,13 +95,13 @@ async def _wait_for_same_thread_dispatch_contention(
 
 async def _buffered_terminal_events(
     bridge: WorkerBridge,
-) -> list[dict[str, Any]]:
+) -> list[WorkerEventEnvelope]:
     """Inspect the retained batch after any in-flight flush returns it."""
     async with bridge._batch.flush_lock:
         return [
             item
             for item in bridge._event_buffer
-            if item["payload"].get("event_type") == "thread_terminal"
+            if item.payload.get("event_type") == "thread_terminal"
         ]
 
 
@@ -142,16 +149,15 @@ def test_duplicate_worker_dispatch_schedules_one_real_executor_task(
     with TestClient(app) as client:
         first = client.post("/dispatch", json=dispatch.model_dump(mode="json"))
         duplicate = client.post("/dispatch", json=dispatch.model_dump(mode="json"))
-        deadline = time.monotonic() + 15
         bridge: WorkerBridge = app.state.bridge
         portal = client.portal
         assert portal is not None
-        terminal_events: list[dict[str, Any]] = []
-        while time.monotonic() < deadline:
-            terminal_events = portal.call(_buffered_terminal_events, bridge)
-            if terminal_events:
-                break
-            time.sleep(0.01)
+        terminal_events = wait_for(
+            lambda: portal.call(_buffered_terminal_events, bridge) or None,
+            deadline=ProgressDeadline(idle_window_s=15.0),
+            interval_s=0.01,
+            stalled=lambda: "the bridge never buffered the terminal event",
+        )
 
         assert first.status_code == 200
         assert duplicate.status_code == 200
@@ -168,9 +174,13 @@ def test_concurrent_identical_capacity_dispatches_replay_one_acceptance(
 
     @asynccontextmanager
     async def worker_lifespan(app: FastAPI):
-        async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
+        # A real callback sink: the run's settle flushes and returns, so the
+        # settled ingest is measured, not the bridge retrying a refused port.
+        async with (
+            AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver,
+            loopback_callback_bridge() as bridge,
+        ):
             await saver.setup()
-            bridge = WorkerBridge("http://127.0.0.1:1", f"concurrent-{action}")
             executor = Executor(saver, bridge)
             app.state.executor = executor
             app.state.bridge = bridge
@@ -179,11 +189,10 @@ def test_concurrent_identical_capacity_dispatches_replay_one_acceptance(
                 yield
                 tasks.cancel_scope.cancel()
             await executor.shutdown()
-            await bridge.close()
 
     app = create_worker_app(lifespan=worker_lifespan)
     authority = resolve_execution_authority(
-        current_execution_metadata(tmp_path, required_roles=("mock-coder-success",))
+        current_execution_metadata(tmp_path, required_roles=(DEFAULT_REQUIRED_ROLE,))
     )
     dispatch = _accepted_graph_dispatch(
         DispatchRequest(
@@ -239,11 +248,15 @@ def test_concurrent_identical_capacity_dispatches_replay_one_acceptance(
             }
         )
         assert len(app.state.dispatch_ids) == 1
-        deadline = time.monotonic() + 5
-        while (
-            app.state.executor.active_ingest_count != 0 and time.monotonic() < deadline
-        ):
-            time.sleep(0.01)
+        wait_until(
+            lambda: app.state.executor.active_ingest_count == 0,
+            deadline=ProgressDeadline(idle_window_s=5.0),
+            interval_s=0.01,
+            stalled=lambda: (
+                f"{app.state.executor.active_ingest_count} ingest tasks are "
+                "still active"
+            ),
+        )
         # Only the request that synchronously admitted this ID generated a
         # capacity owner and crossed into task scheduling.
         assert app.state.executor._next_capacity_generation == 1
@@ -272,7 +285,7 @@ def test_concurrent_distinct_same_thread_dispatch_retains_capacity_refusal(
 
     app = create_worker_app(lifespan=worker_lifespan)
     authority = resolve_execution_authority(
-        current_execution_metadata(tmp_path, required_roles=("mock-coder-success",))
+        current_execution_metadata(tmp_path, required_roles=(DEFAULT_REQUIRED_ROLE,))
     )
 
     def request(dispatch_id: str) -> DispatchRequest:
@@ -281,7 +294,7 @@ def test_concurrent_distinct_same_thread_dispatch_retains_capacity_refusal(
                 dispatch_id=dispatch_id,
                 action="ingest",
                 thread_id="concurrent-distinct-thread",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 workspace_root=str(tmp_path),
                 content="only one ID may enter",
                 recursion_limit=25,
@@ -358,14 +371,14 @@ def test_dispatch_reserves_capacity_before_scheduling_or_checkpoint_read(
 
     app = create_worker_app(lifespan=worker_lifespan)
     authority = resolve_execution_authority(
-        current_execution_metadata(tmp_path, required_roles=("mock-coder-success",))
+        current_execution_metadata(tmp_path, required_roles=(DEFAULT_REQUIRED_ROLE,))
     )
     dispatch = _accepted_graph_dispatch(
         DispatchRequest(
             dispatch_id="capacity-refused-before-schedule",
             action="ingest",
             thread_id="over-capacity",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=str(tmp_path),
             recursion_limit=25,
             model_assignment=authority.model_assignment,

@@ -1,11 +1,9 @@
-"""Both ingest transports retain, and a deleted run stops being held.
+"""The batch relay retains what it took, and a deleted run stops being held.
 
-The HTTP relay routes are covered where resumption itself is, so what is left
-unproven is the other half of the same seam. The worker's WebSocket channel
-carries exactly the same frames through the same chokepoint, and nothing
-asserted that a frame arriving that way ever became a row - the recorder it is
-handed is read nowhere else, so an unflushed WebSocket ingest would have shown
-up only as a resume that was quietly short.
+Resumption itself is covered where the stream is, so what is left unproven is
+the relay's own flush. Nothing asserted that a batch arriving at the gateway
+ever became a row - the recorder it is handed is read nowhere else, so an
+unflushed ingest would have shown up only as a resume that was quietly short.
 
 The delete is the opposite direction. A run whose thread is gone can never
 take another row: the insert would reference a thread that no longer exists.
@@ -19,32 +17,26 @@ boundary and lands in a table.
 
 from __future__ import annotations
 
-import asyncio
-import json
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
-from websockets.asyncio.client import connect
 
-from ...database.permission_repository import create_control_action
-from ...database.run_event_repository import RunEventStore
-from ...database.thread_repository import create_thread
-from ...streaming.aggregator import EventAggregator
+from ...database import RunEventStore
+from ...streaming import RelayHub
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import RunSequenceAllocator
-from ...tests._write_authority import make_test_write_authority
+from ...testing import seed_journaled_thread, serve_on_loopback
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
-from .conftest import _live_server, make_app, seed_run_with_status
+from .conftest import make_app, seed_run_with_status
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from .conftest import SessionFactory
 
-_WS_RUN = "ws-retention-run"
+_RETAINED_RUN = "retention-run"
 _DELETED_RUN = "deleted-replay-run"
 
 
@@ -69,20 +61,8 @@ async def _seed_deletable_run(factory: SessionFactory, run_id: str) -> None:
     proof assert on a delete that never happened.
     """
     async with factory() as session:
-        authority = make_test_write_authority()
-        await create_thread(
-            session,
-            write_authority=authority,
-            thread_id=run_id,
-            status=ThreadStatus.COMPLETED,
-        )
-        await create_control_action(
-            session,
-            thread_id=run_id,
-            action_type=authority.action_type,
-            idempotency_key=f"thread-create:{run_id}",
-            dispatch_id=authority.action_receipt_id,
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+        await seed_journaled_thread(
+            session, thread_id=run_id, status=ThreadStatus.COMPLETED
         )
         await session.commit()
 
@@ -96,34 +76,14 @@ async def _retained(factory: SessionFactory, run_id: str) -> list[int]:
     ]
 
 
-async def _retained_within(
-    factory: SessionFactory, run_id: str, *, expected: int, timeout: float = 10.0
-) -> list[int]:
-    """Poll until the run holds *expected* rows, or the budget runs out.
-
-    The WebSocket ingest answers nothing to its sender, so there is no reply
-    to wait on; polling the table is what a real consumer of that channel can
-    actually observe. The budget fails the test rather than relaxing the
-    claim.
-    """
-    deadline = asyncio.get_running_loop().time() + timeout
-    retained: list[int] = []
-    while asyncio.get_running_loop().time() < deadline:
-        retained = await _retained(factory, run_id)
-        if len(retained) >= expected:
-            return retained
-        await asyncio.sleep(0.02)
-    return retained
-
-
 #: A cadence no test here reaches by waiting. Seating it is what makes the
-#: WebSocket proof about the ingest's OWN flush rather than about the ticker
-#: that would eventually have written the same row anyway.
+#: proof about the ingest's OWN flush rather than about the ticker that would
+#: eventually have written the same row anyway.
 _UNREACHABLE_CADENCE = 3600.0
 
 
 def _seat_recorder_without_a_cadence(
-    app: Any, aggregator: EventAggregator, factory: SessionFactory
+    app: Any, aggregator: RelayHub, factory: SessionFactory
 ) -> RunEventWriter:
     """Seat the real recorder and numbering authority, with its timer parked.
 
@@ -142,10 +102,10 @@ def _seat_recorder_without_a_cadence(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_a_frame_relayed_over_the_worker_websocket_is_retained(
+async def test_a_batch_relayed_over_http_is_retained_by_the_ingests_own_flush(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """The WebSocket ingest writes the group it took, like the HTTP routes.
+    """The batch route writes the group it took before it answers.
 
     A real client on a real socket, speaking the envelope the worker speaks.
     The recorder's periodic flush is parked out of reach, so a row here can
@@ -158,33 +118,35 @@ async def test_a_frame_relayed_over_the_worker_websocket_is_retained(
     which is what makes the stored rows resumable positions rather than a
     second process's ordering.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
-    await seed_run_with_status(session_factory, _WS_RUN, ThreadStatus.RUNNING)
+    await seed_run_with_status(session_factory, _RETAINED_RUN, ThreadStatus.RUNNING)
     writer = _seat_recorder_without_a_cadence(app, aggregator, session_factory)
 
     try:
         async with (
-            _live_server(app) as base,
-            connect(base.replace("http://", "ws://") + "/internal/ws") as ws,
+            serve_on_loopback(app) as base,
+            httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         ):
-            for sequence in (41, 42):
-                await ws.send(
-                    json.dumps(
+            relayed = await client.post(
+                "/internal/events/batch",
+                json={
+                    "events": [
                         {
-                            "type": "event",
-                            "thread_id": _WS_RUN,
-                            "payload": _worker_frame(_WS_RUN, sequence),
+                            "thread_id": _RETAINED_RUN,
+                            "ts": float(sequence),
+                            "payload": _worker_frame(_RETAINED_RUN, sequence),
                         }
-                    )
-                )
-            retained = await _retained_within(
-                session_factory, _WS_RUN, expected=2, timeout=5.0
+                        for sequence in (41, 42)
+                    ]
+                },
             )
+            assert relayed.status_code == 200, relayed.text
+        retained = await _retained(session_factory, _RETAINED_RUN)
     finally:
         await writer.aclose()
 
-    assert retained == [1, 2], "the WebSocket relay wrote nothing of its own"
+    assert retained == [1, 2], "the batch relay wrote nothing of its own"
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -198,12 +160,12 @@ async def test_deleting_a_run_releases_the_frames_its_recorder_still_holds(
     flush can ever place them, and until they are evicted they are still
     offered as that run's replay window.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await checkpointer.setup()
     await _seed_deletable_run(session_factory, _DELETED_RUN)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         relayed = await client.post(

@@ -16,7 +16,7 @@ node will read.
 from __future__ import annotations
 
 import itertools
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
@@ -27,21 +27,25 @@ from ...graph.nodes.clarification import (
     create_clarification_gate_node,
     create_clarification_request_node,
 )
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    add_test_node,
+    async_catalog_run_fields,
+    compile_test_graph,
+    new_state_graph,
+)
 from ...thread.clarification import (
     MAX_ANSWER_CHARS,
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
 )
-from .clarification_harness import new_state_graph
-from .conftest import SessionFactory, async_catalog_run_fields, make_app
+from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from ...thread.state import TeamState
-
-_PRESET = "mock-success-single"
 
 
 def _question_set(request_id: str) -> ClarificationRequest:
@@ -64,16 +68,15 @@ def _question_set(request_id: str) -> ClarificationRequest:
     )
 
 
-async def _park_on_clarification(
-    checkpointer: AsyncSqliteSaver, *, thread_id: str, request_id: str
-) -> None:
-    """Park a real graph on a real clarification interrupt in the real store.
+def _clarification_test_graph(
+    checkpointer: AsyncSqliteSaver, request: ClarificationRequest
+) -> Any:
+    """Compile the minimal clarification-node-pair graph this module parks on.
 
-    Writes through the app's own checkpointer, so what the gateway later reads is
-    literally what a parked run left behind - not a hand-built row shaped to
-    resemble one.
+    Shared by both the fresh-park helper below and the resume path in
+    ``test_the_answered_questionnaire_stops_being_disclosed``, which must
+    build the identical graph to resume it rather than invoke it fresh.
     """
-    request = _question_set(request_id)
 
     async def _producer(state: TeamState) -> ClarificationRequest | None:
         del state
@@ -84,19 +87,34 @@ async def _park_on_clarification(
         return {}
 
     builder = new_state_graph()
-    builder.add_node(
+    add_test_node(
+        builder,
         "clarification_request",
         create_clarification_request_node(
             _producer, gate_target="clarification_gate", proceed_target="proceed"
         ),
     )
-    builder.add_node(
-        "clarification_gate", create_clarification_gate_node(proceed_target="proceed")
+    add_test_node(
+        builder,
+        "clarification_gate",
+        create_clarification_gate_node(proceed_target="proceed"),
     )
-    builder.add_node("proceed", _proceed)
+    add_test_node(builder, "proceed", _proceed)
     builder.add_edge("__start__", "clarification_request")
     builder.add_edge("proceed", "__end__")
-    graph = builder.compile(checkpointer=checkpointer)
+    return compile_test_graph(builder, checkpointer=checkpointer)
+
+
+async def _park_on_clarification(
+    checkpointer: AsyncSqliteSaver, *, thread_id: str, request_id: str
+) -> None:
+    """Park a real graph on a real clarification interrupt in the real store.
+
+    Writes through the app's own checkpointer, so what the gateway later reads is
+    literally what a parked run left behind - not a hand-built row shaped to
+    resemble one.
+    """
+    graph = _clarification_test_graph(checkpointer, _question_set(request_id))
 
     await graph.ainvoke(
         {
@@ -126,7 +144,7 @@ async def _start_run(client: httpx.AsyncClient) -> str:
     response = await client.post(
         "/v1/runs",
         json={
-            "team_preset": _PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "plan it",
             "autonomous": True,
             "run_id": f"clarify-edge-{next(_RUN_SEQ):02d}",
@@ -354,17 +372,16 @@ async def test_an_over_long_answer_is_refused_at_the_wire(
     it cannot be bypassed by a call path that forgets to apply it.
 
     Sized from :data:`MAX_ANSWER_CHARS` rather than from a literal, and asserting
-    BOTH sides of the ceiling. This test used to post a hardcoded ``"x" * 4096``,
-    which publishes the number 4096 next to the word "cap" in a file a consumer
-    reads to learn a2a's bounds - the engine adopted 4096 as this side's answer
-    cap and the dashboard mirrored the engine, while a2a has never enforced
-    anything but 2048.
+    BOTH sides of the ceiling. A hardcoded number would publish a cap next to the
+    word "cap" in a file a consumer reads to learn a2a's bounds, and would not
+    track what a2a actually enforces.
 
-    It also could not fail. It answered only the OPTIONAL ``notes`` question, so
-    the required ``dock_side`` was left blank: delete the length cap entirely and
-    the request still 422s, from the required-question check one layer later.
-    Both answers are supplied below so the length is the only thing left to
-    object to, which is what makes the refusal evidence about the cap.
+    Both the OPTIONAL ``notes`` question and the required ``dock_side`` are
+    answered below so the length is the only thing left to object to. Answering
+    only ``notes`` would leave ``dock_side`` blank, and the request would still
+    422 with the length cap deleted entirely, from the required-question check
+    one layer later; supplying both is what makes the refusal evidence about the
+    cap.
     """
     app, _agg, worker, cp = make_app(session_factory, checkpointer)
     async with httpx.AsyncClient(
@@ -422,31 +439,7 @@ async def test_the_answered_questionnaire_stops_being_disclosed(
         parked = await client.get(f"/v1/runs/{run_id}")
         assert parked.json()["pending_clarification"] is not None
 
-        request = _question_set("clarify-settle")
-
-        async def _producer(state: TeamState) -> ClarificationRequest | None:
-            del state
-            return request
-
-        def _proceed(state: TeamState) -> dict[str, object]:
-            del state
-            return {}
-
-        builder = new_state_graph()
-        builder.add_node(
-            "clarification_request",
-            create_clarification_request_node(
-                _producer, gate_target="clarification_gate", proceed_target="proceed"
-            ),
-        )
-        builder.add_node(
-            "clarification_gate",
-            create_clarification_gate_node(proceed_target="proceed"),
-        )
-        builder.add_node("proceed", _proceed)
-        builder.add_edge("__start__", "clarification_request")
-        builder.add_edge("proceed", "__end__")
-        graph = builder.compile(checkpointer=cp)
+        graph = _clarification_test_graph(cp, _question_set("clarify-settle"))
 
         await graph.ainvoke(
             Command(

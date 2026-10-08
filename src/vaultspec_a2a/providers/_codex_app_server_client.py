@@ -1,7 +1,6 @@
 """Codex app-server subprocess transport and JSON-RPC client."""
 
 import asyncio
-import json
 import logging
 from collections import deque
 from collections.abc import Mapping
@@ -13,8 +12,11 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..utils import package_version
 from ..utils.async_cleanup import complete_cleanup
+from ..utils.coercion import coerce_nonempty_str
+from ._acp_request import encode_frame
 from ._cleanup import cancel_owned_tasks, run_independent_cleanups
 from ._codex_permission import (
+    CANCEL_ACTION,
     DECLINE_ACTION,
     ELICITATION_METHOD,
     CodexPermissionRung,
@@ -34,15 +36,10 @@ logger = logging.getLogger("vaultspec_a2a.providers.codex_chat_model")
 CLEANUP_TIMEOUT_SECONDS = 5.0
 """How long close waits before reporting a cancellation-resistant task."""
 
-_NATIVE_CONTROL_TIMEOUT_SECONDS = 10.0
-_MAX_CODEX_RUNTIME_ID_LENGTH = 256
-
 __all__ = [
     "CLEANUP_TIMEOUT_SECONDS",
     "_CAPABILITIES",
     "_CLIENT_INFO",
-    "_MAX_CODEX_RUNTIME_ID_LENGTH",
-    "_NATIVE_CONTROL_TIMEOUT_SECONDS",
     "_STREAM_CLOSED",
     "_CodexAppServerClient",
 ]
@@ -164,23 +161,6 @@ class _CodexAppServerClient:
             self._lifecycle.stderr_task = asyncio.create_task(self._drain_stderr())
 
     @property
-    def _process(self) -> asyncio.subprocess.Process:
-        """Keep the subprocess inspection seam used by lifecycle tests."""
-        return self._transport.process
-
-    @property
-    def _reader_task(self) -> asyncio.Task[None]:
-        """Keep the reader-task inspection seam used by lifecycle tests."""
-        task = self._lifecycle.reader_task
-        assert task is not None
-        return task
-
-    @property
-    def _stderr_task(self) -> asyncio.Task[None] | None:
-        """Keep the stderr-task inspection seam used by lifecycle tests."""
-        return self._lifecycle.stderr_task
-
-    @property
     def pending_interrupt(self) -> BaseException | None:
         return self._session.pending_interrupt
 
@@ -294,8 +274,7 @@ class _CodexAppServerClient:
         msg_id = (
             raw_id if isinstance(raw_id, int) and not isinstance(raw_id, bool) else None
         )
-        raw_method = message.get("method")
-        method = raw_method if isinstance(raw_method, str) and raw_method else None
+        method = coerce_nonempty_str(message.get("method"))
         # Server-initiated request (has both id and method). The tool-approval
         # request is answered on its own terms; anything else is still refused,
         # but LOUDLY. A silent method-not-found here is what made every bridged
@@ -360,8 +339,9 @@ class _CodexAppServerClient:
 
         The reader must not block: a supervised decision can wait on a human, and
         codex keeps streaming other frames meanwhile. Every outcome answers the
-        request - a raised decision is a decline, never an unanswered frame that
-        would hang the turn until the idle backstop fired.
+        request - a failed decision is a decline and a suspended run abandons the
+        call, never an unanswered frame that would hang the turn until the idle
+        backstop fired.
         """
         rung = self._session.permission_rung
         if rung is None:
@@ -374,8 +354,16 @@ class _CodexAppServerClient:
                 action = await rung.decide(params)
             except GraphBubbleUp as exc:
                 # A supervised rung suspended the graph to ask a human. Hold it
-                # for the turn consumer to re-raise, and free the provider now.
+                # for the turn consumer to re-raise, and free the provider now -
+                # with the elicitation contract's ABANDON action, because that is
+                # what happened. A park does not pause the provider: the turn
+                # kills the session in its `finally` and the node re-runs from
+                # the top on resume, so this answer is the last thing the model
+                # is told. A decline would tell it a user refused a call no user
+                # has yet seen, and invite it to act on that denial in the same
+                # turn.
                 self.pending_interrupt = exc
+                action = CANCEL_ACTION
             except Exception:
                 logger.exception(
                     "Codex permission decision failed; declining (fail-closed)"
@@ -397,7 +385,7 @@ class _CodexAppServerClient:
         self._session.pending.clear()
 
     def _send(self, message: JsonObject) -> None:
-        self._transport.stdin.write((json.dumps(message) + "\n").encode("utf-8"))
+        self._transport.stdin.write(encode_frame(message))
 
     async def request(self, method: str, params: JsonObject) -> JsonObject:
         """Send a request and await its matching response frame."""

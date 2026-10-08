@@ -2,42 +2,27 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import UTC, datetime
-from typing import Any
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ...graph.enums import AgentLifecycleState, Provider
-from ..enums import TERMINAL_STATUSES, RepairStatus
+from ..enums import RepairStatus, ThreadStatus
 from ..models import PlanEntry
 from ..snapshots import (
-    CHECKPOINT_ERROR_REPAIR_MAP,
-    CLARIFICATION_REQUEST_INTERRUPT_TYPE,
     PLAN_APPROVAL_PAUSE_CAUSES,
-    TERMINAL_STATUS_MAP,
-    AgentData,
-    ArtifactData,
-    ClarificationQuestionData,
-    ClarificationRequestData,
-    ExecutionTaskData,
-    MessageData,
-    PermissionData,
-    PermissionOptionData,
-    ProjectedInterrupt,
-    ThreadStateData,
-    ToolCallData,
+    ThreadStateSnapshot,
     build_agent_descriptor,
-    clarification_data_from_interrupt,
     classify_message_role,
     classify_permission_pause_reason,
     derive_message_id,
     extract_message_timestamp,
-    finalize_snapshot_replay_status,
     is_permission_event,
     is_terminal_event,
     normalize_artifacts,
     normalize_plan_entries,
+    record_repair_posture,
     stamp_message_created_at,
 )
 
@@ -174,106 +159,6 @@ def test_normalize_artifacts_skips_non_dict() -> None:
 
 
 # ---------------------------------------------------------------------------
-# finalize_snapshot_replay_status
-# ---------------------------------------------------------------------------
-
-
-def test_finalize_durable() -> None:
-    snap = ThreadStateData(thread_id="t1", status="running", last_sequence=0)
-    result = finalize_snapshot_replay_status(
-        snap,
-        checkpoint_loaded=True,
-        checkpoint_present=True,
-        checkpoint_error=False,
-        thread_status="running",
-    )
-    assert result.replay_status == "durable"
-
-
-def test_finalize_checkpoint_error() -> None:
-    snap = ThreadStateData(thread_id="t1", status="running", last_sequence=0)
-    finalize_snapshot_replay_status(
-        snap,
-        checkpoint_loaded=False,
-        checkpoint_present=False,
-        checkpoint_error=True,
-        thread_status="running",
-    )
-    assert snap.replay_status == "unknown"
-    assert snap.snapshot_complete is False
-
-
-def test_finalize_best_effort() -> None:
-    snap = ThreadStateData(thread_id="t1", status="running", last_sequence=0)
-    finalize_snapshot_replay_status(
-        snap,
-        checkpoint_loaded=False,
-        checkpoint_present=True,
-        checkpoint_error=False,
-        thread_status="running",
-    )
-    assert snap.replay_status == "best_effort"
-    assert snap.snapshot_complete is False
-
-
-def test_finalize_submitted_no_checkpoint() -> None:
-    snap = ThreadStateData(thread_id="t1", status="submitted", last_sequence=0)
-    finalize_snapshot_replay_status(
-        snap,
-        checkpoint_loaded=False,
-        checkpoint_present=False,
-        checkpoint_error=False,
-        thread_status="submitted",
-    )
-    assert snap.replay_status == "unknown"
-    assert snap.snapshot_complete is True
-
-
-def test_finalize_gap_detected() -> None:
-    snap = ThreadStateData(thread_id="t1", status="running", last_sequence=0)
-    finalize_snapshot_replay_status(
-        snap,
-        checkpoint_loaded=False,
-        checkpoint_present=False,
-        checkpoint_error=False,
-        thread_status="running",
-    )
-    assert snap.replay_status == "gap_detected"
-    assert "checkpoint_missing" in snap.degraded_reasons
-    # A detected replay gap classifies as a replay gap. The probe succeeded and
-    # found no checkpoint, so the missing history is established rather than
-    # unknown - reporting it as checkpoint-unavailable claimed the opposite, and
-    # left RepairStatus.REPLAY_GAP with no producer anywhere in the codebase.
-    assert snap.repair_status == RepairStatus.REPLAY_GAP.value
-    assert snap.execution_readiness == RepairStatus.REPLAY_GAP.value
-
-
-def test_replay_gap_is_distinct_from_checkpoint_unavailable() -> None:
-    """The two checkpoint conditions do not collapse onto one repair status.
-
-    An unavailable checkpoint means the probe failed and the contents are
-    unknown; a missing one means the probe succeeded and the history is provably
-    absent. They are different operator situations and must classify differently.
-    """
-    assert (
-        CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_missing"]
-        != CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_unavailable"]
-    )
-    assert CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_missing"] is RepairStatus.REPLAY_GAP
-
-
-def test_every_repair_status_has_a_producer() -> None:
-    """No RepairStatus member is unreachable from the code that assigns them.
-
-    REPLAY_GAP was a contract value no code path could emit: the one condition
-    that meant it was classified as something else. This asserts the enum and the
-    checkpoint classification map cannot drift apart again silently.
-    """
-    classified = set(CHECKPOINT_ERROR_REPAIR_MAP.values())
-    assert RepairStatus.REPLAY_GAP in classified
-
-
-# ---------------------------------------------------------------------------
 # Event classification predicates
 # ---------------------------------------------------------------------------
 
@@ -292,11 +177,23 @@ def test_is_terminal_event_false_unknown_status() -> None:
 
 def test_is_permission_event_true() -> None:
     assert is_permission_event({"type": "permission_request"})
-    assert is_permission_event({"type": "permission_resolved"})
+    assert is_permission_event({"type": "plan_approval_request"})
+    assert is_permission_event({"type": "document_approval_request"})
 
 
 def test_is_permission_event_false() -> None:
     assert not is_permission_event({"type": "agent_status"})
+
+
+def test_a_retired_resolution_event_is_not_a_permission_event() -> None:
+    """``permission_resolved`` is not a type any producer emits.
+
+    The journal settles an answer from the application receipt of the resume
+    that carried it, so nothing ever announced the settlement as an event of its
+    own. Admitting the type kept a relay branch alive that only tests reached,
+    and a frame naming it must now classify as the unknown event it is.
+    """
+    assert not is_permission_event({"type": "permission_resolved"})
 
 
 def test_classify_permission_pause_reason_plan_approval() -> None:
@@ -312,103 +209,6 @@ def test_classify_permission_pause_reason_none() -> None:
 
 
 # ---------------------------------------------------------------------------
-# clarification_data_from_interrupt
-# ---------------------------------------------------------------------------
-
-
-def _clarify_interrupt(payload: dict[str, Any]) -> ProjectedInterrupt:
-    return ProjectedInterrupt(
-        interrupt_id="interrupt-clarify-1",
-        interrupt_type=payload.get("type", ""),
-        payload=payload,
-    )
-
-
-def test_clarification_data_from_interrupt_projects_bounded_questions() -> None:
-    interrupt = _clarify_interrupt(
-        {
-            "type": CLARIFICATION_REQUEST_INTERRUPT_TYPE,
-            "questions": [
-                {
-                    "id": "provider",
-                    "prompt": "Which provider?",
-                    "kind": "choice",
-                    "required": True,
-                    "options": ["codex", "zai"],
-                },
-                {"id": "scope", "prompt": "Which module?", "kind": "text"},
-            ],
-        }
-    )
-    data = clarification_data_from_interrupt(interrupt)
-    assert data is not None
-    assert data.request_id == "interrupt-clarify-1"
-    assert len(data.questions) == 2
-    assert data.questions[0] == ClarificationQuestionData(
-        id="provider",
-        prompt="Which provider?",
-        kind="choice",
-        required=True,
-        options=["codex", "zai"],
-    )
-    assert data.questions[1] == ClarificationQuestionData(
-        id="scope", prompt="Which module?", kind="text", required=False, options=[]
-    )
-
-
-def test_clarification_data_from_interrupt_ignores_other_interrupt_types() -> None:
-    interrupt = _clarify_interrupt(
-        {"type": "document_approval_request", "phase": "research"}
-    )
-    assert clarification_data_from_interrupt(interrupt) is None
-
-
-def test_clarification_data_from_interrupt_none_when_questions_not_a_list() -> None:
-    interrupt = _clarify_interrupt(
-        {"type": CLARIFICATION_REQUEST_INTERRUPT_TYPE, "questions": "not-a-list"}
-    )
-    assert clarification_data_from_interrupt(interrupt) is None
-
-
-def test_clarification_data_from_interrupt_none_when_no_readable_question() -> None:
-    interrupt = _clarify_interrupt(
-        {
-            "type": CLARIFICATION_REQUEST_INTERRUPT_TYPE,
-            "questions": [{"id": "", "prompt": "missing id"}, "not-a-dict"],
-        }
-    )
-    assert clarification_data_from_interrupt(interrupt) is None
-
-
-def test_clarification_data_from_interrupt_drops_malformed_entries_keeps_rest() -> None:
-    interrupt = _clarify_interrupt(
-        {
-            "type": CLARIFICATION_REQUEST_INTERRUPT_TYPE,
-            "questions": [
-                {"id": "good", "prompt": "Fine?"},
-                {"id": "", "prompt": "no id"},
-                "not-a-dict",
-            ],
-        }
-    )
-    data = clarification_data_from_interrupt(interrupt)
-    assert data is not None
-    assert [q.id for q in data.questions] == ["good"]
-
-
-def test_clarification_data_from_interrupt_unknown_kind_falls_back_to_text() -> None:
-    interrupt = _clarify_interrupt(
-        {
-            "type": CLARIFICATION_REQUEST_INTERRUPT_TYPE,
-            "questions": [{"id": "q1", "prompt": "?", "kind": "essay"}],
-        }
-    )
-    data = clarification_data_from_interrupt(interrupt)
-    assert data is not None
-    assert data.questions[0].kind == "text"
-
-
-# ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
@@ -418,116 +218,43 @@ def test_plan_approval_pause_causes_contains_both_variants() -> None:
     assert "plan_approval_request" in PLAN_APPROVAL_PAUSE_CAUSES
 
 
-def test_terminal_status_map_keys() -> None:
-    assert set(TERMINAL_STATUS_MAP) == {status.value for status in TERMINAL_STATUSES}
-
-
 # ---------------------------------------------------------------------------
-# dataclass round-trip: dataclass -> asdict -> Pydantic model_validate
+# record_repair_posture
 # ---------------------------------------------------------------------------
 
 
-def test_message_data_round_trip() -> None:
-    from ...api.schemas.snapshots import MessageSnapshot
-
-    data = MessageData(
-        message_id="m1",
-        role="user",
-        content="hi",
-        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+def _snapshot() -> ThreadStateSnapshot:
+    return ThreadStateSnapshot(
+        thread_id="t1", status=ThreadStatus.RUNNING, last_sequence=0
     )
-    pydantic_obj = MessageSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.message_id == "m1"
-    assert pydantic_obj.role == "user"
 
 
-def test_tool_call_data_round_trip() -> None:
-    from ...api.schemas.snapshots import ToolCallSnapshot
-
-    data = ToolCallData(
-        tool_call_id="tc1",
-        title="bash",
-        kind="execute",
-        status="pending",
-    )
-    pydantic_obj = ToolCallSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.tool_call_id == "tc1"
+def test_record_repair_posture_writes_the_posture_and_its_readiness_together() -> None:
+    snapshot = _snapshot()
+    record_repair_posture(snapshot, "needs_reconciliation")
+    assert snapshot.repair_status is RepairStatus.NEEDS_RECONCILIATION
+    assert snapshot.execution_readiness is RepairStatus.NEEDS_RECONCILIATION
 
 
-def test_artifact_data_round_trip() -> None:
-    from ...api.schemas.snapshots import ArtifactSnapshot
-
-    data = ArtifactData(
-        artifact_id="a1",
-        filename="test.py",
-        content="print('hello')",
-        complete=True,
-    )
-    pydantic_obj = ArtifactSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.artifact_id == "a1"
+def test_record_repair_posture_clears_both_fields_for_no_posture() -> None:
+    snapshot = _snapshot()
+    record_repair_posture(snapshot, RepairStatus.REPLAY_GAP)
+    record_repair_posture(snapshot, None)
+    assert snapshot.repair_status is None
+    assert snapshot.execution_readiness is None
 
 
-def test_permission_data_round_trip() -> None:
-    from ...api.schemas.snapshots import PermissionSnapshot
-
-    data = PermissionData(
-        request_id="r1",
-        description="approve this",
-        options=[
-            PermissionOptionData(
-                option_id="allow_once",
-                name="Allow Once",
-                kind="allow_once",
-            )
-        ],
-        tool_call="bash",
-        tool_kind="execute",
-    )
-    pydantic_obj = PermissionSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.request_id == "r1"
-    assert len(pydantic_obj.options) == 1
-    assert pydantic_obj.tool_kind == "execute"
+def test_record_repair_posture_refuses_a_posture_outside_the_vocabulary() -> None:
+    snapshot = _snapshot()
+    with pytest.raises(ValueError, match="not a valid RepairStatus"):
+        record_repair_posture(snapshot, "bogus")
+    assert snapshot.repair_status is None
+    assert snapshot.execution_readiness is None
 
 
-def test_clarification_request_data_round_trip() -> None:
-    from ...api.schemas.snapshots import ClarificationRequestSnapshot
-
-    data = ClarificationRequestData(
-        request_id="clarify-1",
-        questions=[
-            ClarificationQuestionData(
-                id="provider",
-                prompt="Which provider?",
-                kind="choice",
-                required=True,
-                options=["codex", "zai"],
-            )
-        ],
-    )
-    pydantic_obj = ClarificationRequestSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.request_id == "clarify-1"
-    assert len(pydantic_obj.questions) == 1
-    assert pydantic_obj.questions[0].options == ["codex", "zai"]
-
-
-def test_agent_data_round_trip() -> None:
-    from ...api.schemas.snapshots import AgentSnapshot
-
-    data = AgentData(
-        thread_id="thread-1",
-        agent_id="agent-1",
-        node_name="supervisor",
-        state=AgentLifecycleState.IDLE,
-        provider=Provider.CLAUDE,
-        model_name="catalog-model",
-        role="manager",
-    )
-    pydantic_obj = AgentSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.agent_id == "agent-1"
-    # The descriptor is the wire model's only source, so an added field must
-    # survive the asdict projection rather than falling back to its default.
-    assert pydantic_obj.provider is Provider.CLAUDE
-    assert pydantic_obj.model_name == "catalog-model"
+# ---------------------------------------------------------------------------
+# build_agent_descriptor
+# ---------------------------------------------------------------------------
 
 
 def test_build_agent_descriptor_reads_provider_and_model_from_node_metadata() -> None:
@@ -569,38 +296,3 @@ def test_build_agent_descriptor_rejects_an_unrecognised_provider() -> None:
         thread_id="thread-1",
     )
     assert descriptor.provider is None
-
-
-def test_execution_task_data_round_trip() -> None:
-    from ...api.schemas.snapshots import ExecutionTaskSnapshot
-
-    data = ExecutionTaskData(
-        task_id="task-1",
-        name="supervisor",
-        path=["supervisor"],
-        has_error=False,
-    )
-    pydantic_obj = ExecutionTaskSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.task_id == "task-1"
-
-
-def test_thread_state_data_round_trip() -> None:
-    from ...api.schemas.snapshots import ThreadStateSnapshot
-
-    data = ThreadStateData(
-        thread_id="t1",
-        status="running",
-        last_sequence=42,
-        messages=[
-            MessageData(
-                message_id="m1",
-                role="user",
-                content="hi",
-                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
-            )
-        ],
-    )
-    pydantic_obj = ThreadStateSnapshot.model_validate(asdict(data))
-    assert pydantic_obj.thread_id == "t1"
-    assert pydantic_obj.last_sequence == 42
-    assert len(pydantic_obj.messages) == 1

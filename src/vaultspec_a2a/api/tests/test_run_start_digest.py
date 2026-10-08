@@ -21,12 +21,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import subprocess
 import sys
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from ...api.run_admission import (
     _ALWAYS_EXCLUDED,
@@ -39,6 +39,7 @@ from ...api.run_admission import (
     stamped_replay_digest,
 )
 from ...api.schemas.gateway import ProviderCatalogSelection, RunStartRequest
+from ...testing import inherited_environment
 from ...thread.actor_tokens import ActorTokenBundle
 
 
@@ -145,7 +146,7 @@ def test_the_fingerprint_is_stable_across_processes() -> None:
         text=True,
         encoding="utf-8",
         check=True,
-        env={**os.environ, "PYTHONHASHSEED": "1"},
+        env=inherited_environment({"PYTHONHASHSEED": "1"}),
     )
 
     assert completed.stdout.strip() == _current(body), (
@@ -330,43 +331,6 @@ def test_a_prepare_digest_ignores_the_prompt_and_tokens() -> None:
     assert prepare != request_digest(_request(), prepared=False)
 
 
-def _legacy_digest(body: RunStartRequest) -> str:
-    """Recompute the pre-classification fingerprint from its specification.
-
-    Derived here from the stated rule - canonical JSON over every field that
-    existed then except the two request-identifying ones, SHA-256 - rather than
-    from the production exclusion tables, so a change cannot redefine what
-    "the old rule" means and green-wash a stored fingerprint that no longer
-    compares.
-    """
-    payload = body.model_dump(
-        mode="json", exclude={"stage", "reservation_id", "continues_run_id"}
-    )
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def test_a_fingerprint_stored_under_the_old_rule_is_compared_under_it() -> None:
-    """A stored fingerprint cannot be recomputed, so it must carry its rule.
-
-    Raw tokens are never persisted, so a run written before credentials were
-    classified out has a fingerprint no current rule can reproduce. Compared
-    under the current rule, a byte-identical replay of that run would be refused
-    spuriously.
-    """
-    body = _request(actor_tokens=_bundle("tok-1"))
-    stored = _legacy_digest(body)
-
-    assert replay_digest_matches(stored, body), (
-        "an unstamped fingerprint must compare under the rule it was written with"
-    )
-    # The old rule keeps its old meaning: under it, a rotated bundle really is a
-    # different request, and the marker is what stops that verdict leaking into
-    # newly stored runs.
-    assert not replay_digest_matches(stored, _request(actor_tokens=_bundle("tok-2")))
-    assert not replay_digest_matches(stored, _request(message="something else"))
-
-
 def test_a_newly_stored_fingerprint_carries_the_current_rule() -> None:
     """The stamp is what makes a stored fingerprint self-describing."""
     body = _request(actor_tokens=_bundle("tok-1"))
@@ -377,45 +341,44 @@ def test_a_newly_stored_fingerprint_carries_the_current_rule() -> None:
     assert separator, "a stored fingerprint must name the rule it was computed under"
     assert ReplayDigestRule(marker) is CURRENT_REPLAY_DIGEST_RULE
     assert digest == _current(body)
-    # And it is a fingerprint under the NEW rule, not the old one wearing a new
-    # marker: the same run retried with rotated credentials still matches.
+    # The stamp does not change what is compared: the same run retried with
+    # rotated credentials still matches.
     assert replay_digest_matches(stamped, _request(actor_tokens=_bundle("tok-2")))
     assert not replay_digest_matches(stamped, _request(message="something else"))
 
 
-def test_an_unrecognised_rule_marker_is_not_comparable() -> None:
-    """A run written by a newer process must not be replayed on a guess.
+@pytest.mark.parametrize("marker", ["r1", "r99", ""])
+def test_an_unrecognised_rule_marker_is_not_comparable(marker: str) -> None:
+    """A run written under a rule this process lacks must not be replayed on a guess.
 
     Its fingerprint was computed under a rule this process does not implement,
     so no comparison it can make is evidence of anything; reporting no match
     refuses the replay rather than answering with a run whose identity was never
-    verified.
+    verified. ``r1`` is a retired rule and is refused like any other unknown
+    marker.
 
-    The discriminating input is a fingerprint under the rule an unrecognised
-    marker would fall BACK to if it guessed. A fingerprint under the current
-    rule is not: it disagrees with the older rule's digest anyway, so an
-    implementation that quietly guessed the older rule would report no match for
-    it too and look identical to one that refused.
+    The discriminating input is a digest that DOES match the current rule: an
+    implementation that quietly fell back to the current rule for an unknown
+    marker would accept it, whereas a digest that disagrees with the current
+    rule is refused either way and looks identical to a real refusal.
     """
     body = _request(actor_tokens=_bundle("tok-1"))
-    guessable = _legacy_digest(body)
 
     # Control: under the marker that names it, this fingerprint really does
-    # compare equal - so every refusal below is the MARKER being refused rather
+    # compare equal - so the refusal below is the MARKER being refused rather
     # than the digest happening to disagree.
-    assert replay_digest_matches(
-        f"{ReplayDigestRule.CREDENTIAL_SENSITIVE.value}:{guessable}", body
-    )
+    assert replay_digest_matches(stamped_replay_digest(body), body)
 
-    assert not replay_digest_matches(f"r99:{guessable}", body), (
+    assert not replay_digest_matches(f"{marker}:{_current(body)}", body), (
         "an unknown rule marker must refuse, not fall back to a rule it knows"
     )
-    assert not replay_digest_matches(f":{guessable}", body), (
-        "an empty rule marker names no rule and must refuse just the same"
-    )
-    # A current-rule fingerprint under those markers is refused as well.
-    assert not replay_digest_matches(f"r99:{_current(body)}", body)
-    assert not replay_digest_matches(f":{_current(body)}", body)
+
+
+def test_an_unmarked_fingerprint_is_not_comparable() -> None:
+    """A bare digest names no rule, so it is refused rather than read under one."""
+    body = _request(actor_tokens=_bundle("tok-1"))
+
+    assert not replay_digest_matches(_current(body), body)
 
 
 def test_persisted_digest_round_trips_through_metadata() -> None:
@@ -432,13 +395,8 @@ def test_persisted_digest_round_trips_through_metadata() -> None:
     assert json.loads(metadata)["feature_tag"] == "x", "existing metadata was dropped"
 
 
-def test_a_run_predating_digest_persistence_reads_as_unknown() -> None:
-    """Absent must mean unknown, not mismatched.
-
-    Runs created before the digest was persisted carry no digest. Treating that
-    as a mismatch would refuse every legitimate replay of an existing run, so the
-    caller falls back to the narrower comparison instead.
-    """
+def test_metadata_without_a_digest_reads_as_absent() -> None:
+    """Absent must read as absent, never as an empty or matching digest."""
     from ...api.routes.gateway import _persisted_request_digest
 
     assert _persisted_request_digest(None) is None
@@ -447,15 +405,57 @@ def test_a_run_predating_digest_persistence_reads_as_unknown() -> None:
     assert _persisted_request_digest("not json at all") is None
 
 
-def test_persisting_a_digest_preserves_the_lease_beside_it() -> None:
-    """Two writers share this blob; neither may clobber the other."""
+def test_a_replay_of_the_recorded_request_is_accepted() -> None:
+    """The check passes for the request the run was started with."""
     from ...api.routes.gateway import (
         _persist_request_digest,
-        _persisted_lease_id,
+        _replay_identity_or_conflict,
     )
+
+    body = _request(actor_tokens=_bundle("tok-1"))
+    metadata = _persist_request_digest(None, stamped_replay_digest(body))
+
+    _replay_identity_or_conflict("r-1", metadata, body)
+    _replay_identity_or_conflict(
+        "r-1", metadata, _request(actor_tokens=_bundle("tok-2"))
+    )
+
+
+def test_a_replay_of_a_different_request_is_refused() -> None:
+    """The same id carrying other work is a new intention, not a replay."""
+    from ...api.routes.gateway import (
+        _persist_request_digest,
+        _replay_identity_or_conflict,
+    )
+
+    metadata = _persist_request_digest(None, stamped_replay_digest(_request()))
+
+    with pytest.raises(HTTPException) as refused:
+        _replay_identity_or_conflict(
+            "r-1", metadata, _request(message="something else")
+        )
+
+    assert refused.value.status_code == 409
+
+
+def test_a_replay_of_a_run_with_no_recorded_digest_is_refused() -> None:
+    """A run that records no digest has no identity to compare, so it is refused."""
+    from ...api.routes.gateway import _replay_identity_or_conflict
+
+    with pytest.raises(HTTPException) as refused:
+        _replay_identity_or_conflict("r-1", None, _request())
+
+    assert refused.value.status_code == 409
+
+
+def test_persisting_a_digest_preserves_the_lease_beside_it() -> None:
+    """Two writers share this blob; neither may clobber the other."""
+    from ...api.routes.gateway import _persist_request_digest
+    from ...control._thread_metadata import run_lease_id
+    from ...utils.coercion import decode_json_object
 
     with_lease = '{"run_lease": {"lease_id": "lease-1", "reservation_id": "r"}}'
 
     merged = _persist_request_digest(with_lease, "deadbeef")
 
-    assert _persisted_lease_id(merged) == "lease-1"
+    assert run_lease_id(decode_json_object(merged)) == "lease-1"

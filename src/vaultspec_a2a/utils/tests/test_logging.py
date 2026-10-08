@@ -64,7 +64,7 @@ def test_service_kind_json_to_stderr_and_rotating_file(tmp_path: Path) -> None:
     settings = _settings(
         env=Environment.PRODUCTION, level=LogLevel.DEBUG, home=tmp_path
     )
-    configure_logging("service", service_name="gateway", settings_override=settings)
+    configure_logging("service", service_name="gateway", settings=settings)
 
     root = logging.getLogger()
     assert root.level == logging.DEBUG
@@ -90,13 +90,13 @@ def test_service_kind_honors_log_level(tmp_path: Path) -> None:
     settings = _settings(
         env=Environment.DEVELOPMENT, level=LogLevel.ERROR, home=tmp_path
     )
-    configure_logging("service", service_name="worker", settings_override=settings)
+    configure_logging("service", service_name="worker", settings=settings)
     assert logging.getLogger().level == logging.ERROR
 
 
 def test_service_kind_attaches_correlation_filter(tmp_path: Path) -> None:
     settings = _settings(env=Environment.PRODUCTION, level=LogLevel.INFO, home=tmp_path)
-    configure_logging("service", service_name="gateway", settings_override=settings)
+    configure_logging("service", service_name="gateway", settings=settings)
     for handler in logging.getLogger().handlers:
         assert any(isinstance(f, OTelCorrelationFilter) for f in handler.filters)
 
@@ -109,7 +109,7 @@ def test_cli_kind_stderr_warning_no_stdout(tmp_path: Path) -> None:
         env=Environment.PRODUCTION, level=LogLevel.DEBUG, home=tmp_path
     )
     # Production/non-interactive -> plain stderr StreamHandler at WARNING.
-    configure_logging("cli", settings_override=settings)
+    configure_logging("cli", settings=settings)
     root = logging.getLogger()
     assert root.level == logging.WARNING
     assert not any(getattr(h, "stream", None) is sys.stdout for h in root.handlers)
@@ -119,11 +119,8 @@ def test_cli_kind_stderr_warning_no_stdout(tmp_path: Path) -> None:
 # --- protocol kind ---------------------------------------------------------
 
 
-def test_protocol_kind_is_stderr_only(tmp_path: Path) -> None:
-    settings = _settings(
-        env=Environment.PRODUCTION, level=LogLevel.DEBUG, home=tmp_path
-    )
-    configure_logging("protocol", settings_override=settings)
+def test_protocol_kind_is_stderr_only() -> None:
+    configure_logging("protocol")
     root = logging.getLogger()
     assert root.level == logging.WARNING
     assert root.handlers, "protocol kind must attach a stderr handler"
@@ -255,8 +252,8 @@ def test_json_formatter_survives_a_computed_false_exc_info() -> None:
     ``Logger._log`` normalises only truthy ``exc_info`` values, so a caller
     passing a computed flag lands ``False`` on the record verbatim. The OTLP
     gRPC exporter does exactly this on every transport error it does not
-    classify as unknown, and the formatter used to raise ``TypeError`` on it -
-    which discards the record, silencing the very failures the lane exists to
+    classify as unknown, and a formatter that raised ``TypeError`` on it would
+    discard the record, silencing the very failures the lane exists to
     report.
     """
     logger = logging.getLogger("test.exc_info.false")

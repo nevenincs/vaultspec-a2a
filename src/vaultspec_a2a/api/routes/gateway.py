@@ -2,9 +2,9 @@
 
 Mounts the run, preset, and service verbs under ``/v1`` as the engine-facing
 edge, including bounded discovery and the droppable ``run-stream`` companion to
-the authoritative status snapshot. Each verb reshapes an existing service
-rather than reinventing it, so there is a single code path: the richer internal
-``/api`` surface and these verbs call the same services beneath.
+the authoritative status snapshot. Each verb reshapes an existing
+:mod:`vaultspec_a2a.control` service rather than reinventing it, so there is a
+single code path beneath the edge.
 
 Run start composes :mod:`vaultspec_a2a.control.admission` and
 :mod:`vaultspec_a2a.control.health` into ``start``, readiness-gated ``prepare``,
@@ -19,6 +19,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import asdict
+from datetime import timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -35,17 +37,26 @@ if TYPE_CHECKING:
 
     import httpx
 
+    from ...team import TeamConfig
+
+from ...control._thread_metadata import RUN_LEASE_METADATA_KEY, RunLeaseBinding
 from ...control.admission import AdmissionBroker, AdmissionReadiness
 from ...control.config import settings
 from ...control.drain import DrainGate
+from ...control.execution_authority import (
+    read_frozen_team_selection,
+    record_frozen_team_selection,
+)
 from ...control.health import (
     assemble_desktop_readiness,
 )
+from ...control.readiness import API_VERSION
 from ...control.run_start_policy import (
     required_role_ids,
 )
 from ...domain_config import domain_config
 from ...providers.provider_catalog import (
+    SELECTION_SCHEMA_VERSION,
     ControlSelection,
     ProviderRecord,
     SelectionReference,
@@ -60,8 +71,7 @@ from ...providers.team_selection import (
     freeze_team_selection,
     normalize_replay_selection,
 )
-from ...thread.dispatch_policy import FailureType
-from ...utils.coercion import coerce_object_mapping
+from ...utils.coercion import coerce_nonempty_str, decode_json_object
 from ..auth import authenticate_request
 from ..run_admission import (
     replay_digest_matches,
@@ -75,7 +85,7 @@ from ..schemas.gateway import (
 from ..workspace import require_existing_workspace_root
 
 router = APIRouter(
-    prefix="/v1",
+    prefix=f"/{API_VERSION}",
     dependencies=[Depends(authenticate_request)],
     # Every route here is behind the attach gate, so both refusals are properties
     # of the router rather than of any one verb. They were absent from the
@@ -90,7 +100,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "_DEGRADED_CHECK_STATUSES",
-    "_admission_readiness",
+    "_body_against_frozen_selection",
     "_body_with_frozen_selection",
     "_bool_field",
     "_canonical_replay_body",
@@ -102,18 +112,17 @@ __all__ = [
     "_persist_lease",
     "_persist_request_digest",
     "_persist_team_selection",
-    "_persisted_lease_binding",
-    "_persisted_lease_id",
     "_prepare_workspace_root",
     "_probe_admission_readiness",
     "_probe_harness",
-    "_raise_for_dispatch_failure",
-    "_read_persisted_team_selection",
     "_release_binding_digest",
     "_release_ineligible_reservation",
     "_replay_identity_or_conflict",
     "_string_field",
     "_validate_and_freeze_selection_or_refuse",
+    "admission_broker",
+    "admission_gate",
+    "provider_catalog_service",
     "router",
 ]
 
@@ -126,23 +135,19 @@ _DEGRADED_CHECK_STATUSES: frozenset[str] = frozenset(
 
 
 def provider_catalog_service(app: FastAPI) -> ProviderCatalogService:
-    """Return the process-wide bounded provider-catalog service."""
+    """Return the process-wide bounded provider-catalog service.
+
+    Built with the operator's catalog lifetime, so how long a served catalog -
+    and therefore a client's selection of it - stays current is one configured
+    answer rather than a constant compiled into the service.
+    """
     service = getattr(app.state, "provider_catalog_service", None)
     if service is None:
-        service = ProviderCatalogService()
+        service = ProviderCatalogService(
+            ttl=timedelta(seconds=domain_config.provider_catalog_ttl_seconds)
+        )
         app.state.provider_catalog_service = service
     return service
-
-
-def _metadata_object(metadata_json: str | None) -> dict[str, object] | None:
-    """Decode durable metadata only when it is a JSON object."""
-    if not metadata_json:
-        return None
-    try:
-        decoded: object = json.loads(metadata_json)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    return coerce_object_mapping(decoded)
 
 
 def _string_field(record: dict[str, object], field: str) -> str | None:
@@ -213,9 +218,9 @@ def _admission_readiness(
     """Project the seated desktop readiness facts into an admission-readiness view.
 
     Reads the single readiness authority (``assemble_desktop_readiness``) over the
-    seated worker and database state - the cheap, non-blocking surface - so a
-    prepare reports the same worker, provider, and admission facts the readiness
-    model and service-state verb serve, never a second computation.
+    seated worker and database state - the cheap, non-blocking surface - so
+    prepare and commit gate on the same run-admission verdict the readiness model
+    and service-state verb serve, never a second computation.
     """
     readiness = assemble_desktop_readiness(
         app_state=app_state,
@@ -234,9 +239,36 @@ def _admission_readiness(
 async def _probe_admission_readiness(
     app_state: Any, worker_client: httpx.AsyncClient
 ) -> AdmissionReadiness:
-    from ...control._worker_health import probe_worker_health, worker_ready_and_ours
+    from ...control._worker_health import (
+        WorkerHealthProbe,
+        probe_worker_health,
+        worker_credential_authorized,
+        worker_ready_and_ours,
+    )
 
-    probe = await probe_worker_health(settings.worker_url, client=worker_client)
+    # The generation must come from the spawner that issued it. It is the highest
+    # generation this gateway has minted, and a worker reporting a HIGHER one
+    # classifies as unidentified - so defaulting it to zero here would disown our
+    # own restarted worker on its own admission path.
+    spawner = getattr(app_state, "worker_spawner", None)
+    generation = getattr(spawner, "generation", 0)
+    owner_pid = getattr(spawner, "owner_pid", None)
+    # Ownership precedes the credential: the app-pooled client carries the worker
+    # IPC bearer on every request it makes, so a listener the owner's process tree
+    # does not hold is never probed. A withheld probe is a decisive non-observation
+    # of OUR worker, not an unfinished one, so it reports unreachable (and, by the
+    # short circuit below, unadoptable) rather than indeterminate.
+    probe = (
+        await probe_worker_health(
+            settings.worker_url, client=worker_client, internal_token=None
+        )
+        if await worker_credential_authorized(
+            settings.worker_port,
+            owner_pid=owner_pid,
+            action="a run-admission readiness probe",
+        )
+        else WorkerHealthProbe(healthy=False, body=None)
+    )
     reachable = probe.healthy
     # An indeterminate probe (the worker did not answer inside the budget) is not
     # an observation of absence, so it must not be reported as one: pass no live
@@ -249,13 +281,6 @@ async def _probe_admission_readiness(
     # both: "some process holds this port" is exactly what a squatting orphan
     # satisfies. Only asked when the port answered at all, so the refusal path
     # costs nothing extra.
-    #
-    # The generation must come from the spawner that issued it. It is the highest
-    # generation this gateway has minted, and a worker reporting a HIGHER one
-    # classifies as unidentified - so defaulting it to zero here would disown our
-    # own restarted worker on its own admission path.
-    spawner = getattr(app_state, "worker_spawner", None)
-    generation = getattr(spawner, "generation", 0)
     adoptable: bool | None
     if probe.indeterminate:
         # Provenance is unknown for the same reason health is; the promotion this
@@ -263,7 +288,11 @@ async def _probe_admission_readiness(
         adoptable = None
     else:
         adoptable = reachable and await worker_ready_and_ours(
-            settings.worker_url, current_generation=generation
+            settings.worker_url,
+            settings.worker_port,
+            current_generation=generation,
+            internal_token=getattr(app_state, "internal_token", None),
+            owner_pid=owner_pid,
         )
     return _admission_readiness(
         app_state, worker_probe_ready=probe_verdict, worker_adoptable=adoptable
@@ -271,12 +300,13 @@ async def _probe_admission_readiness(
 
 
 def _prepare_workspace_root(body: RunStartRequest) -> Path | None:
-    """Resolve the preset-loading workspace for a prepare, or ``None``.
+    """Resolve the preset-loading workspace for a run-start request, or ``None``.
 
-    A prepare carries no run id, so it never mints a workspace; it only needs a
-    workspace context to resolve a workspace-local preset. When the request
-    metadata names an absolute workspace root it is used, otherwise the bundled
-    preset set is resolved (``None``).
+    Resolving it mints nothing: a prepare never mints a workspace, and a new run
+    mints its project afterwards, in the same canonical spelling. It only gives
+    the request a workspace context to resolve a workspace-local preset. When the
+    request metadata names an absolute workspace root it is used, otherwise the
+    bundled preset set is resolved (``None``).
     """
     metadata = body.metadata
     workspace_root = getattr(metadata, "workspace_root", None) if metadata else None
@@ -318,7 +348,7 @@ def _selection_reference(value: ProviderCatalogSelection) -> SelectionReference:
 def _wire_reference(reference: SelectionReference) -> ProviderCatalogSelection:
     """Render a normalized domain reference into the canonical request wire."""
     return ProviderCatalogSelection(
-        schema_version=1,
+        schema_version=SELECTION_SCHEMA_VERSION,
         provider_id=reference.provider_id,
         execution_mode=reference.execution_mode,
         catalog_revision=reference.catalog_revision,
@@ -347,17 +377,25 @@ def _body_with_frozen_selection(
     )
 
 
-def _canonical_replay_body(
-    metadata_json: str | None, body: RunStartRequest
+def _body_against_frozen_selection(
+    frozen: FrozenTeamSelection, body: RunStartRequest, *, mismatch: str
 ) -> RunStartRequest:
-    """Canonicalize a replay from persisted defaults, without live discovery."""
-    metadata = _metadata_object(metadata_json)
-    record = metadata.get(_TEAM_SELECTION_METADATA_KEY) if metadata else None
-    if record is None:
-        return body
+    """Canonicalize *body*'s selection against an already accepted freeze.
+
+    No catalog is consulted: the freeze is the authority here, so the only
+    question left is whether this request names what was frozen - a control the
+    freeze took from a catalog default may be omitted or stated, and either
+    spelling normalizes to the frozen one. A request that names something else
+    is a different run wearing the same identity, and is refused with *mismatch*
+    alone: every refusal the comparison raises says only that it did not match,
+    so serving the sentence twice would add nothing.
+
+    The one home for both readings of a freeze that already exists: a replay
+    meeting a durable run, and a commit consuming its reservation.
+    """
     try:
         selection, overrides, fallbacks = normalize_replay_selection(
-            record=record,
+            frozen=frozen,
             selection=_selection_reference(body.selection),
             overrides={
                 role: _selection_reference(reference)
@@ -366,7 +404,7 @@ def _canonical_replay_body(
             fallbacks=tuple(_selection_reference(item) for item in body.fallbacks),
         )
     except (TeamSelectionError, ValueError) as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail=mismatch) from exc
     return body.model_copy(
         update={
             "selection": _wire_reference(selection),
@@ -376,6 +414,26 @@ def _canonical_replay_body(
             },
             "fallbacks": [_wire_reference(reference) for reference in fallbacks],
         }
+    )
+
+
+def _canonical_replay_body(
+    metadata_json: str | None, body: RunStartRequest
+) -> RunStartRequest:
+    """Canonicalize a replay from persisted defaults, without live discovery.
+
+    A stored selection that cannot be validated is refused with what the read
+    says about it: that is a fact about the durable run rather than about this
+    request, and the sentence is the only account of it anyone gets.
+    """
+    try:
+        frozen = read_frozen_team_selection(metadata_json)
+    except (TeamSelectionError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if frozen is None:
+        return body
+    return _body_against_frozen_selection(
+        frozen, body, mismatch="replay selection does not match the accepted run"
     )
 
 
@@ -442,7 +500,7 @@ def _log_detached_catalog_build(task: asyncio.Future[Any]) -> None:
 async def _validate_and_freeze_selection_or_refuse(
     app: FastAPI,
     body: RunStartRequest,
-    team_config: Any,
+    team_config: TeamConfig,
     workspace_root: Path | None,
 ) -> FrozenTeamSelection:
     """Revalidate the complete new-run selection in its canonical workspace."""
@@ -483,47 +541,30 @@ async def _validate_and_freeze_selection_or_refuse(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-# The metadata key binding a run to its non-secret admission lease identity. The
-# gateway writes it at commit and the terminal handler reads it back; both restate
-# this key inline, matching the metadata convention used for frozen selection.
-_RUN_LEASE_METADATA_KEY = "run_lease"
-
 # The canonical digest of the request that created a run. Persisted on every
 # create so a later replay can be compared against what the run was actually
 # started with, rather than against the single field the check previously read.
-# The stored value is the rule-stamped form (``<rule>:<digest>``); an unstamped
-# value is a run created before the marker existed and is compared under the
-# rule it was written with.
+# The stored value is the rule-stamped form (``<rule>:<digest>``).
 _REQUEST_DIGEST_METADATA_KEY = "run_request_digest"
 
 
 def _persist_request_digest(metadata_json: str | None, digest: str) -> str:
     """Embed the creating request's rule-stamped digest into run metadata."""
-    data = _metadata_object(metadata_json) or {}
+    data = decode_json_object(metadata_json) or {}
     data[_REQUEST_DIGEST_METADATA_KEY] = digest
     return json.dumps(data)
 
 
 def _persisted_request_digest(metadata_json: str | None) -> str | None:
-    """Read the creating request's digest, or ``None`` for a pre-existing run.
+    """Read the creating request's rule-stamped digest, or ``None`` when absent.
 
-    ``None`` means the digest is UNKNOWN, never that the request was empty, so
-    the caller falls back to the narrower comparison instead of refusing a
-    legitimate replay. Two runs reach that state, and both are expected: a run
-    created before digests were persisted, and a run whose id this service
-    minted, since the digest is stored only for a caller-supplied id.
-
-    The second case has a consequence worth naming. A caller can read a
-    server-minted id off the response and later present it as its own, and that
-    request is then compared on the frozen selection alone rather than on the whole
-    body. Closing it is not merely a matter of persisting the digest anyway: the
-    run id is itself a digested field, so the original request - which carried
-    none - and the later one that carries it would never match, and every such
-    replay would be refused instead. Narrowing here is the deliberate trade.
+    Every run records its digest at creation, because a start always carries a
+    caller-supplied run id. ``None`` therefore means the metadata cannot be tied
+    to any request, never that the request was empty.
     """
-    data = _metadata_object(metadata_json)
+    data = decode_json_object(metadata_json)
     digest = data.get(_REQUEST_DIGEST_METADATA_KEY) if data is not None else None
-    return digest if isinstance(digest, str) and digest else None
+    return coerce_nonempty_str(digest)
 
 
 def _replay_identity_or_conflict(
@@ -550,19 +591,15 @@ def _replay_identity_or_conflict(
     rotated bundle here would refuse exactly the lost-acknowledgement recovery
     this path exists to serve. Credential coverage remains enforced at first
     start by admission, which is where an uncovering bundle is refused. The
-    stored fingerprint is compared under the rule it was written with, so a run
-    created before that classification still replays.
+    stored fingerprint is compared under the rule it was written with.
 
     Raises:
-        HTTPException: 409 when the request fingerprint differs.
+        HTTPException: 409 when the request fingerprint differs, or when the
+            run records none to compare against.
     """
-    # ``None`` means the digest is unknown - an older run, or one whose id this
-    # service minted - not that the request was empty; refusing on it would
-    # break a legitimate replay. Such a request passes the identity check
-    # unfingerprinted, which is narrower rather than absent.
     persisted_digest = _persisted_request_digest(metadata_json)
     canonical_body = _canonical_replay_body(metadata_json, body)
-    if persisted_digest is not None and not replay_digest_matches(
+    if persisted_digest is None or not replay_digest_matches(
         persisted_digest, canonical_body
     ):
         raise HTTPException(
@@ -575,71 +612,20 @@ def _replay_identity_or_conflict(
         )
 
 
-def _persist_lease(metadata_json: str | None, binding: _RunLeaseBinding) -> str:
+def _persist_lease(metadata_json: str | None, binding: RunLeaseBinding) -> str:
     """Embed the non-secret lease and exact replay binding into run metadata."""
-    data = _metadata_object(metadata_json) or {}
-    data[_RUN_LEASE_METADATA_KEY] = {
-        "lease_id": binding.lease_id,
-        "reservation_id": binding.reservation_id,
-        "commit_digest": binding.commit_digest,
-    }
+    data = decode_json_object(metadata_json) or {}
+    data[RUN_LEASE_METADATA_KEY] = asdict(binding)
     return json.dumps(data)
 
 
-def _legacy_lease_id(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    if (
-        1 <= len(value) <= 128
-        and value[0].isalnum()
-        and all(
-            character.isascii() and (character.isalnum() or character in {"_", "-"})
-            for character in value
-        )
-    ):
-        return value
-    return None
-
-
-def _persisted_lease_id(metadata_json: str | None) -> str | None:
-    """Read current or legacy non-secret lease metadata from a durable run."""
-    binding = _persisted_lease_binding(metadata_json)
-    if binding is not None:
-        return binding.lease_id
-    data = _metadata_object(metadata_json)
-    lease = data.get(_RUN_LEASE_METADATA_KEY) if data is not None else None
-    lease_object = coerce_object_mapping(lease)
-    if lease_object is None:
-        return None
-    return _legacy_lease_id(lease_object.get("lease_id"))
-
-
-def _persisted_lease_binding(metadata_json: str | None) -> _RunLeaseBinding | None:
-    """Read the exact staged-commit replay binding from durable metadata."""
-    data = _metadata_object(metadata_json)
-    if data is None:
-        return None
-    lease = coerce_object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
-    if lease is None:
-        return None
-    lease_id = _string_field(lease, "lease_id")
-    reservation_id = _string_field(lease, "reservation_id")
-    commit_digest = _string_field(lease, "commit_digest")
-    if not lease_id or not reservation_id or not commit_digest:
-        return None
-    return _RunLeaseBinding(
-        lease_id=lease_id,
-        reservation_id=reservation_id,
-        commit_digest=commit_digest,
-    )
-
-
-def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> Any:
+def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> TeamConfig:
     """Load the preset with the run's workspace context or refuse with a 422.
 
     The v1 verb never silently drafts a run for a missing or unparseable preset:
     a load or validation failure is a client error, returned as a 422 with a safe
-    reason rather than a non-running draft.
+    reason rather than a non-running draft. Each run-start request loads its
+    preset here exactly once; everything downstream reuses that configuration.
     """
 
     from ...team.team_config import load_team_config
@@ -658,7 +644,7 @@ def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> Any:
         ) from exc
 
 
-def _probe_harness(team_config: Any, ws_root: Path | None) -> Any:
+def _probe_harness(team_config: TeamConfig, ws_root: Path | None) -> Any:
     """Probe the agent harness for a document-authoring preset, else ``None``.
 
     A non-authoring preset carries no harness requirement, so it returns ``None``
@@ -686,68 +672,19 @@ def _probe_harness(team_config: Any, ws_root: Path | None) -> Any:
     )
 
 
-_TEAM_SELECTION_METADATA_KEY = "provider_catalog_selection"
-
-
 def _persist_team_selection(
     metadata_json: str | None, frozen: FrozenTeamSelection
 ) -> str:
     """Persist the normalized schema-v1 catalog selection."""
-    data = _metadata_object(metadata_json) or {}
-    data[_TEAM_SELECTION_METADATA_KEY] = frozen.to_record()
+    data = decode_json_object(metadata_json) or {}
+    record_frozen_team_selection(data, frozen)
     return json.dumps(data)
 
 
-def _read_persisted_team_selection(
-    metadata_json: str | None,
-) -> FrozenTeamSelection | None:
-    """Rebuild the modern frozen execution authority without live discovery."""
-    from ...providers.team_selection import frozen_team_selection_from_record
-
-    data = _metadata_object(metadata_json)
-    if data is None or _TEAM_SELECTION_METADATA_KEY not in data:
-        return None
-    return frozen_team_selection_from_record(data[_TEAM_SELECTION_METADATA_KEY])
-
-
 def _modern_frozen_disclosure(
-    frozen: Any,
+    frozen: FrozenTeamSelection | None,
 ) -> FrozenTeamAssignmentSummary | None:
     """Project only validated modern selections onto the public frozen shape."""
-    if not isinstance(frozen, FrozenTeamSelection):
+    if frozen is None:
         return None
     return FrozenTeamAssignmentSummary.model_validate(frozen.disclosure())
-
-
-def _raise_for_dispatch_failure(
-    failure_type: FailureType | None, detail: str | None
-) -> None:
-    """Map a dispatch failure to the same HTTP status the internal route uses."""
-    if failure_type is None:
-        return
-    if failure_type == FailureType.CIRCUIT_OPEN:
-        raise HTTPException(status_code=503, detail=detail or "Circuit breaker open")
-    if failure_type == FailureType.AT_CAPACITY:
-        raise HTTPException(status_code=503, detail="Worker at capacity — try again")
-    if failure_type == FailureType.UNREACHABLE:
-        raise HTTPException(status_code=502, detail="Worker unreachable")
-    if failure_type == FailureType.REJECTED:
-        raise HTTPException(
-            status_code=502, detail=detail or "Worker dispatch rejected"
-        )
-    if failure_type == FailureType.INCOMPATIBLE_STATE:
-        raise HTTPException(
-            status_code=409, detail=detail or "Run execution state is incompatible"
-        )
-
-
-# Import after the shared helpers are defined; decorators register on this router.
-# isort: off
-from ._gateway_run_start import (  # noqa: E402
-    _RunLeaseBinding,
-)
-from . import _gateway_read_endpoints as _read_router_registration  # noqa: E402
-from . import _gateway_action_endpoints as _action_router_registration  # noqa: E402
-
-# isort: on
-del _read_router_registration, _action_router_registration

@@ -1,19 +1,21 @@
 """Tests for deterministic supervisor routing and gating logic."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END
 from langgraph.types import Command
 from pydantic import PrivateAttr
 
+from ....testing import add_test_node, compile_test_graph, new_state_graph
 from ....thread.state import TeamState
 from ...nodes.supervisor import (
+    SupervisorOptions,
     _build_supervisor_messages,
     _evaluate_supervisor_response,
     _phase_for_route,
@@ -21,7 +23,6 @@ from ...nodes.supervisor import (
     create_plan_approval_node,
     create_supervisor_node,
 )
-from .._state_graph_helpers import add_test_node, compile_test_graph
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -96,7 +97,7 @@ def _build_approval_graph(
     worker_phase_map: dict[str, str] | None,
 ) -> Any:
     """Mirror the star wiring: supervisor marks pending, plan_approval interrupts."""
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, "supervisor", supervisor_node)
     add_test_node(
         builder, "plan_approval", create_plan_approval_node(workers, worker_phase_map)
@@ -465,8 +466,10 @@ async def test_supervisor_node_clears_stale_routing_error_on_clean_route() -> No
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-coder"],
-        worker_phase_map={"vaultspec-coder": "exec"},
-        autonomous=True,
+        options=SupervisorOptions(
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=True,
+        ),
     )
     state = _make_state_for_phase_gate(
         vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
@@ -499,8 +502,10 @@ async def test_supervisor_parse_failure_clears_stale_approval_state() -> None:
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-coder"],
-        worker_phase_map={"vaultspec-coder": "exec"},
-        autonomous=True,
+        options=SupervisorOptions(
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=True,
+        ),
     )
     state = _make_state_for_phase_gate(
         vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
@@ -533,8 +538,10 @@ async def test_supervisor_resume_clears_stale_routing_error_after_approval() -> 
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-coder"],
-        worker_phase_map={"vaultspec-coder": "exec"},
-        autonomous=False,
+        options=SupervisorOptions(
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=False,
+        ),
     )
 
     graph = _build_approval_graph(
@@ -581,8 +588,10 @@ async def test_a_plan_verdict_for_another_request_asks_again() -> None:
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-coder"],
-        worker_phase_map={"vaultspec-coder": "exec"},
-        autonomous=False,
+        options=SupervisorOptions(
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=False,
+        ),
     )
     graph = _build_approval_graph(
         node, ["vaultspec-coder"], {"vaultspec-coder": "exec"}
@@ -609,16 +618,125 @@ async def test_a_plan_verdict_for_another_request_asks_again() -> None:
     assert resumed["approval_status"] == "approved"
 
 
+def _build_looping_approval_graph(
+    supervisor_node: Any,
+    workers: list[str],
+    worker_phase_map: dict[str, str] | None,
+) -> Any:
+    """The star wiring with the gate's reroute edge, so a rejection comes back.
+
+    A rejected plan returns to whoever revises it, and on a team with no
+    plan-phase worker that is the supervisor - which asks for approval again.
+    The edge is what lets a test reach the SECOND ask at all.
+    """
+    builder = new_state_graph()
+    add_test_node(builder, "supervisor", supervisor_node)
+    add_test_node(
+        builder, "plan_approval", create_plan_approval_node(workers, worker_phase_map)
+    )
+    builder.set_entry_point("supervisor")
+
+    def _route_on_approval(state: TeamState) -> str:
+        if state.get("approval_status") == "pending":
+            return "plan_approval"
+        return "__end__"
+
+    def _route_after_gate(state: TeamState) -> str:
+        return "supervisor" if state.get("next") == "supervisor" else "__end__"
+
+    builder.add_conditional_edges(
+        "supervisor",
+        _route_on_approval,
+        {"plan_approval": "plan_approval", "__end__": END},
+    )
+    builder.add_conditional_edges(
+        "plan_approval",
+        _route_after_gate,
+        {"supervisor": "supervisor", "__end__": END},
+    )
+    return compile_test_graph(builder, checkpointer=InMemorySaver())
+
+
 @pytest.mark.asyncio
-async def test_supervisor_rejection_clears_consumed_approval_request_id() -> None:
-    """Rejected plan resumes must not leave the consumed approval request active."""
+async def test_a_re_asked_plan_approval_takes_a_fresh_request_id() -> None:
+    """A re-ask of an unchanged plan is a new request, not the answered one.
+
+    The plan, its path and the exec worker are all unchanged when a human
+    rejects a plan and the gate asks again, so naming the request by those
+    alone minted the id the human had just answered. The control journal keys
+    an answer by the request id, so the second ask replayed the first
+    rejection and the plan could never be approved. The ask lineage is part of
+    the name, so each ask takes an id no earlier ask has spent - while a replay
+    of one ask still recomputes its own.
+    """
+    model = _StaticSupervisorModel("vaultspec-coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-coder"],
+        options=SupervisorOptions(
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=False,
+        ),
+    )
+    graph = _build_looping_approval_graph(
+        node, ["vaultspec-coder"], {"vaultspec-coder": "exec"}
+    )
+    config: RunnableConfig = {"configurable": {"thread_id": "plan-approval-reask"}}
+    state = _make_state_for_plan_approval(vault_index={"plan": [".vault/plan/plan.md"]})
+
+    first = await graph.ainvoke(state, config=config)
+    first_ask = first["__interrupt__"][0].value
+    first_id = first_ask["request_id"]
+
+    second = await graph.ainvoke(
+        Command(resume={"verdict": "rejected", "request_id": first_id}), config=config
+    )
+    assert "__interrupt__" in second
+    second_ask = second["__interrupt__"][0].value
+    assert second_ask["request_id"] != first_id
+    # Nothing the old name was derived from changed; only the lineage did.
+    assert second_ask["plan_paths"] == first_ask["plan_paths"]
+    assert second_ask["exec_worker"] == first_ask["exec_worker"]
+
+    # A stray answer parks the SAME ask again, under the id it already
+    # disclosed: a re-ask is minted by an answered verdict, not by a replay.
+    replayed = await graph.ainvoke(
+        Command(resume={"verdict": "rejected", "request_id": "another-plan"}),
+        config=config,
+    )
+    assert replayed["__interrupt__"][0].value["request_id"] == second_ask["request_id"]
+
+    approved = await graph.ainvoke(
+        Command(resume={"verdict": "approved", "request_id": second_ask["request_id"]}),
+        config=config,
+    )
+    assert approved["approval_status"] == "approved"
+    assert approved["next"] == "vaultspec-coder"
+    assert approved["plan_approvals_asked"] == [first_id, second_ask["request_id"]]
+
+
+def _plan_approval_rejection_fixture(
+    thread_id: str = "test-supervisor-reject",
+) -> tuple[Any, "RunnableConfig", TeamState]:
+    """The supervisor graph, config and initial state the plan-approval tests share.
+
+    Each caller mutates the returned *state* with the one field that makes its
+    scenario (a stale request id, a stale current plan, nothing) before
+    invoking *graph*.
+    """
     model = _StaticSupervisorModel("vaultspec-coder")
     node = create_supervisor_node(
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-plan-author", "vaultspec-coder"],
-        worker_phase_map={"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
-        autonomous=False,
+        options=SupervisorOptions(
+            worker_phase_map={
+                "vaultspec-plan-author": "plan",
+                "vaultspec-coder": "exec",
+            },
+            autonomous=False,
+        ),
     )
 
     graph = _build_approval_graph(
@@ -626,11 +744,18 @@ async def test_supervisor_rejection_clears_consumed_approval_request_id() -> Non
         ["vaultspec-plan-author", "vaultspec-coder"],
         {"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
     )
-    config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-reject"}}
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
 
     state = _make_state_for_plan_approval(
         vault_index={"plan": [".vault/plan/plan.md"]},
     )
+    return graph, config, state
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejection_clears_consumed_approval_request_id() -> None:
+    """Rejected plan resumes must not leave the consumed approval request active."""
+    graph, config, state = _plan_approval_rejection_fixture()
     state["approval_request_id"] = "approval-1"
 
     first = await graph.ainvoke(state, config=config)
@@ -656,8 +781,10 @@ async def test_supervisor_clean_finish_clears_active_agent_owner() -> None:
         model=model,
         system_prompt="You are a supervisor.",
         workers=["vaultspec-coder"],
-        worker_phase_map={"vaultspec-coder": "exec"},
-        autonomous=True,
+        options=SupervisorOptions(
+            worker_phase_map={"vaultspec-coder": "exec"},
+            autonomous=True,
+        ),
     )
     state = _make_state_for_phase_gate(
         vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
@@ -674,25 +801,7 @@ async def test_supervisor_clean_finish_clears_active_agent_owner() -> None:
 @pytest.mark.asyncio
 async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
     """Rejected reroutes must replace stale plan summaries with the new owner."""
-    model = _StaticSupervisorModel("vaultspec-coder")
-    node = create_supervisor_node(
-        model=model,
-        system_prompt="You are a supervisor.",
-        workers=["vaultspec-plan-author", "vaultspec-coder"],
-        worker_phase_map={"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
-        autonomous=False,
-    )
-
-    graph = _build_approval_graph(
-        node,
-        ["vaultspec-plan-author", "vaultspec-coder"],
-        {"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
-    )
-    config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-reject"}}
-
-    state = _make_state_for_plan_approval(
-        vault_index={"plan": [".vault/plan/plan.md"]},
-    )
+    graph, config, state = _plan_approval_rejection_fixture()
     state["current_plan"] = [
         {"content": "Route to vaultspec-coder", "status": "in_progress"}
     ]
@@ -719,39 +828,21 @@ async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
 
 @pytest.mark.asyncio
 async def test_plan_approval_node_no_longer_accepts_retired_approved_boolean() -> None:
-    """The plan gate speaks the verdict vocabulary now (D6) — the legacy
+    """The plan gate speaks the verdict vocabulary — the legacy
     ``{"approved": bool}`` resume shape is retired, not bridged. A resume in
     that shape carries no ``"verdict"`` and names no request, so it answers
     nothing: the gate parks again on the same request rather than reading it
     as an approval or spending a revision on it.
     """
-    model = _StaticSupervisorModel("vaultspec-coder")
-    node = create_supervisor_node(
-        model=model,
-        system_prompt="You are a supervisor.",
-        workers=["vaultspec-plan-author", "vaultspec-coder"],
-        worker_phase_map={"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
-        autonomous=False,
-    )
-
-    graph = _build_approval_graph(
-        node,
-        ["vaultspec-plan-author", "vaultspec-coder"],
-        {"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
-    )
-    config: RunnableConfig = {
-        "configurable": {"thread_id": "test-supervisor-retired-boolean-shape"}
-    }
-
-    state = _make_state_for_plan_approval(
-        vault_index={"plan": [".vault/plan/plan.md"]},
+    graph, config, state = _plan_approval_rejection_fixture(
+        thread_id="test-supervisor-retired-boolean-shape"
     )
 
     first = await graph.ainvoke(state, config=config)
     assert "__interrupt__" in first
     request_id = first["__interrupt__"][0].value["request_id"]
 
-    # The retired shape used to mean "approved". It must not any more.
+    # The retired shape no longer means "approved".
     resumed = await graph.ainvoke(Command(resume={"approved": True}), config=config)
     assert "__interrupt__" in resumed
     assert resumed["__interrupt__"][0].value["request_id"] == request_id

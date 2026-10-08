@@ -3,9 +3,9 @@
 Real objects throughout: a real ``StateGraph`` compiled with LangGraph's
 ``InMemorySaver``, suspended by a real ``interrupt()`` call, inspected through
 the real ``aget_state`` checkpointer read, and projected by the real
-``emit_interrupt_events`` into a real ``EventAggregator``. Nothing here stands in
-for production code, so the assertions describe what a dashboard client actually
-receives.
+``emit_interrupt_events`` into a real ``RunEventProducer``. Nothing here stands
+in for production code, so the assertions describe what a dashboard client
+actually receives.
 """
 
 from __future__ import annotations
@@ -15,18 +15,19 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import interrupt
 from typing_extensions import TypedDict
 
+from ...graph.acp_options import option_kind
 from ...graph.enums import PermissionOptionKind
-from ..aggregator import EventAggregator
-from ..transformer import emit_interrupt_events
-from ..types import resolve_acp_option_kind
+from ...graph.events import PermissionRequest
+from ...testing import add_test_node, compile_test_graph, new_state_graph
+from .._interrupt_projection import emit_interrupt_events
+from ..aggregator import RunEventProducer
+from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from ..types import StreamableGraph
 
 
@@ -45,6 +46,7 @@ async def _suspend_on_permission(
         interrupt(
             {
                 "type": "permission_request",
+                "request_id": "perm-edit",
                 "tool_name": "Edit",
                 "tool_input": {"path": "src/a.py"},
                 "options": state["acp_options"],
@@ -52,13 +54,11 @@ async def _suspend_on_permission(
         )
         return state
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _GateState))
-    typed_add_node = cast("Callable[[str, Any], None]", builder.add_node)
-    typed_add_node("gate", gate)
+    builder = new_state_graph(_GateState)
+    add_test_node(builder, "gate", gate)
     builder.add_edge(START, "gate")
     builder.add_edge("gate", END)
-    typed_compile = cast("Callable[..., Any]", builder.compile)
-    graph = typed_compile(checkpointer=InMemorySaver())
+    graph = compile_test_graph(builder, checkpointer=InMemorySaver())
 
     config = RunnableConfig(configurable={"thread_id": thread_id})
     result = await graph.ainvoke({"acp_options": acp_options}, config)
@@ -71,17 +71,16 @@ async def _project(
     thread_id: str, acp_options: list[dict[str, Any]]
 ) -> list[dict[str, str]]:
     """Return the option list a client receives for the given ACP options."""
-    aggregator = EventAggregator()
+    producer = RunEventProducer()
+    relayed = relayed_events(producer)
     graph, config = await _suspend_on_permission(thread_id, acp_options)
 
-    emitted = await emit_interrupt_events(
-        thread_id, "coder", graph, config, aggregator.emitters
-    )
+    emitted = await emit_interrupt_events(thread_id, graph, config, producer._emitters)
     assert emitted
 
-    pending = aggregator.get_pending_permissions(thread_id)
-    assert len(pending) == 1
-    return pending[0].options
+    requests = [s.event for s in relayed if isinstance(s.event, PermissionRequest)]
+    assert len(requests) == 1
+    return requests[0].options
 
 
 @pytest.mark.asyncio
@@ -102,24 +101,33 @@ async def test_both_option_id_spellings_reach_the_client_intact() -> None:
 
 @pytest.mark.asyncio
 async def test_an_option_id_present_but_null_does_not_reach_the_client() -> None:
-    """A present-but-null key defeated the old ``dict.get`` fallback chain.
+    """An option naming no id is dropped, never renamed.
 
     ``opt.get("optionId", ...)`` returns ``None`` when the key exists with a null
     value — the default never fires — so a null id was projected into the frame
-    and offered to the dashboard as something a human could answer with.
+    and offered to the dashboard as something a human could answer with. Naming
+    one for it is worse: the id that was substituted, ``allow_once``, is an
+    APPROVAL, so a malformed refusal reached the operator as a grant. The worker
+    refuses a request with no pickable option, so nothing here needs an invention
+    to stay answerable.
     """
     options = await _project("thread-null", [{"optionId": None, "label": "Broken"}])
 
-    assert options[0]["option_id"] == "allow_once"
-    assert options[0]["option_id"] is not None
+    assert options == []
 
 
 @pytest.mark.asyncio
-async def test_an_options_list_the_agent_omits_falls_back_to_allow_and_deny() -> None:
-    """An agent offering nothing still yields an answerable pair."""
+async def test_an_options_list_the_agent_omits_stays_empty() -> None:
+    """An agent offering nothing is projected as offering nothing.
+
+    The pair this used to invent was persisted as the request's own offer and
+    the human's pick validated against it, so the worker then rejected that pick
+    against the real offer and the run stalled. Such a request is refused at the
+    worker and never parks, so no frame of it reaches here at all.
+    """
     options = await _project("thread-empty", [])
 
-    assert [opt["option_id"] for opt in options] == ["allow_once", "deny_once"]
+    assert options == []
 
 
 @pytest.mark.asyncio
@@ -184,63 +192,21 @@ async def test_an_agent_declaring_no_kind_still_derives_one_from_the_id() -> Non
     assert [str(opt["kind"]) for opt in options] == ["allow_always", "reject_once"]
 
 
-def test_resolve_prefers_a_declared_kind_over_the_id_heuristic() -> None:
-    """The resolver's contract, exercised directly on every input shape."""
+def test_option_kind_prefers_a_declared_kind_over_the_id_heuristic() -> None:
+    """The kind reader's contract, exercised directly on every input shape."""
     # A schema-valid declaration is honoured even when the id disagrees.
-    assert resolve_acp_option_kind("reject_once", "approve") is (
+    assert option_kind({"optionId": "approve", "kind": "reject_once"}) is (
         PermissionOptionKind.REJECT_ONCE
     )
     # A PermissionOptionKind member is as valid as its bare string value.
-    assert resolve_acp_option_kind(PermissionOptionKind.ALLOW_ALWAYS, "nope") is (
-        PermissionOptionKind.ALLOW_ALWAYS
-    )
+    always = {"optionId": "nope", "kind": PermissionOptionKind.ALLOW_ALWAYS}
+    assert option_kind(always) is PermissionOptionKind.ALLOW_ALWAYS
     # Absent, empty, non-string, and unrecognised declarations all fall back.
     for declared in (None, "", "refuse", 7, {"kind": "reject_once"}):
-        assert resolve_acp_option_kind(declared, "deny_always") is (
+        assert option_kind({"optionId": "deny_always", "kind": declared}) is (
             PermissionOptionKind.REJECT_ALWAYS
         )
     # With nothing to go on at either end, the permissive default stands: the
     # heuristic recognises only rejecting spellings, so flipping it would classify
     # every approving id this system mints as a denial.
-    assert resolve_acp_option_kind(None, "approve") is PermissionOptionKind.ALLOW_ONCE
-
-
-def test_relayed_cache_keeps_a_denial_declared_under_an_approving_id() -> None:
-    """The gateway's cache must not re-derive a kind the payload already carries.
-
-    Two paths build a permission option. The transformer, reading a live ACP
-    interrupt, resolves the kind from what the agent DECLARED. The relay path,
-    rebuilding this cache from a worker payload, used to re-derive it from the
-    option id instead - discarding the one field that says whether the option
-    denies.
-
-    That is not a hypothetical divergence. An id is free-form and
-    provider-defined, and nothing obliges an agent to spell a rejecting option
-    "deny" or "reject"; the resolver exists precisely because such an option was
-    once persisted as an approval with no way for a later reader to recover the
-    denial. Driven through the aggregator's real relay seam over a payload whose
-    declared kind and id DISAGREE, which is the only shape that can tell the two
-    derivations apart.
-    """
-    aggregator = EventAggregator()
-
-    aggregator.sync_worker_event(
-        "thread-denial-under-approving-id",
-        {
-            "type": "permission_request",
-            "request_id": "req-1",
-            "description": "Write to the repository",
-            "options": [
-                # Declared a denial, spelled like an acceptance.
-                {"option_id": "approve", "name": "No", "kind": "reject_once"},
-            ],
-        },
-    )
-
-    pending = aggregator.get_pending_permissions("thread-denial-under-approving-id")
-    assert pending, "the request never reached the cache"
-    option = pending[0].options[0]
-    assert option["kind"] == str(PermissionOptionKind.REJECT_ONCE), (
-        "the cache re-derived the kind from the id and turned a declared "
-        f"denial into {option['kind']}"
-    )
+    assert option_kind({"optionId": "approve"}) is PermissionOptionKind.ALLOW_ONCE

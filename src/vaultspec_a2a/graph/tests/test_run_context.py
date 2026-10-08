@@ -1,7 +1,7 @@
 """Run identity reaches graph nodes as LangGraph Runtime context.
 
 The resolver is exercised with real ``Runtime`` objects, and the plumbing is
-proven end to end: a context handed to the aggregator's ingest arrives, intact,
+proven end to end: a context handed to the producer's ingest arrives, intact,
 inside a node of a real compiled graph, and a compiled team graph declares it.
 """
 
@@ -11,19 +11,21 @@ import asyncio
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import pytest
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.runtime import Runtime
 
-from ...streaming.aggregator import EventAggregator
+from ...streaming import GraphInvocation, RunEventProducer
 from ...team.team_config import load_agent_config, load_team_config
-from ..compiler import _add_node, compile_team_graph
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    deterministic_model_assignment,
+    new_state_graph,
+)
+from ..compiler import compile_team_graph
 from ..run_context import RunContext, run_thread_id
-from ._state_graph_helpers import compile_test_graph
-from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
-
     from ...streaming.types import StreamableGraph
     from ...thread.state import TeamState
     from ..protocols import ProviderFactoryProtocol
@@ -64,24 +66,23 @@ async def test_ingest_delivers_the_run_context_to_graph_nodes() -> None:
         received.append(runtime.context)
         return {"seen": "yes"}
 
-    builder: StateGraph[Any, RunContext, Any, Any] = StateGraph(
-        cast("Any", _Seen), context_schema=RunContext
-    )
-    _add_node(builder, "record", record)
+    builder = new_state_graph(_Seen, context_schema=RunContext)
+    add_test_node(builder, "record", record)
     builder.add_edge(START, "record")
     builder.add_edge("record", END)
     graph = cast("StreamableGraph", compile_test_graph(builder))
 
-    aggregator = EventAggregator()
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    producer = RunEventProducer()
     outcome = await asyncio.wait_for(
-        ingest(
-            thread_id="ctx-thread",
-            agent_id="supervisor",
-            graph=graph,
-            graph_input={"seen": ""},
-            config={"configurable": {"thread_id": "ctx-thread"}},
-            context=_CONTEXT,
+        producer.ingest(
+            "ctx-thread",
+            "supervisor",
+            graph,
+            GraphInvocation(
+                graph_input={"seen": ""},
+                config={"configurable": {"thread_id": "ctx-thread"}},
+                context=_CONTEXT,
+            ),
         ),
         timeout=10.0,
     )

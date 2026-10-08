@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from ...control.config import Settings
+from ...testing import inherited_environment
 from ._env_example import (
     DOCUMENTED_BUT_NOT_READ,
     INTEGRATION_EXAMPLE,
@@ -41,6 +41,7 @@ from ._env_example import (
     declared_names,
     documented,
     harness_section,
+    service_fields,
     service_section,
     setting_field_by_name,
 )
@@ -53,11 +54,8 @@ if TYPE_CHECKING:
 #: why. Every other line must show the default, so a changed default and a
 #: stale example cannot pass each other silently.
 _DOCUMENTED_OVERRIDES = {
-    "VAULTSPEC_A2A_DATABASE_URL": "a relocated SQLite store, and the Postgres profile",
-    "VAULTSPEC_A2A_DATABASE_BACKEND": "the Postgres profile",
-    "VAULTSPEC_A2A_CHECKPOINT_BACKEND": "the Postgres profile",
-    "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": "the Postgres profile",
-    "VAULTSPEC_A2A_MOCK_API_BASE": "the integration profile's VidaiMock address",
+    "VAULTSPEC_A2A_DATABASE_URL": "a relocated SQLite store",
+    "VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL": "a relocated SQLite checkpoint store",
     "VAULTSPEC_A2A_ENGINE_SERVE_CMD": "unset, the launcher runs this same template",
     "OTEL_SERVICE_VERSION": "a sample service identity",
     "OTEL_SDK_DISABLED": "an opt-in switch shown switched on",
@@ -140,7 +138,7 @@ def _names_read_by_the_code() -> set[str]:
 def test_every_setting_is_read_by_the_code() -> None:
     """A declared setting nothing reads is a knob that turns nothing."""
     read = _names_read_by_the_code()
-    unread = sorted(field for field in Settings.model_fields if field not in read)
+    unread = sorted(field for field in service_fields() if field not in read)
 
     assert not unread, (
         f"settings no shipped code reads: {unread}. Remove each, or wire the "
@@ -164,8 +162,8 @@ def _profiles() -> list[list[Assignment]]:
 
     The uncommented lines are what a copied file sets. Each run of adjacent
     commented lines is a block an operator uncomments together, loaded on top
-    of the uncommented lines it would sit beside - the way the Postgres block
-    replaces the SQLite backends.
+    of the uncommented lines it would sit beside - the way a relocated store
+    replaces the default one.
     """
     settings_names = setting_field_by_name()
     lines = [
@@ -180,11 +178,11 @@ def _load_profiles(
 ) -> list[dict[str, object]]:
     """Load *profiles* in a child whose environment sets no setting at all."""
     unset = declared_names()
-    environment = {
-        name: value
-        for name, value in os.environ.items()
-        if name not in unset and not name.startswith("VAULTSPEC_")
-    }
+    environment = inherited_environment(
+        dict.fromkeys(
+            [*unset, *(name for name in os.environ if name.startswith("VAULTSPEC_"))]
+        )
+    )
     completed = subprocess.run(
         [sys.executable, "-m", "vaultspec_a2a.control.tests._example_profile_loader"],
         input=json.dumps({"profiles": profiles}),

@@ -25,19 +25,17 @@ under rather than from a number typed on an idle machine.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import os
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
-import psutil
-
-from .progress import ProgressDeadline, ProgressStalledError
+from ..utils import ProcessContainment, reap_contained, spawn_contained
+from ..utils._process_tree import tree_cpu_usage
+from .progress import ProgressDeadline, ProgressStalledError, wait_for
 from .session_root import session_scratch_dir
 
 if TYPE_CHECKING:
@@ -81,21 +79,11 @@ def child_tree_progress(pid: int) -> tuple[float, int]:
     vanished process reports ``(0.0, 0)`` rather than raising: the caller's own
     exit observation, not this, decides that a wait is over.
     """
-    try:
-        root = psutil.Process(pid)
-        members = [root, *root.children(recursive=True)]
-    except (psutil.Error, OSError):
+    usage = tree_cpu_usage(pid)
+    if usage is None:
         return (0.0, 0)
-    total = 0.0
-    live = 0
-    for member in members:
-        try:
-            times = member.cpu_times()
-        except (psutil.Error, OSError):
-            continue
-        total += times.user + times.system
-        live += 1
-    return (round(total, 2), live)
+    cpu_s, live = usage
+    return (round(cpu_s, 2), live)
 
 
 def measured_child_startup_s() -> float:
@@ -109,11 +97,22 @@ def measured_child_startup_s() -> float:
     """
     global _measured_startup_s
     if _measured_startup_s is None:
+        command = [sys.executable, "-c", _STARTUP_PROBE]
+        containment = ProcessContainment.create()
         started = time.monotonic()
-        subprocess.run(
-            [sys.executable, "-c", _STARTUP_PROBE], check=True, capture_output=True
+        probe = spawn_contained(
+            command, containment, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-        _measured_startup_s = max(time.monotonic() - started, 0.01)
+        try:
+            stdout, stderr = probe.communicate()
+            elapsed = time.monotonic() - started
+        finally:
+            reap_contained(probe, containment)
+        if probe.returncode != 0:
+            raise subprocess.CalledProcessError(
+                probe.returncode, command, stdout, stderr
+            )
+        _measured_startup_s = max(elapsed, 0.01)
     return _measured_startup_s
 
 
@@ -139,17 +138,20 @@ class ChildWatch(TypedDict, total=False):
 
 def await_child(
     process: subprocess.Popen[bytes],
+    containment: ProcessContainment,
     *,
     what: str,
     **watch: Unpack[ChildWatch],
 ) -> int:
     """Wait for *process* to exit, failing on a stall and never on slowness.
 
-    *what* names the child in a failure; :class:`ChildWatch` documents what
-    else the wait can be told to watch. A wedged child is REAPED as a tree
-    before :class:`~.progress.ProgressStalledError` is raised, so a failed
-    wait never leaves a process holding its ports, its handles, and its share
-    of the machine.
+    *process* was started inside *containment* by
+    :func:`~vaultspec_a2a.utils.spawn_contained`. *what* names the child in a
+    failure; :class:`ChildWatch` documents what else the wait can be told to
+    watch. A wedged child is REAPED through its containment, tree and all,
+    before :class:`~.progress.ProgressStalledError` is raised, so a failed wait
+    never leaves a process holding its ports, its handles, and its share of the
+    machine.
     """
     fingerprint = watch.get("fingerprint")
     diagnostic = watch.get("diagnostic")
@@ -158,51 +160,38 @@ def await_child(
         idle_window_s=watch.get("idle_window_s", DEFAULT_IDLE_WINDOW_S)
     )
     started = time.monotonic()
-    observed: object = None
-    while True:
+
+    def _exit_status() -> int | None:
         returncode = process.poll()
-        if returncode is not None:
-            return returncode
-        current = (
+        if (
+            returncode is None
+            and ceiling_s is not None
+            and time.monotonic() - started > ceiling_s
+        ):
+            msg = f"still running after its {ceiling_s:.0f}s ceiling"
+            raise ProgressStalledError(msg)
+        return returncode
+
+    def _observed() -> object:
+        return (
             child_tree_progress(process.pid),
             None if fingerprint is None else fingerprint(),
         )
-        if current != observed:
-            observed = current
-            deadline.touch()
-        try:
-            deadline.check()
-            if ceiling_s is not None and time.monotonic() - started > ceiling_s:
-                msg = f"still running after its {ceiling_s:.0f}s ceiling"
-                raise ProgressStalledError(msg)
-        except ProgressStalledError as stalled:
-            _reap_tree(process.pid)
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                process.wait(timeout=5.0)
-            context = "" if diagnostic is None else f"\n{diagnostic()}"
-            raise ProgressStalledError(
-                f"{what} (pid {process.pid}) made no progress: {stalled}{context}"
-            ) from stalled
-        time.sleep(_POLL_INTERVAL_S)
-
-
-def _reap_tree(pid: int) -> None:
-    """Kill *pid*'s tree through the shared primitive, from any calling context.
-
-    The primitive is asynchronous. Called from a test that is itself running an
-    event loop, ``asyncio.run`` would refuse and leave the wedged tree alive, so
-    the reap then runs on a thread with a loop of its own.
-    """
-    from ..utils import kill_pid_tree_async
 
     try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        asyncio.run(kill_pid_tree_async(pid))
-        return
-    reaper = threading.Thread(target=lambda: asyncio.run(kill_pid_tree_async(pid)))
-    reaper.start()
-    reaper.join()
+        return wait_for(
+            _exit_status,
+            deadline=deadline,
+            fingerprint=_observed,
+            interval_s=_POLL_INTERVAL_S,
+        )
+    except ProgressStalledError as stalled:
+        reaped = reap_contained(process, containment)
+        context = "" if diagnostic is None else f"\n{diagnostic()}"
+        unreaped = "" if reaped else " (its contained tree was not reaped)"
+        raise ProgressStalledError(
+            f"{what} (pid {process.pid}) made no progress: {stalled}{unreaped}{context}"
+        ) from stalled
 
 
 def file_size_fingerprint(*paths: os.PathLike[str] | str) -> Callable[[], object]:
@@ -248,15 +237,19 @@ def run_child(
     child that fills a pipe buffer would wedge behind a reader this wait does
     not run, and a file's growing size is the caller-observable progress signal
     the wait reads. The files land in this session's own scratch seat inside the
-    worktree, never in the system temporary directory.
+    worktree, never in the system temporary directory. The child runs inside its
+    own containment, whose whole tree is reaped once the child exits, so nothing
+    it left running outlives the call.
     """
     with (
         _capture_dir() as capture,
         tempfile.TemporaryFile(dir=capture) as out,
         tempfile.TemporaryFile(dir=capture) as err,
     ):
-        process = subprocess.Popen(
+        containment = ProcessContainment.create()
+        process = spawn_contained(
             command,
+            containment,
             stdout=out,
             stderr=err,
             env=None if env is None else dict(env),
@@ -264,11 +257,21 @@ def run_child(
         )
 
         def _written() -> object:
-            return (os.fstat(out.fileno()).st_size, os.fstat(err.fileno()).st_size)
+            return (
+                os.fstat(out.fileno()).st_size,
+                os.fstat(err.fileno()).st_size,
+            )
 
-        returncode = await_child(
-            process, what=what, idle_window_s=idle_window_s, fingerprint=_written
-        )
+        try:
+            returncode = await_child(
+                process,
+                containment,
+                what=what,
+                idle_window_s=idle_window_s,
+                fingerprint=_written,
+            )
+        finally:
+            reap_contained(process, containment)
         out.seek(0)
         err.seek(0)
         return subprocess.CompletedProcess(

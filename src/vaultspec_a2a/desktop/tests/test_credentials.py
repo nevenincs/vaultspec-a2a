@@ -25,7 +25,7 @@ from ...desktop.credentials import (
     load_attach_credential,
     load_ownership_capability,
 )
-from ...testing.links import plant_link_to_file
+from ...testing import plant_link_to_file
 
 _VALID_TOKEN = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
 
@@ -218,11 +218,11 @@ def test_the_minted_secret_is_published_restricted_and_byte_exact(
 def test_a_failed_mint_leaves_no_temporary_secret_behind(tmp_path: Path) -> None:
     """A mint that cannot publish must not strand a live secret in a temporary.
 
-    The cleanup used to cover only the harden-and-rename step, so a write or
-    fsync failure left a readable secret sitting beside the credential file, and
-    an interruption that was not an ``OSError`` leaked one from the rename step
-    too. A directory standing where the credential belongs makes the rename fail
-    for real; nothing may survive in the credentials directory afterwards.
+    The cleanup covers every step of the publication - the write, the fsync and
+    the harden-and-rename - and any interruption, not only an ``OSError``, so no
+    readable secret is left beside the credential file. A directory standing
+    where the credential belongs makes the rename fail for real; nothing may
+    survive in the credentials directory afterwards.
     """
     credentials_dir = tmp_path / "credentials"
     credentials_dir.mkdir()

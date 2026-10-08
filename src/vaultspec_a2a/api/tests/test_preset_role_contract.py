@@ -26,13 +26,14 @@ from ...control.run_start_policy import (
     required_role_ids,
 )
 from ...team.team_config import discover_team_preset_ids, load_team_config
+from ...testing import role_tokens
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.errors import ConfigError
-from ..routes._gateway_action_endpoints import _summarize_preset
+from ..routes._gateway_action_endpoints import summarize_preset
 
 
 def _real_preset_ids() -> list[str]:
-    """Every bundled preset that loads, mocks included - they dispatch too."""
+    """Every bundled preset that loads."""
     ids: list[str] = []
     for preset_id in sorted(discover_team_preset_ids()):
         try:
@@ -50,7 +51,7 @@ def test_discovery_advertises_exactly_the_roles_policy_requires(preset_id: str) 
     """Red if the served list and the enforced list are computed separately."""
     tc = load_team_config(preset_id)
 
-    summary = _summarize_preset(preset_id, None)
+    summary = summarize_preset(preset_id, None)
 
     assert list(summary.required_roles) == required_role_ids(tc), (
         f"preset {preset_id!r} advertises required_roles that differ from the "
@@ -71,16 +72,20 @@ def test_a_bundle_minted_from_discovery_is_never_refused_for_missing_roles(
     harness) and never a role the caller could not have known to mint.
     """
     tc = load_team_config(preset_id)
-    summary = _summarize_preset(preset_id, None)
+    summary = summarize_preset(preset_id, None)
 
     bundle = ActorTokenBundle(
-        tokens={role: f"tok-{role}" for role in summary.required_roles},
+        tokens=role_tokens(summary.required_roles),
         engine_bearer="bearer",
     )
     verdict = evaluate_run_start_eligibility(
         tc,
         feature_tag="role-contract",
         actor_tokens=bundle,
+        # A subscriber is declared present for the same reason a feature tag is:
+        # the subject is the TOKEN gate, and the gateway's own conditions would
+        # answer an authoring preset before it is ever reached.
+        verdict_subscriber_running=True,
         harness=None,
     )
 

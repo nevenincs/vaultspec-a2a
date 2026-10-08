@@ -14,46 +14,31 @@ exactly once however many passes run.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import httpx
 import pytest
-import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
-from ...database import get_thread
-from ...database.models import RecoveryAttemptModel
-from ...database.reconciliation import reconcile_threads_on_startup
+from ...database import RecoveryAttemptModel, get_thread
+from ...testing import adopted_spawner
 from ...thread.enums import ControlActionType, RepairStatus, ThreadStatus
 from ..circuit_breaker import WorkerCircuitBreaker
 from ..direct_control_recovery import redrive_direct_control_actions
+from ..reconciliation import reconcile_threads_on_startup
 from ..recovery_authority import (
     CONTINUATION_PROMOTED,
     RecoveryRequest,
     RecoveryTrigger,
     reconcile_run_checkpoint,
 )
-from ..worker_management import LazyWorkerSpawner
 from ._continuation import (
     RUN,
     BusyRun,
-    busy_run_state,
     finish_turn,
     journal_action,
     queue_continuation,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
-
-
-@pytest_asyncio.fixture
-async def busy_run(tmp_path: Path) -> AsyncIterator[BusyRun]:
-    async with busy_run_state(tmp_path) as state:
-        yield state
 
 
 async def _promote(run: BusyRun) -> None:
@@ -100,9 +85,7 @@ async def _restart_recovery(run: BusyRun, passes: int = 1) -> list[dict[str, obj
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=3, recovery_timeout=30
                 ),
-                worker_spawner=LazyWorkerSpawner(
-                    worker_url="http://worker", worker_port=8001, auto_spawn=False
-                ),
+                worker_spawner=adopted_spawner(),
                 trace_headers=None,
             )
     return received

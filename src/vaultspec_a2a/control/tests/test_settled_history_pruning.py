@@ -9,53 +9,42 @@ checkpoint recovery may still need.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-import pytest_asyncio
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
+from langgraph.graph import END, START
+
+from ...database import ThreadModel, create_thread
+from ...graph.nodes._worker_permissions import (
+    permission_callback_for,
+    recorded_permission_answers,
+)
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    new_state_graph,
+    seed_completed_authority,
+    seed_create_action,
+)
+from ...tests._checkpoint_seeding import real_checkpoint
+from ...thread import RunWriteAuthority
+from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.state import TeamState
+from ..event_handlers import (
+    CheckpointPruneRegistry,
+    RelayServices,
+    _handle_terminal_event,
 )
 
-from ...conftest import materialize_schema
-from ...database.models import ThreadModel
-from ...tests._checkpoint_seeding import real_checkpoint
-from ...thread.enums import ThreadStatus
-from ..event_handlers import CheckpointPruneRegistry, _handle_terminal_event
-from .test_terminal_sequence_capture import _seed_completed_authority
-
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping
+    from collections.abc import Mapping
+    from pathlib import Path
 
-
-@pytest_asyncio.fixture
-async def engine(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncEngine]:
-    db_file = tmp_path_factory.mktemp("settled-history-db") / "test.db"
-    materialize_schema(Path(db_file))
-    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest_asyncio.fixture
-async def checkpointer(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncSqliteSaver]:
-    db_file = tmp_path_factory.mktemp("settled-history-checkpoints") / "cp.db"
-    async with AsyncSqliteSaver.from_conn_string(str(db_file)) as cp:
-        yield cp
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+    )
 
 
 async def _put_bare_checkpoint(
@@ -97,7 +86,7 @@ async def test_a_proven_completion_prunes_the_superseded_checkpoints(
     session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     async with session_factory() as session:
-        thread_id, _receipt = await _seed_completed_authority(
+        thread_id, _receipt = await seed_completed_authority(
             session, checkpointer, title="settled history"
         )
     # Sorts beneath the seeded completion, as an earlier superstep's id would.
@@ -111,9 +100,11 @@ async def test_a_proven_completion_prunes_the_superseded_checkpoints(
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-        prune_registry=prunes,
+        services=RelayServices(
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+            prune_registry=prunes,
+        ),
     )
     # The prune runs behind the relay rather than inside it; shutdown waits for
     # it the same way before closing the store.
@@ -128,7 +119,7 @@ async def test_an_unproven_completion_keeps_the_whole_history(
     session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
 ) -> None:
     async with session_factory() as session:
-        thread_id, _receipt = await _seed_completed_authority(
+        thread_id, _receipt = await seed_completed_authority(
             session, checkpointer, title="unproven history"
         )
     # A newer checkpoint carrying no completion receipt is what the proof reads,
@@ -142,11 +133,111 @@ async def test_an_unproven_completion_keeps_the_whole_history(
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-        prune_registry=prunes,
+        services=RelayServices(
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+            prune_registry=prunes,
+        ),
     )
     await prunes.settle()
 
     assert await _status(session_factory, thread_id) != ThreadStatus.COMPLETED
     assert await _checkpoint_ids(checkpointer, thread_id) == history
+
+
+# ---------------------------------------------------------------------------
+# R4 T7: a parked interrupt survives a stray completed terminal.
+# ---------------------------------------------------------------------------
+
+#: What a provider offers for one tool call: a once-only approval and refusal.
+_TOOL_OPTIONS: list[dict[str, Any]] = [
+    {"optionId": "allow_once", "name": "Allow once", "kind": "allow_once"},
+    {"optionId": "reject_once", "name": "Reject once", "kind": "reject_once"},
+]
+
+
+def _asking(
+    tool_name: str, tool_input: dict[str, Any], offered: list[dict[str, Any]]
+) -> Any:
+    """A node that asks for one tool call through the worker's own callback.
+
+    The callback raises the real ``GraphInterrupt`` LangGraph parks a task on,
+    so the checkpoint this leaves holds a genuine unanswered interrupt write -
+    not a stand-in for one.
+    """
+
+    async def ask(state: TeamState) -> dict[str, Any]:
+        callback = permission_callback_for(recorded_permission_answers(state))
+        await callback(tool_name, tool_input, offered)
+        return {}
+
+    return ask
+
+
+def _parked_interrupt_graph(checkpointer: AsyncSqliteSaver) -> Any:
+    """A one-node graph that parks on a tool permission every time it runs."""
+    builder = new_state_graph(TeamState)
+    add_test_node(builder, "ask", _asking("bash", {"command": "ls"}, _TOOL_OPTIONS))
+    builder.add_edge(START, "ask")
+    builder.add_edge("ask", END)
+    return compile_test_graph(
+        builder, checkpointer=checkpointer, name="parked-interrupt-probe"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_stray_completed_terminal_does_not_settle_a_parked_run(
+    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """A run parked on an unanswered interrupt ignores a stray completion terminal.
+
+    Completion is proven off the checkpoint, never taken on the event's own
+    say-so. A checkpoint still holding an unanswered interrupt write classifies
+    as ``checkpoint_interrupted``, never ``checkpoint_completed`` (R4 T7), so the
+    stray terminal below is refused: the run keeps its parked status, and its
+    checkpoint - carrying the interrupt it is parked on - is never pruned.
+    """
+    thread_id = "parked-interrupt-run"
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            thread_id=thread_id,
+            status=ThreadStatus.INPUT_REQUIRED,
+            write_authority=RunWriteAuthority(
+                0, 1, ControlActionType.INGEST, "accepted"
+            ),
+        )
+        receipt = await seed_create_action(session, thread_id, workspace=tmp_path)
+        await session.commit()
+
+    config = cast("Any", {"configurable": {"thread_id": thread_id}})
+    await _parked_interrupt_graph(checkpointer).ainvoke(
+        {
+            "active_graph_action_receipt": receipt.model_dump(mode="json"),
+            "graph_action_receipts": {
+                receipt.dispatch_id: receipt.model_dump(mode="json")
+            },
+        },
+        config,
+    )
+    parked = await checkpointer.aget_tuple(config)
+    assert parked is not None
+    assert parked.pending_writes, "the ask node must leave an unanswered interrupt"
+    history_before = await _checkpoint_ids(checkpointer, thread_id)
+
+    prunes = CheckpointPruneRegistry()
+    await _handle_terminal_event(
+        thread_id,
+        {"event_type": "thread_terminal", "status": "completed"},
+        services=RelayServices(
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+            prune_registry=prunes,
+        ),
+    )
+    await prunes.settle()
+
+    assert await _status(session_factory, thread_id) == ThreadStatus.INPUT_REQUIRED
+    assert await _checkpoint_ids(checkpointer, thread_id) == history_before

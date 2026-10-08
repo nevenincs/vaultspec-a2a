@@ -19,7 +19,6 @@ write-backs or lose one to the other.
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import json
 import logging
 import os
@@ -30,6 +29,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..desktop._filesystem_authority import confined_file_descriptor
+from ..desktop._platform_acl import harden_credential_path
+from ..thread import sha256_hex
 from ..utils.atomic_write import atomic_write_text
 from ..utils.file_lock import held_exclusive_lock
 
@@ -93,16 +94,6 @@ def _home_key(home: Path) -> Path:
 def forget_run_credential(run_home: Path) -> None:
     """Release refresh authority once the owning run has finished cleanup."""
     _seeded_homes.pop(_home_key(run_home), None)
-
-
-def _digest(payload: bytes) -> str:
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _restrict_file(path: Path) -> None:
-    """Best-effort owner-only permissions on a credential file; never raises."""
-    with contextlib.suppress(OSError):
-        path.chmod(0o600)
 
 
 def codex_credential_store_mode(base_home: Path) -> str:
@@ -202,13 +193,12 @@ def seed_run_credential(base_home: Path, run_home: Path) -> CodexAuthSeed | None
         os.fdopen(descriptor, "wb", closefd=False) as copied,
     ):
         copied.write(payload)
-    # Defensive: pin the credential copy to owner-only regardless of the
-    # source's mode (POSIX-effective; a no-op on Windows, where the temp tree is
-    # already user-scoped).
-    _restrict_file(destination)
+    # Pin the credential copy to owner-only regardless of the source's mode:
+    # POSIX mode bits, or a private access-control list on Windows.
+    harden_credential_path(destination)
     seed = CodexAuthSeed(
         source=source,
-        digest=_digest(payload),
+        digest=sha256_hex(payload),
         last_refresh=(
             stamp.isoformat() if (stamp := _last_refresh(payload)) is not None else None
         ),
@@ -305,7 +295,7 @@ def _refreshed_credential(
     if len(payload) > _MAX_RETURNED_AUTH_BYTES:
         logger.error("The returned Codex credential exceeds its size limit")
         return None
-    if _digest(payload) == registered.seed.digest:
+    if sha256_hex(payload) == registered.seed.digest:
         return None
     try:
         text = payload.decode("utf-8")
@@ -334,7 +324,7 @@ def _source_overtook_the_run(seed: CodexAuthSeed, payload: bytes) -> bool:
         current = seed.source.read_bytes()
     except OSError:
         return False
-    if _digest(current) == seed.digest:
+    if sha256_hex(current) == seed.digest:
         return False
     current_stamp = _last_refresh(current)
     run_stamp = _last_refresh(payload)

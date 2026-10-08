@@ -1,9 +1,9 @@
 """Tests for src/vaultspec_a2a/api/internal.py -- internal IPC router endpoints.
 
-Validates the /internal/health, /internal/events, and /internal/heartbeat
+Validates the /internal/health, /internal/events/batch, and /internal/heartbeat
 HTTP endpoints using a real FastAPI test client with httpx.ASGITransport.
 
-Uses a real EventAggregator as the relay target (no fakes or mocks).
+Uses a real RelayHub as the relay target (no fakes or mocks).
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import pathlib
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -21,34 +20,27 @@ from sqlalchemy import select
 from starlette.testclient import TestClient
 
 from ...control._worker_health import WorkerLiveness
-from ...control.accepted_input import freeze_accepted_input
-from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.execution_authority import resolve_execution_authority
-from ...control.tests._catalog_authority import current_execution_metadata
 from ...database import (
-    create_control_action,
+    ThreadExecutionStateModel,
     create_thread,
     get_permission_request,
     get_thread_execution_state,
     set_thread_repair_state,
 )
-from ...database.models import ThreadExecutionStateModel
-from ...ipc.schemas import DispatchRequest
-from ...providers import ProviderCondition
-from ...streaming.aggregator import EventAggregator
-from ...team.team_config import load_team_config
-from ...tests._checkpoint_seeding import real_checkpoint
+from ...graph.enums import AgentLifecycleState, ProviderCondition
+from ...streaming import RelayHub
+from ...testing import (
+    park_plan_approval,
+    record_completed_checkpoint,
+    seed_accepted_thread,
+)
 from ...tests._write_authority import make_test_write_authority
-from ...thread.action_receipts import GraphCompletionReceipt
-from ...thread.executable_graph import freeze_graph_definition
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
 from ...worker.ipc import WorkerBridge
 from ..internal import internal_router
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-    from sqlalchemy.ext.asyncio import AsyncSession
 
     from ...thread.action_receipts import GraphActionReceipt
     from .conftest import SessionFactory
@@ -56,85 +48,6 @@ if TYPE_CHECKING:
 # Every dispatch names an active project, as a real one does. This package's own
 # directory is real, absolute, and present on either platform.
 _WORKSPACE = str(pathlib.Path(__file__).resolve().parent)
-
-
-async def _seed_accepted_thread(
-    session: AsyncSession,
-    *,
-    thread_id: str | None = None,
-    status: str = "running",
-) -> tuple[str, GraphActionReceipt]:
-    """Seed one current accepted graph action for relay-contract tests."""
-    workspace = pathlib.Path(_WORKSPACE)
-    metadata = current_execution_metadata(workspace)
-    authority = make_test_write_authority()
-    thread = await create_thread(
-        session,
-        write_authority=authority,
-        thread_id=thread_id,
-        status=status,
-        team_preset="mock-success-single",
-        metadata=metadata,
-    )
-    dispatch = DispatchRequest(
-        action="ingest",
-        thread_id=thread.id,
-        content="relay fixture",
-        workspace_root=_WORKSPACE,
-        recursion_limit=25,
-        team_preset="mock-success-single",
-        graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=workspace),
-            workspace_root=workspace,
-        ),
-        model_assignment=resolve_execution_authority(metadata).model_assignment,
-    )
-    await create_control_action(
-        session,
-        thread_id=thread.id,
-        action_type=authority.action_type,
-        idempotency_key=f"thread-create:{thread.id}",
-        dispatch_id=authority.action_receipt_id,
-        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-        payload=freeze_accepted_input(dispatch, intent={"content": "relay fixture"}),
-    )
-    receipt = await prepare_graph_action_receipt(
-        session, thread_id=thread.id, dispatch_id=authority.action_receipt_id
-    )
-    assert receipt is not None
-    return thread.id, receipt
-
-
-async def _record_completed_checkpoint(
-    checkpointer: AsyncSqliteSaver, receipt: GraphActionReceipt
-) -> None:
-    config: RunnableConfig = {
-        "configurable": {"thread_id": receipt.thread_id, "checkpoint_ns": ""}
-    }
-    checkpoint = await real_checkpoint()
-    checkpoint["id"] = f"cp-{receipt.thread_id}"
-    checkpoint["channel_values"] = {
-        "active_graph_action_receipt": receipt.model_dump(mode="json"),
-        "graph_action_receipts": {receipt.dispatch_id: receipt.model_dump(mode="json")},
-        "graph_completion_receipts": {
-            receipt.dispatch_id: GraphCompletionReceipt(
-                schema_version="graph-completion-v1",
-                action=receipt,
-                outcome="completed",
-            ).model_dump(mode="json")
-        },
-    }
-    checkpoint["channel_versions"] = {
-        "active_graph_action_receipt": checkpointer.get_next_version(None, None),
-        "graph_action_receipts": checkpointer.get_next_version(None, None),
-        "graph_completion_receipts": checkpointer.get_next_version(None, None),
-    }
-    await checkpointer.aput(
-        config,
-        checkpoint,
-        {"source": "loop", "step": 1, "parents": {}},
-        checkpoint["channel_versions"],
-    )
 
 
 def _failed_payload(
@@ -164,16 +77,18 @@ def _failed_payload(
 
 def _make_test_app(
     *,
-    with_aggregator: bool = False,
+    with_relay_hub: bool = False,
     session_factory: SessionFactory | None = None,
 ) -> FastAPI:
     """Create a minimal FastAPI app with the internal router and wired state.
 
-    When ``with_aggregator`` is True, a real ``EventAggregator`` - the relay
+    When ``with_relay_hub`` is True, a real ``RelayHub`` - the relay
     target the ingest paths write to - is attached (no fakes).
     """
     app = FastAPI()
     app.include_router(internal_router)
+    # No token seated, which the development environment reads as no authentication.
+    app.state.internal_token = None
 
     # Seat the liveness record the way the gateway lifespan does, so these apps
     # exercise the same seam production writes through.
@@ -186,12 +101,45 @@ def _make_test_app(
     # durable write must be skipped, so the absence has to be DECLARED.
     app.state.db_session_factory = session_factory
 
-    app.state.aggregator = None
+    app.state.relay_hub = None
 
-    if with_aggregator:
-        app.state.aggregator = EventAggregator()
+    if with_relay_hub:
+        app.state.relay_hub = RelayHub()
 
     return app
+
+
+def _batch_of(thread_id: str, payload: dict[str, object]) -> dict[str, object]:
+    """Wrap one worker event in the body the batch ingress route accepts."""
+    return {"events": [{"thread_id": thread_id, "payload": payload}]}
+
+
+def _execution_state_projection_payload(
+    checkpoint_id: str, *, parent_checkpoint_id: str
+) -> dict[str, object]:
+    """A healthy execution-state projection naming one running supervisor task."""
+    return {
+        "type": "execution_state_projection",
+        "checkpoint_id": checkpoint_id,
+        "parent_checkpoint_id": parent_checkpoint_id,
+        "next_nodes": ["supervisor"],
+        "interrupt_count": 1,
+        "task_count": 1,
+        "tasks": [
+            {
+                "task_id": "task-1",
+                "name": "supervisor",
+                "path": ["supervisor"],
+                "has_error": False,
+                "error_type": None,
+                "interrupt_ids": ["interrupt-1"],
+                "interrupt_types": ["permission_request"],
+                "has_nested_state": False,
+                "has_result": False,
+            }
+        ],
+        "degraded_reasons": [],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -233,8 +181,8 @@ async def test_dispatch_application_receipt_is_not_broadcast_to_progress(
     session_factory: SessionFactory,
 ) -> None:
     """The private stable dispatch identity must stop at the gateway DB edge."""
-    app = _make_test_app(with_aggregator=True, session_factory=session_factory)
-    aggregator = app.state.aggregator
+    app = _make_test_app(with_relay_hub=True, session_factory=session_factory)
+    aggregator = app.state.relay_hub
     queue = aggregator.add_subscriber("receipt-observer")
     aggregator.subscribe("receipt-observer", ["receipt-thread"])
 
@@ -251,15 +199,18 @@ async def test_dispatch_application_receipt_is_not_broadcast_to_progress(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         response = await client.post(
-            "/internal/events",
+            "/internal/events/batch",
             json={
-                "type": "event",
-                "thread_id": "receipt-thread",
-                "payload": {
-                    "type": "dispatch_applied",
-                    "dispatch_id": "private-stable-id",
-                    "action": "ingest",
-                },
+                "events": [
+                    {
+                        "thread_id": "receipt-thread",
+                        "payload": {
+                            "type": "dispatch_applied",
+                            "dispatch_id": "private-stable-id",
+                            "action": "ingest",
+                        },
+                    }
+                ]
             },
         )
 
@@ -374,95 +325,30 @@ class TestInternalHeartbeat:
 
 
 # ---------------------------------------------------------------------------
-# /internal/events
+# /internal/events/batch
 # ---------------------------------------------------------------------------
 
 
 class TestInternalEvents:
-    """Verify the /internal/events endpoint.
+    """Verify the /internal/events/batch endpoint.
 
-    When the relay target is present, the endpoint accepts the event. When it is
+    When the relay target is present, the endpoint accepts the batch. When it is
     absent, it returns 503 so the worker can detect the unready gateway and retry
     or backoff.
     """
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_valid_event_returns_ok(self) -> None:
-        app = _make_test_app(with_aggregator=True)
+        app = _make_test_app(with_relay_hub=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-42",
-                    "payload": {"event_type": "chunk", "data": "hello"},
-                },
+                "/internal/events/batch",
+                json=_batch_of("t-42", {"event_type": "chunk", "data": "hello"}),
             )
             assert resp.status_code == 200
             assert resp.json() == {"status": "ok"}
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_event_with_aggregator_only_returns_ok(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """The HTTP path should accept events when the aggregator is available."""
-        app = _make_test_app(with_aggregator=True)
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-42",
-                    "payload": {"event_type": "chunk", "data": "hello"},
-                },
-            )
-            assert resp.status_code == 200
-            assert resp.json() == {"status": "ok"}
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_event_without_relay_target_returns_503(self) -> None:
-        """With no relay target seated, /internal/events returns 503.
-
-        The guard survives the collapse to a single relay: a gateway whose
-        aggregator is not yet seated must tell the worker to back off rather
-        than accept an event it will silently drop.
-        """
-        app = _make_test_app()
-        assert app.state.aggregator is None
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-42",
-                    "payload": {"event_type": "chunk", "data": "hello"},
-                },
-            )
-            assert resp.status_code == 503
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_missing_thread_id_is_malformed(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """A malformed event without thread_id is rejected."""
-        app = _make_test_app(with_aggregator=True)
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "payload": {"data": "hello"},
-                },
-            )
-            assert resp.status_code == 422
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_execution_state_projection_persists_without_broadcasting(
@@ -471,7 +357,7 @@ class TestInternalEvents:
     ) -> None:
         """Execution-state projection events should persist via the internal path."""
         app = _make_test_app(
-            with_aggregator=True,
+            with_relay_hub=True,
             session_factory=session_factory,
         )
 
@@ -486,35 +372,13 @@ class TestInternalEvents:
             base_url="http://test",
         ) as client:
             resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-84",
-                    "payload": {
-                        "type": "execution_state_projection",
-                        "checkpoint_id": "cp-1",
-                        "parent_checkpoint_id": "cp-0",
-                        "snapshot_created_at": "2026-03-10T12:00:00+00:00",
-                        "next_nodes": ["supervisor"],
-                        "interrupt_types": ["permission_request"],
-                        "interrupt_count": 1,
-                        "task_count": 1,
-                        "tasks": [
-                            {
-                                "task_id": "task-1",
-                                "name": "supervisor",
-                                "path": ["supervisor"],
-                                "has_error": False,
-                                "error_type": None,
-                                "interrupt_ids": ["interrupt-1"],
-                                "interrupt_types": ["permission_request"],
-                                "has_nested_state": False,
-                                "has_result": False,
-                            }
-                        ],
-                        "degraded_reasons": [],
-                    },
-                },
+                "/internal/events/batch",
+                json=_batch_of(
+                    "t-84",
+                    _execution_state_projection_payload(
+                        "cp-1", parent_checkpoint_id="cp-0"
+                    ),
+                ),
             )
 
         assert resp.status_code == 200
@@ -529,25 +393,24 @@ class TestInternalEvents:
         assert projection.task_count == 1
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_invalid_projection_timestamp_persists_without_relay_state(
+    async def test_projection_persists_without_relay_state(
         self,
         session_factory: SessionFactory,
     ) -> None:
-        """The ASGI projection route stores malformed clock data as absent.
+        """The ASGI projection route stores the report and touches no relay state.
 
         Execution-state projection is a persistence-only worker report. It must
-        not enter subscriber or sequence state while the durable boundary safely
-        treats an invalid optional timestamp as unavailable.
+        not enter subscriber or sequence state.
         """
-        aggregator = EventAggregator()
+        aggregator = RelayHub()
         app = _make_test_app(session_factory=session_factory)
-        app.state.aggregator = aggregator
+        app.state.relay_hub = aggregator
 
         async with session_factory() as session:
             await create_thread(
                 session,
                 write_authority=make_test_write_authority(),
-                thread_id="t-invalid-projection-clock",
+                thread_id="t-projection-persistence",
             )
             await session.commit()
 
@@ -556,23 +419,22 @@ class TestInternalEvents:
             base_url="http://test",
         ) as client:
             response = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-invalid-projection-clock",
-                    "payload": {
+                "/internal/events/batch",
+                json=_batch_of(
+                    "t-projection-persistence",
+                    {
                         "type": "execution_state_projection",
-                        "checkpoint_id": "cp-invalid-clock",
-                        "snapshot_created_at": "not-an-rfc3339-timestamp",
+                        "checkpoint_id": "cp-persisted",
                     },
-                },
+                ),
             )
 
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
         assert aggregator.subscriber_count() == 0
-        assert aggregator.subscription_count() == 0
-        assert aggregator.sequence_count() == 0
+        assert aggregator.get_active_thread_ids() == []
+        # Never prepared for numbering: the projection bypassed the relay seam.
+        assert aggregator.issued_sequence("t-projection-persistence") is None
 
         async with session_factory() as session:
             rows = list(
@@ -580,15 +442,14 @@ class TestInternalEvents:
                     await session.scalars(
                         select(ThreadExecutionStateModel).where(
                             ThreadExecutionStateModel.thread_id
-                            == "t-invalid-projection-clock"
+                            == "t-projection-persistence"
                         )
                     )
                 ).all()
             )
 
         assert len(rows) == 1
-        assert rows[0].checkpoint_id == "cp-invalid-clock"
-        assert rows[0].snapshot_created_at is None
+        assert rows[0].checkpoint_id == "cp-persisted"
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_plan_approval_relay_creates_durable_permission_and_can_be_responded(
@@ -602,20 +463,19 @@ class TestInternalEvents:
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         async with session_factory() as session:
-            thread_id, _receipt = await _seed_accepted_thread(session)
+            thread_id, _receipt = await seed_accepted_thread(session)
             await session.commit()
 
-        request_id = f"{thread_id}:plan-approval"
+        request_id = await park_plan_approval(checkpointer, thread_id=thread_id)
         async with AsyncClient(
             transport=ASGITransport(app=app),
             base_url="http://test",
         ) as client:
             relay = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": thread_id,
-                    "payload": {
+                "/internal/events/batch",
+                json=_batch_of(
+                    thread_id,
+                    {
                         "type": "plan_approval_request",
                         "request_id": request_id,
                         "description": "Approve plan before execution",
@@ -632,7 +492,7 @@ class TestInternalEvents:
                             },
                         ],
                     },
-                },
+                ),
             )
 
         assert relay.status_code == 200
@@ -665,7 +525,7 @@ class TestInternalEvents:
     ) -> None:
         """A degraded-only update must not erase the last good execution-state row."""
         app = _make_test_app(
-            with_aggregator=True,
+            with_relay_hub=True,
             session_factory=session_factory,
         )
 
@@ -682,46 +542,23 @@ class TestInternalEvents:
             base_url="http://test",
         ) as client:
             good = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-84-degraded",
-                    "payload": {
-                        "type": "execution_state_projection",
-                        "checkpoint_id": "cp-good",
-                        "parent_checkpoint_id": "cp-parent",
-                        "snapshot_created_at": "2026-03-10T12:00:00+00:00",
-                        "next_nodes": ["supervisor"],
-                        "interrupt_types": ["permission_request"],
-                        "interrupt_count": 1,
-                        "task_count": 1,
-                        "tasks": [
-                            {
-                                "task_id": "task-1",
-                                "name": "supervisor",
-                                "path": ["supervisor"],
-                                "has_error": False,
-                                "error_type": None,
-                                "interrupt_ids": ["interrupt-1"],
-                                "interrupt_types": ["permission_request"],
-                                "has_nested_state": False,
-                                "has_result": False,
-                            }
-                        ],
-                        "degraded_reasons": [],
-                    },
-                },
+                "/internal/events/batch",
+                json=_batch_of(
+                    "t-84-degraded",
+                    _execution_state_projection_payload(
+                        "cp-good", parent_checkpoint_id="cp-parent"
+                    ),
+                ),
             )
             degraded = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-84-degraded",
-                    "payload": {
+                "/internal/events/batch",
+                json=_batch_of(
+                    "t-84-degraded",
+                    {
                         "type": "execution_state_projection",
                         "degraded_reasons": ["execution_state_projection_unavailable"],
                     },
-                },
+                ),
             )
 
         assert good.status_code == 200
@@ -739,59 +576,34 @@ class TestInternalEvents:
         )
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_missing_payload_is_malformed(self) -> None:
-        """A malformed event without payload is rejected."""
-        app = _make_test_app(with_aggregator=True)
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-42",
-                },
-            )
-            assert resp.status_code == 422
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_empty_thread_id_is_treated_as_malformed(self) -> None:
-        """An empty string thread_id is treated as missing (falsy)."""
-        app = _make_test_app(with_aggregator=True)
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "",
-                    "payload": {"data": "hello"},
-                },
-            )
-            assert resp.status_code == 422
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_empty_payload_is_treated_as_malformed(self) -> None:
-        """An empty dict payload is treated as missing (falsy)."""
-        app = _make_test_app(with_aggregator=True)
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            resp = await client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": "t-42",
-                    "payload": {},
-                },
-            )
-            assert resp.status_code == 422
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_batch_with_malformed_event_is_rejected(self) -> None:
-        """Malformed entries in /internal/events/batch fail the whole batch."""
-        app = _make_test_app(with_aggregator=True)
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            pytest.param({"payload": {"event_type": "chunk"}}, id="missing-thread-id"),
+            pytest.param({"thread_id": "t-2"}, id="missing-payload"),
+            pytest.param(
+                {"thread_id": "", "payload": {"event_type": "chunk"}},
+                id="empty-thread-id",
+            ),
+            pytest.param({"thread_id": "t-2", "payload": {}}, id="empty-payload"),
+            pytest.param(
+                {"thread_id": "t" * 129, "payload": {"event_type": "chunk"}},
+                id="over-long-thread-id",
+            ),
+            pytest.param(
+                {"thread_id": "t-2", "payload": {"event_type": "chunk"}, "ts": "late"},
+                id="non-numeric-ts",
+            ),
+        ],
+    )
+    async def test_batch_with_malformed_event_is_rejected_before_any_relay(
+        self, entry: dict[str, object]
+    ) -> None:
+        """One malformed entry fails the whole batch before any entry relays."""
+        app = _make_test_app(with_relay_hub=True)
+        aggregator = app.state.relay_hub
+        observer = aggregator.add_subscriber("batch-observer")
+        aggregator.subscribe("batch-observer", ["t-1", "t-2"])
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -800,16 +612,27 @@ class TestInternalEvents:
                 json={
                     "events": [
                         {"thread_id": "t-1", "payload": {"event_type": "chunk"}},
-                        {"thread_id": "", "payload": {"event_type": "chunk"}},
+                        entry,
                     ]
                 },
             )
-            assert resp.status_code == 422
+        assert resp.status_code == 422
+        assert observer.empty()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_batch_without_events_is_rejected(self) -> None:
+        """A body that is not a batch is refused rather than read as empty."""
+        app = _make_test_app(with_relay_hub=True)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post("/internal/events/batch", json={})
+        assert resp.status_code == 422
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_batch_with_aggregator_only_returns_ok(self) -> None:
-        """The batch HTTP path should accept events when only the aggregator exists."""
-        app = _make_test_app(with_aggregator=True)
+        """The batch HTTP path accepts events when only the relay hub is wired."""
+        app = _make_test_app(with_relay_hub=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -845,110 +668,6 @@ class TestInternalEvents:
                 },
             )
             assert resp.status_code == 503
-
-
-class TestInternalWebSocketLogging:
-    """Verify structured logging on the internal worker WebSocket path."""
-
-    def test_malformed_event_log_includes_runtime_fields(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Malformed event envelopes should log bounded WS metadata."""
-        app = _make_test_app()
-
-        with (
-            caplog.at_level(logging.WARNING, logger="vaultspec_a2a.api.internal"),
-            TestClient(app) as client,
-            client.websocket_connect("/internal/ws") as ws,
-        ):
-            ws.send_json({"type": "event", "thread_id": "", "payload": {}})
-
-        record = next(
-            rec
-            for rec in caplog.records
-            if "Malformed worker event envelope" in rec.message
-        )
-        assert record.__dict__["thread_id"] == ""
-        assert record.__dict__["event_type"] == ""
-        assert record.__dict__["message_type"] == "event"
-        assert record.__dict__["transport"] == "ws"
-        assert record.__dict__["frame_size"] > 0
-
-    def test_missing_relay_target_log_includes_runtime_fields(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Dropped relay events should log thread and event correlation fields."""
-        app = _make_test_app()
-
-        with (
-            caplog.at_level(logging.WARNING, logger="vaultspec_a2a.api.internal"),
-            TestClient(app) as client,
-            client.websocket_connect("/internal/ws") as ws,
-        ):
-            ws.send_json(
-                {
-                    "type": "event",
-                    "thread_id": "t-drop",
-                    "payload": {"event_type": "chunk", "data": "hello"},
-                }
-            )
-
-        record = next(
-            rec
-            for rec in caplog.records
-            if "No relay target available -- dropping event" in rec.message
-        )
-        assert record.__dict__["thread_id"] == "t-drop"
-        assert record.__dict__["event_type"] == "chunk"
-        assert record.__dict__["transport"] == "ws"
-        assert record.__dict__["action"] == "relay_drop_event"
-
-    def test_ws_heartbeat_log_includes_runtime_fields(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Internal WS heartbeat logs should carry count and transport metadata."""
-        app = _make_test_app()
-
-        with (
-            caplog.at_level(logging.DEBUG, logger="vaultspec_a2a.api.internal"),
-            TestClient(app) as client,
-            client.websocket_connect("/internal/ws") as ws,
-        ):
-            ws.send_json(
-                {
-                    "type": "heartbeat",
-                    "active_threads": ["t-1", "t-2"],
-                }
-            )
-
-        record = next(
-            rec for rec in caplog.records if "Worker heartbeat:" in rec.message
-        )
-        assert record.__dict__["message_type"] == "heartbeat"
-        assert record.__dict__["active_thread_count"] == 2
-        assert record.__dict__["transport"] == "ws"
-
-    def test_unknown_ws_message_log_includes_runtime_fields(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Unknown WS message types should log bounded frame metadata."""
-        app = _make_test_app()
-
-        with (
-            caplog.at_level(logging.WARNING, logger="vaultspec_a2a.api.internal"),
-            TestClient(app) as client,
-            client.websocket_connect("/internal/ws") as ws,
-        ):
-            ws.send_json({"type": "mystery", "payload": {"ignored": True}})
-
-        record = next(
-            rec
-            for rec in caplog.records
-            if "Unknown internal WS message type" in rec.message
-        )
-        assert record.__dict__["message_type"] == "mystery"
-        assert record.__dict__["transport"] == "ws"
-        assert record.__dict__["frame_size"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -1029,38 +748,54 @@ class TestWorkerBridgeRetry:
         assert len(bridge._event_buffer) <= settings.ipc_max_event_buffer
 
 
+def _mirror_working_agent(aggregator: RelayHub, thread_id: str) -> None:
+    """Relay one agent-status frame, so the hub mirrors a live agent for the run."""
+    aggregator.sync_worker_event(
+        thread_id,
+        {
+            "type": "agent_status",
+            "agent_id": "coder",
+            "state": AgentLifecycleState.WORKING.value,
+        },
+    )
+
+
 class TestAggregatorGCOnTerminal:
-    """Aggregator sequence counters are pruned on thread_terminal events."""
+    """A settled run's live relay state is purged on its thread_terminal event."""
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_terminal_event_prunes_thread_from_aggregator_sequences(
+    async def test_terminal_event_purges_only_the_settled_runs_live_state(
         self,
         session_factory: SessionFactory,
         checkpointer: AsyncSqliteSaver,
     ) -> None:
-        """_handle_terminal_event removes the terminated thread from
-        aggregator _sequences.
+        """_handle_terminal_event drops the terminated run's mirrored state and
+        leaves a still-active run's alone.
         """
-        from ...control.event_handlers import _handle_terminal_event
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
 
-        aggregator = EventAggregator()
-        aggregator._emitters._sequences["t-pruned"] = 5
-        aggregator._emitters._sequences["t-active"] = 3
+        aggregator = RelayHub()
+        _mirror_working_agent(aggregator, "t-pruned")
+        _mirror_working_agent(aggregator, "t-active")
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(session, thread_id="t-pruned")
+            _, receipt = await seed_accepted_thread(session, thread_id="t-pruned")
             await session.commit()
-        await _record_completed_checkpoint(checkpointer, receipt)
+        await record_completed_checkpoint(checkpointer, receipt)
 
         await _handle_terminal_event(
             "t-pruned",
             {"event_type": "thread_terminal", "status": "completed"},
-            aggregator=aggregator,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                relay_hub=aggregator,
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+            ),
         )
 
-        assert "t-pruned" not in aggregator._emitters._sequences
-        assert "t-active" in aggregator._emitters._sequences
+        assert aggregator.mirror.get_agent_states("t-pruned") == {}
+        assert aggregator.mirror.get_agent_states("t-active") == {
+            "coder": AgentLifecycleState.WORKING
+        }
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_unproven_completion_log_includes_runtime_fields(
@@ -1069,18 +804,17 @@ class TestAggregatorGCOnTerminal:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """A refused completion identifies the thread and evidence failure."""
-        from ...control.event_handlers import _handle_terminal_event
-        from ...database import update_thread_status
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
         from ...thread.enums import ThreadStatus
 
-        aggregator = EventAggregator()
+        aggregator = RelayHub()
         async with session_factory() as session:
-            thread = await create_thread(
+            await create_thread(
                 session,
                 write_authority=make_test_write_authority(),
                 thread_id="t-logged",
+                status=ThreadStatus.RUNNING,
             )
-            await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
             await session.commit()
 
         with caplog.at_level(
@@ -1089,8 +823,9 @@ class TestAggregatorGCOnTerminal:
             await _handle_terminal_event(
                 "t-logged",
                 {"event_type": "thread_terminal", "status": "completed"},
-                aggregator=aggregator,
-                session_factory=session_factory,
+                services=RelayServices(
+                    relay_hub=aggregator, session_factory=session_factory
+                ),
             )
 
         record = next(
@@ -1106,41 +841,45 @@ class TestAggregatorGCOnTerminal:
         checkpointer: AsyncSqliteSaver,
     ) -> None:
         """Repeated proven terminal delivery is idempotent for the live set."""
-        from ...control.event_handlers import _handle_terminal_event
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
 
-        aggregator = EventAggregator()
+        aggregator = RelayHub()
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-terminal-skip"
             )
             await session.commit()
-        await _record_completed_checkpoint(checkpointer, receipt)
-        aggregator._emitters._sequences["t-terminal-skip"] = 4
+        await record_completed_checkpoint(checkpointer, receipt)
+        _mirror_working_agent(aggregator, "t-terminal-skip")
 
         await _handle_terminal_event(
             "t-terminal-skip",
             {"event_type": "thread_terminal", "status": "completed"},
-            aggregator=aggregator,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                relay_hub=aggregator,
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+            ),
         )
-        assert aggregator.get_sequence("t-terminal-skip") == 0
+        assert aggregator.mirror.get_agent_states("t-terminal-skip") == {}
         await _handle_terminal_event(
             "t-terminal-skip",
             {"event_type": "thread_terminal", "status": "completed"},
-            aggregator=aggregator,
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                relay_hub=aggregator,
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+            ),
         )
-        assert aggregator.get_sequence("t-terminal-skip") == 0
+        assert aggregator.mirror.get_agent_states("t-terminal-skip") == {}
 
 
 class TestTerminalEventFailureReasonPersistence:
-    """S37 / failure-reason persistence: error_detail durably records on FAILED.
+    """Failure-reason persistence: error_detail durably records on FAILED.
 
-    012840a4 made the SSE relay surface the real exception text; these prove
-    the durable counterpart — a reloaded panel (run-status alone, never the
-    live stream) recovers the SAME reason, not a bare "failed".
+    The SSE relay surfaces the real exception text; these prove the durable
+    counterpart — a reloaded panel (run-status alone, never the live stream)
+    recovers the SAME reason, not a bare "failed".
     """
 
     @pytest.mark.asyncio(loop_scope="function")
@@ -1148,11 +887,11 @@ class TestTerminalEventFailureReasonPersistence:
         self,
         session_factory: SessionFactory,
     ) -> None:
-        from ...control.event_handlers import _handle_terminal_event
-        from ...database.models import ThreadModel
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
+        from ...database import ThreadModel
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-failed-with-reason"
             )
             await session.commit()
@@ -1162,7 +901,7 @@ class TestTerminalEventFailureReasonPersistence:
             _failed_payload(
                 receipt, "Ingest stalled: no event from the graph for over 90s"
             ),
-            session_factory=session_factory,
+            services=RelayServices(session_factory=session_factory),
         )
 
         async with session_factory() as session:
@@ -1181,21 +920,22 @@ class TestTerminalEventFailureReasonPersistence:
         checkpointer: AsyncSqliteSaver,
     ) -> None:
         """No error_detail on completed/cancelled — the column stays None."""
-        from ...control.event_handlers import _handle_terminal_event
-        from ...database.models import ThreadModel
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
+        from ...database import ThreadModel
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-completed-no-reason"
             )
             await session.commit()
-        await _record_completed_checkpoint(checkpointer, receipt)
+        await record_completed_checkpoint(checkpointer, receipt)
 
         await _handle_terminal_event(
             "t-completed-no-reason",
             {"event_type": "thread_terminal", "status": "completed"},
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                session_factory=session_factory, checkpointer=checkpointer
+            ),
         )
 
         async with session_factory() as session:
@@ -1212,11 +952,11 @@ class TestTerminalEventFailureReasonPersistence:
         """A malformed relay payload (e.g. error_detail as a number) never
         reaches the durable column — falls back to leaving it untouched
         rather than raising or coercing garbage into the record."""
-        from ...control.event_handlers import _handle_terminal_event
-        from ...database.models import ThreadModel
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
+        from ...database import ThreadModel
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-malformed-detail"
             )
             await session.commit()
@@ -1226,7 +966,7 @@ class TestTerminalEventFailureReasonPersistence:
         await _handle_terminal_event(
             "t-malformed-detail",
             payload,
-            session_factory=session_factory,
+            services=RelayServices(session_factory=session_factory),
         )
 
         async with session_factory() as session:
@@ -1250,12 +990,12 @@ class TestTerminalEventProviderConditionPersistence:
         session_factory: SessionFactory,
     ) -> None:
         """The lane's own verdict survives the relay hop into the column."""
-        from ...control.event_handlers import _handle_terminal_event
-        from ...database.models import ThreadModel
-        from ...providers import ProviderCondition
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
+        from ...database import ThreadModel
+        from ...graph.enums import ProviderCondition
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-failed-throttled"
             )
             await session.commit()
@@ -1265,7 +1005,7 @@ class TestTerminalEventProviderConditionPersistence:
             _failed_payload(
                 receipt, "the provider refused for rate", ProviderCondition.THROTTLED
             ),
-            session_factory=session_factory,
+            services=RelayServices(session_factory=session_factory),
         )
 
         async with session_factory() as session:
@@ -1286,12 +1026,12 @@ class TestTerminalEventProviderConditionPersistence:
         campaign removes; the floor says plainly that nothing classified it,
         which a consumer can render and act on.
         """
-        from ...control.event_handlers import _handle_terminal_event
-        from ...database.models import ThreadModel
-        from ...providers import ProviderCondition
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
+        from ...database import ThreadModel
+        from ...graph.enums import ProviderCondition
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-failed-unclassified"
             )
             await session.commit()
@@ -1301,7 +1041,7 @@ class TestTerminalEventProviderConditionPersistence:
             _failed_payload(
                 receipt, "unclassified provider failure", ProviderCondition.UNKNOWN
             ),
-            session_factory=session_factory,
+            services=RelayServices(session_factory=session_factory),
         )
 
         async with session_factory() as session:
@@ -1321,11 +1061,11 @@ class TestTerminalEventProviderConditionPersistence:
         consumer a value it must reject - strictly worse than the floor, which
         it can at least render.
         """
-        from ...control.event_handlers import _handle_terminal_event
-        from ...database.models import ThreadModel
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
+        from ...database import ThreadModel
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-failed-bogus-condition"
             )
             await session.commit()
@@ -1335,7 +1075,7 @@ class TestTerminalEventProviderConditionPersistence:
         await _handle_terminal_event(
             "t-failed-bogus-condition",
             payload,
-            session_factory=session_factory,
+            services=RelayServices(session_factory=session_factory),
         )
 
         async with session_factory() as session:
@@ -1351,15 +1091,15 @@ class TestTerminalEventProviderConditionPersistence:
         checkpointer: AsyncSqliteSaver,
     ) -> None:
         """A run that did not fail has no provider failure to classify."""
-        from ...control.event_handlers import _handle_terminal_event
-        from ...database.models import ThreadModel
+        from ...control.event_handlers import RelayServices, _handle_terminal_event
+        from ...database import ThreadModel
 
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-completed-condition"
             )
             await session.commit()
-        await _record_completed_checkpoint(checkpointer, receipt)
+        await record_completed_checkpoint(checkpointer, receipt)
 
         await _handle_terminal_event(
             "t-completed-condition",
@@ -1368,8 +1108,9 @@ class TestTerminalEventProviderConditionPersistence:
                 "status": "completed",
                 "provider_condition": "throttled",
             },
-            session_factory=session_factory,
-            checkpointer=checkpointer,
+            services=RelayServices(
+                session_factory=session_factory, checkpointer=checkpointer
+            ),
         )
 
         async with session_factory() as session:
@@ -1396,14 +1137,14 @@ class TestConditionSurvivesAReload:
         session_factory: SessionFactory,
         checkpointer: AsyncSqliteSaver,
     ) -> None:
-        from ...providers import ProviderCondition
+        from ...graph.enums import ProviderCondition
         from .conftest import make_app
 
         app, _aggregator, _worker, _checkpointer = make_app(
             session_factory, checkpointer
         )
         async with session_factory() as session:
-            _, receipt = await _seed_accepted_thread(
+            _, receipt = await seed_accepted_thread(
                 session, thread_id="t-reload-condition"
             )
             await session.commit()
@@ -1411,16 +1152,16 @@ class TestConditionSurvivesAReload:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             relayed = await client.post(
-                "/internal/events",
-                json={
-                    "thread_id": "t-reload-condition",
-                    "payload": _failed_payload(
+                "/internal/events/batch",
+                json=_batch_of(
+                    "t-reload-condition",
+                    _failed_payload(
                         receipt,
                         "Graph event stream failed unexpectedly: "
                         "AcpPromptError: credit balance too low",
                         ProviderCondition.CREDITS_EXHAUSTED,
                     ),
-                },
+                ),
             )
             assert relayed.status_code == 200
 
@@ -1531,14 +1272,13 @@ def _worker_bridge_into(app: FastAPI) -> WorkerBridge:
 
 
 class TestNoFailedRunPersistsWithoutACondition:
-    """The invariant, swept across the two paths that fail a run without ingest.
+    """The invariant, asserted on the path that fails a run without ingest.
 
-    A failed run carrying no condition is the blank terminal this campaign
-    exists to remove: a client sees ``failed`` and has nothing to act on. The
-    two paths that reach that state without a provider ever being engaged are a
-    dispatch that never left the gateway and a worker rejection before the graph
-    ran, so both are asserted here rather than only the ingest path that already
-    had coverage.
+    A failed run carrying no condition is a blank terminal: a client sees
+    ``failed`` and has nothing to act on. A
+    worker rejection before the graph ran reaches that state without a provider
+    ever being engaged, so it is asserted here rather than only the ingest path
+    that already had coverage.
     """
 
     @pytest.mark.asyncio(loop_scope="function")
@@ -1549,7 +1289,7 @@ class TestNoFailedRunPersistsWithoutACondition:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """A malformed direct dispatch cannot emit a terminal without authority."""
-        from ...database.models import ThreadModel
+        from ...database import ThreadModel
         from ...ipc.schemas import DispatchRequest
         from ...worker.executor import Executor
         from .conftest import make_app
@@ -1598,80 +1338,3 @@ class TestNoFailedRunPersistsWithoutACondition:
             in record.getMessage()
             for record in caplog.records
         )
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_a_dispatch_failure_persists_a_condition(
-        self,
-        session_factory: SessionFactory,
-    ) -> None:
-        """A dispatch that never left the gateway fails the run with a condition."""
-        from ...control.repair_transitions import apply_dispatch_failure
-        from ...database.models import ThreadModel
-        from ...thread.enums import ThreadStatus
-
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-dispatch-failure",
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            await apply_dispatch_failure(
-                session,
-                "t-dispatch-failure",
-                failed_status=ThreadStatus.FAILED,
-                reason="the gateway worker is not reachable",
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            row = await session.get(ThreadModel, "t-dispatch-failure")
-            assert row is not None
-            assert row.status == "failed"
-            assert row.provider_condition is not None
-            assert row.failure_reason
-
-    @pytest.mark.asyncio(loop_scope="function")
-    async def test_an_undelivered_resume_is_not_a_failed_run_and_records_none(
-        self,
-        session_factory: SessionFactory,
-    ) -> None:
-        """The honest exception to the sweep above, asserted rather than glossed.
-
-        An undelivered permission resume settles the run to INPUT_REQUIRED: the
-        answer did not arrive, but the run is alive and still parked on its
-        question. It is NOT a failed run, so it correctly persists no condition
-        and no failure reason - stamping either would make a reloading client
-        report a failure that never happened. Its account survives on the repair
-        reason, which a still-live run can honestly carry.
-        """
-        from ...control.repair_transitions import apply_dispatch_failure
-        from ...database.models import ThreadModel
-        from ...thread.enums import ThreadStatus
-
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="t-undelivered-resume",
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            await apply_dispatch_failure(
-                session,
-                "t-undelivered-resume",
-                failed_status=ThreadStatus.INPUT_REQUIRED,
-                reason="the gateway worker is not reachable",
-            )
-            await session.commit()
-
-        async with session_factory() as session:
-            row = await session.get(ThreadModel, "t-undelivered-resume")
-            assert row is not None
-            assert row.status == ThreadStatus.INPUT_REQUIRED.value
-            assert row.provider_condition is None
-            assert row.failure_reason is None
-            assert row.repair_reason == "the gateway worker is not reachable"

@@ -24,11 +24,18 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
-import httpx
-
-from ..utils._process_tree import detached_spawn_kwargs, kill_pid_tree_async
+from ..utils import bearer_header
+from ..utils._process_tree import (
+    PortClaim,
+    classify_port_claim,
+    detached_spawn_kwargs,
+    kill_pid_tree_async,
+    pid_is_live,
+    port_has_listener,
+    wait_pid_gone,
+)
 from .boot import (
     build_cwd_for,
     build_sha,
@@ -39,6 +46,7 @@ from .boot import (
     serve_cwd_for,
     serve_env,
 )
+from .discovery import health_payload_ready, probe_health
 from .errors import LifecycleError
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
@@ -90,6 +98,15 @@ _KILL_ESCALATION_WAIT = 5.0
 
 SPAWN_LOG_CAP_BYTES = 10 * 1024 * 1024
 
+# A connect probe, not a bind probe: on Windows ``SO_REUSEADDR`` lets a second
+# socket bind a port another is already listening on, so only a loopback connect
+# tells a held port from a free one.
+_PORT_PROBE_TIMEOUT_SECONDS = 1.0
+
+# How long a felled generation may take to exit before a resume/rerun refuses to
+# spawn a replacement that could overlap it on the same port.
+_TERMINATION_CONFIRM_SECONDS = 10.0
+
 
 @dataclass(frozen=True, slots=True)
 class ProcVerdict:
@@ -123,32 +140,11 @@ def endpoint_for(record: ProcRecord) -> str:
     return f"http://127.0.0.1:{record.port}"
 
 
-def _is_pid_alive(pid: int) -> bool:
-    from .discovery import is_pid_alive
-
-    return is_pid_alive(pid)
-
-
-def _confirm_terminated(pid: int, *, timeout: float = 10.0) -> bool:
-    """Poll until *pid* is no longer a live process; ``False`` if it survives.
-
-    A bounded confirmation that a felled generation actually terminated, so a
-    replacement is never spawned while the old process is still alive on the same
-    port. Returns ``False`` when the pid is still alive at the deadline (a kill
-    that did not take), so the caller can refuse rather than overlap generations.
-    """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not _is_pid_alive(pid):
-            return True
-        time.sleep(0.05)
-    return not _is_pid_alive(pid)
-
-
 def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
     """Kill *pid* and its whole process tree, returning ``True`` once it is dead.
 
-    A thin synchronous wrapper over :func:`~..utils.process.kill_pid_tree_async`,
+    A thin synchronous wrapper over
+    :func:`~vaultspec_a2a.utils._process_tree.kill_pid_tree_async`,
     the single asynchronous escalation this project owns (Windows
     ``taskkill /T /F``; POSIX snapshot-then-``SIGTERM``-then-``SIGKILL``) - this
     module used to carry an independent ~70-line synchronous copy of that same
@@ -215,13 +211,14 @@ def spawn(
         from pathlib import Path as _Path
 
         _rotate_log_if_over_cap(_Path(log_path))
-    log_handle = open(log_path, "ab") if log_path is not None else None  # noqa: SIM115
-    stdout: IO[bytes] | int = (
-        log_handle if log_handle is not None else subprocess.DEVNULL
-    )
     child_env = {**os.environ, **env} if env is not None else None
     flags = detached_spawn_kwargs()
-    try:
+    with contextlib.ExitStack() as owned:
+        stdout: IO[bytes] | int = (
+            owned.enter_context(open(log_path, "ab"))
+            if log_path is not None
+            else subprocess.DEVNULL
+        )
         return subprocess.Popen(
             command,
             cwd=str(cwd),
@@ -232,9 +229,6 @@ def spawn(
             start_new_session=flags.start_new_session,
             env=child_env,
         )
-    finally:
-        if log_handle is not None:
-            log_handle.close()
 
 
 def resolve(name: str, *, home: Path | None = None) -> ProcRecord:
@@ -292,11 +286,11 @@ def attach(name: str, *, home: Path | None = None) -> ProcVerdict:
     so an operator never attaches to a stale record.
     """
     record = resolve(name, home=home)
-    if not _is_pid_alive(record.pid):
+    if not pid_is_live(record.pid):
         raise LifecycleError(
             f"{record.role}-{record.name} pid {record.pid} is not alive"
         )
-    if not _port_is_bound(record.port):
+    if not port_has_listener(record.port, timeout=_PORT_PROBE_TIMEOUT_SECONDS):
         raise LifecycleError(
             f"{record.role}-{record.name} pid {record.pid} is alive but port "
             f"{record.port} is not accepting connections"
@@ -341,6 +335,25 @@ def kill(name: str, *, home: Path | None = None) -> ProcRecord:
     return record
 
 
+def _run_role_build(record: ProcRecord, role: RoleConfig, *, verb: str) -> Path:
+    """Run *role*'s build command in *record*'s build tree and return that tree.
+
+    The build's output streams to the operator rather than being captured; only
+    its exit status is read.
+
+    Raises:
+        LifecycleError: If the build exits non-zero.
+    """
+    cwd = build_cwd_for(record)
+    result = subprocess.run(role.build, cwd=str(cwd), check=False, encoding="utf-8")
+    if result.returncode != 0:
+        raise LifecycleError(
+            f"{verb} for {record.role}-{record.name} failed "
+            f"(exit {result.returncode}): {' '.join(role.build)}"
+        )
+    return cwd
+
+
 def rebuild(
     name: str, *, home: Path | None = None, config: ProcsConfig | None = None
 ) -> str | None:
@@ -356,13 +369,7 @@ def rebuild(
         raise LifecycleError(
             f"role {record.role!r} declares no build command in procs.toml"
         )
-    cwd = build_cwd_for(record)
-    result = subprocess.run(role.build, cwd=str(cwd), check=False)
-    if result.returncode != 0:
-        raise LifecycleError(
-            f"build for {record.role}-{record.name} failed "
-            f"(exit {result.returncode}): {' '.join(role.build)}"
-        )
+    cwd = _run_role_build(record, role, verb="build")
     sha = build_sha(cwd)
     if read_record(record_path(record.role, record.name, home=home)) is not None:
         from dataclasses import replace
@@ -385,7 +392,7 @@ def resume(
     started/last-seen stamp, preserving port, workspace, and owner.
     """
     record = resolve(name, home=home)
-    if _is_pid_alive(record.pid):
+    if pid_is_live(record.pid):
         raise LifecycleError(
             f"{record.role}-{record.name} pid {record.pid} is still alive; "
             "nothing to resume (use rerun to cycle it)"
@@ -394,7 +401,7 @@ def resume(
     # termination before spawning, so the replacement generation cannot overlap a
     # surviving old-tree member on the same port.
     tree_kill(record.pid)
-    if not _confirm_terminated(record.pid):
+    if not wait_pid_gone(record.pid, timeout=_TERMINATION_CONFIRM_SECONDS):
         raise LifecycleError(
             f"resume could not confirm {record.role}-{record.name} pid "
             f"{record.pid} terminated; refusing to spawn an overlapping "
@@ -425,7 +432,7 @@ def rerun(
     # and resume both guard before acting, and rerun must match that ordering.
     ensure_explicit_repo(role, record.repo, f"{record.role}-{record.name}")
     tree_kill(record.pid)
-    if not _confirm_terminated(record.pid):
+    if not wait_pid_gone(record.pid, timeout=_TERMINATION_CONFIRM_SECONDS):
         # The old tree did not confirm dead: refuse to spawn a replacement that
         # could overlap the surviving old generation on the same port. The record
         # is left unchanged - no new generation is published.
@@ -435,13 +442,7 @@ def rerun(
             "replacement (record left unchanged)"
         )
     if role.build:
-        cwd = build_cwd_for(record)
-        result = subprocess.run(role.build, cwd=str(cwd), check=False)
-        if result.returncode != 0:
-            raise LifecycleError(
-                f"rebuild for {record.role}-{record.name} failed "
-                f"(exit {result.returncode})"
-            )
+        _run_role_build(record, role, verb="rebuild")
     return _start_from_record(
         record, home=home, config=resolved_config, ready_timeout=ready_timeout
     )
@@ -650,39 +651,7 @@ def _worker_auth_headers(
     """
     if not (is_worker and internal_token_file):
         return {}
-    token = read_internal_token(internal_token_file, label=label)
-    return {"Authorization": f"Bearer {token}"}
-
-
-def _health_payload_is_ready(payload: object, *, is_gateway: bool) -> bool:
-    """Whether a parsed ``/health`` JSON body proves THIS role is ready."""
-    if not isinstance(payload, dict):
-        return False
-    body = cast("dict[str, object]", payload)
-    if is_gateway:
-        return body.get("service") == "gateway" and body.get("ready") is True
-    return body.get("service") == "worker" and body.get("status") == "ok"
-
-
-def _probe_health(
-    port: int, *, headers: dict[str, str], is_gateway: bool, request_timeout: float
-) -> bool:
-    """One bounded ``GET /health``, reduced to a readiness bool."""
-    try:
-        response = httpx.get(
-            f"http://127.0.0.1:{port}/health",
-            headers=headers,
-            timeout=request_timeout,
-        )
-    except httpx.HTTPError:
-        return False
-    if response.status_code != 200:
-        return False
-    try:
-        payload = response.json()
-    except ValueError:
-        return False
-    return _health_payload_is_ready(payload, is_gateway=is_gateway)
+    return bearer_header(read_internal_token(internal_token_file, label=label))
 
 
 def _health_probe_for(
@@ -710,14 +679,12 @@ def _health_probe_for(
         internal_token_file=internal_token_file,
         label=role_cfg.name,
     )
+    role: Literal["gateway", "worker"] = "gateway" if is_gateway else "worker"
+    base_url = f"http://127.0.0.1:{port}"
 
     def _probe(request_timeout: float) -> bool:
-        return _probe_health(
-            port,
-            headers=headers,
-            is_gateway=is_gateway,
-            request_timeout=request_timeout,
-        )
+        body = probe_health(base_url, timeout=request_timeout, headers=headers)
+        return health_payload_ready(body, role)
 
     return _probe
 
@@ -741,10 +708,10 @@ class _UnresolvedOwnershipLogger:
             return
         logger.warning(
             "Readiness accepted port %d on the bound-port signal "
-            "alone: the listening pid could not be resolved, so it "
-            "was not confirmed to belong to pid %d. Ownership is "
-            "unverified for this boot; an orphan or a racer "
-            "holding the port would read as ready.",
+            "alone: the listener's owner could not be resolved, so it "
+            "was not confirmed to sit in the process tree of pid %d. "
+            "Ownership is unverified for this boot; an orphan or a "
+            "racer holding the port would read as ready.",
             self._port,
             self._pid,
         )
@@ -755,9 +722,9 @@ class _UnresolvedOwnershipLogger:
         if self._reported:
             return
         logger.warning(
-            "Readiness withheld on port %d: the listening pid could "
-            "not be resolved, so it was not confirmed to belong to "
-            "pid %d; the HTTP health probe was skipped.",
+            "Readiness withheld on port %d: the listener's owner could "
+            "not be resolved, so it was not confirmed to sit in the "
+            "process tree of pid %d; the HTTP health probe was skipped.",
             self._port,
             self._pid,
         )
@@ -774,22 +741,18 @@ def _listener_ready(
 ) -> bool:
     """One poll iteration's readiness verdict for *port*; ``False`` keeps waiting.
 
-    Does not accept a bound port until the listening pid is confirmed to be the
+    Does not accept a bound port until the listener is confirmed to be held by the
     child or a descendant of it
-    (:func:`~vaultspec_a2a.utils.process.listener_belongs_to`). A foreign holder
-    of the port - an un-reaped orphan of a felled generation, or a racer on a
-    fixed resume/rerun port - therefore never reads as our process being ready.
+    (:func:`~vaultspec_a2a.utils._process_tree.classify_port_claim`). A foreign
+    holder of the port - an un-reaped orphan of a felled generation, or a racer on
+    a fixed resume/rerun port - therefore never reads as our process being ready.
     """
-    from ..utils._process_tree import ListenerOwnership, classify_listener_ownership
-
-    if not _port_is_bound(port):
-        return False
-    ownership = classify_listener_ownership(port, process.pid)
-    if ownership is ListenerOwnership.CONFIRMED:
+    claim = classify_port_claim(port, process.pid, timeout=_PORT_PROBE_TIMEOUT_SECONDS)
+    if claim is PortClaim.OURS:
         if health_probe is None:
             return True
         return health_probe(max(deadline - time.monotonic(), 0.001))
-    if ownership is ListenerOwnership.UNRESOLVED:
+    if claim is PortClaim.UNRESOLVED:
         if health_probe is None:
             # Generic roles remain listener-only. Failing a legitimate boot
             # because a pid could not be read would change their settled
@@ -815,12 +778,13 @@ def _await_listener(
     """Wait for a live listener on *port* that OUR child owns.
 
     Returns ``False`` if the spawned child dies first, and does not accept a bound
-    port until the listening pid is confirmed to be the child or a descendant of
-    it (:func:`~vaultspec_a2a.utils.process.listener_belongs_to`). A foreign holder
-    of the port - an un-reaped orphan of a felled generation, or a racer on a
-    fixed resume/rerun port - therefore never reads as our process being ready, so
-    a record is not published pointing at a listener we do not own. An A2A HTTP
-    role additionally must satisfy *health_probe* within the same deadline.
+    port until the listener is confirmed to be held by the child or a descendant of
+    it (:func:`~vaultspec_a2a.utils._process_tree.classify_port_claim`). A
+    foreign holder of the port - an un-reaped orphan of a felled generation, or a
+    racer on a fixed resume/rerun port - therefore never reads as our process
+    being ready, so a record is not published pointing at a listener we do not
+    own. An A2A HTTP role additionally must satisfy *health_probe* within the same
+    deadline.
     """
     deadline = time.monotonic() + timeout
     unresolved_logger = _UnresolvedOwnershipLogger(port, process.pid)
@@ -906,17 +870,3 @@ def _start_from_record(
     )
     write_record(updated, home=home)
     return updated
-
-
-def _port_is_bound(port: int, *, timeout: float = 1.0) -> bool:
-    """Return ``True`` when something is accepting connections on *port*.
-
-    A connect probe, not a bind probe: on Windows ``SO_REUSEADDR`` lets a second
-    socket bind a port another is already listening on, so a bind cannot tell a
-    held port from a free one. A successful loopback connect proves a live
-    listener - exactly what ``attach`` must verify. Delegates to the shared
-    :func:`~vaultspec_a2a.lifecycle.discovery.port_has_listener` primitive.
-    """
-    from .discovery import port_has_listener
-
-    return port_has_listener(port, timeout=timeout)

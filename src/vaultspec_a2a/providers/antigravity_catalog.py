@@ -23,23 +23,31 @@ can produce.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from ..workspace.environment import resolve_env_vars
-from ._catalog_fields import display_text, local_id, model_list_revision
+from ._catalog_discovery import (
+    ProviderCatalogDiscovery,
+    available_catalog,
+    unavailable_discovery,
+)
+from ._catalog_fields import (
+    MAX_DISCOVERY_READ_BYTES,
+    display_text,
+    local_id,
+    model_list_revision,
+)
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .antigravity_cli import resolve_antigravity_command
 from .provider_catalog import (
     MAX_MODELS,
     AuthenticationState,
-    CatalogState,
-    CatalogStatus,
     ControlKind,
+    HealthState,
     ModelCatalogEntry,
     NativeControl,
     NativeControlOption,
-    ProviderCatalog,
 )
 
 if TYPE_CHECKING:
@@ -52,9 +60,6 @@ __all__ = ["discover_antigravity_catalog"]
 #: The CLI answers a bare listing quickly; a wedged one must not hold discovery.
 _LISTING_TIMEOUT_SECONDS = 90.0
 
-#: Bounded so a runaway CLI cannot stream an unbounded catalog into memory.
-_OUTPUT_BUDGET_BYTES = 1 << 20
-
 #: The reasoning-effort domain, declared by ``agy --effort`` as
 #: ``(low|medium|high)``. Unlike the model ids this is NOT enumerable: the CLI
 #: exposes no listing for it, so the values are carried here and will need
@@ -62,23 +67,6 @@ _OUTPUT_BUDGET_BYTES = 1 << 20
 #: names - no model identity is hardcoded by this.
 _EFFORT_VALUES = ("low", "medium", "high")
 _EFFORT_CONTROL_ID = "effort"
-
-
-def _unavailable(
-    key: ProviderCatalogKey, *, reason: str, authentication: AuthenticationState
-) -> tuple[ProviderCatalog, AuthenticationState]:
-    return (
-        ProviderCatalog(
-            key=key,
-            state=CatalogState(
-                status=CatalogStatus.UNAVAILABLE,
-                checked_at=datetime.now(UTC),
-                reason=reason,
-            ),
-            models=(),
-        ),
-        authentication,
-    )
 
 
 def _effort_control(namespace: str) -> NativeControl:
@@ -131,16 +119,26 @@ async def discover_antigravity_catalog(
     *,
     cli_path: str | None = None,
     home: str | None = None,
-) -> tuple[ProviderCatalog, AuthenticationState]:
-    """Discover the Antigravity catalog by listing models with the real CLI."""
+) -> ProviderCatalogDiscovery:
+    """Discover the Antigravity catalog by listing models with the real CLI.
+
+    The lane has no credential setting, so an installed CLI is its whole
+    configuration: the one resolution here is also the ``configured`` evidence.
+    """
     executable = resolve_antigravity_command(cli_path=cli_path, home=home)
     if executable is None:
-        return _unavailable(
+        return unavailable_discovery(
             key,
             reason="Antigravity CLI is not installed",
-            authentication=AuthenticationState.UNKNOWN,
+            configured=HealthState.UNAVAILABLE,
         )
+    listed = await _list_models(key, workspace_root, executable)
+    return replace(listed, configured=HealthState.AVAILABLE)
 
+
+async def _list_models(
+    key: ProviderCatalogKey, workspace_root: Path, executable: Path
+) -> ProviderCatalogDiscovery:
     try:
         process = await spawn_acp_process(
             [str(executable), "models"],
@@ -149,21 +147,19 @@ async def discover_antigravity_catalog(
             use_exec=True,
         )
     except OSError as exc:
-        return _unavailable(
+        return unavailable_discovery(
             key,
             reason=f"Antigravity CLI could not be launched: {exc.strerror or exc}",
-            authentication=AuthenticationState.UNKNOWN,
         )
 
     try:
         stdout_bytes = await _read_listing(process, timeout=_LISTING_TIMEOUT_SECONDS)
     except TimeoutError:
-        return _unavailable(
+        return unavailable_discovery(
             key,
             reason=(
                 f"Antigravity model listing exceeded {_LISTING_TIMEOUT_SECONDS:.0f}s"
             ),
-            authentication=AuthenticationState.UNKNOWN,
         )
     finally:
         await kill_process_tree(process)
@@ -172,7 +168,7 @@ async def discover_antigravity_catalog(
         # A listing needs the account, so a refusal is most likely a missing
         # login - but the CLI does not say so, and reporting UNAUTHENTICATED on
         # every failure would blame the operator for a crash. UNKNOWN is honest.
-        return _unavailable(
+        return unavailable_discovery(
             key,
             reason=f"Antigravity model listing exited {process.returncode}",
             authentication=AuthenticationState.UNKNOWN,
@@ -182,30 +178,25 @@ async def discover_antigravity_catalog(
     namespace = f"{key.provider_id}:{key.execution_mode}"
     models = _models_from_listing(stdout, namespace=namespace)
     if not models:
-        return _unavailable(
+        return unavailable_discovery(
             key,
             reason="Antigravity served no models",
             authentication=AuthenticationState.UNAUTHENTICATED,
         )
 
-    controls = (_effort_control(namespace),)
-    return (
-        ProviderCatalog(
-            key=key,
-            state=CatalogState(
-                status=CatalogStatus.AVAILABLE,
-                checked_at=datetime.now(UTC),
-                # The bare model list is the whole revision here. The RPC lanes
-                # fold their native controls in because a provider can change
-                # those between calls; this lane's one control is a static flag
-                # domain that cannot move without a code change, so hashing it
-                # would add a constant to every revision and signal nothing.
-                revision=model_list_revision(key, models),
-            ),
+    return ProviderCatalogDiscovery(
+        catalog=available_catalog(
+            key,
+            # The bare model list is the whole revision here. The RPC lanes fold
+            # their native controls in because a provider can change those
+            # between calls; this lane's one control is a static flag domain
+            # that cannot move without a code change, so hashing it would add a
+            # constant to every revision and signal nothing.
+            revision=model_list_revision(key, models),
             models=models,
-            native_controls=controls,
+            native_controls=(_effort_control(namespace),),
         ),
-        AuthenticationState.AUTHENTICATED,
+        authentication=AuthenticationState.AUTHENTICATED,
     )
 
 
@@ -226,7 +217,7 @@ async def _read_listing(
         raise RuntimeError("Catalog process requires stdout and stderr pipes")
     async with asyncio.timeout(timeout), asyncio.TaskGroup() as tasks:
         output = tasks.create_task(
-            _drain_listing(process.stdout, retain=_OUTPUT_BUDGET_BYTES)
+            _drain_listing(process.stdout, retain=MAX_DISCOVERY_READ_BYTES)
         )
         tasks.create_task(_drain_listing(process.stderr, retain=0))
         tasks.create_task(process.wait())

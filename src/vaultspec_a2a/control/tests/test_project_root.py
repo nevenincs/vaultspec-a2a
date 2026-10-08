@@ -6,10 +6,9 @@ proven end to end rather than inferred from the resolver alone.
 """
 
 from pathlib import Path
-from typing import Protocol, cast
 
 from ...domain_config import DomainSettingsConfig
-from ...testing import armed_environment
+from ...testing import armed_environment, build_settings
 from ..config import Settings
 from ..settings_base import (
     ENV_FILE_ENV,
@@ -18,12 +17,6 @@ from ..settings_base import (
     resolve_against,
     resolve_project_root,
 )
-
-
-class _SettingsEnvFileFactory(Protocol):
-    """``Settings`` called with pydantic-settings' private ``_env_file`` argument."""
-
-    def __call__(self, *, _env_file: Path) -> Settings: ...
 
 
 def _tree(root: Path, *markers: str) -> Path:
@@ -129,7 +122,7 @@ def test_a_construction_named_file_cannot_name_a_different_project_root(
     env_file = tmp_path / ".env"
     env_file.write_text(f"{PROJECT_ROOT_ENV}={hijacked}\n", encoding="utf-8")
     with armed_environment(**{PROJECT_ROOT_ENV: None}):
-        configured = cast("_SettingsEnvFileFactory", Settings)(_env_file=env_file)
+        configured = build_settings(env_file=env_file)
         expected = resolve_project_root()
     assert configured.project_root == expected
     assert configured.project_root != hijacked

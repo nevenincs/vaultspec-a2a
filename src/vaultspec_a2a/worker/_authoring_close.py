@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from ..streaming.types import StreamableGraph
     from .token_store import RunTokenStore
 
+__all__ = ["close_authoring_session_best_effort"]
+
 logger = logging.getLogger("vaultspec_a2a.worker.executor")
 
 # The authoring role owns the engine session opened by this run.

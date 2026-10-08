@@ -1,8 +1,8 @@
 # Development service fixtures
 
 Production uses native binaries and has no Docker dependency. This directory
-contains Docker support only for Jaeger trace debugging and the VidaiMock
-test provider. Gateway and worker run as native processes.
+contains Docker support only for Jaeger trace debugging. Gateway and worker run
+as native processes.
 
 ## Native development services
 
@@ -27,12 +27,12 @@ and native lifecycle ownership.
 
 ## Integration fixtures
 
-`docker-compose.integration.yml` defines only VidaiMock and Jaeger. The
-integration harness starts gateway and worker natively and uses these
-containers as development/test dependencies.
+`docker-compose.integration.yml` defines only Jaeger. The integration harness
+starts gateway and worker natively and uses this container as a development/test
+dependency.
 
 Run `just test-native-integration` to exercise native lifecycle, cancellation,
-health, trace, and worker attachment checks with the development fixtures.
+health, trace, and worker attachment checks with the development fixture.
 
 ```console
 just stack-integration-config
@@ -41,27 +41,15 @@ just stack-integration-status
 just stack-integration-down
 ```
 
-VidaiMock is available at <http://127.0.0.1:8100>, and the Jaeger user interface
-at <http://127.0.0.1:16686>. Native processes export OTLP gRPC traces to
-`http://127.0.0.1:4317`. `VIDAIMOCK_PORT`, `JAEGER_UI_PORT`, and
-`JAEGER_OTLP_PORT` change the host ports while retaining loopback binding.
+The Jaeger user interface is available at <http://127.0.0.1:16686>. Native
+processes export OTLP gRPC traces to `http://127.0.0.1:4317`. `JAEGER_UI_PORT`
+and `JAEGER_OTLP_PORT` change the host ports while retaining loopback binding.
 OTLP HTTP and Jaeger's health endpoint remain inside the Compose network.
 
 ## Trace debugging
 
-For Jaeger without VidaiMock, use the separate infrastructure project:
-
-```console
-just stack-infrastructure-config
-just stack-infrastructure-up
-just stack-infrastructure-status
-just stack-infrastructure-down
-```
-
-The infrastructure recipes use the same Compose definition but start only
-Jaeger. Use either fixture project at a time with the default ports, or assign
-different ports when running both. Configure native trace exporters through
-the settings in `.env.example`.
+Configure native trace exporters through the settings in `.env.example`, and
+start the Jaeger fixture above to receive them.
 
 HTTP trace URL attributes omit query strings, fragments, and URL user
 information. Trace paths, server addresses, and run/thread identifiers remain

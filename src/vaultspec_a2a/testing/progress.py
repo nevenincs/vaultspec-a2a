@@ -20,6 +20,7 @@ last-resort guard against test code that stops polling entirely.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -34,7 +35,7 @@ from ..lifecycle import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Awaitable, Callable, Sequence
     from pathlib import Path
 
 __all__ = [
@@ -44,6 +45,9 @@ __all__ = [
     "ResourceDiedError",
     "registry_watch",
     "wait_for",
+    "wait_for_async",
+    "wait_until",
+    "wait_until_async",
 ]
 
 
@@ -122,8 +126,13 @@ class ProgressDeadline:
         """Seconds since progress was last observed."""
         return time.monotonic() - self._last_progress
 
-    def check(self) -> None:
-        """Raise if the resource died or the wait stalled; otherwise return."""
+    def check(self, stalled: Callable[[], str] | None = None) -> None:
+        """Raise if the resource died or the wait stalled; otherwise return.
+
+        *stalled* names what the wait was for and the last value seen. It is
+        evaluated only at a stall, so it reads the freshest state, and its text
+        leads the stall message.
+        """
         for watch in self.watches:
             reason = watch.verdict()
             if reason is not None:
@@ -137,11 +146,14 @@ class ProgressDeadline:
                 ", ".join(f"{watch.label}: live" for watch in self.watches)
                 or "no liveness watches"
             )
-            raise ProgressStalledError(
+            detail = (
                 f"no progress observed for {idle:.1f}s "
                 f"(idle window {self.idle_window_s}s; {verdicts}). The resource "
                 "is alive but the observed state stopped changing - this is a "
                 "hang, not slowness."
+            )
+            raise ProgressStalledError(
+                detail if stalled is None else f"{stalled()}: {detail}"
             )
 
 
@@ -151,6 +163,7 @@ def wait_for[T](
     deadline: ProgressDeadline,
     fingerprint: Callable[[], object] | None = None,
     interval_s: float = 0.5,
+    stalled: Callable[[], str] | None = None,
 ) -> T:
     """Poll until *poll* returns a value, under progress-based failure only.
 
@@ -158,17 +171,96 @@ def wait_for[T](
     counts as progress and touches the deadline; with no fingerprint supplied,
     only completion counts, so the idle window bounds the whole wait. The
     deadline's watches are checked every iteration, so a dead resource fails
-    the wait in one interval rather than one idle window.
+    the wait in one interval rather than one idle window. On a stall,
+    :class:`ProgressStalledError` leads with what *stalled* returns, evaluated
+    at that moment: say what was awaited and the last value seen.
     """
     last_print: object = object()
     while True:
         result = poll()
         if result is not None:
             return result
-        if fingerprint is not None:
-            current = fingerprint()
-            if current != last_print:
-                last_print = current
-                deadline.touch()
-        deadline.check()
+        last_print = _observe(deadline, fingerprint, last_print, stalled)
         time.sleep(interval_s)
+
+
+async def wait_for_async[T](
+    poll: Callable[[], Awaitable[T | None]],
+    *,
+    deadline: ProgressDeadline,
+    fingerprint: Callable[[], object] | None = None,
+    interval_s: float = 0.5,
+    stalled: Callable[[], str] | None = None,
+) -> T:
+    """Await *poll* until it returns a value; the coroutine twin of :func:`wait_for`.
+
+    Progress, the idle window, the liveness watches and *stalled* mean exactly
+    what they mean there; only the poll and the sleep between polls are awaited.
+    """
+    last_print: object = object()
+    while True:
+        result = await poll()
+        if result is not None:
+            return result
+        last_print = _observe(deadline, fingerprint, last_print, stalled)
+        await asyncio.sleep(interval_s)
+
+
+def wait_until(
+    condition: Callable[[], bool],
+    *,
+    deadline: ProgressDeadline,
+    fingerprint: Callable[[], object] | None = None,
+    interval_s: float = 0.5,
+    stalled: Callable[[], str] | None = None,
+) -> None:
+    """Poll until *condition* holds: :func:`wait_for` over a plain truth test."""
+    wait_for(
+        lambda: condition() or None,
+        deadline=deadline,
+        fingerprint=fingerprint,
+        interval_s=interval_s,
+        stalled=stalled,
+    )
+
+
+async def wait_until_async(
+    condition: Callable[[], bool],
+    *,
+    deadline: ProgressDeadline,
+    fingerprint: Callable[[], object] | None = None,
+    interval_s: float = 0.5,
+    stalled: Callable[[], str] | None = None,
+) -> None:
+    """Await until *condition* holds: :func:`wait_until` yielding between polls.
+
+    *condition* is a synchronous truth test, for state a coroutine elsewhere on
+    the loop is changing; the wait hands the loop back between polls.
+    """
+
+    async def _poll() -> bool | None:
+        return condition() or None
+
+    await wait_for_async(
+        _poll,
+        deadline=deadline,
+        fingerprint=fingerprint,
+        interval_s=interval_s,
+        stalled=stalled,
+    )
+
+
+def _observe(
+    deadline: ProgressDeadline,
+    fingerprint: Callable[[], object] | None,
+    last_print: object,
+    stalled: Callable[[], str] | None,
+) -> object:
+    """Touch *deadline* on a changed fingerprint, check it, and return the print."""
+    if fingerprint is not None:
+        current = fingerprint()
+        if current != last_print:
+            last_print = current
+            deadline.touch()
+    deadline.check(stalled)
+    return last_print

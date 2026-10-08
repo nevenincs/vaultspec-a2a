@@ -16,8 +16,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...providers.team_selection import model_assignment_digest
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.enums import ControlActionType, ThreadStatus
 from ..executor import Executor
 from .test_executor import (
@@ -59,12 +59,14 @@ def _two_step_graph(checkpointer: Any, runs: list[str], gate: asyncio.Event) -> 
         return {"messages": [AIMessage(content="second")]}
 
     builder = new_state_graph()
-    builder.add_node("first", first)
-    builder.add_node("second", second)
+    add_test_node(builder, "first", first)
+    add_test_node(builder, "second", second)
     builder.add_edge("__start__", "first")
     builder.add_edge("first", "second")
     builder.add_edge("second", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(checkpointer=checkpointer)
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=checkpointer
+    )
     return graph
 
 
@@ -86,88 +88,84 @@ def _follow_up(request: DispatchRequest, dispatch_id: str) -> DispatchRequest:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_a_drained_run_delivered_again_continues_where_it_stopped() -> None:
+async def test_a_drained_run_delivered_again_continues_where_it_stopped(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     runs: list[str] = []
     gate = asyncio.Event()
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-        await checkpointer.setup()
-        request = _current_ingest_dispatch("redelivered-run")
-        relayed: list[dict[str, Any]] = []
+    request = _current_ingest_dispatch("redelivered-run")
+    relayed: list[dict[str, Any]] = []
 
-        before_bridge = _make_recording_bridge(relayed)
-        before = Executor(checkpointer=checkpointer, bridge=before_bridge)
-        graph = _two_step_graph(checkpointer, runs, gate)
-        try:
-            _register(before, request, graph)
-            dispatch = asyncio.create_task(before.handle_dispatch(request))
-            while runs != ["first"]:
-                await asyncio.sleep(0.01)
-            drain = asyncio.create_task(before.drain("restart"))
-            gate.set()
-            await asyncio.wait_for(dispatch, timeout=10.0)
-            await asyncio.wait_for(drain, timeout=10.0)
-        finally:
-            await before_bridge.close()
-            await before.shutdown()
-        assert runs == ["first"]
+    before_bridge = _make_recording_bridge(relayed)
+    before = Executor(checkpointer=checkpointer, bridge=before_bridge)
+    graph = _two_step_graph(checkpointer, runs, gate)
+    try:
+        _register(before, request, graph)
+        dispatch = asyncio.create_task(before.handle_dispatch(request))
+        while runs != ["first"]:
+            await asyncio.sleep(0.01)
+        drain = asyncio.create_task(before.drain("restart"))
+        gate.set()
+        await asyncio.wait_for(dispatch, timeout=10.0)
+        await asyncio.wait_for(drain, timeout=10.0)
+    finally:
+        await before_bridge.close()
+        await before.shutdown()
+    assert runs == ["first"]
 
-        # The restarted worker is handed the same open action again.
-        after_relayed: list[dict[str, Any]] = []
-        bridge = _make_recording_bridge(after_relayed)
-        after = Executor(checkpointer=checkpointer, bridge=bridge)
-        try:
-            _register(after, request, graph)
-            await asyncio.wait_for(after.handle_dispatch(request), timeout=10.0)
-            await bridge.flush_events()
+    # The restarted worker is handed the same open action again.
+    after_relayed: list[dict[str, Any]] = []
+    bridge = _make_recording_bridge(after_relayed)
+    after = Executor(checkpointer=checkpointer, bridge=bridge)
+    try:
+        _register(after, request, graph)
+        await asyncio.wait_for(after.handle_dispatch(request), timeout=10.0)
+        await bridge.flush_events()
 
-            assert runs == ["first", "second"]
-            snapshot = await graph.aget_state(
-                {"configurable": {"thread_id": request.thread_id}}
-            )
-            inputs = [
-                m for m in snapshot.values["messages"] if isinstance(m, HumanMessage)
-            ]
-            assert [m.content for m in inputs] == ["build it"]
-            terminals = _frames_of(after_relayed, "thread_terminal")
-            assert [t["status"] for t in terminals] == [ThreadStatus.COMPLETED]
-        finally:
-            await bridge.close()
-            await after.shutdown()
+        assert runs == ["first", "second"]
+        snapshot = await graph.aget_state(
+            {"configurable": {"thread_id": request.thread_id}}
+        )
+        inputs = [m for m in snapshot.values["messages"] if isinstance(m, HumanMessage)]
+        assert [m.content for m in inputs] == ["build it"]
+        terminals = _frames_of(after_relayed, "thread_terminal")
+        assert [t["status"] for t in terminals] == [ThreadStatus.COMPLETED]
+    finally:
+        await bridge.close()
+        await after.shutdown()
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_a_follow_up_over_a_finished_turn_runs_instead_of_reporting_done() -> (
-    None
-):
+async def test_a_follow_up_over_a_finished_turn_runs_instead_of_reporting_done(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     runs: list[str] = []
     gate = asyncio.Event()
     gate.set()
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-        await checkpointer.setup()
-        relayed: list[dict[str, Any]] = []
-        bridge = _make_recording_bridge(relayed)
-        executor = Executor(checkpointer=checkpointer, bridge=bridge)
-        try:
-            first_turn = _current_ingest_dispatch("follow-up-run")
-            graph = _two_step_graph(checkpointer, runs, gate)
-            _register(executor, first_turn, graph)
-            await asyncio.wait_for(executor.handle_dispatch(first_turn), timeout=10.0)
-            assert runs == ["first", "second"]
+    relayed: list[dict[str, Any]] = []
+    bridge = _make_recording_bridge(relayed)
+    executor = Executor(checkpointer=checkpointer, bridge=bridge)
+    try:
+        first_turn = _current_ingest_dispatch("follow-up-run")
+        graph = _two_step_graph(checkpointer, runs, gate)
+        _register(executor, first_turn, graph)
+        await asyncio.wait_for(executor.handle_dispatch(first_turn), timeout=10.0)
+        assert runs == ["first", "second"]
 
-            second_turn = _follow_up(first_turn, "follow-up-run-second")
-            _register(executor, second_turn, graph)
-            await asyncio.wait_for(executor.handle_dispatch(second_turn), timeout=10.0)
-            await bridge.flush_events()
+        second_turn = _follow_up(first_turn, "follow-up-run-second")
+        _register(executor, second_turn, graph)
+        await asyncio.wait_for(executor.handle_dispatch(second_turn), timeout=10.0)
+        await bridge.flush_events()
 
-            assert runs == ["first", "second", "first", "second"]
-            terminals = _frames_of(relayed, "thread_terminal")
-            assert [t["status"] for t in terminals] == [
-                ThreadStatus.COMPLETED,
-                ThreadStatus.COMPLETED,
-            ]
-        finally:
-            await bridge.close()
-            await executor.shutdown()
+        assert runs == ["first", "second", "first", "second"]
+        terminals = _frames_of(relayed, "thread_terminal")
+        assert [t["status"] for t in terminals] == [
+            ThreadStatus.COMPLETED,
+            ThreadStatus.COMPLETED,
+        ]
+    finally:
+        await bridge.close()
+        await executor.shutdown()
 
 
 @pytest.mark.asyncio(loop_scope="function")

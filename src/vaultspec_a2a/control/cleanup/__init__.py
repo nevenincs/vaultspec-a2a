@@ -1,10 +1,11 @@
 """Manifest-driven execution of cross-store thread deletion cleanup.
 
 This package performs the real store effects a deletion saga plans: it builds
-the durable cleanup manifest from a thread and its artifacts, and executes each
-item independently against the checkpoint store and the workspace filesystem.
-The saga repository owns the durable manifest and result ledger; this package
-owns turning them into effects with containment and per-item independence.
+the durable cleanup manifest from a thread, and executes each item
+independently against the checkpoint store and the authoring replay journals.
+The deletion saga owns the durable manifest and result ledger, persisted through
+the database layer; this package owns turning them into effects with per-item
+independence.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ from .executor import (
     build_cleanup_manifest,
     execute_cleanup_item,
     execute_cleanup_manifest,
-    resolve_contained_artifact_path,
 )
 
 __all__ = [
@@ -22,5 +22,4 @@ __all__ = [
     "build_cleanup_manifest",
     "execute_cleanup_item",
     "execute_cleanup_manifest",
-    "resolve_contained_artifact_path",
 ]

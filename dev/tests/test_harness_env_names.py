@@ -9,19 +9,18 @@ section equal, in both directions, to the names the code actually reads.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from dev.ci_formats import REPORT_NAME_ENV, REPORTS_ENV
 from dev.exit_codes import ALLOW_EMPTY_ENV, FIX_STRICT_ENV
 from dev.init.contract import FORCE_ENV, JSON_ENV
+from dev.paths import REPO_ROOT
 from vaultspec_a2a.control.settings_base import field_env_names
-from vaultspec_a2a.service_tests._provider_catalog_live import (
+from vaultspec_a2a.testing import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
     LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON,
 )
 from vaultspec_a2a.testing.session_root import TestSessionSettings
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 _HEADING = "# Development harness\n"
 _NAME = re.compile(r"\b(VAULTSPEC_[A-Z0-9_]+)\b")
 

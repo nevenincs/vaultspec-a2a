@@ -5,13 +5,14 @@ session lifecycle RPCs and data carriers.
 """
 
 import asyncio
-import json
 import logging
 from contextlib import suppress
 from typing import Never, TypedDict, Unpack
 
 from ..control.config import settings
+from ..graph.enums import ProviderCondition
 from ..utils.enums import AcpRequestId
+from ._acp_request import issue_request
 from ._acp_types import (
     AcpModelConfig,
     AcpResponseFuture,
@@ -20,7 +21,6 @@ from ._acp_types import (
 )
 from ._json_contract import JsonObject, JsonValue, lenient_json_object
 from .acp_exceptions import AcpAuthError, AcpErrorCode
-from .conditions import ProviderCondition
 
 __all__: list[str] = []
 
@@ -43,7 +43,6 @@ class _RuntimeLogOptions(TypedDict, total=False):
     session_id: str | None
     stderr_event_count: int | None
     exit_code: int | None
-    kill_strategy: str | None
     # What actually ran this turn: the adapter as it named itself in the
     # handshake, and the CLI the lane pinned for it. Bounded strings, no payload.
     agent_name: str | None
@@ -62,15 +61,10 @@ def runtime_log_extra(
     session_id = options.get("session_id")
     stderr_event_count = options.get("stderr_event_count")
     exit_code = options.get("exit_code")
-    kill_strategy = options.get("kill_strategy")
+    command = config.provider_command
     extra: dict[str, object] = {
         "provider": config.provider,
-        "runtime_authority": config.runtime_authority,
-        "acp_backend": config.acp_backend,
-        "command_origin": config.command_origin,
-        "command_kind": config.command_kind,
-        "command_executable": config.command_executable,
-        "command_target": config.command_target,
+        **(command.metadata() if command is not None else {}),
         "auth_mode": config.auth_mode,
         "use_exec": config.use_exec,
         "workspace_root_present": bool(config.workspace_root),
@@ -87,7 +81,6 @@ def runtime_log_extra(
         session_id=session_id,
         stderr_event_count=stderr_event_count,
         exit_code=exit_code,
-        kill_strategy=kill_strategy,
         agent_name=options.get("agent_name"),
         agent_version=options.get("agent_version"),
         cli_executable=options.get("cli_executable"),
@@ -242,24 +235,21 @@ async def authenticate_rpc(
     if ctx is not None:
         ctx.last_auth_url = auth_url
     method_id = select_auth_method_id(auth_methods)
-    rpc_id = AcpRequestId.AUTHENTICATE
-    response_futures[rpc_id] = asyncio.get_running_loop().create_future()
-    req: JsonObject = {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "method": "authenticate",
-        "params": {"methodId": method_id},
-    }
     logger.info(
         "Attempting ACP authenticate handshake",
         extra=runtime_log_extra(config, handshake_step="authenticate"),
     )
-    async with stdin_lock:
-        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await stdin.drain()
+    response_future = await issue_request(
+        response_futures,
+        stdin=stdin,
+        stdin_lock=stdin_lock,
+        rpc_id=AcpRequestId.AUTHENTICATE,
+        method="authenticate",
+        params={"methodId": method_id},
+    )
     try:
         resp = await wait_for_authenticate_response(
-            response_future=response_futures[rpc_id],
+            response_future=response_future,
             process=process,
             timeout_seconds=settings.acp_interactive_auth_timeout_seconds,
         )

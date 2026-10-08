@@ -4,7 +4,6 @@ Every test uses real files and real subprocesses — no mocks, no monkeypatching
 """
 
 import json
-import os
 import subprocess
 import sys
 import textwrap
@@ -12,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from ...control.env_registry import CREDENTIAL_ENV_NAMES, FOREIGN_PROVIDER_ENV_NAMES
+from ...testing import inherited_environment
 from ..environment import resolve_env_vars, resolve_venv
 
 
@@ -115,29 +116,11 @@ _SCRUB_PROBE_SCRIPT = textwrap.dedent(
     """
 )
 
-_SCRUB_SECRET_KEYS: list[str] = [
-    "ANTHROPIC_API_KEY",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "OPENAI_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "AWS_SECRET_ACCESS_KEY",
-    "AZURE_OPENAI_API_KEY",
-    "ZHIPU_API_KEY",
-    "LANGCHAIN_API_KEY",
-    "LANGSMITH_API_KEY",
-    "LANGCHAIN_TRACING_V2",
-    # ANTHROPIC_LOG causes SDK debug text on stdout → JSON-RPC corruption.
-    "ANTHROPIC_LOG",
-    # Kimi Code temporary-provider definitions are never inherited piecemeal.
-    "KIMI_API_KEY",
-    "KIMI_BASE_URL",
-    "KIMI_MODEL_API_KEY",
-    "KIMI_MODEL_BASE_URL",
-    "KIMI_MODEL_NAME",
-    "KIMI_MODEL_MAX_CONTEXT_SIZE",
-    "KIMI_MODEL_CAPABILITIES",
-]
+# Every name the registry declares as a provider credential or a provider name
+# the service never accepts: the scrub is held to the registry, not to a copy.
+_SCRUB_SECRET_KEYS: list[str] = sorted(
+    CREDENTIAL_ENV_NAMES | FOREIGN_PROVIDER_ENV_NAMES
+)
 
 _SCRUB_VAULTSPEC_KEYS: dict[str, str] = {
     "VAULTSPEC_SECRET_TOKEN": "should-not-leak",
@@ -181,14 +164,16 @@ def resolved_env(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
     script = tmp_path / "scrub_probe.py"
     script.write_text(_SCRUB_PROBE_SCRIPT, encoding="utf-8")
 
-    env = dict(os.environ)
-    for key in _SCRUB_SECRET_KEYS:
-        env[key] = "super-secret-value"
-    env.update(_SCRUB_VAULTSPEC_KEYS)
-    env.update(_SCRUB_NON_ALLOWLISTED_CLAUDE_CODE)
-    env.update(_SCRUB_ALLOWLISTED_CLAUDE_CODE)
-    env.update(_SCRUB_ZAI_KEYS)
-    env.update(_SCRUB_SAFE_KEYS)
+    env = inherited_environment(
+        {
+            **dict.fromkeys(_SCRUB_SECRET_KEYS, "super-secret-value"),
+            **_SCRUB_VAULTSPEC_KEYS,
+            **_SCRUB_NON_ALLOWLISTED_CLAUDE_CODE,
+            **_SCRUB_ALLOWLISTED_CLAUDE_CODE,
+            **_SCRUB_ZAI_KEYS,
+            **_SCRUB_SAFE_KEYS,
+        }
+    )
 
     result = subprocess.run(
         [sys.executable, str(script), str(tmp_path)],

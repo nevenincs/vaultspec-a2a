@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -22,8 +22,9 @@ from httpx import ASGITransport
 
 from ...api.internal import internal_router
 from ...control.config import settings
-from ...streaming.aggregator import EventAggregator
-from ...testing.environment import settings_override
+from ...ipc.body_limit import BoundedHttpBodyMiddleware, gateway_body_limit
+from ...streaming import RelayHub
+from ...testing import settings_override
 from ..ipc import WorkerBridge
 
 # Small enough to reach the batch boundary with a handful of events, and applied
@@ -35,14 +36,19 @@ _SMALL_BODY_LIMIT = 4096
 def _gateway_app() -> FastAPI:
     """Mount the production internal relay route on a real application.
 
-    The route itself is the gateway's own, so the batch limit it enforces is the
-    shipped one. It is given a real event aggregator and told explicitly that it
-    has no database, which is the declared shape for a host that relays progress
-    without persisting it - and progress is all these events are.
+    The route and the body-limit middleware in front of it are the gateway's own,
+    so the batch limit enforced is the shipped one. It is given a real relay
+    hub and told explicitly that it has no database, which is the declared
+    shape for a host that relays progress without persisting it - and progress is
+    all these events are.
     """
     app = FastAPI()
+    app.add_middleware(
+        cast("Any", BoundedHttpBodyMiddleware), limit=gateway_body_limit(settings)
+    )
     app.include_router(internal_router)
-    app.state.aggregator = EventAggregator()
+    app.state.internal_token = None
+    app.state.relay_hub = RelayHub()
     app.state.db_session_factory = None
     app.state.checkpointer = None
     return app
@@ -112,10 +118,10 @@ class _SizeRecordingGateway:
 async def test_a_backlog_is_split_into_batches_the_gateway_accepts() -> None:
     """A buffer larger than one body is delivered, not refused whole.
 
-    The whole buffer used to go out as a single post. A backlog built while the
-    gateway was away therefore arrived over the limit, was refused, and was
-    re-queued unchanged - so it was refused again, indefinitely. It is now cut
-    into bodies that fit, in order, and the real route accepts every one.
+    The buffer is cut into bodies that fit, in order, and the real route accepts
+    every one. Sent as a single post, a backlog built while the gateway was away
+    would arrive over the limit, be refused, and be re-queued unchanged - refused
+    again, indefinitely.
     """
     with settings_override(internal_max_http_body_bytes=_SMALL_BODY_LIMIT):
         limit = settings.internal_max_event_batch_bytes
@@ -198,7 +204,7 @@ async def test_a_full_buffer_gives_up_progress_before_an_outcome() -> None:
 
     A terminal is stated once and nothing restates it, so a lost one leaves the
     gateway watching a run that never ends - and the flood of progress that
-    precedes a terminal is exactly what used to push it out of a full buffer.
+    precedes a terminal is exactly what would push it out of a full buffer.
     """
     gateway = _SizeRecordingGateway()
     with settings_override(ipc_max_event_buffer=4):
@@ -213,7 +219,7 @@ async def test_a_full_buffer_gives_up_progress_before_an_outcome() -> None:
                 await bridge.send_event("run-bounds", _progress(index, size=32))
 
             buffered = [
-                entry["payload"].get("event_type") for entry in bridge._event_buffer
+                entry.payload.get("event_type") for entry in bridge._event_buffer
             ]
             assert "thread_terminal" in buffered, buffered
             assert await bridge.flush_events() is True
@@ -279,7 +285,7 @@ async def test_a_refused_batch_keeps_its_outcome_when_the_buffer_refilled(
                 assert await flush is False
 
             buffered = [
-                entry["payload"].get("event_type") for entry in bridge._event_buffer
+                entry.payload.get("event_type") for entry in bridge._event_buffer
             ]
         finally:
             await bridge.close()
@@ -323,8 +329,8 @@ class _RefusingOnceGateway:
 async def test_a_backlog_the_cadence_flush_failed_is_driven_again() -> None:
     """A batch re-queued by the cadence flush itself is retried without new events.
 
-    The re-queue runs inside the flush task, which used to count as the pending
-    flush, so no redrive was armed and the backlog waited for an event that a
+    The re-queue runs inside the flush task, which must not count as the pending
+    flush, or no redrive is armed and the backlog waits for an event that a
     run which has just ended never sends.
     """
     gateway = _RefusingOnceGateway()
@@ -350,14 +356,48 @@ async def test_a_backlog_the_cadence_flush_failed_is_driven_again() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_event_buffered_during_a_cadence_post_is_delivered_unprompted() -> (
+    None
+):
+    """An event that arrives while the cadence flush is posting still goes out.
+
+    The in-flight flush has already taken its snapshot, yet the new event sees it
+    as the pending flush and arms none of its own. A run that parks right after
+    such an event emits nothing more, so unless the finishing flush arms the next
+    one, the park waits in the buffer for an unrelated run to stir the bridge.
+    """
+    gateway = _SizeRecordingGateway()
+    gateway.gate = asyncio.Event()
+    with settings_override(ipc_flush_interval_seconds=0.01):
+        bridge = _bridge_to(gateway.app)
+        try:
+            await bridge.send_event("run-bounds", _progress(0, size=32))
+            while gateway.in_flight == 0:
+                await asyncio.sleep(0.005)
+
+            await bridge.send_event(
+                "run-bounds", {"event_type": "permission_request", "request_id": "p"}
+            )
+            gateway.gate.set()
+            async with asyncio.timeout(5.0):
+                while len(gateway.events) < 2:
+                    await asyncio.sleep(0.01)
+        finally:
+            await bridge.close()
+
+    relayed = [event["payload"].get("event_type") for event in gateway.events]
+    assert relayed == ["message_chunk", "permission_request"]
+
+
+@pytest.mark.asyncio
 async def test_two_flushes_never_overlap_on_the_wire() -> None:
     """The cadence flush and a terminal's immediate flush take turns.
 
-    They used to share no lock, so both could hold a slice of one buffer at once:
-    the gateway then had two posts in flight whose relative order nothing
-    established, and a failure in either re-queued events the other had already
-    delivered. The gateway is held mid-request here so the overlap, if there were
-    one, would be unmissable.
+    They share one lock; without it both could hold a slice of one buffer at once:
+    the gateway would have two posts in flight whose relative order nothing
+    established, and a failure in either would re-queue events the other had
+    already delivered. The gateway is held mid-request here so the overlap, if
+    there were one, would be unmissable.
     """
     gateway = _SizeRecordingGateway()
     gateway.gate = asyncio.Event()

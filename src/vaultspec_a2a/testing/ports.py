@@ -6,12 +6,10 @@ reservation marker in the machine-global procs home over the committed scratch
 band - so two concurrent claimants (workers, sessions, agents) can never be
 handed the same port.
 
-Three entry points live here because there are three genuinely different
+Two entry points live here because there are two genuinely different
 questions a caller can be asking, and collapsing them would be worse than the
 duplication that used to separate them:
 
-- :func:`reserved_port` holds a claim for the duration of a ``with`` block and
-  releases it on exit. Take this when the test owns a bounded window.
 - :func:`free_port` holds a claim for the whole PROCESS lifetime and returns a
   bare port number. Take this when there is no teardown moment to release in -
   a module-level constant, a child process's port, a negative test asserting
@@ -19,10 +17,14 @@ duplication that used to separate them:
   no listener on it, which is what those negative callers assert against.
 - :func:`allocate_free_ports` asks the OS for currently-unoccupied ports and
   hands out NO claim at all. It is the FALLBACK for a missing band config or an
-  exhausted band, not a peer of the other two, and it must never be used to
-  obtain a port a test will bind while anything else could take it.
+  exhausted band, not a peer of the other, and it must never be used to obtain
+  a port a test will bind while anything else could take it.
 
-The band-backed paths are the default-safe ones: allocation arbitrates through
+A caller that must decide when its claim passes to the process takes the
+building blocks :func:`reserve_scratch_ports` and
+:func:`hold_for_process_lifetime` directly.
+
+The band-backed path is the default-safe one: allocation arbitrates through
 the machine-global registry FIRST, and the unclaimed OS candidate is what a
 caller degrades to rather than failing a run over allocation policy.
 
@@ -42,17 +44,13 @@ import threading
 from typing import TYPE_CHECKING
 
 from ..lifecycle import (
-    ProcsConfig,
     load_procs_config,
     release_reservation,
     reserve_port,
 )
-from ..lifecycle.discovery import port_has_listener
+from ..utils._process_tree import port_has_listener
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-    from pathlib import Path
-
     from ..lifecycle import PortReservation
 
 __all__ = [
@@ -62,7 +60,6 @@ __all__ = [
     "free_port",
     "hold_for_process_lifetime",
     "reserve_scratch_ports",
-    "reserved_port",
 ]
 
 SCRATCH_ROLE = "scratch"
@@ -86,28 +83,6 @@ class PortAllocationError(AssertionError):
     """No unoccupied port could be obtained for the caller."""
 
 
-@contextlib.contextmanager
-def reserved_port(
-    *, home: Path | None = None, config: ProcsConfig | None = None
-) -> Generator[int]:
-    """Hold an exclusively-reserved scratch-band port while the caller uses it.
-
-    The reservation marker stays held for the body's duration and is released
-    on exit, so the port cannot be handed to any other registry-aware claimant
-    while the test binds it. ``home``/``config`` injection exists for the
-    framework's own isolation tests; ordinary callers take the machine-global
-    default so exclusion spans every concurrent session on the host.
-    """
-    resolved = config if config is not None else load_procs_config()
-    reservation = reserve_port(
-        SCRATCH_ROLE, resolved.role(SCRATCH_ROLE), home=home, config=resolved
-    )
-    try:
-        yield reservation.port
-    finally:
-        release_reservation(reservation)
-
-
 def free_port() -> int:
     """Return a loopback port with no listener answering on it.
 
@@ -116,9 +91,6 @@ def free_port() -> int:
     parallel agent, or a lifecycle boot can never be handed the same number
     while this process lives. :func:`allocate_free_ports` is the FALLBACK for a
     missing config or an exhausted band, not the primary path.
-
-    A test wanting a claim scoped to a context rather than the process takes
-    :func:`reserved_port` instead.
     """
     reservations = reserve_scratch_ports(1)
     if reservations is None:
@@ -166,7 +138,7 @@ def allocate_free_ports(count: int) -> list[int]:
     Bind-to-port-zero ALONE is not a free-port test on Windows: without
     ``SO_EXCLUSIVEADDRUSE`` a plain ``bind`` to a port another process already
     serves on ``0.0.0.0`` SUCCEEDS, so each kernel choice is confirmed with
-    ``lifecycle.discovery.port_has_listener`` - the same connect probe
+    ``utils._process_tree.port_has_listener`` - the same connect probe
     production trusts - while the binding is still held (this socket never
     listens, so an ACCEPTED connect can only be a foreign listener). The
     result is still a candidate that nothing reserves, which is why the

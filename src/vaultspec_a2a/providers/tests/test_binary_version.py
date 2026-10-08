@@ -11,6 +11,7 @@ import pytest
 from ..binary_version import (
     BinaryVersionProbeError,
     _launch_identity,
+    binary_version_text,
     parse_binary_version,
     probe_binary_version,
 )
@@ -65,6 +66,39 @@ def test_missing_or_malformed_launcher_version_is_refused(tmp_path: Path) -> Non
     with pytest.raises(BinaryVersionProbeError, match="version is unavailable"):
         probe_binary_version(launcher)
     assert parse_binary_version("probe-cli 1.2.3 and 2.3.4") is None
+    assert binary_version_text("probe-cli 1.2.3 and 2.3.4") is None
+
+
+def test_version_report_is_read_in_dotted_form() -> None:
+    assert binary_version_text("codex-cli 1.2.3\n") == "1.2.3"
+    assert binary_version_text("no version here") is None
+
+
+def test_a_bare_version_string_with_nothing_else_is_parsed() -> None:
+    """A launcher that reports only the bare number, with or without a newline."""
+    assert binary_version_text("1.2.3") == "1.2.3"
+    assert binary_version_text("1.2.3\n") == "1.2.3"
+
+
+def test_a_click_style_version_banner_is_parsed() -> None:
+    """``click``'s own ``--version`` banner shape: ``"{prog}, version {ver}"``.
+
+    ``vaultspec-core`` is itself a click CLI, so its ``--version`` report takes
+    this exact shape - the one :func:`cli.provision._resolved_version` reads
+    through this same shared parser.
+    """
+    assert binary_version_text("vaultspec-core, version 1.2.3\n") == "1.2.3"
+
+
+def test_a_report_with_no_version_number_at_all_is_refused() -> None:
+    """A launcher that does not understand ``--version`` prints help, not a version."""
+    banner = (
+        "Usage: probe-cli [OPTIONS] COMMAND [ARGS]...\n\n"
+        "  Manage the probe toolchain.\n\n"
+        "Options:\n  --help  Show this message and exit.\n"
+    )
+    assert parse_binary_version(banner) is None
+    assert binary_version_text(banner) is None
 
 
 def test_shim_identity_tracks_current_target(tmp_path: Path) -> None:

@@ -11,24 +11,45 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 import pytest
 import pytest_asyncio
 
-from .service_tests._provider_catalog_live import (
+from .testing import (
     LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
+    LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON,
+    apply_layer_markers,
     live_provider_catalog_selector_is_configured,
+    live_provider_override_selector_is_configured,
+    seated_lanes,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Callable, Iterator
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
     from .authoring.discovery import EngineEndpoint
 
-#: Where a suite reads the live PostgreSQL server it was given.
-POSTGRES_URL_ENV = "VAULTSPEC_A2A_TEST_POSTGRES_URL"
+
+@pytest.fixture(scope="session", autouse=True)
+def _seated_fixture_lanes() -> Iterator[None]:
+    """Hold the source checkout's fixture lanes for every in-process test.
+
+    A test that builds a model, freezes a selection or resolves a frozen one in
+    its own process reaches the deterministic lane through the same plugin seam
+    a test gateway is armed with, so the lane is seated once for the session
+    rather than per test. Only the settings singleton is touched: a child
+    process is armed through its environment, never by inheriting this seat. A
+    test about an unarmed product posture, or one that arms the desktop profile,
+    unseats the lanes for its own block.
+    """
+    with seated_lanes():
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +128,18 @@ def _env_set(name: str) -> Callable[[], bool]:
     return lambda: bool((os.environ.get(name) or "").strip())
 
 
+def _module_present(name: str) -> Callable[[], bool]:
+    def probe() -> bool:
+        from importlib.util import find_spec
+
+        try:
+            return find_spec(name) is not None
+        except (ImportError, ValueError):
+            return False
+
+    return probe
+
+
 # --- Provider credentials ---------------------------------------------------
 #
 # A provider lane authenticates two ways, and a probe that knows only one of
@@ -177,6 +210,7 @@ def _cli_reports_logged_in(
 
 def _claude_credentialed() -> bool:
     """Whether the production Claude auth channel has a usable credential."""
+    from .providers._factory_commands import CLAUDE_CONFIG_DIR_ENV
     from .providers.cli_resolution import ProviderRuntimeUnavailableError
     from .providers.factory import claude_auth_env
 
@@ -184,21 +218,22 @@ def _claude_credentialed() -> bool:
         injected, channel = claude_auth_env()
     except ProviderRuntimeUnavailableError:
         return False
-    if channel == "oauth_token":
-        return bool(injected.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip())
-    # An operator export reaches the child through the allowed ambient
-    # environment. A token only in project .env is not an ambient export.
-    if (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or "").strip():
+    # The factory injects a token for the oauth_token channel and, for the
+    # subscription login, only an operator export - a token that sits only in
+    # project .env is not one.
+    if any(token.strip() for token in injected.values()):
         return True
+    if channel == "oauth_token":
+        return False
     # `claude auth status` emits JSON carrying "loggedIn", which answers the
     # expiry question a file on disk cannot. Only its silence falls back.
     reported = _cli_reports_logged_in(["claude", "auth", "status"], '"loggedin": true')
     if reported is not None:
         return reported
-    # CLAUDE_CONFIG_DIR is the CLI's own knob (see providers/acp_chat_model.py);
-    # it is not a settings field, so it is read where the CLI reads it.
+    # CLAUDE_CONFIG_DIR is the CLI's own knob; it is not a settings field, so it
+    # is read where the CLI reads it.
     return _credential_store(
-        os.environ.get("CLAUDE_CONFIG_DIR"), ".claude", ".credentials.json"
+        os.environ.get(CLAUDE_CONFIG_DIR_ENV), ".claude", ".credentials.json"
     )
 
 
@@ -218,7 +253,7 @@ def _antigravity_installed() -> bool:
 def _antigravity_credentialed() -> bool:
     """The CLI's persisted OAuth login, at the path the lane resolves."""
     from .control.config import settings
-    from .testing.tests._support.antigravity import antigravity_credential_path
+    from .testing import antigravity_credential_path
 
     return antigravity_credential_path(home=settings.antigravity_cli_home).is_file()
 
@@ -263,8 +298,11 @@ def _docker_compose_present() -> bool:
     Deliberately does NOT probe image pulls or daemon health: a Docker that is
     installed but broken is a failure to surface, not an absence to skip on.
     """
-    docker = shutil.which("docker") or shutil.which("docker.exe")
-    if docker is None:
+    from .service_tests.harness import resolve_docker_executable
+
+    try:
+        docker = resolve_docker_executable()
+    except FileNotFoundError:
         return False
     try:
         completed = subprocess.run(
@@ -278,13 +316,13 @@ def _docker_compose_present() -> bool:
     return completed.returncode == 0
 
 
-def _mcp_streamable_http_present() -> bool:
-    from importlib.util import find_spec
+def _claude_acp_adapter_present() -> bool:
+    """The Node ACP adapter is installed, or the binary backend replaces it."""
+    from .control.config import settings
+    from .providers._factory_commands import claude_acp_entry
+    from .providers.execution_modes import BINARY_BACKEND
 
-    try:
-        return find_spec("mcp.client.streamable_http") is not None
-    except (ImportError, ValueError):
-        return False
+    return settings.acp_backend == BINARY_BACKEND or claude_acp_entry().exists()
 
 
 EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
@@ -296,15 +334,6 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
             "re-run the service tier"
         ),
         probe=_docker_compose_present,
-    ),
-    ExternalPrerequisite(
-        "postgres",
-        what="a reachable PostgreSQL server for the checkpoint backend",
-        supply=(
-            "start PostgreSQL and export " + POSTGRES_URL_ENV + " as a "
-            "postgresql:// connection string to a database the tests may write"
-        ),
-        probe=_env_set(POSTGRES_URL_ENV),
     ),
     ExternalPrerequisite(
         "dashboard-engine",
@@ -328,13 +357,43 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         probe=live_provider_catalog_selector_is_configured,
     ),
     ExternalPrerequisite(
+        "provider-catalog-override-selection",
+        what="an explicitly opted-in second provider catalog selection",
+        supply=(
+            "choose an entry on a different lane from the primary selection, then "
+            "export "
+            + ", ".join(LIVE_PROVIDER_OVERRIDE_SELECTION_ENVIRON)
+            + " as its opaque provider/lane/entry/control/option identifiers"
+        ),
+        probe=live_provider_override_selector_is_configured,
+    ),
+    ExternalPrerequisite(
+        "provider-capacity",
+        what="a provider that admits work instead of refusing it for rate",
+        supply=(
+            "wait for the provider's rate limit or subscription window to reset, "
+            "then re-run"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
+        "provider-refusal-armed",
+        what="a provider lane armed to refuse work, with its condition declared",
+        supply=(
+            "arm the stack so a lane will really refuse work, then export "
+            "VAULTSPEC_A2A_PROVIDER_CONDITION_EXPECT as the condition it will "
+            "produce"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
         "loopback-stack",
         what="a reachable loopback engine plus a2a gateway and worker",
         supply=(
-            "boot a workspace-local `vaultspec serve --no-seat` engine plus this "
-            "branch's a2a gateway and worker with "
-            "VAULTSPEC_A2A_AUTHORING_SUBSCRIBER_ENABLED=true (runbook), then export "
-            "VAULTSPEC_A2A_ENGINE_SERVICE_JSON and select -m service"
+            "boot a workspace-local `vaultspec serve --no-seat` engine, export "
+            "VAULTSPEC_A2A_ENGINE_SERVICE_JSON so the gateway discovers it (which "
+            "is what runs the verdict subscriber), then boot this branch's a2a "
+            "gateway and worker and select -m service"
         ),
         probe=None,
     ),
@@ -345,6 +404,48 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
             "boot this branch's a2a gateway and worker on matching ports and "
             "export VAULTSPEC_A2A_GATEWAY_URL (or leave it to the process registry's "
             "gateway-dev entry)"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
+        "in-process-lanes",
+        what="a served provider catalog with a selectable in-process lane",
+        supply=(
+            "boot this branch's gateway so the catalog it serves for the run's "
+            "workspace lists a selectable `deterministic` lane"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
+        "outbound-network",
+        what="outbound network access to the public internet",
+        supply=(
+            "run on a host that can reach the public hosts the proof retrieves "
+            "from and is not rate-limited by them"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
+        "engine-vault-adr",
+        what="an engine vault holding an ADR the read-a-named-ADR proof can use",
+        supply=(
+            "point the engine at a workspace whose `.vault/adr/` holds a decision "
+            "record carrying identifier-shaped text the proof's prompt does not repeat"
+        ),
+        probe=None,
+    ),
+    ExternalPrerequisite(
+        "vaultspec-core",
+        what="the locked vaultspec-core tooling in the active environment",
+        supply="uv sync --locked",
+        probe=_module_present("vaultspec_core"),
+    ),
+    ExternalPrerequisite(
+        "symlinks",
+        what="a host that permits creating symlinks",
+        supply=(
+            "enable Windows Developer Mode, or run elevated, so unprivileged "
+            "symlink creation is permitted"
         ),
         probe=None,
     ),
@@ -366,6 +467,15 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         skip_reason_tokens=("claude cli", "claude acp cli"),
     ),
     ExternalPrerequisite(
+        "claude-acp-adapter",
+        what="the Claude ACP node adapter",
+        supply=(
+            "run `npm install` for @agentclientprotocol/claude-agent-acp per the "
+            "ACP runbook"
+        ),
+        probe=_claude_acp_adapter_present,
+    ),
+    ExternalPrerequisite(
         "kimi-cli",
         what="the Kimi CLI on PATH",
         supply=("install Kimi Code per https://moonshotai.github.io/kimi-code/"),
@@ -376,8 +486,14 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         "mcp-streamable-http",
         what="the mcp package's streamable-http client transport",
         supply="uv sync --locked --group all",
-        probe=_mcp_streamable_http_present,
+        probe=_module_present("mcp.client.streamable_http"),
         skip_reason_tokens=("mcp streamable-http",),
+    ),
+    ExternalPrerequisite(
+        "otlp-grpc-exporter",
+        what="the OTLP gRPC exporter package",
+        supply="uv sync --locked --extra otlp --group tooling",
+        probe=None,
     ),
     ExternalPrerequisite(
         "zai-credential",
@@ -517,32 +633,6 @@ def live_engine(external_prerequisite: ExternalPrerequisiteRule) -> EngineEndpoi
     return endpoint
 
 
-@pytest_asyncio.fixture
-async def pooled_postgres_saver(
-    external_prerequisite: ExternalPrerequisiteRule,
-) -> AsyncIterator[Any]:
-    """The production pooled PostgreSQL saver against the live server.
-
-    One home for the whole repository: every suite that proves something about
-    the PostgreSQL checkpoint backend opens it the way production does, over
-    the pool production builds, rather than each keeping its own copy of the
-    same eight lines.
-    """
-    external_prerequisite("postgres")
-    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
-    from .database.checkpoints import postgres_checkpoint_pool
-
-    pool = postgres_checkpoint_pool(os.environ[POSTGRES_URL_ENV])
-    await pool.open(wait=True)
-    try:
-        saver = AsyncPostgresSaver(conn=pool)
-        await saver.setup()
-        yield saver
-    finally:
-        await pool.close()
-
-
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register the one channel a caller uses to guarantee a prerequisite."""
     parser.addoption(
@@ -566,6 +656,17 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "requires_prerequisites(*ids): deselects a billable live proof unless "
         "the caller explicitly declares every listed external prerequisite.",
+    )
+    config.addinivalue_line(
+        "markers",
+        f"{SQLITE_ENGINE_MARK}(posture, *, timeout=None): the SqlitePosture and "
+        "driver lock wait in seconds the root `engine` fixture opens with.",
+    )
+    config.addinivalue_line(
+        "markers",
+        f"{SEPARATE_CHECKPOINT_STORE_MARK}: give the `checkpointer` fixture a "
+        "file of its own instead of the application store production shares "
+        "with it.",
     )
     _declared = frozenset(config.getoption("required_prerequisites") or [])
     unknown = sorted(_declared - _BY_ID.keys())
@@ -609,7 +710,10 @@ def _collection_prerequisites(item: pytest.Item) -> frozenset[str]:
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Deselect opt-in live proofs until callers explicitly authorize every resource.
+    """Mark every test directory by layer, then deselect opt-in live proofs.
+
+    The layer marks are the repository's one table of per-directory rules
+    (``testing.markers``), applied here once for the whole session.
 
     A configured live provider turn can spend a real credential.  It is
     therefore neither a skip nor an implicit service test: normal collection
@@ -618,6 +722,7 @@ def pytest_collection_modifyitems(
     refuses that explicit request before collection if a declared resource is
     actually absent.
     """
+    apply_layer_markers(items)
     declared = declared_prerequisites()
     selected: list[pytest.Item] = []
     deselected: list[pytest.Item] = []
@@ -763,8 +868,8 @@ def schema_template() -> Path:
     if _schema_template is None:
         from sqlalchemy import create_engine
 
-        from .database.models import Base
-        from .testing.session_root import session_scratch_dir
+        from .database import Base
+        from .testing import session_scratch_dir
 
         target = session_scratch_dir("vaultspec-schema-") / "template.db"
         # Built through the SYNCHRONOUS driver deliberately: callers are async
@@ -780,10 +885,228 @@ def schema_template() -> Path:
     return _schema_template
 
 
-def materialize_schema(db_path: Path) -> Path:
-    """Give *db_path* the full schema by copying the session template."""
-    import shutil
+_migrated_template: Path | None = None
 
+
+def migrated_schema_template() -> Path:
+    """Return a SQLite file brought to head by the packaged chain, built once.
+
+    The same economy as :func:`schema_template`, for the suites whose claim is
+    about what the Alembic chain produces rather than what the model metadata
+    declares. The chain runs once per session through the production migration
+    entrypoint, and every caller copies the result, so each test still owns a
+    real migrated file of its own.
+
+    Alembic's env opens an event loop of its own, which it cannot do on a thread
+    already running one, so the chain runs on a thread of its own whichever
+    context asks first - a synchronous fixture or a coroutine mid-test.
+    """
+    global _migrated_template
+    if _migrated_template is None:
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        from .database import run_migrations
+        from .testing import session_scratch_dir
+
+        target = session_scratch_dir("vaultspec-migrated-") / "migrated.db"
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(
+                asyncio.run, run_migrations(f"sqlite+aiosqlite:///{target}")
+            ).result()
+        _migrated_template = target
+    return _migrated_template
+
+
+def materialize_schema(db_path: Path, *, migrated: bool = False) -> Path:
+    """Give *db_path* the full schema by copying a session template.
+
+    *migrated* selects the Alembic-head template over the model-metadata one.
+    """
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(schema_template(), db_path)
+    template = migrated_schema_template() if migrated else schema_template()
+    shutil.copyfile(template, db_path)
     return db_path
+
+
+# ---------------------------------------------------------------------------
+# Database, session and checkpointer fixtures - one family for every suite
+# ---------------------------------------------------------------------------
+#
+# Every suite reaches a store through these rather than building its own:
+# ``engine`` is a real per-test SQLite file carrying the model schema,
+# ``migrated_engine`` a real per-test file at the head of the Alembic chain, and
+# ``checkpointer`` a real per-test ``AsyncSqliteSaver`` in the served posture,
+# over the SAME file as ``engine`` because production defaults both stores to
+# one. A suite whose claim depends on the connection posture or needs two files
+# says so with the ``sqlite_engine`` or ``separate_checkpoint_store`` mark,
+# which is data the one fixture reads, never a second engine builder.
+
+SQLITE_ENGINE_MARK = "sqlite_engine"
+
+#: How a test declares that its claim needs the checkpoint store in a file of
+#: its own, rather than the single file production serves both stores from.
+SEPARATE_CHECKPOINT_STORE_MARK = "separate_checkpoint_store"
+
+
+class SqlitePosture(Enum):
+    """How much of the application's SQLite connection posture an engine has."""
+
+    #: Journal mode, lock waiting and ``BEGIN`` exactly as the driver leaves them.
+    DRIVER = "driver"
+    #: SQLAlchemy owns every ``BEGIN``; the driver's implicit one is disabled.
+    TRANSACTIONS = "transactions"
+    #: The served posture: WAL, the configured busy timeout, enforced foreign
+    #: keys, and SQLAlchemy-owned ``BEGIN``.
+    APPLICATION = "application"
+
+
+def _sqlite_engine(
+    db_file: Path, posture: SqlitePosture, *, timeout: float | None = None
+) -> AsyncEngine:
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from .database import (
+        configure_sqlite_engine,
+        configure_sqlite_transactions,
+    )
+
+    connect_args: dict[str, Any] = {} if timeout is None else {"timeout": timeout}
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{db_file}", connect_args=connect_args
+    )
+    if posture is SqlitePosture.APPLICATION:
+        configure_sqlite_engine(engine)
+    elif posture is SqlitePosture.TRANSACTIONS:
+        configure_sqlite_transactions(engine)
+    return engine
+
+
+@pytest.fixture
+def database_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A per-test SQLite file carrying the full model schema."""
+    return materialize_schema(tmp_path_factory.mktemp("database") / "test.db")
+
+
+@pytest_asyncio.fixture
+async def engine(
+    request: pytest.FixtureRequest, database_file: Path
+) -> AsyncIterator[AsyncEngine]:
+    """A real engine over :func:`database_file`, in the posture the test marks.
+
+    Unmarked, the engine keeps the driver's defaults. ``sqlite_engine(posture,
+    timeout=...)`` on the test, its class or its module chooses a
+    :class:`SqlitePosture` and the driver's lock wait in seconds.
+    """
+    # pytest leaves ``FixtureRequest.node`` unannotated; for a function-scoped
+    # fixture it is the requesting test item.
+    node = cast("pytest.Item", request.node)
+    marker = node.get_closest_marker(SQLITE_ENGINE_MARK)
+    posture: SqlitePosture = (
+        marker.args[0] if marker is not None and marker.args else SqlitePosture.DRIVER
+    )
+    timeout: float | None = marker.kwargs.get("timeout") if marker is not None else None
+    eng = _sqlite_engine(database_file, posture, timeout=timeout)
+    yield eng
+    await eng.dispose()
+
+
+@pytest.fixture
+def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    """Sessions over :func:`engine`, keeping attribute state across commits."""
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture
+async def session(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncSession]:
+    """One open session from :func:`session_factory` for direct assertions."""
+    async with session_factory() as db:
+        yield db
+
+
+@pytest.fixture
+def migrated_database_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A per-test SQLite file at the head of the packaged Alembic chain."""
+    return materialize_schema(
+        tmp_path_factory.mktemp("migrated") / "application.db", migrated=True
+    )
+
+
+@pytest_asyncio.fixture
+async def migrated_engine(migrated_database_file: Path) -> AsyncIterator[AsyncEngine]:
+    """A real engine over :func:`migrated_database_file`, as the service opens it.
+
+    Always the application posture: a cascade or a lock wait this schema
+    declares is enforced here exactly as production enforces it.
+    """
+    eng = _sqlite_engine(migrated_database_file, SqlitePosture.APPLICATION)
+    yield eng
+    await eng.dispose()
+
+
+@pytest.fixture
+def migrated_session_factory(
+    migrated_engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    """Sessions over :func:`migrated_engine`."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    return async_sessionmaker(migrated_engine, expire_on_commit=False)
+
+
+@pytest.fixture(scope="session")
+def migrated_template() -> Path:
+    """The session's read-only Alembic-head file, for suites that only reflect it."""
+    return migrated_schema_template()
+
+
+@pytest.fixture
+def checkpoint_file(
+    request: pytest.FixtureRequest,
+    database_file: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Path:
+    """Where :func:`checkpointer` keeps its store: the application file.
+
+    Production defaults both stores to ONE file -
+    ``settings.checkpoint_connection_string`` falls back to ``database_url`` -
+    so the run's durable rows and its checkpoints share a single write lock.
+    Pointed at a file of its own, a suite could never meet that lock, and the
+    whole class of defects it produces (a read failing over a settlement, a
+    graph event stream failing a run) was invisible to every tier.
+
+    A test whose claim genuinely needs two stores says so with the
+    ``separate_checkpoint_store`` mark on itself, its class or its module.
+    """
+    # pytest leaves ``FixtureRequest.node`` unannotated; for a function-scoped
+    # fixture it is the requesting test item.
+    node = cast("pytest.Item", request.node)
+    if node.get_closest_marker(SEPARATE_CHECKPOINT_STORE_MARK) is not None:
+        return tmp_path_factory.mktemp("checkpoints") / "checkpoints.db"
+    return database_file
+
+
+@pytest_asyncio.fixture
+async def checkpointer(checkpoint_file: Path) -> AsyncIterator[AsyncSqliteSaver]:
+    """A real ``AsyncSqliteSaver`` over :func:`checkpoint_file`, set up.
+
+    In the posture ``open_checkpointer`` gives the served saver, from the one
+    statement source both production checkpoint writers consume, and applied
+    BEFORE ``setup()`` for the same reason production applies it there: the DDL
+    is the saver's first write and the configured lock wait has to be in force
+    for it.
+    """
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from .control.config import settings
+    from .database import checkpoint_pragmas
+
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_file)) as saver:
+        for statement in checkpoint_pragmas(settings.sqlite_busy_timeout_ms):
+            await saver.conn.execute(statement)
+        await saver.setup()
+        yield saver

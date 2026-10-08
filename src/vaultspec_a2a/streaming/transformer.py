@@ -8,8 +8,7 @@ the wire events a client sees:
   ``nostream`` tag at the stream layer;
 - ``tasks`` carries one start and one result per graph node, which is the node
   boundary and the node's own state update;
-- ``updates`` carries the interrupts a parked run raised;
-- ``custom`` carries whatever a node wrote through ``get_stream_writer()``.
+- ``updates`` carries the interrupts a parked run raised.
 
 A tool's own lifecycle is not a graph stream mode - it is a LangChain callback
 - so it is projected by ``RunLifecycleCallbacks`` instead, seated in the run's
@@ -24,12 +23,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import cast
 
-from ..domain_config import domain_config
 from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
-from ._interrupt_projection import emit_interrupt_events as emit_interrupt_events
 from .buffering import BufferingManager
-from .custom_writes import custom_write_node_name
 from .emitters import EventEmitters
 from .sse_frames import enforce_progress_allowlist
 from .translation import (
@@ -42,14 +38,24 @@ from .translation import (
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "STREAM_MODES",
+    "EventProjectionServices",
+    "StreamFrame",
+    "durable_loop_checkpoint_id",
+    "frame_reports_interrupt",
+    "process_stream_frame",
+    "project_run_progress",
+]
+
 #: The ``updates`` key LangGraph writes a parked run's interrupts under.
-INTERRUPT_UPDATE_KEY = "__interrupt__"
+_INTERRUPT_UPDATE_KEY = "__interrupt__"
 
 #: The stream modes this projection consumes, in the order they are requested.
 #: ``checkpoints`` is included because the run's own lifecycle reads it (the
 #: dispatch receipt fires from the first durable one); it produces no wire
 #: event of its own, so it is handled by the ingest loop rather than here.
-STREAM_MODES = ("messages", "updates", "tasks", "custom", "checkpoints")
+STREAM_MODES = ("messages", "updates", "tasks", "checkpoints")
 
 
 def project_run_progress(payload: object) -> object:
@@ -109,7 +115,7 @@ def frame_reports_interrupt(frame: StreamFrame) -> bool:
     """
     payload = frame.payload
     if frame.mode == "updates" and isinstance(payload, dict):
-        return INTERRUPT_UPDATE_KEY in cast("dict[str, object]", payload)
+        return _INTERRUPT_UPDATE_KEY in cast("dict[str, object]", payload)
     if frame.mode == "tasks" and isinstance(payload, dict):
         return bool(cast("dict[str, object]", payload).get("interrupts"))
     return False
@@ -157,9 +163,6 @@ async def process_stream_frame(
         return
     if frame.mode == "tasks":
         await _project_task(frame, thread_id, agent_id, services)
-        return
-    if frame.mode == "custom":
-        await _project_custom(frame, thread_id, agent_id, services.emitters)
         return
     if frame.mode in ("updates", "checkpoints"):
         # `updates` duplicates what the task result already carried, and is
@@ -341,54 +344,3 @@ async def _emit_artifacts(
                 ),
                 content=str(artifact_map.get("content", "")),
             )
-
-
-# ---------------------------------------------------------------------------
-# custom — whatever a node wrote through get_stream_writer()
-# ---------------------------------------------------------------------------
-
-
-async def _project_custom(
-    frame: StreamFrame,
-    thread_id: str,
-    agent_id: str,
-    emitters: EventEmitters,
-) -> None:
-    """Relay a node's own stream write as a thought.
-
-    LangGraph strips the writing node from a custom write's namespace, so a
-    plain write is attributed to the run's agent - but one pushed through
-    :func:`~vaultspec_a2a.streaming.custom_writes.emit_custom_node_write`
-    carries its node's identity INSIDE the payload instead, read here rather
-    than guessed at. Any other payload shape a node cares to write is still
-    accepted: the reason this path existed without a producer is that only
-    one shape was ever contemplated.
-    """
-    node = custom_write_node_name(frame.payload)
-    content = _custom_text(frame.payload)
-    if not content:
-        return
-    await emitters.emit_thought_chunk(
-        thread_id=thread_id,
-        agent_id=node or agent_id,
-        content=content,
-        message_id=thread_id,
-    )
-
-
-def _custom_text(payload: object) -> str:
-    """Render an arbitrary stream write as bounded display text."""
-    if isinstance(payload, str):
-        text = payload
-    elif isinstance(payload, Mapping):
-        mapping = cast("Mapping[str, object]", payload)
-        raw = mapping.get("content", mapping)
-        text = raw if isinstance(raw, str) else str(raw)
-    elif payload is None:
-        return ""
-    else:
-        text = str(payload)
-    if not text:
-        return ""
-    max_len = domain_config.tool_arg_truncate_len
-    return text[:max_len] + "..." if len(text) > max_len else text

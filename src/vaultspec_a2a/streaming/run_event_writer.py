@@ -22,12 +22,12 @@ from collections import OrderedDict, deque
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
-from ..database.run_event_repository import RunEventRecord
+from ..database import RunEventRecord
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ..database.run_event_repository import RunEventStore
+    from ..database import RunEventStore
     from .subscribers import SequenceAllocation
 
 #: The three bounds below and the default projector are this writer's own
@@ -136,6 +136,12 @@ class RunEventWriter:
                 event_type=str(body.get("type") or body.get("event_type") or ""),
                 payload_json=json.dumps(body, separators=(",", ":")),
                 created_at=allocation.allocated_at,
+                # Carried from the allocation, never read here: this method
+                # runs in front of the fan-out and the flush does not, so the
+                # allocation is the only place the frame's own trace was in
+                # scope.
+                trace_id=allocation.trace_id,
+                span_id=allocation.span_id,
             )
         )
         self._ensure_ticker()
@@ -250,10 +256,9 @@ class RunEventWriter:
         """Log a refused flush, and drop the ring when it can never succeed.
 
         The permanence test is the run's own existence rather than the shape
-        of the error, so it reads the same on both backends: a foreign-key
-        violation and a connection drop arrive as different exceptions from
-        different drivers, but a run whose thread is gone can never take a
-        row again under either. A store too unwell to answer the question is
+        of the error: a foreign-key violation and a dropped connection arrive as
+        different exceptions, but a run whose thread is gone can never take a
+        row again. A store too unwell to answer the question is
         treated as transient, which is the safe direction - the records stay
         where a resume can read them.
         """

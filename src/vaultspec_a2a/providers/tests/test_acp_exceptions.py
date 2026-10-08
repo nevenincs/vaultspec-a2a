@@ -9,6 +9,7 @@ from typing import cast
 
 import pytest
 
+from ...graph.enums import ProviderCondition
 from ...utils.enums import AcpRequestId
 from .._acp_auth import authenticate_rpc
 from .._acp_types import AcpModelConfig, AcpResponseFutures
@@ -19,7 +20,6 @@ from ..acp_exceptions import (
     AcpPromptError,
     AcpSessionError,
 )
-from ..conditions import ProviderCondition
 
 
 class _AuthWriter:
@@ -44,12 +44,7 @@ async def test_explicit_auth_failure_carries_credential_condition() -> None:
         mcp_servers=[],
         use_exec=False,
         provider=None,
-        runtime_authority=None,
-        acp_backend=None,
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
     )
     futures: AcpResponseFutures = {}

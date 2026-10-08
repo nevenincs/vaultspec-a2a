@@ -17,15 +17,13 @@ Skips with a pointer when the Claude CLI is unavailable (an infra gate).
 """
 
 import asyncio
-import json
 import threading
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import pytest_asyncio
-import uvicorn
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from pydantic import TypeAdapter
 from starlette.applications import Starlette
@@ -36,7 +34,12 @@ from ...authoring.catalog import CATALOG_SCHEMA_VERSION, parse_catalog
 from ...control.config import settings
 from ...graph.enums import Provider
 from ...protocols.mcp.tools.authoring_bridge import build_authoring_mcp_server
-from ...testing.ports import free_port
+from ...testing import (
+    acp_request,
+    exchange_acp_request,
+    initialize_request,
+    serve_on_loopback_in_thread,
+)
 from ...workspace.environment import resolve_env_vars
 from .._acp_authoring import AuthoringToolBinding, build_authoring_mcp_servers
 from .._claude_tool_policy import claude_bypass_declined_meta
@@ -45,7 +48,9 @@ from .._json_contract import JsonObject, JsonValue
 from .._subprocess import kill_process_tree, spawn_acp_process
 from ..cli_resolution import resolve_provider_cli_executable
 from ..factory import claude_auth_env
-from ._acp_frames import read_acp_frame
+
+if TYPE_CHECKING:
+    from ...conftest import ExternalPrerequisiteRule
 
 _CATALOG: JsonObject = {
     "schema_version": CATALOG_SCHEMA_VERSION,
@@ -67,19 +72,17 @@ _CATALOG: JsonObject = {
 
 
 class _AuthoringHttpServer:
-    """Serve the committed authoring MCP server over streamable HTTP in a thread."""
+    """The committed authoring MCP server, served over streamable HTTP."""
 
     def __init__(self) -> None:
-        self.port = free_port()
+        self.base_url = ""
         self.connected = threading.Event()
-        self._uvicorn: uvicorn.Server | None = None
-        self._thread: threading.Thread | None = None
 
     @property
     def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}/mcp"
+        return f"{self.base_url}/mcp"
 
-    def _app(self) -> Starlette:
+    def build_app(self) -> Starlette:
         async def _dispatch(
             name: str, arguments: dict[str, Any], *, tool_call_id: str | None = None
         ) -> dict[str, Any]:
@@ -106,45 +109,31 @@ class _AuthoringHttpServer:
 
         return Starlette(lifespan=lifespan, routes=[Mount("/mcp", app=handle)])
 
-    async def start(self) -> None:
-        config = uvicorn.Config(
-            self._app(), host="127.0.0.1", port=self.port, log_level="error"
-        )
-        self._uvicorn = uvicorn.Server(config)
-        self._thread = threading.Thread(target=self._uvicorn.run, daemon=True)
-        self._thread.start()
-        for _ in range(50):
-            if self._uvicorn.started:
-                return
-            await asyncio.sleep(0.1)
-        raise RuntimeError("authoring MCP HTTP server did not start")
-
-    async def stop(self) -> None:
-        if self._uvicorn is not None:
-            self._uvicorn.should_exit = True
-        if self._thread is not None:
-            await asyncio.to_thread(self._thread.join, 5.0)
-
 
 @pytest_asyncio.fixture
 async def authoring_http() -> AsyncGenerator[_AuthoringHttpServer]:
+    # Served from its own thread: the agent connects back while this test's loop
+    # is busy driving the agent's process.
     server = _AuthoringHttpServer()
-    await server.start()
-    try:
+    with serve_on_loopback_in_thread(
+        server.build_app(), lifespan="auto", log_level="error"
+    ) as base:
+        server.base_url = base
         yield server
-    finally:
-        await server.stop()
 
 
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_real_agent_connects_to_authoring_bridge(
     authoring_http: _AuthoringHttpServer,
+    external_prerequisite: "ExternalPrerequisiteRule",
 ) -> None:
     if resolve_provider_cli_executable(Provider.CLAUDE) is None:
-        pytest.fail("claude CLI unavailable; start it per the ACP runbook")
+        external_prerequisite.absent(
+            "claude-cli", "the service resolves no Claude CLI to start"
+        )
 
-    command, meta = _classify_acp_command(settings.acp_backend)
+    command = _classify_acp_command(settings.acp_backend)
     workspace = str(Path.cwd())
     env = resolve_env_vars(Path(workspace))
     auth_environment, _auth_mode = claude_auth_env()
@@ -156,23 +145,18 @@ async def test_real_agent_connects_to_authoring_bridge(
     env.pop("CLAUDECODE", None)
 
     proc = await spawn_acp_process(
-        command, env, workspace, use_exec=False, metadata=meta
+        list(command.argv),
+        env,
+        workspace,
+        use_exec=False,
+        metadata=command.metadata(),
     )
-    assert proc.stdin is not None and proc.stdout is not None
     try:
-        init: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": 0,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": 1,
-                "clientCapabilities": {"fs": {"readTextFile": True}},
-                "clientInfo": {"name": "s19-bridge-test", "version": "1.0.0"},
-            },
-        }
-        proc.stdin.write(json.dumps(init).encode("utf-8") + b"\n")
-        await proc.stdin.drain()
-        init_frame = await read_acp_frame(proc.stdout, 0, 20.0)
+        init_frame = await exchange_acp_request(
+            proc,
+            initialize_request(0, "s19-bridge-test", {"fs": {"readTextFile": True}}),
+            20.0,
+        )
         assert "result" in init_frame
 
         binding = AuthoringToolBinding(
@@ -181,22 +165,22 @@ async def test_real_agent_connects_to_authoring_bridge(
             bearer_token="test-bearer",
             actor_token="test-actor",
         )
-        new: JsonObject = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "session/new",
-            "params": {
-                "cwd": workspace,
-                "mcpServers": list[JsonValue](build_authoring_mcp_servers(binding)),
-                # The posture a served session opens under. The bridge is
-                # reached from a real run, so the session that reaches it is
-                # created the way a real run creates one.
-                "_meta": claude_bypass_declined_meta(),
-            },
-        }
-        proc.stdin.write(json.dumps(new).encode("utf-8") + b"\n")
-        await proc.stdin.drain()
-        new_frame = await read_acp_frame(proc.stdout, 1, 30.0)
+        new_frame = await exchange_acp_request(
+            proc,
+            acp_request(
+                1,
+                "session/new",
+                {
+                    "cwd": workspace,
+                    "mcpServers": list[JsonValue](build_authoring_mcp_servers(binding)),
+                    # The posture a served session opens under. The bridge is
+                    # reached from a real run, so the session that reaches it is
+                    # created the way a real run creates one.
+                    "_meta": claude_bypass_declined_meta(),
+                },
+            ),
+            30.0,
+        )
         # The real agent accepted the authoring mcpServers config.
         assert "result" in new_frame, new_frame.get("error")
 
@@ -209,4 +193,4 @@ async def test_real_agent_connects_to_authoring_bridge(
             "real agent did not connect to the authoring MCP server"
         )
     finally:
-        await kill_process_tree(proc, metadata=meta)
+        await kill_process_tree(proc, metadata=command.metadata())

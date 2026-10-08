@@ -42,16 +42,10 @@ from ._acp_mcp import harness_spawn_env
 from ._acp_model_state import (
     AcpModelState,
     AcpSessionBusyError,
-    NativeCommandRequest,
     model_state_or_none,
     model_state_path,
     read_model_state,
     write_model_state,
-)
-from ._acp_native_commands import (
-    native_command_error_result,
-    native_command_prompt_blocks,
-    validate_native_command,
 )
 from ._acp_prompt_outcomes import (
     raise_for_prompt_stop_reason as _raise_for_prompt_stop_reason,
@@ -82,26 +76,38 @@ from ._acp_types import (
     AcpModelConfig,
     AcpResponseFuture,
     AcpSessionContext,
-    NativeCommandOutcome,
-    NativeCommandResult,
     PermissionCallback,
     RpcHandlerMap,
     require_workspace_root,
 )
 from ._cleanup import CleanupStep, run_independent_cleanups
+from ._factory_commands import ProviderCommand
 from ._json_contract import JsonObject
 from ._mcp_contract import verify_harness_mcp_contract
 from ._native_role import prepare_acp_role, require_native_workspace, role_environment
 from ._prompt_render import render_prompt_blocks
-from ._runtime_identity import RuntimeIdentityBinding, identity_path, identity_text
+from ._runtime_identity import (
+    RuntimeIdentityBinding,
+    identity_command,
+    identity_path,
+    identity_text,
+)
 from ._stream_lifetime import ProcessChatModel
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import AcpError
 from .binary_version import probe_binary_version
 from .cli_resolution import pin_claude_executable
+from .execution_modes import NODE_BACKEND
+from .kimi_config_home import (
+    KIMI_CODE_HOME_ENV,
+    build_kimi_config_home,
+    cleanup_kimi_config_home,
+)
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ..graph.protocols import RuntimeIdentityRecordArgs
 
 __all__ = ["AcpChatModel"]
@@ -169,13 +175,14 @@ class AcpChatModel(ProcessChatModel):
     )
     version_proof_required: bool = Field(default=False, exclude=True)
     execution_mode: str | None = Field(default=None, exclude=True)
-    runtime_authority: str | None = Field(
+    provider_command: ProviderCommand | None = Field(
         default=None,
-        description="Bounded runtime authority classification for the ACP command.",
-    )
-    acp_backend: str | None = Field(
-        default=None,
-        description="ACP backend classification such as node, binary, or kimi-code.",
+        description=(
+            "The classified launch this model runs: its runtime authority, "
+            "origin, kind, target and, for the Claude-family adapter, the ACP "
+            "backend. Unset for a command that was never classified."
+        ),
+        exclude=True,
     )
     acp_family: str = Field(
         default="claude",
@@ -184,22 +191,6 @@ class AcpChatModel(ProcessChatModel):
             "allowlist transport: the claude family emits the Claude-CLI-only "
             "session/new allowedTools _meta; the kimi family omits it."
         ),
-    )
-    command_origin: str | None = Field(
-        default=None,
-        description="Bounded origin of the resolved ACP command.",
-    )
-    command_kind: str | None = Field(
-        default=None,
-        description="Bounded command kind such as node_entry or bun_binary.",
-    )
-    command_executable: str | None = Field(
-        default=None,
-        description="Resolved ACP executable basename for evidence logs.",
-    )
-    command_target: str | None = Field(
-        default=None,
-        description="Resolved ACP entrypoint or executable target for evidence logs.",
     )
     auth_mode: str | None = Field(
         default=None,
@@ -268,13 +259,8 @@ class AcpChatModel(ProcessChatModel):
                 allowed_tools=list(self.allowed_tools),
                 use_exec=self.use_exec,
                 provider=self.provider,
-                runtime_authority=self.runtime_authority,
-                acp_backend=self.acp_backend,
+                provider_command=self.provider_command,
                 acp_family=self.acp_family,
-                command_origin=self.command_origin,
-                command_kind=self.command_kind,
-                command_executable=self.command_executable,
-                command_target=self.command_target,
                 auth_mode=self.auth_mode,
                 desired_model=self.desired_model,
                 desired_config_options=dict(self.desired_config_options),
@@ -323,7 +309,6 @@ class AcpChatModel(ProcessChatModel):
                 messages,
                 stop=stop,
                 run_manager=run_manager,
-                native_command=None,
                 **kwargs,
             )
         ) as request:
@@ -336,7 +321,6 @@ class AcpChatModel(ProcessChatModel):
         *,
         stop: list[str] | None,
         run_manager: AsyncCallbackManagerForLLMRun | None,
-        native_command: NativeCommandRequest | None,
         **kwargs: Any,
     ) -> AsyncGenerator[ChatGenerationChunk]:
         """Own one provider session and refuse concurrent use explicitly."""
@@ -346,11 +330,7 @@ class AcpChatModel(ProcessChatModel):
         self._state.session.session_busy = True
         try:
             async with aclosing(
-                self._astream_session(
-                    messages,
-                    run_manager=run_manager,
-                    native_command=native_command,
-                )
+                self._astream_session(messages, run_manager=run_manager)
             ) as session:
                 async for chunk in session:
                     yield chunk
@@ -468,14 +448,15 @@ class AcpChatModel(ProcessChatModel):
         binding = self._runtime_identity
         if binding is None:
             return
-        entry = identity_path(self.command_target, field="adapter entry path")
+        launch = identity_command(self.provider_command)
+        entry = identity_path(launch.command_target, field="adapter entry path")
         if self.acp_family == "claude":
             cli = identity_path(
                 self._state.session.claude_executable, field="CLI executable path"
             )
             node = (
                 identity_path(self.command[0], field="Node executable path")
-                if self.acp_backend == "node" and self.command
+                if launch.acp_backend == NODE_BACKEND and self.command
                 else None
             )
         else:
@@ -499,7 +480,7 @@ class AcpChatModel(ProcessChatModel):
                 self.execution_mode, field="execution mode"
             ),
             "runtime_authority": identity_text(
-                self.runtime_authority, field="runtime authority"
+                launch.runtime_authority, field="runtime authority"
             ),
             "adapter_name": identity_text(agent_info.get("name"), field="adapter name"),
             "adapter_version": identity_text(
@@ -523,7 +504,6 @@ class AcpChatModel(ProcessChatModel):
         messages: list[BaseMessage],
         *,
         run_manager: AsyncCallbackManagerForLLMRun | None,
-        native_command: NativeCommandRequest | None,
     ) -> AsyncGenerator[ChatGenerationChunk]:
         """Prepare one role before any independent probe or provider acquisition."""
         workspace = require_workspace_root(
@@ -538,9 +518,7 @@ class AcpChatModel(ProcessChatModel):
             self._native_authority = authority
             try:
                 async with aclosing(
-                    self._astream_prepared_session(
-                        messages, run_manager=run_manager, native_command=native_command
-                    )
+                    self._astream_prepared_session(messages, run_manager=run_manager)
                 ) as prepared:
                     async for chunk in prepared:
                         yield chunk
@@ -552,9 +530,8 @@ class AcpChatModel(ProcessChatModel):
         messages: list[BaseMessage],
         *,
         run_manager: AsyncCallbackManagerForLLMRun | None,
-        native_command: NativeCommandRequest | None,
     ) -> AsyncGenerator[ChatGenerationChunk]:
-        """Run one ordinary prompt or one negotiated native command."""
+        """Run one ordinary prompt."""
         # Rendered through the seam the Codex lane shares: a conversation says
         # who spoke and what a tool answered, and it has to say the same thing on
         # whichever transport carries it. Rendering here instead dropped every
@@ -589,7 +566,20 @@ class AcpChatModel(ProcessChatModel):
         process: asyncio.subprocess.Process | None = None
         stdout_task: asyncio.Task[None] | None = None
         stderr_task: asyncio.Task[None] | None = None
+        kimi_config_home: Path | None = None
         try:
+            if self.acp_family == "kimi":
+                # Built fresh for THIS session and torn down in the finally
+                # below, mirroring the Codex chat model's own per-turn home
+                # (``_build_codex_config_home`` / ``cleanup_codex_config_home``
+                # in ``codex_chat_model.py``): a model instance can be invoked
+                # for more than one turn, so a home baked in once at
+                # construction time could not be removed here without
+                # breaking the next turn's isolation. Building and cleaning up
+                # within the same session call keeps every turn isolated and
+                # leaves nothing for the 24h orphan sweep to reclaim.
+                kimi_config_home = build_kimi_config_home()
+                env[KIMI_CODE_HOME_ENV] = str(kimi_config_home)
             process = await _spawn_acp_process(
                 self.command,
                 env,
@@ -666,9 +656,6 @@ class AcpChatModel(ProcessChatModel):
             self._state.transport.stdin = ctx.stdin
             self._state.transport.stdin_lock = ctx.stdin_lock
             self._state.session.response_futures = ctx.response_futures
-            prompt_blocks = await native_command_prompt_blocks(
-                ctx, native_command, prompt_blocks, result.session_id
-            )
             prompt_future = await setup_prompt(
                 ctx,
                 self._state.config,
@@ -680,11 +667,12 @@ class AcpChatModel(ProcessChatModel):
                 yield chunk
         finally:
             # Independent cleanup: a failure in any one release must not skip
-            # the rest. MCP surfacing writes nothing to the workspace or the
-            # config home, so the session tree is the only thing to release;
-            # unisolated CLI transcript stays in the operator's config tree.
-            # A prepared native role's surrounding owner removes its fresh home
-            # only after this session cleanup finishes.
+            # the rest. MCP surfacing writes nothing to the workspace, so the
+            # session tree and (for the kimi family) its per-session config
+            # home are the only things to release; unisolated CLI transcript
+            # stays in the operator's config tree. A prepared native role's
+            # surrounding owner removes its fresh home only after this
+            # session cleanup finishes.
             cleanup_steps: list[CleanupStep] = []
             if ctx is not None:
                 session_ctx, out_task, err_task = ctx, stdout_task, stderr_task
@@ -702,33 +690,19 @@ class AcpChatModel(ProcessChatModel):
                         lambda: _kill_process_tree(orphaned_process),
                     )
                 )
+            if kimi_config_home is not None:
+                # Off the loop: mirrors the Codex config-home release, which
+                # keeps a filesystem removal from blocking the event loop
+                # another run's teardown may be sharing.
+                cleanup_steps.append(
+                    (
+                        "kimi-config-home",
+                        lambda: asyncio.to_thread(
+                            cleanup_kimi_config_home, kimi_config_home
+                        ),
+                    )
+                )
             await run_independent_cleanups(*cleanup_steps)
-
-    async def execute_native_command(
-        self, name: str, arguments: str | None = None
-    ) -> NativeCommandResult:
-        """Execute one exactly advertised command through ACP prompt syntax."""
-        validate_native_command(name, arguments)
-
-        output: list[str] = []
-        try:
-            async for chunk in self._stream_request(
-                [],
-                stop=None,
-                run_manager=None,
-                native_command=NativeCommandRequest(name, arguments),
-            ):
-                content = chunk.message.content
-                if isinstance(content, str):
-                    output.append(content)
-        except Exception as exc:
-            return native_command_error_result(name, exc)
-        return NativeCommandResult(
-            name=name,
-            outcome=NativeCommandOutcome.COMPLETED,
-            output="".join(output),
-            effects_may_have_occurred=True,
-        )
 
     def _enforce_turn_deadline(self, ctx: AcpSessionContext) -> None:
         """Fail the turn once the subprocess has gone silent for too long."""

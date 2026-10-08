@@ -1,213 +1,117 @@
-"""Dispatch-failure state transitions stay aligned with readiness semantics."""
+"""Repair transitions, dispatch failure among them, stay aligned with readiness."""
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-import anyio
 import httpx
 import pytest
-import pytest_asyncio
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
-from ...api.tests.clarification_harness import park_clarification
-from ...conftest import materialize_schema
-from ...control._permission_response_contract import (
-    PermissionInput,
-    PermissionRuntime,
-)
-from ...control.accepted_input import freeze_accepted_input
+from ...control._permission_response_contract import PermissionInput
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.clarification_service import (
     ClarificationRuntime,
     respond_to_clarification,
 )
-from ...control.config import settings
-from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.execution_authority import resolve_execution_authority
+from ...control.leased_dispatch import DispatchTransport
 from ...control.permission_service import respond_to_permission
-from ...control.repair_transitions import apply_dispatch_failure
-from ...control.worker_management import LazyWorkerSpawner
+from ...control.repair_transitions import (
+    apply_repair_transition,
+    record_failed_permission_resume,
+)
 from ...database import (
-    create_control_action,
     create_thread,
     get_permission_request,
     get_thread,
     record_permission_request,
 )
-from ...domain_config import domain_config
-from ...ipc.schemas import DispatchRequest
-from ...providers.conditions import ProviderCondition
-from ...team.team_config import load_team_config
-from ...testing import session_scratch_dir
+from ...testing import (
+    adopted_spawner,
+    capacity_holders,
+    current_execution_metadata,
+    park_clarification,
+    park_permission,
+    seed_create_action,
+    served_worker,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.clarification import ClarificationAnswers
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import RepairStatus, ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
-from ._catalog_authority import current_execution_metadata
+from ...thread.enums import ControlActionType, RepairStatus, ThreadStatus
+from ...thread.repair_policy import RepairPhase, repair_state_for_action
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from pathlib import Path
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+    )
 
 _TEST_INTERNAL_TOKEN = "dispatch-failure-transition-test-token"
 
 
-@pytest.fixture
-def _dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give both sides of real worker dispatch the current IPC credential."""
-    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
-
-
-@asynccontextmanager
-async def _saturated_worker(
-    checkpoint_path: Path,
-) -> AsyncGenerator[httpx.AsyncClient]:
-    """Serve the production worker app with every run slot already taken.
-
-    The capacity is exhausted through the executor's own reservation verb, so
-    the 429 the gateway meets is the one the worker composes for a full
-    service rather than a status written here.
-    """
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
-        await saver.setup()
-        bridge = WorkerBridge("http://control", "dispatch-failure-transition-test")
-        executor = Executor(saver, bridge)
-        for index in range(domain_config.max_concurrent_threads):
-            reservation, _reason = await executor.reserve_dispatch_capacity(
-                f"held-{index}"
-            )
-            assert reservation is not None
-        app = create_worker_app()
-        app.state.executor = executor
-        async with anyio.create_task_group() as tasks:
-            app.state.task_group = tasks
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="http://worker",
-                headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-            ) as client:
-                yield client
-            tasks.cancel_scope.cancel()
-        await executor.shutdown()
-        await bridge.close()
-
-
-@pytest_asyncio.fixture
-async def engine(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncEngine]:
-    """Create a file-backed engine for dispatch-failure tests."""
-    case_dir = tmp_path_factory.mktemp("dispatch-failure-db")
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    engine: AsyncEngine,
-) -> async_sessionmaker[AsyncSession]:
-    """Provide an async session factory bound to the test engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-# A follow-up inherits the active project its run was created with, so a thread
-# seeded for a dispatch-behaviour test needs a real one: without it the message
-# service refuses before reaching the behaviour under test. The directory is
-# real because the refusal is about presence, not shape.
-_ACTIVE_PROJECT = str(session_scratch_dir("vaultspec-active-project-"))
-
-
-def _active_project_metadata() -> str:
-    """Return current execution authority naming a real active project."""
-    return current_execution_metadata(Path(_ACTIVE_PROJECT))
-
-
-async def _seed_accepted_initial_action(
-    session: AsyncSession, thread_id: str, *, workspace: Path | None = None
-) -> None:
-    thread = await get_thread(session, thread_id)
-    assert thread is not None
-    metadata = thread.thread_metadata or _active_project_metadata()
-    workspace = workspace or Path(_ACTIVE_PROJECT)
-    dispatch = DispatchRequest(
-        dispatch_id=thread.writer_action_receipt_id,
-        action="ingest",
-        thread_id=thread_id,
-        content="initial fixture",
-        workspace_root=str(workspace),
-        team_preset="mock-success-single",
-        graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=workspace),
-            workspace_root=workspace,
-        ),
-        model_assignment=resolve_execution_authority(metadata).model_assignment,
-        recursion_limit=25,
-    )
-    await create_control_action(
-        session,
-        thread_id=thread_id,
-        action_type=thread.writer_action_type,
-        idempotency_key=f"thread-create:{thread_id}",
-        dispatch_id=thread.writer_action_receipt_id,
-        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-        payload=freeze_accepted_input(dispatch, intent={"content": "initial fixture"}),
-    )
-    assert (
-        await prepare_graph_action_receipt(
-            session, thread_id=thread_id, dispatch_id=thread.writer_action_receipt_id
-        )
-        is not None
-    )
+#: Every step of a control action the repair policy maps.
+_ACTION_STEPS: list[tuple[ControlActionType, RepairPhase]] = [
+    (ControlActionType.INGEST, RepairPhase.REQUESTED),
+    (ControlActionType.INGEST, RepairPhase.APPLIED),
+    (ControlActionType.PERMISSION_REQUEST_CREATED, RepairPhase.APPLIED),
+    (ControlActionType.PERMISSION_RESPONSE_SUBMITTED, RepairPhase.REQUESTED),
+    (ControlActionType.PERMISSION_RESPONSE_APPLIED, RepairPhase.APPLIED),
+    (ControlActionType.MESSAGE_FOLLOWUP_REQUESTED, RepairPhase.REQUESTED),
+    (ControlActionType.MESSAGE_FOLLOWUP_APPLIED, RepairPhase.APPLIED),
+    (ControlActionType.CANCEL, RepairPhase.REQUESTED),
+    (ControlActionType.CANCEL, RepairPhase.APPLIED),
+]
 
 
 @pytest.mark.asyncio
-async def test_a_failed_dispatch_records_its_reason_and_condition(
+@pytest.mark.parametrize(("action", "phase"), _ACTION_STEPS)
+async def test_every_action_step_persists_through_the_one_applier(
     session_factory: async_sessionmaker[AsyncSession],
+    action: ControlActionType,
+    phase: RepairPhase,
 ) -> None:
-    """A dispatch that fails the run persists why, on both durable channels."""
+    """Each mapped step lands whole: posture, readiness, account and action.
+
+    The run starts quarantined with a stale account, so a step that left any of
+    them behind would show here. Readiness is never written on its own, so it
+    must read back as the posture the step installed.
+    """
+    transition = repair_state_for_action(action, phase)
     async with session_factory() as session:
         thread = await create_thread(
             session,
             write_authority=make_test_write_authority(),
-            title="Failed dispatch",
-            repair_status="healthy",
-            execution_readiness="healthy",
+            title="Repair step",
+            repair_status=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+            repair_reason="a stale account",
         )
         await session.commit()
 
     async with session_factory() as session:
-        await apply_dispatch_failure(
-            session,
-            thread.id,
-            failed_status=ThreadStatus.FAILED,
-            reason="the gateway worker is not reachable",
-        )
+        await apply_repair_transition(session, thread.id, transition)
         await session.commit()
 
     async with session_factory() as session:
         updated = await get_thread(session, thread.id)
-        assert updated is not None
-        assert updated.status == ThreadStatus.FAILED.value
-        assert updated.failure_reason == "the gateway worker is not reachable"
-        # The floor, not a provider member: nothing here reached a provider.
-        assert updated.provider_condition == ProviderCondition.UNKNOWN.value
-        assert updated.repair_reason == "the gateway worker is not reachable"
+    assert updated is not None
+    assert updated.repair_status == transition.repair_status.value
+    assert updated.execution_readiness == updated.repair_status
+    assert updated.repair_reason == transition.reason
+    recorded = (
+        updated.last_requested_action
+        if phase is RepairPhase.REQUESTED
+        else updated.last_applied_action
+    )
+    untouched = (
+        updated.last_applied_action
+        if phase is RepairPhase.REQUESTED
+        else updated.last_requested_action
+    )
+    assert recorded == action.value
+    assert untouched is None
 
 
 @pytest.mark.asyncio
@@ -216,11 +120,11 @@ async def test_an_undelivered_resume_does_not_stamp_a_failure_on_a_live_run(
 ) -> None:
     """A run left parked keeps its question, and reports no failure.
 
-    The permission-resume caller passes INPUT_REQUIRED: the resume did not
-    arrive, but the run is still alive and still waiting on its answer. Writing
-    a failure reason or condition here would make a reloading client report a
-    failure that never happened, because both columns are defined as describing
-    a run that FAILED. The account survives on the repair reason instead.
+    The resume did not arrive, but the run is still alive and still waiting on
+    its answer. Writing a failure reason or condition here would make a
+    reloading client report a failure that never happened, because both columns
+    are defined as describing a run that FAILED. The account survives on the
+    repair reason instead.
     """
     async with session_factory() as session:
         thread = await create_thread(
@@ -228,15 +132,14 @@ async def test_an_undelivered_resume_does_not_stamp_a_failure_on_a_live_run(
             write_authority=make_test_write_authority(),
             title="Undelivered resume",
             repair_status="healthy",
-            execution_readiness="healthy",
         )
+        await seed_create_action(session, thread.id)
         await session.commit()
 
     async with session_factory() as session:
-        await apply_dispatch_failure(
+        await record_failed_permission_resume(
             session,
             thread.id,
-            failed_status=ThreadStatus.INPUT_REQUIRED,
             reason="the gateway worker is not reachable",
         )
         await session.commit()
@@ -255,6 +158,7 @@ async def test_an_undelivered_resume_does_not_stamp_a_failure_on_a_live_run(
 async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_land(
     session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """An answer that never reached the parked node says so durably.
 
@@ -265,54 +169,49 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
     recorded where a live run can carry it and nowhere that claims a failure.
     """
     thread_id = "undelivered-clarification-resume"
-    async with AsyncSqliteSaver.from_conn_string(
-        str(tmp_path / "clarification-checkpoints.db")
-    ) as checkpointer:
-        await checkpointer.setup()
-        parked = await park_clarification(checkpointer, thread_id=thread_id)
+    parked = await park_clarification(checkpointer, thread_id=thread_id)
 
-        async with session_factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id=thread_id,
-                status=ThreadStatus.INPUT_REQUIRED,
-                title="Undelivered clarification resume",
-                repair_status="paused_resumable",
-                execution_readiness="paused_resumable",
-                metadata=current_execution_metadata(tmp_path),
-            )
-            await _seed_accepted_initial_action(session, thread_id, workspace=tmp_path)
-            await session.commit()
-
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9",
-            worker_port=9,
-            auto_spawn=False,
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=thread_id,
+            status=ThreadStatus.INPUT_REQUIRED,
+            title="Undelivered clarification resume",
+            repair_status="paused_resumable",
+            metadata=current_execution_metadata(tmp_path),
         )
-        spawner.replace_process(None)
-        circuit_breaker = WorkerCircuitBreaker(
-            failure_threshold=1,
-            recovery_timeout=30.0,
-        )
-        circuit_breaker.force_open()
+        await seed_create_action(session, thread_id, workspace=tmp_path)
+        await session.commit()
 
-        async with (
-            httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client,
-            session_factory() as session,
-        ):
-            result = await respond_to_clarification(
-                session,
-                thread_id=thread_id,
+    spawner = adopted_spawner()
+    circuit_breaker = WorkerCircuitBreaker(
+        failure_threshold=1,
+        recovery_timeout=30.0,
+    )
+    circuit_breaker.force_open()
+
+    async with (
+        httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client,
+        session_factory() as session,
+    ):
+        result = await respond_to_clarification(
+            session,
+            thread_id=thread_id,
+            request_id=parked.request.request_id,
+            resolution=ClarificationAnswers(
                 request_id=parked.request.request_id,
-                resolution=ClarificationAnswers(
-                    request_id=parked.request.request_id,
-                    answers={"provider": "codex"},
+                answers={"provider": "codex"},
+            ),
+            runtime=ClarificationRuntime(
+                checkpointer,
+                DispatchTransport(
+                    worker_client=client,
+                    circuit_breaker=circuit_breaker,
+                    worker_spawner=spawner,
                 ),
-                runtime=ClarificationRuntime(
-                    checkpointer, client, circuit_breaker, spawner, 1, None
-                ),
-            )
+            ),
+        )
 
     assert result.dispatched is False
     assert result.failure_type is FailureType.CIRCUIT_OPEN
@@ -334,59 +233,19 @@ async def test_a_definitely_undelivered_resume_records_why_the_answer_did_not_la
         assert updated.execution_readiness == "paused_resumable"
 
 
-@pytest.mark.asyncio
-async def test_a_reasonless_failure_still_carries_a_condition(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    """A failed run is classified even when the caller supplied no message.
-
-    The condition rides the FAILURE, not the reason. A caller that fails a run
-    without a message must still leave a classified row - otherwise the blank
-    terminal this campaign removes returns through the back door, and a client
-    reloading sees a failed run it cannot branch on.
-    """
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Reasonless failure",
-            repair_status="healthy",
-            execution_readiness="healthy",
-        )
-        await session.commit()
-
-    async with session_factory() as session:
-        await apply_dispatch_failure(
-            session,
-            thread.id,
-            failed_status=ThreadStatus.FAILED,
-        )
-        await session.commit()
-
-    async with session_factory() as session:
-        updated = await get_thread(session, thread.id)
-        assert updated is not None
-        assert updated.status == ThreadStatus.FAILED.value
-        assert updated.failure_reason is None
-        assert updated.provider_condition == ProviderCondition.UNKNOWN.value
-
-
-def _permission_spawner(worker_url: str = "http://worker") -> LazyWorkerSpawner:
-    spawner = LazyWorkerSpawner(
-        worker_url=worker_url, worker_port=8001, auto_spawn=False
-    )
-    spawner.replace_process(None)
-    return spawner
-
-
 async def _parked_permission_run(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
     *,
     thread_id: str,
     workspace: Path,
 ) -> str:
     """Seed a run parked on a real tool-permission question."""
-    request_id = f"{thread_id}:permission"
+    request_id = await park_permission(
+        checkpointer,
+        thread_id=thread_id,
+        options=[{"optionId": "allow_once", "name": "Allow once"}],
+    )
     async with session_factory() as session:
         await create_thread(
             session,
@@ -395,7 +254,6 @@ async def _parked_permission_run(
             status=ThreadStatus.INPUT_REQUIRED,
             title="Parked on a tool permission",
             repair_status=RepairStatus.PAUSED_RESUMABLE.value,
-            execution_readiness=RepairStatus.PAUSED_RESUMABLE.value,
             metadata=current_execution_metadata(workspace),
         )
         await record_permission_request(
@@ -406,16 +264,16 @@ async def _parked_permission_run(
             description="Allow the command?",
             allowed_options=[{"optionId": "allow_once", "name": "Allow once"}],
         )
-        await _seed_accepted_initial_action(session, thread_id, workspace=workspace)
+        await seed_create_action(session, thread_id, workspace=workspace)
         await session.commit()
     return request_id
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("_dispatch_auth")
 async def test_a_saturated_worker_leaves_the_parked_run_answerable(
     session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Backpressure retains the accepted answer instead of quarantining the run.
 
@@ -427,22 +285,26 @@ async def test_a_saturated_worker_leaves_the_parked_run_answerable(
     """
     thread_id = "capacity-refused-resume"
     request_id = await _parked_permission_run(
-        session_factory, thread_id=thread_id, workspace=tmp_path
+        session_factory, checkpointer, thread_id=thread_id, workspace=tmp_path
     )
 
     async with (
-        _saturated_worker(tmp_path / "capacity-checkpoints.db") as worker_client,
+        served_worker(
+            checkpointer, token=_TEST_INTERNAL_TOKEN, held_threads=capacity_holders()
+        ) as worker,
         session_factory() as session,
     ):
         result = await respond_to_permission(
             session,
+            thread_id=thread_id,
             response=PermissionInput(request_id, "allow_once", "capacity-retry"),
-            runtime=PermissionRuntime(
-                WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30.0),
-                _permission_spawner(),
-                worker_client,
-                25,
-                None,
+            checkpointer=checkpointer,
+            transport=DispatchTransport(
+                worker_client=worker.client,
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=3, recovery_timeout=30.0
+                ),
+                worker_spawner=adopted_spawner(),
             ),
         )
 
@@ -472,6 +334,7 @@ async def test_a_saturated_worker_leaves_the_parked_run_answerable(
 @pytest.mark.asyncio
 async def test_an_unreachable_worker_leaves_the_parked_run_answerable(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
     tmp_path: Path,
 ) -> None:
     """A transport failure retains the accepted answer for its scheduled retry.
@@ -483,7 +346,7 @@ async def test_an_unreachable_worker_leaves_the_parked_run_answerable(
     """
     thread_id = "unreachable-refused-resume"
     request_id = await _parked_permission_run(
-        session_factory, thread_id=thread_id, workspace=tmp_path
+        session_factory, checkpointer, thread_id=thread_id, workspace=tmp_path
     )
 
     async with (
@@ -492,13 +355,15 @@ async def test_an_unreachable_worker_leaves_the_parked_run_answerable(
     ):
         result = await respond_to_permission(
             session,
+            thread_id=thread_id,
             response=PermissionInput(request_id, "allow_once", "unreachable-retry"),
-            runtime=PermissionRuntime(
-                WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30.0),
-                _permission_spawner("http://127.0.0.1:9"),
-                worker_client,
-                25,
-                None,
+            checkpointer=checkpointer,
+            transport=DispatchTransport(
+                worker_client=worker_client,
+                circuit_breaker=WorkerCircuitBreaker(
+                    failure_threshold=3, recovery_timeout=30.0
+                ),
+                worker_spawner=adopted_spawner("http://127.0.0.1:9"),
             ),
         )
 

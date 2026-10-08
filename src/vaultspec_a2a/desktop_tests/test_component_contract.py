@@ -8,8 +8,8 @@ certification presets do not.
 The dashboard-shaped fixture is deliberately not a release candidate.  It
 only carries a cross-repository component reference whose name and version are
 checked against standardized metadata from the built wheel.  Target capsule
-assembly and real CPython, Node.js, and ACP artifact digests belong to S13/S14;
-this gate neither substitutes host executables nor reimplements the future
+assembly and real CPython, Node.js, and ACP artifact digests are outside this
+gate; it neither substitutes host executables nor reimplements the future
 dashboard release-set verifier.
 """
 
@@ -31,7 +31,7 @@ from ..desktop import (
     ComponentIdentity,
     export_component_manifest_schema,
 )
-from ..tests.gateway_boot import clean_subprocess_environment
+from ..testing import clean_subprocess_environment
 
 _PROJECT_ROOT: Final = Path(__file__).resolve().parents[3]
 _SCHEMA_SNAPSHOT: Final = _PROJECT_ROOT / "schemas" / "desktop-capsule-manifest.json"
@@ -53,10 +53,6 @@ _PRODUCTION_PRESET_INVENTORY: Final = frozenset(
         "vaultspec_a2a/team/presets/agents/vaultspec-supervisor.toml",
         "vaultspec_a2a/team/presets/agents/vaultspec-synthesist.toml",
         "vaultspec_a2a/team/presets/teams/vaultspec-adr-research.toml",
-        # Served: discover_team_preset_ids() offers it, so presets-list does too.
-        # Referenced by id at runtime rather than by import, which is why a
-        # source grep alone reads it as a test fixture.
-        "vaultspec_a2a/team/presets/teams/vaultspec-adr-research-clarify.toml",
         "vaultspec_a2a/team/presets/teams/vaultspec-doc-editor.toml",
         "vaultspec_a2a/team/presets/teams/vaultspec-solo-coder.toml",
     }

@@ -11,11 +11,19 @@ A prepare validates the request's required roles, triggers the gateway-owned
 worker's single-flight startup through the injected demand seam, probes execution
 readiness, and - only when execution is ready and a slot is free under the hard
 reservation bound - records an expiring reservation with the prepared-request
-digest. It accepts no actor token, creates no durable run, and
-spawns no run-owned child: the only process it may bring up is the gateway's own
-lazy worker, which is shared, not run-owned. A reservation that is never committed
-simply expires and frees its slot. Commit accepts only the exact prepared request
-and role set; mismatches leave the reservation active for a valid retry.
+digest and the catalog selection that request froze. It accepts no actor token,
+creates no durable run, and spawns no run-owned child: the only process it may
+bring up is the gateway's own lazy worker, which is shared, not run-owned. A
+reservation that is never committed simply expires and frees its slot. Commit
+accepts only the exact prepared request and role set; mismatches leave the
+reservation active for a valid retry.
+
+The reservation is where a run's FREEZE lives between the two calls. Validating a
+selection against the served catalog and fixing it is the prepare's job, and the
+commit binding is the digest of that result, so a commit that froze a second time
+was re-answering a settled question against a catalog that may have moved since -
+which refuses the exact request the reservation was issued for. The broker hands
+the freeze back instead.
 
 The broker holds only reservation bookkeeping. Minting actor tokens, creating the
 durable run, and dispatching it belong to the route that consumes a committed
@@ -36,17 +44,15 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from ..thread.actor_tokens import MAX_ROLES_PER_RUN
+from .readiness import ProviderEligibility, RunAdmission, WorkerLifecycleState
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from ..api.schemas.gateway_readiness import (
-        ProviderEligibility,
-        RunAdmission,
-        WorkerLifecycleState,
-    )
+    from ..providers.team_selection import FrozenTeamSelection
 
 __all__ = [
+    "RESERVATION_UNAVAILABLE",
     "AdmissionBroker",
     "AdmissionReadiness",
     "ReservationState",
@@ -69,6 +75,10 @@ _REASON_TOO_MANY_ROLES = (
 )
 _REASON_CAPACITY = "run-admission reservation capacity is exhausted"
 _REASON_UNKNOWN = "no active reservation matches the supplied reservation id"
+#: The public spelling of that refusal, for a caller that has to serve it before
+#: it ever reaches :meth:`AdmissionBroker.commit` - reading a dead reservation's
+#: freeze and committing it are the same refusal and must read the same way.
+RESERVATION_UNAVAILABLE = _REASON_UNKNOWN
 _REASON_NOT_ACTIVE = "reservation is expired, released, or already committed"
 _REASON_NOT_READY = "run admission is not execution-ready"
 _REASON_BINDING_MISMATCH = "commit does not match the prepared request"
@@ -89,12 +99,15 @@ class ReservationState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class AdmissionReadiness:
-    """Execution-readiness facts probed once during a prepare.
+    """Execution-readiness facts probed once during a prepare or a commit.
 
     Reports the worker's rung on the cold-to-execution ladder, whether any
     subprocess provider resolves on this host, and the composed run-admission
-    verdict. Prepare is fail-closed: any verdict other than execution-ready
-    refuses the reservation before capacity is assigned.
+    verdict. Only the verdict gates: it already folds in the worker rung,
+    provider eligibility, gateway database readiness, the recovery owner and the
+    native-execution profile, so the other facts are disclosure. Both stages are
+    fail-closed: any verdict other than execution-ready refuses before capacity
+    is assigned or actor tokens are accepted.
     """
 
     worker_state: WorkerLifecycleState
@@ -102,6 +115,13 @@ class AdmissionReadiness:
     eligible_providers: tuple[str, ...]
     run_admission: RunAdmission
     reasons: tuple[str, ...] = ()
+
+    @property
+    def not_ready_reason(self) -> str | None:
+        """Return the safe refusal reason, or ``None`` when execution-ready."""
+        if self.run_admission is RunAdmission.READY:
+            return None
+        return _REASON_NOT_READY
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,12 +163,18 @@ class CommitOutcome:
 
 @dataclass(slots=True)
 class _Reservation:
-    """Internal reservation bookkeeping; never leaves the broker."""
+    """Internal reservation bookkeeping; never leaves the broker.
+
+    ``frozen_selection`` is the one place the prepare's freeze survives to the
+    commit. ``binding_digest`` is computed over it, so a reservation whose freeze
+    is absent could not be committed at all.
+    """
 
     reservation_id: str
     lease_id: str
     required_roles: tuple[str, ...]
     binding_digest: str
+    frozen_selection: FrozenTeamSelection
     expires_monotonic: float
     # The exact client-visible prepare body, kept separately because commit may
     # bind a server-normalized form (for example, advertised catalog defaults).
@@ -183,6 +209,7 @@ class AdmissionBroker:
         ensure_worker: Callable[[], Awaitable[None]],
         probe_readiness: Callable[[], Awaitable[AdmissionReadiness]],
         binding_digest: str,
+        frozen_selection: FrozenTeamSelection,
         release_digest: str | None = None,
     ) -> PrepareOutcome:
         """Reserve a bounded admission slot after triggering worker startup.
@@ -193,6 +220,10 @@ class AdmissionBroker:
         capacity is assigned - records an expiring reservation only when a slot is
         free under the hard bound. No token is accepted and no run is created; the
         worker is the gateway's own, never a run-owned child.
+
+        *frozen_selection* is the freeze this prepare validated against the served
+        catalog and *binding_digest* was computed over. It is kept so the commit
+        can consume it rather than freeze again.
         """
         roles = tuple(required_roles)
         if not roles:
@@ -222,11 +253,8 @@ class AdmissionBroker:
         # flight, so exactly one worker is created no matter how many prepare.
         await ensure_worker()
         readiness = await probe_readiness()
-        if (
-            readiness.worker_state.value != "ready"
-            or readiness.provider_eligibility.value != "eligible"
-            or readiness.run_admission.value != "ready"
-        ):
+        not_ready = readiness.not_ready_reason
+        if not_ready is not None:
             return PrepareOutcome(
                 admitted=False,
                 reservation_id=None,
@@ -234,7 +262,7 @@ class AdmissionBroker:
                 required_roles=roles,
                 expires_at=None,
                 readiness=readiness,
-                reason=_REASON_NOT_READY,
+                reason=not_ready,
             )
 
         loop = asyncio.get_running_loop()
@@ -261,6 +289,7 @@ class AdmissionBroker:
                 lease_id=lease_id,
                 required_roles=roles,
                 binding_digest=binding_digest,
+                frozen_selection=frozen_selection,
                 expires_monotonic=now + self._ttl,
                 release_digest=release_digest,
             )
@@ -272,6 +301,33 @@ class AdmissionBroker:
             expires_at=expires_at_iso,
             readiness=readiness,
         )
+
+    async def admitted_selection(
+        self, reservation_id: str
+    ) -> FrozenTeamSelection | None:
+        """Return the freeze a live reservation holds, or ``None`` when it has none.
+
+        The read a commit makes BEFORE it binds anything: the selection it must
+        commit is the one its prepare validated, so it is taken from the
+        reservation rather than recomputed from a catalog that may have moved.
+        ``None`` means no reservation can serve this commit - unknown, expired,
+        released or already consumed - which the caller refuses exactly as it
+        refuses a commit against one.
+
+        Expiry is swept first, so a reservation past its lifetime answers
+        ``None`` here and is gone for the commit that follows, rather than being
+        honoured by one call and refused by the next.
+        """
+        now = asyncio.get_running_loop().time()
+        async with self._lock:
+            self._sweep_expired(now)
+            reservation = self._reservations.get(reservation_id)
+            if reservation is None or reservation.state not in {
+                ReservationState.ACTIVE,
+                ReservationState.COMMITTING,
+            }:
+                return None
+            return reservation.frozen_selection
 
     async def commit(
         self,

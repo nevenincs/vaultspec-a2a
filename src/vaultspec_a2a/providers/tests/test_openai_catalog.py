@@ -8,11 +8,13 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, override
+from http.server import BaseHTTPRequestHandler
+from typing import TYPE_CHECKING
 
 import pytest
 
+from ...testing import JsonReplyHandler, serve_handler
+from .._catalog_fields import MAX_DISCOVERY_READ_BYTES
 from ..openai_catalog import (
     OpenAICompatibleCatalogError,
     catalog_from_model_list,
@@ -53,7 +55,7 @@ class _ServerState:
 
 
 def _handler(state: _ServerState) -> type[BaseHTTPRequestHandler]:
-    class CatalogHandler(BaseHTTPRequestHandler):
+    class CatalogHandler(JsonReplyHandler, BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def do_GET(self) -> None:
@@ -86,28 +88,14 @@ def _handler(state: _ServerState) -> type[BaseHTTPRequestHandler]:
                 finally:
                     state.connection_closed.set()
 
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            del format, args
-
     return CatalogHandler
 
 
 @contextmanager
 def _serve(*responses: _HttpResponse) -> Generator[tuple[str, _ServerState]]:
     state = _ServerState(list(responses))
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(state))
-    server.daemon_threads = True
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    host = str(server.server_address[0])
-    port = int(server.server_address[1])
-    try:
-        yield f"http://{host}:{port}/v1", state
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5.0)
+    with serve_handler(_handler(state)) as port:
+        yield f"http://127.0.0.1:{port}/v1", state
 
 
 def _json_response(payload: JsonObject, *, status: int = 200) -> _HttpResponse:
@@ -404,7 +392,7 @@ async def test_real_http_multi_value_next_link_refuses_partial_catalog() -> None
 async def test_real_http_response_bound_is_enforced_without_diagnostic_leak() -> None:
     response = _HttpResponse(
         status=200,
-        body=b"{" + _SECRET.encode() + b"x" * 1_048_576,
+        body=b"{" + _SECRET.encode() + b"x" * MAX_DISCOVERY_READ_BYTES,
     )
     with (
         _serve(response) as (base_url, _),

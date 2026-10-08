@@ -141,8 +141,8 @@ async def decide_review(
 
     ``POST /authoring/v1/reviews/{approval_id}/decisions`` is the human-review
     half of the delivery path this repository's own respond route explicitly
-    refuses to decide on a document proposal's behalf (the amended
-    a2a-orchestration-edge contract: no second approval authority in A2A) — the
+    refuses to decide on a document proposal's behalf (no second approval
+    authority in A2A) — the
     engine review surface is the sole approval authority, and this is the typed
     client call onto it.
 
@@ -313,7 +313,7 @@ class AuthoringSession:
     def state_references(self) -> dict[str, Any]:
         """Return the produced-id references to fold into thread state.
 
-        References only (D5): session id and the changeset/proposal ids this
+        References only: session id and the changeset/proposal ids this
         session created — never document content.
         """
         return {

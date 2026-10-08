@@ -10,6 +10,7 @@ import pytest
 from httpx import ASGITransport
 
 from ...api.app import create_app
+from ..schemas.provider_catalog import PROVIDER_CATALOG_PATH
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -23,7 +24,7 @@ _TOKEN = "attach-credential-token-fedcba9876543210"
 _GATED_REQUESTS = (
     ("GET", "/v1/runs"),
     ("GET", "/v1/presets"),
-    ("GET", "/v1/provider-catalog?workspace_root=C%3A%5Cworkspace"),
+    ("GET", f"{PROVIDER_CATALOG_PATH}?workspace_root=C%3A%5Cworkspace"),
 )
 
 
@@ -36,7 +37,6 @@ def _make_gated_app():
 
     app = create_app(lifespan=_noop_lifespan)
     app.state.v1_service_token = _TOKEN
-    app.state.allow_unauthenticated_v1_for_testing = False
     return app
 
 

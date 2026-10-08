@@ -101,8 +101,7 @@ def resolve_harness_mcp_capabilities(
     The desktop profile admits only a registry entry explicitly marked desktop
     available. An omitted marker fails closed, and a runtime-acquired entry becomes
     an actionable, path-free unavailable capability instead of a launch spec.
-    Non-desktop resolution preserves the existing Compose and foreground-development
-    behavior.
+    Non-desktop resolution keeps the native foreground-development behavior.
 
     The caller must select *profile* explicitly. Runtime integration will pass the
     authoritative desktop profile once that authority exists; this seam never
@@ -778,11 +777,11 @@ def compose_harness_mcp_servers(
     removes any requested capability that its profile marks unavailable, including
     stale matching allowlist entries, so prohibited acquisition material cannot
     survive an earlier non-desktop composition. A model with no ACP
-    ``with_mcp_servers`` surface (mock, hosted API) is returned unchanged, and an
-    empty *names* is a no-op for non-desktop callers. Desktop callers still inspect
-    pre-attached state when *names* is empty so a stale prohibited launch cannot
-    survive a profile transition. Raises :class:`ConfigError` on an unknown declared
-    name.
+    ``with_mcp_servers`` surface (in-process fixture lane, hosted API) is
+    returned unchanged, and an empty *names* is a no-op for non-desktop callers.
+    Desktop callers still inspect pre-attached state when *names* is empty so a
+    stale prohibited launch cannot survive a profile transition. Raises
+    :class:`ConfigError` on an unknown declared name.
 
     ``allowed_tools`` (headless runs only) are the exact ``mcp__<server>__<tool>``
     names to auto-permit for the composed servers - typically
@@ -797,9 +796,9 @@ def compose_harness_mcp_servers(
     takes the session-inject + allowlist path below; a Codex model exposes
     ``with_harness_mcp_servers`` and takes the ``CODEX_HOME`` ``config.toml`` path
     (``allowed_tools`` does not apply - the read-verb constraint is applied at
-    config.toml emission). ONLY a model with neither delivery mechanism (mock,
-    hosted API) is returned unchanged. A model that HAS a harness delivery
-    mechanism is never silently no-oped.
+    config.toml emission). ONLY a model with neither delivery mechanism
+    (in-process fixture lane, hosted API) is returned unchanged. A model that HAS
+    a harness delivery mechanism is never silently no-oped.
 
     ``project_root`` is the run's bound project, pinned onto every composed spec
     through :func:`pin_harness_mcp_servers`. It is the caller's to state and is

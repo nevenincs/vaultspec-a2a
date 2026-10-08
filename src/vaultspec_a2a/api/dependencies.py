@@ -20,9 +20,9 @@ import httpx
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database import get_db
-from ..database.checkpoints import Checkpointer
-from ..streaming.aggregator import EventAggregator
+from ..database import Checkpointer, get_db
+from ..desktop.credentials import MAX_CREDENTIAL_BYTES
+from ..streaming import RelayHub
 
 # The header carrying the receipt-bound lifecycle ownership capability. Distinct
 # from the attach Authorization bearer so the two planes never alias; loopback-only
@@ -31,9 +31,9 @@ LIFECYCLE_CAPABILITY_HEADER = "X-Vaultspec-Lifecycle-Capability"
 
 __all__ = [
     "LIFECYCLE_CAPABILITY_HEADER",
-    "get_aggregator",
     "get_checkpointer",
     "get_circuit_breaker",
+    "get_relay_hub",
     "get_services",
     "get_worker_client",
     "get_worker_spawner",
@@ -43,7 +43,11 @@ __all__ = [
 
 async def require_lifecycle_capability(
     request: Request,
-    capability: str | None = Header(default=None, alias=LIFECYCLE_CAPABILITY_HEADER),
+    capability: str | None = Header(
+        default=None,
+        alias=LIFECYCLE_CAPABILITY_HEADER,
+        max_length=MAX_CREDENTIAL_BYTES,
+    ),
 ) -> None:
     """Require the receipt-bound lifecycle ownership capability, in constant time.
 
@@ -53,11 +57,8 @@ async def require_lifecycle_capability(
     The capability the gateway holds is loaded from the dashboard-created ownership
     file that discovery never references. A missing runtime capability is corrupted
     application state and fails closed; a mismatch is redacted so neither presence
-    nor shape of the expected value leaks. Only an app created with the explicit
-    test-only bypass may run without one.
+    nor shape of the expected value leaks.
     """
-    if bool(getattr(request.app.state, "allow_unauthenticated_v1_for_testing", False)):
-        return
     expected = getattr(request.app.state, "lifecycle_capability", None)
     if not isinstance(expected, str) or not expected:
         raise HTTPException(
@@ -72,12 +73,12 @@ async def require_lifecycle_capability(
         )
 
 
-def get_aggregator(request: Request) -> EventAggregator:
-    """FastAPI dependency for the EventAggregator singleton."""
-    aggregator: EventAggregator | None = getattr(request.app.state, "aggregator", None)
-    if aggregator is None:
-        raise RuntimeError("EventAggregator not initialised in app state")
-    return aggregator
+def get_relay_hub(request: Request) -> RelayHub:
+    """FastAPI dependency for the gateway's relay hub singleton."""
+    relay_hub: RelayHub | None = getattr(request.app.state, "relay_hub", None)
+    if relay_hub is None:
+        raise RuntimeError("Relay hub not initialised in app state")
+    return relay_hub
 
 
 def get_checkpointer(request: Request) -> Checkpointer:
@@ -114,13 +115,13 @@ def get_worker_spawner(request: Request) -> Any:
 
 async def get_services(
     db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
+    relay_hub: RelayHub = Depends(get_relay_hub),
     checkpointer: Checkpointer = Depends(get_checkpointer),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
-) -> tuple[AsyncSession, EventAggregator, Checkpointer, httpx.AsyncClient]:
+) -> tuple[AsyncSession, RelayHub, Checkpointer, httpx.AsyncClient]:
     """Dependency for bundling all required services into a single injection point.
 
     No longer includes GraphRegistry or TaskGroup -- the worker owns
     graph lifecycle, and the gateway does not run background agent tasks.
     """
-    return db, aggregator, checkpointer, worker_client
+    return db, relay_hub, checkpointer, worker_client

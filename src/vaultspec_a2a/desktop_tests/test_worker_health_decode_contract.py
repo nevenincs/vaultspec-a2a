@@ -1,35 +1,38 @@
 """Real-HTTP proof that one worker never gets two contradictory health verdicts.
 
-A worker that answers ``200`` with a body the decoder cannot read is the case
-where the gateway's two health readers used to disagree. The watchdog and
-``/health`` read it through the probe primitive and saw the worker UP; the
-boot, adopt, and evict paths read it through the body-returning helper, which
-evaluated ``resp.json()`` inside the same ``try`` that caught transport
-failures, and so received the identical ``None`` it receives for a DEAD worker.
-One live worker was simultaneously up and absent, and the absent reading is the
-one that spawns a competitor onto a port that worker still holds.
+A process that answers ``200`` with a body the decoder cannot read is the case
+where the gateway's readers could disagree about the same occupant. One live
+occupant must never read as simultaneously ready and absent, because the absent
+reading is the one that spawns a competitor onto a port that process still
+holds.
 
 The occupant here is a real HTTP server in a real subprocess serving a real
 malformed ``200`` over a real socket - the condition itself, not a stand-in for
 any code under test. Every assertion drives production functions directly.
 
-The contract these pin down is deliberately asymmetric, because the two callers
-ask different questions of the same occupant:
+Three different questions are asked of that one occupant, and the answers must
+be consistent:
 
-- *is a worker up?* - yes; an unreadable body cannot make a healthy worker
-  unhealthy;
-- *does something hold this port?* - yes, so do not spawn onto it;
-- *is that something provably mine?* - no; an unreadable body is the absence of
-  evidence, and the provenance check must refuse it under both profiles.
+- *is a ready worker there?* - no; a 200 is not a readiness answer, and an
+  unreadable body carries no readiness fact at all;
+- *does something hold this port?* - yes, and that is read from the SOCKET, not
+  from the health body, which is why an unreadable occupant can be refused
+  without being mistaken for a dead one;
+- *may it be adopted or evicted?* - no; absence of pairing evidence is not
+  evidence of ownership, under either profile, and the spawn is refused rather
+  than attempted.
+
+Keeping the second question on the socket is the load-bearing part. While it was
+answered by the status code, a verdict change anywhere in the health rule could
+turn a held port into an apparently free one.
 """
 
 from __future__ import annotations
 
 import contextlib
-import socket
+import os
 import subprocess
 import sys
-import time
 from typing import TYPE_CHECKING
 
 import httpx
@@ -37,10 +40,18 @@ import pytest
 
 from ..control._worker_health import WorkerHealthProbe, probe_worker_health
 from ..control.worker_management import LazyWorkerSpawner
-from ..testing.ports import free_port
+from ..testing import (
+    WatchedProcess,
+    await_ready,
+    free_port,
+    reap_process,
+    settings_override,
+)
+from ..utils import ProcessContainment, spawn_contained
+from ..utils._process_tree import PortClaim, classify_port_claim, port_has_listener
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
 # A real server that answers 200 with a body that is emphatically not JSON.
@@ -93,32 +104,36 @@ while time.monotonic() < deadline:
 
 
 @contextlib.contextmanager
-def _stalled_worker() -> Generator[str]:
-    """Run a real server that accepts /health and never sends a response."""
-    port = free_port()
-    proc = subprocess.Popen(
-        [sys.executable, "-c", _STALLED_WORKER, str(port)],
+def _running_worker(
+    command: list[str], *, name: str, ready: Callable[[], bool]
+) -> Generator[None]:
+    """Run *command* contained until *ready* passes, and reap its tree after."""
+    containment = ProcessContainment.create()
+    process = spawn_contained(
+        command,
+        containment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    url = f"http://127.0.0.1:{port}"
+    worker = WatchedProcess(name, process, containment)
     try:
-        deadline = time.monotonic() + 15.0
-        while time.monotonic() < deadline:
-            with (
-                contextlib.suppress(OSError),
-                socket.create_connection(("127.0.0.1", port), timeout=1.0),
-            ):
-                break
-            time.sleep(0.05)
-        else:
-            raise AssertionError("the stalled worker never bound its port")
-        yield url
+        await_ready(ready, what=name, watch=[worker], timeout=15.0, interval=0.05)
+        yield
     finally:
-        with contextlib.suppress(Exception):
-            proc.kill()
-            proc.wait(timeout=10)
+        reap_process(worker)
+
+
+@contextlib.contextmanager
+def _stalled_worker() -> Generator[str]:
+    """Run a real server that accepts /health and never sends a response."""
+    port = free_port()
+    with _running_worker(
+        [sys.executable, "-c", _STALLED_WORKER, str(port)],
+        name="stalled worker",
+        ready=lambda: port_has_listener(port, timeout=1.0),
+    ):
+        yield f"http://127.0.0.1:{port}"
 
 
 @contextlib.contextmanager
@@ -127,62 +142,57 @@ def _malformed_worker(tmp_path: Path) -> Generator[tuple[str, int]]:
     port = free_port()
     script = tmp_path / "malformed_worker.py"
     script.write_text(_MALFORMED_WORKER, encoding="utf-8")
-    proc = subprocess.Popen(
-        [sys.executable, str(script), str(port)],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
     url = f"http://127.0.0.1:{port}"
-    try:
-        deadline = time.monotonic() + 15.0
-        while time.monotonic() < deadline:
-            try:
-                with httpx.Client(timeout=1.0) as client:
-                    resp = client.get(f"{url}/health")
-                if resp.status_code == 200:
-                    break
-            except httpx.HTTPError:
-                time.sleep(0.05)
-        else:
-            raise AssertionError("the malformed worker never came up")
+    with _running_worker(
+        [sys.executable, str(script), str(port)],
+        name="malformed worker",
+        ready=lambda: httpx.get(f"{url}/health", timeout=1.0).status_code == 200,
+    ):
         yield url, port
-    finally:
-        with contextlib.suppress(Exception):
-            proc.kill()
-            proc.wait(timeout=10)
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_an_unreadable_worker_is_up_present_and_not_ours(
+async def test_an_unreadable_occupant_is_not_ready_but_still_holds_the_port(
     tmp_path: Path,
 ) -> None:
-    """One live unreadable worker yields three consistent, non-contradictory reads.
+    """One live unreadable occupant yields consistent, non-contradictory reads.
 
     Each assertion is a different production entry point against the SAME live
-    occupant, which is what makes the set a split-brain proof rather than three
+    occupant, which is what makes the set a split-brain proof rather than several
     unrelated checks.
 
-    Load-bearing: the public result distinguishes a healthy but unreadable
-    occupant from a dead worker. Collapsing those states would let spawn compete
-    for a port a live process still holds.
+    Load-bearing: the port claim distinguishes this held port from a free one
+    even though the health verdict is now the same ``False`` a dead worker gives.
+    Collapsing those two would let a spawn compete for a port a live process
+    still holds - which is observable here as the worker stderr log the spawn
+    path opens before it starts a process, and which must not appear.
     """
     with _malformed_worker(tmp_path) as (url, port):
-        # The health verdict is the status code and nothing else: an unreadable
-        # body cannot turn a healthy worker unhealthy.
-        probe = await probe_worker_health(url)
-        assert probe == WorkerHealthProbe(healthy=True, body=None)
+        # Not a readiness answer: a 200 proves only that something answered, and
+        # these bytes carry no readiness fact to read.
+        probe = await probe_worker_health(url, internal_token=None)
+        assert probe == WorkerHealthProbe(healthy=False, body=None)
+        # ...yet the port is demonstrably held, from the socket rather than the
+        # body, and held by this test's own descendant, so a credentialed read
+        # of it would be authorized where a stranger's would not.
+        assert classify_port_claim(port, os.getpid(), timeout=1.0) is PortClaim.OURS
 
-        spawner = LazyWorkerSpawner(worker_url=url, worker_port=port, auto_spawn=True)
-        await spawner.ensure_worker()
+        with settings_override(a2a_home=tmp_path / "home"):
+            spawner = LazyWorkerSpawner(
+                worker_url=url, worker_port=port, auto_spawn=True, internal_token=None
+            )
+            await spawner.ensure_worker()
+            stderr_log = spawner.stderr_log_path
         async with httpx.AsyncClient() as client:
             incumbent = await client.get(f"{url}/health")
-        second_probe = await probe_worker_health(url)
+        second_probe = await probe_worker_health(url, internal_token=None)
 
     assert incumbent.status_code == 200
     assert spawner.spawned is False
     assert spawner.process is None
-    assert second_probe == WorkerHealthProbe(healthy=True, body=None)
+    assert stderr_log is not None
+    assert stderr_log.exists() is False
+    assert second_probe == WorkerHealthProbe(healthy=False, body=None)
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -194,7 +204,7 @@ async def test_nothing_listening_is_reported_absent(tmp_path: Path) -> None:
     vacuous. Port 9 (discard) refuses the connection outright.
     """
     dead = "http://127.0.0.1:9"
-    probe = await probe_worker_health(dead)
+    probe = await probe_worker_health(dead, internal_token=None)
     assert probe == WorkerHealthProbe(healthy=False, body=None)
     # A refused connection is an OBSERVATION of absence, not a failure to observe.
     assert probe.indeterminate is False
@@ -215,7 +225,7 @@ async def test_a_stalled_worker_is_unhealthy_but_not_observed_absent() -> None:
     the port is closed - which is precisely the distinction under proof.
     """
     with _stalled_worker() as url:
-        probe = await probe_worker_health(url, timeout=1.0)
+        probe = await probe_worker_health(url, timeout=1.0, internal_token=None)
 
     assert probe.healthy is False, "a worker that never answered is not healthy"
     assert probe.indeterminate is True, (

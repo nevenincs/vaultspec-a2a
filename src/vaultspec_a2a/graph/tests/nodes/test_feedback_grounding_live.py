@@ -1,6 +1,6 @@
 """Live boundary proof: the research_adr writer grounds on a real feedback batch.
 
-Test-integrity / wire-contract (S14): ONLINE against the real engine resolved via
+Test-integrity / wire-contract: ONLINE against the real engine resolved via
 the discovery file, never a mocked wire. It proves the end-to-end grounding path
 the offline tests cannot reach: a REAL feedback batch created on the engine, a
 REAL FeedbackContextReader that retrieves it by id under a REAL minted actor
@@ -28,8 +28,9 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import PrivateAttr
 
 from ....authoring import FeedbackContextReader
-from ....graph.nodes.worker import create_worker_node
+from ....graph.nodes.worker import WorkerNodeOptions, create_worker_node
 from ....thread.actor_tokens import ActorTokenBundle
+from ....utils import bearer_header
 from ....worker.token_store import RunTokenStore
 
 if TYPE_CHECKING:
@@ -80,7 +81,7 @@ class _RecordingModel(BaseChatModel):
 def _post(
     base: str, path: str, bearer: str, actor: str | None, body: dict[str, Any]
 ) -> dict[str, Any]:
-    headers = {"Authorization": f"Bearer {bearer}", "content-type": "application/json"}
+    headers = {**bearer_header(bearer), "content-type": "application/json"}
     if actor is not None:
         headers["x-authoring-actor-token"] = actor
     resp = httpx.post(f"{base}{path}", headers=headers, json=body, timeout=10.0)
@@ -164,8 +165,7 @@ async def test_synthesist_node_grounds_on_a_real_feedback_batch(
         model=recording,
         system_prompt="You are the synthesist.",
         name="synthesis",
-        role="synthesist",
-        feedback_reader=reader,
+        options=WorkerNodeOptions(role="synthesist", feedback_reader=reader),
     )
 
     state: TeamState = {
@@ -206,8 +206,7 @@ async def test_synthesist_node_ungrounded_without_a_batch(
         model=recording,
         system_prompt="You are the synthesist.",
         name="synthesis",
-        role="synthesist",
-        feedback_reader=reader,
+        options=WorkerNodeOptions(role="synthesist", feedback_reader=reader),
     )
     state: TeamState = {
         "messages": [HumanMessage(content="Draft the research document.")],

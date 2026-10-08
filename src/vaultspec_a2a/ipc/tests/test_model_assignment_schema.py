@@ -15,7 +15,7 @@ from ..schemas import DispatchRequest
 def _assignment() -> dict[str, dict[str, Any]]:
     return {
         "coder": {
-            "provider": "codex",
+            "provider_id": "codex",
             "execution_mode": "codex-app-server",
             "catalog_revision": "rev",
             "entry_id": "entry",
@@ -27,6 +27,7 @@ def _assignment() -> dict[str, dict[str, Any]]:
                     "provider_value": "high",
                 }
             ],
+            "defaulted_control_ids": [],
             "fallbacks": [
                 {
                     "schema_version": 1,
@@ -57,21 +58,25 @@ def test_dispatch_rejects_unknown_nested_assignment_fields(location: str) -> Non
     }[location]
     target["profile_id"] = "retired"
     with pytest.raises(ValidationError, match="model_assignment"):
-        DispatchRequest(
-            action="ingest",
-            thread_id="thread",
-            workspace_root=str(Path.cwd()),
-            recursion_limit=10,
-            model_assignment=assignment,
+        DispatchRequest.model_validate(
+            {
+                "action": "ingest",
+                "thread_id": "thread",
+                "workspace_root": str(Path.cwd()),
+                "recursion_limit": 10,
+                "model_assignment": assignment,
+            }
         )
 
 
 def test_dispatch_accepts_the_exact_closed_assignment() -> None:
-    request = DispatchRequest(
-        action="ingest",
-        thread_id="thread",
-        workspace_root=str(Path.cwd()),
-        recursion_limit=10,
-        model_assignment=_assignment(),
+    request = DispatchRequest.model_validate(
+        {
+            "action": "ingest",
+            "thread_id": "thread",
+            "workspace_root": str(Path.cwd()),
+            "recursion_limit": 10,
+            "model_assignment": _assignment(),
+        }
     )
-    assert request.model_assignment["coder"]["model_name"] == "exact"
+    assert request.model_assignment["coder"].model_name == "exact"

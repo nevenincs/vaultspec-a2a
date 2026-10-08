@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -10,72 +9,82 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 from uuid import uuid4
 
-from sqlalchemy import and_, exists, func, or_, select, update
+from sqlalchemy import and_, exists, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
-    from sqlalchemy.engine import CursorResult
     from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.orm import QueryableAttribute
     from sqlalchemy.sql import Select
     from sqlalchemy.sql.elements import ColumnElement
 
-from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
+from ..thread import RunWriteAuthority, ThreadWriteExpectation, sha256_hex
+from ..thread.constants import (
+    MAX_FEATURE_TAG_LENGTH,
+    MAX_WORKSPACE_ROOT_LENGTH,
+    RUN_ID_PATTERN,
+)
 from ..thread.enums import (
     ACTIVE_STATUSES,
     NON_ACTIVE_STATUSES,
+    TERMINAL_STATUS_VALUES,
     ApprovalStatus,
     ControlActionType,
+    DegradedReason,
     RepairStatus,
     ThreadStatus,
 )
 from ..thread.errors import NicknameConflictError
 from ..thread.lifecycle_guards import can_delete
 from ..thread.transitions import validate_transition
+from ..utils.coercion import decode_json_object
 from ._helpers import (
     _UNSET,
-    _coerce_approval_status,
-    _coerce_control_action_type,
-    _coerce_repair_status,
-    _coerce_status,
+    _coerce,
+    _journal_row_for,
     _UnsetType,
+    affected_rows,
     save_model,
 )
 from .models import (
     ControlActionModel,
-    RunWriteAuthority,
     ThreadExecutionStateModel,
     ThreadModel,
 )
 from .models import (
     utcnow as _utcnow,
 )
+from .write_authority_schema import WRITE_AUTHORITY_VIOLATION_PREDICATE
 
 __all__ = [
     "ActiveThreadProjection",
     "ThreadStatusElectionOutcome",
     "ThreadStatusElectionResult",
-    "ThreadWriteExpectation",
     "create_thread",
     "delete_thread",
     "elect_thread_deleting",
     "elect_thread_status",
     "get_thread",
     "get_thread_execution_state",
-    "get_thread_metadata",
     "list_active_thread_page",
     "list_non_terminal_threads",
     "list_threads",
+    "lock_thread_row",
     "normalize_workspace_identity",
     "path_safe_run_id_clause",
     "record_thread_execution_state",
+    "select_invalid_authority_thread",
+    "select_orphaned_writer_thread",
+    "select_settled_thread_ids",
     "set_thread_approval_state",
     "set_thread_repair_state",
-    "successor_thread_write_authority",
+    "thread_exists",
+    "thread_last_sequence",
+    "thread_owned_by",
     "thread_write_expectation",
-    "update_thread_status",
 ]
 
 
@@ -87,27 +96,6 @@ class ActiveThreadProjection:
     status: str
     feature_tag: str | None
     created_at: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class ThreadWriteExpectation:
-    """Exact durable state and authority a lifecycle writer observed."""
-
-    status: ThreadStatus
-    authority: RunWriteAuthority
-
-    def __post_init__(self) -> None:
-        """Refuse a partially typed election witness.
-
-        These fields carry static types, but the checks defend against callers
-        that construct this value from untrusted data and bypass the type
-        checker entirely; `cast(object, ...)` only changes what the checker
-        infers, not what runs.
-        """
-        if not isinstance(cast("object", self.status), ThreadStatus):
-            raise TypeError("status must be a ThreadStatus")
-        if not isinstance(cast("object", self.authority), RunWriteAuthority):
-            raise TypeError("authority must be a RunWriteAuthority")
 
 
 class ThreadStatusElectionOutcome(StrEnum):
@@ -129,50 +117,89 @@ class ThreadStatusElectionResult:
 def thread_write_expectation(thread: ThreadModel) -> ThreadWriteExpectation:
     """Snapshot the complete current election witness from a durable row."""
     return ThreadWriteExpectation(
-        status=_coerce_status(thread.status),
+        status=_coerce(ThreadStatus, thread.status, label="thread status"),
         authority=RunWriteAuthority(
             run_revision=thread.run_revision,
             writer_generation=thread.writer_generation,
-            action_type=_coerce_control_action_type(thread.writer_action_type),
+            action_type=_coerce(
+                ControlActionType,
+                thread.writer_action_type,
+                label="control action type",
+            ),
             action_receipt_id=thread.writer_action_receipt_id,
         ),
     )
 
 
-def successor_thread_write_authority(
-    expectation: ThreadWriteExpectation,
+def thread_owned_by(
+    action_type: ControlActionType | QueryableAttribute[str],
+    action_receipt_id: str | QueryableAttribute[str | None],
     *,
-    action_type: ControlActionType,
-    action_receipt_id: str,
-) -> RunWriteAuthority:
-    """Build the exact next authority from an observed durable receipt."""
-    if not isinstance(cast("object", expectation), ThreadWriteExpectation):
-        raise TypeError("expectation must be a ThreadWriteExpectation")
-    if not isinstance(cast("object", action_type), ControlActionType):
-        raise TypeError("action_type must be a ControlActionType")
-    current = expectation.authority
-    same_action = (
-        action_type is current.action_type
-        and action_receipt_id == current.action_receipt_id
+    writer_generation: int | None = None,
+    run_revision: int | None = None,
+) -> ColumnElement[bool]:
+    """Return the SQL form of ``RunWriteAuthority.owned_by`` over ``threads``.
+
+    The action identity is either bound values or a joined row's columns, so
+    one predicate serves both an exact observed witness and a scan for runs
+    whose current writer is the joined action. Generation and revision are
+    pinned only when given.
+    """
+    writer_type = (
+        action_type.value if isinstance(action_type, ControlActionType) else action_type
     )
-    return RunWriteAuthority(
-        run_revision=current.run_revision + 1,
-        writer_generation=(
-            current.writer_generation if same_action else current.writer_generation + 1
-        ),
-        action_type=action_type,
-        action_receipt_id=action_receipt_id,
+    clauses = [
+        ThreadModel.writer_action_type == writer_type,
+        ThreadModel.writer_action_receipt_id == action_receipt_id,
+    ]
+    if writer_generation is not None:
+        clauses.append(ThreadModel.writer_generation == writer_generation)
+    if run_revision is not None:
+        clauses.append(ThreadModel.run_revision == run_revision)
+    return and_(*clauses)
+
+
+def select_invalid_authority_thread() -> Select[tuple[str]]:
+    """Select one thread whose stored write authority breaks a current CHECK."""
+    return (
+        select(ThreadModel.id).where(text(WRITE_AUTHORITY_VIOLATION_PREDICATE)).limit(1)
+    )
+
+
+def select_settled_thread_ids(*, before: datetime) -> Select[tuple[str]]:
+    """Select the runs that reached a terminal status before *before*."""
+    return select(ThreadModel.id).where(
+        ThreadModel.status.in_(TERMINAL_STATUS_VALUES),
+        ThreadModel.updated_at < before,
+    )
+
+
+def select_orphaned_writer_thread() -> Select[tuple[str]]:
+    """Select one thread whose current writer names no journal row of its own."""
+    return (
+        select(ThreadModel.id)
+        .outerjoin(
+            ControlActionModel,
+            and_(
+                ControlActionModel.thread_id == ThreadModel.id,
+                thread_owned_by(
+                    ControlActionModel.action_type, ControlActionModel.dispatch_id
+                ),
+            ),
+        )
+        .where(ControlActionModel.id.is_(None))
+        .limit(1)
     )
 
 
 def path_safe_run_id_clause() -> ColumnElement[bool]:
-    """Return the cross-dialect persisted run-id grammar predicate.
+    """Return the persisted run-id grammar predicate.
 
     The one canonical predicate for "is this durable id the shape the gateway's
-    ``PathSafeRunId``/``ReservationId``/``LeaseId`` types admit" - public so a
-    query outside this module can apply it rather than re-deriving the regex.
+    ``PathSafeRunId`` type admits" - public so a query outside this module can
+    apply it rather than re-deriving the regex.
     """
-    return ThreadModel.id.regexp_match(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
+    return ThreadModel.id.regexp_match(RUN_ID_PATTERN)
 
 
 def normalize_workspace_identity(value: str | os.PathLike[str]) -> str:
@@ -193,17 +220,11 @@ def normalize_workspace_identity(value: str | os.PathLike[str]) -> str:
 
 def _discovery_selectors(metadata: str | None) -> tuple[str | None, str | None]:
     """Project bounded discovery selectors once at the metadata write seam."""
-    if not metadata:
+    value = decode_json_object(metadata)
+    if value is None:
         return None, None
-    try:
-        value = json.loads(metadata)
-    except (json.JSONDecodeError, RecursionError, TypeError):
-        return None, None
-    if not isinstance(value, dict):
-        return None, None
-    value_obj = cast("dict[str, object]", value)
-    workspace = value_obj.get("workspace_root")
-    feature = value_obj.get("feature_tag")
+    workspace = value.get("workspace_root")
+    feature = value.get("feature_tag")
     if (
         not isinstance(workspace, str)
         or not os.path.isabs(workspace)
@@ -221,7 +242,7 @@ def _workspace_key(workspace_root: str | None) -> str | None:
     """Return an index-safe identity for an already-canonical workspace path."""
     if workspace_root is None:
         return None
-    return hashlib.sha256(workspace_root.encode("utf-8")).hexdigest()
+    return sha256_hex(workspace_root.encode("utf-8"))
 
 
 class _CreateThreadOptional(TypedDict, total=False):
@@ -233,7 +254,6 @@ class _CreateThreadOptional(TypedDict, total=False):
     team_preset: str | None
     repair_status: RepairStatus | str
     repair_reason: str | None
-    execution_readiness: RepairStatus | str
 
 
 class _CreateThreadArgs(_CreateThreadOptional):
@@ -248,9 +268,15 @@ async def create_thread(
     metadata = options.get("metadata")
     nickname = options.get("nickname")
     thread_id = options.get("thread_id")
-    coerced_status = _coerce_status(options.get("status", ThreadStatus.SUBMITTED))
-    coerced_repair_status = _coerce_repair_status(
-        options.get("repair_status", RepairStatus.HEALTHY)
+    coerced_status = _coerce(
+        ThreadStatus,
+        options.get("status", ThreadStatus.SUBMITTED),
+        label="thread status",
+    )
+    coerced_repair_status = _coerce(
+        RepairStatus,
+        options.get("repair_status", RepairStatus.HEALTHY),
+        label="repair status",
     )
 
     if nickname is not None:
@@ -274,7 +300,7 @@ async def create_thread(
         is_active=coerced_status in ACTIVE_STATUSES,
         repair_status=coerced_repair_status.value,
         repair_reason=options.get("repair_reason"),
-        execution_readiness=options.get("execution_readiness", RepairStatus.HEALTHY),
+        execution_readiness=coerced_repair_status.value,
         thread_metadata=metadata,
         workspace_root=workspace_root,
         workspace_key=_workspace_key(workspace_root),
@@ -298,8 +324,53 @@ async def create_thread(
         raise
 
 
-async def get_thread(session: AsyncSession, thread_id: str) -> ThreadModel | None:
-    return await session.get(ThreadModel, thread_id)
+async def get_thread(
+    session: AsyncSession, thread_id: str, *, refresh: bool = False
+) -> ThreadModel | None:
+    """Return one run's row by id.
+
+    ``refresh`` re-reads the row from the database instead of the identity map,
+    for a caller whose copy may predate a write another statement made.
+    """
+    return await session.get(ThreadModel, thread_id, populate_existing=refresh)
+
+
+async def thread_exists(session: AsyncSession, thread_id: str) -> bool:
+    """Whether a run's row exists, answered without loading it."""
+    return (
+        await session.scalar(select(ThreadModel.id).where(ThreadModel.id == thread_id))
+    ) is not None
+
+
+async def thread_last_sequence(session: AsyncSession, thread_id: str) -> int | None:
+    """Return the replay cursor captured on a run when it settled.
+
+    ``None`` for an absent run and for a present one that has not settled.
+    """
+    return await session.scalar(
+        select(ThreadModel.last_sequence).where(ThreadModel.id == thread_id)
+    )
+
+
+async def lock_thread_row(session: AsyncSession, thread_id: str) -> ThreadModel | None:
+    """Return a run's row with its write lock held until this transaction ends.
+
+    The ordering point between transactions that decide opposite things about
+    the same run, such as admitting a continuation and settling the run. Both
+    sides read the run through this, so whichever arrives second waits and then
+    reads what the first committed. The row is re-read rather than reused from
+    the identity map, because a stale copy is exactly what the lock exists to
+    prevent.
+
+    SQLite takes no row lock and needs none: its write transaction already
+    excludes a second writer for the whole transaction.
+    """
+    return await session.scalar(
+        select(ThreadModel)
+        .where(ThreadModel.id == thread_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
 
 
 async def list_threads(
@@ -453,10 +524,10 @@ def _active_thread_page_statement(
         .where(
             ThreadModel.is_active.is_(True),
             ThreadModel.status.in_(sorted(status.value for status in ACTIVE_STATUSES)),
-            # SQLAlchemy renders this portable operator as ``REGEXP`` on
-            # SQLite (whose dialect installs a Python regexp function) and
-            # ``~`` on PostgreSQL. Keep legacy invalid identifiers out of the
-            # bounded page in the database, before LIMIT is applied.
+            # SQLAlchemy renders this operator as ``REGEXP``, which the SQLite
+            # dialect backs with a Python regexp function. Keep legacy invalid
+            # identifiers out of the bounded page in the database, before LIMIT
+            # is applied.
             path_safe_run_id_clause(),
         )
         .order_by(ThreadModel.created_at.desc(), ThreadModel.id.desc())
@@ -480,7 +551,7 @@ def _active_thread_page_statement(
 
 
 async def delete_thread(session: AsyncSession, thread_id: str) -> bool:
-    thread = await session.get(ThreadModel, thread_id)
+    thread = await get_thread(session, thread_id)
     if thread is None:
         return False
     await session.delete(thread)
@@ -530,38 +601,9 @@ def _capped_single_line(text: str) -> str:
     return encoded[:budget].decode("utf-8", errors="ignore") + _TRUNCATION_MARK
 
 
-def _validate_successor_authority(
-    expectation: ThreadWriteExpectation,
-    successor: RunWriteAuthority,
-) -> None:
-    """Validate the only two current authority-advance shapes."""
-    current = expectation.authority
-    if successor.run_revision != current.run_revision + 1:
-        raise ValueError("successor run_revision must advance by exactly one")
-
-    same_action = (
-        successor.action_type is current.action_type
-        and successor.action_receipt_id == current.action_receipt_id
-    )
-    expected_generation = (
-        current.writer_generation if same_action else current.writer_generation + 1
-    )
-    if successor.writer_generation != expected_generation:
-        relation = "remain unchanged" if same_action else "advance by exactly one"
-        raise ValueError(f"successor writer_generation must {relation}")
-
-
-def _validate_election_inputs(
-    expectation: ThreadWriteExpectation,
-    status: ThreadStatus,
-    successor: RunWriteAuthority,
-) -> None:
+def _validate_expectation(expectation: ThreadWriteExpectation) -> None:
     if not isinstance(cast("object", expectation), ThreadWriteExpectation):
         raise TypeError("expectation must be a ThreadWriteExpectation")
-    if not isinstance(cast("object", status), ThreadStatus):
-        raise TypeError("status must be a ThreadStatus")
-    if not isinstance(cast("object", successor), RunWriteAuthority):
-        raise TypeError("successor must be a RunWriteAuthority")
 
 
 class _ElectionOptional(TypedDict, total=False):
@@ -572,7 +614,8 @@ class _ElectionOptional(TypedDict, total=False):
 class _ElectionArgs(_ElectionOptional):
     expectation: ThreadWriteExpectation
     status: ThreadStatus
-    successor: RunWriteAuthority
+    action_type: ControlActionType
+    action_receipt_id: str
 
 
 async def elect_thread_status(
@@ -582,86 +625,54 @@ async def elect_thread_status(
 
     The update predicate contains the observed state and every authority field.
     Database lock rechecks therefore choose one winner even when two sessions
-    carry the same stale snapshot. The successor receipt must already identify
-    a same-thread, same-action journal row; absence is a typed refusal and never
+    carry the same stale snapshot. The elected action's successor authority is
+    derived from the witness here, and its receipt must already identify a
+    same-thread, same-action journal row; absence is a typed refusal and never
     causes authority to be invented.
+
+    ``failure_reason`` and ``provider_condition`` leave their columns unchanged
+    when falsy, and there is deliberately no explicit-clear path: a run's failure
+    account is written once, on the election that fails it. The reason is
+    flattened to one line and capped here, the one write boundary every producer
+    passes through. The condition is written independently of the reason because
+    the two answer different questions (what happened versus what the reader
+    should do), so a caller that knows only one must still be able to record it.
     """
     expectation = kwargs["expectation"]
     status = kwargs["status"]
-    successor = kwargs["successor"]
     failure_reason = kwargs.get("failure_reason")
     provider_condition = kwargs.get("provider_condition")
-    _validate_election_inputs(expectation, status, successor)
+    _validate_expectation(expectation)
+    successor = expectation.authority.successor(
+        action_type=kwargs["action_type"],
+        action_receipt_id=kwargs["action_receipt_id"],
+    )
+    if not isinstance(cast("object", status), ThreadStatus):
+        raise TypeError("status must be a ThreadStatus")
     validate_transition(expectation.status, status, thread_id=thread_id)
-    _validate_successor_authority(expectation, successor)
-    current = expectation.authority
-    if (
-        status is expectation.status
-        and successor.action_type is current.action_type
-        and successor.action_receipt_id == current.action_receipt_id
+    if status is expectation.status and expectation.authority.owned_by(
+        successor.action_type, successor.action_receipt_id
     ):
         raise ValueError(
             "an election must advance state or install a new action identity"
         )
 
-    receipt_exists = exists(
-        select(ControlActionModel.id).where(
-            ControlActionModel.thread_id == thread_id,
-            ControlActionModel.action_type == successor.action_type.value,
-            ControlActionModel.dispatch_id == successor.action_receipt_id,
-        )
-    )
     values: dict[str, object] = {
         "status": status.value,
         "is_active": status in ACTIVE_STATUSES,
         "updated_at": _utcnow(),
-        "run_revision": successor.run_revision,
-        "writer_generation": successor.writer_generation,
-        "writer_action_type": successor.action_type.value,
-        "writer_action_receipt_id": successor.action_receipt_id,
     }
     if failure_reason:
         values["failure_reason"] = _capped_single_line(failure_reason)
     if provider_condition:
         values["provider_condition"] = provider_condition
-
-    statement = (
-        update(ThreadModel)
-        .where(
-            ThreadModel.id == thread_id,
-            ThreadModel.status == expectation.status.value,
-            ThreadModel.run_revision == current.run_revision,
-            ThreadModel.writer_generation == current.writer_generation,
-            ThreadModel.writer_action_type == current.action_type.value,
-            ThreadModel.writer_action_receipt_id == current.action_receipt_id,
-            receipt_exists,
-        )
-        .values(**values)
-        .execution_options(synchronize_session=False)
+    return await _compare_and_set_thread(
+        session,
+        thread_id,
+        expectation=expectation,
+        successor=successor,
+        values=values,
     )
-    result = cast("CursorResult[object]", await session.execute(statement))
-    if result.rowcount == 1:
-        # Callers apply repair, approval and journal side effects in this same
-        # transaction. Refresh an already identity-mapped row before returning
-        # so those steps observe the elected status and authority rather than
-        # the witness that just lost ownership.
-        await session.scalar(
-            select(ThreadModel)
-            .where(ThreadModel.id == thread_id)
-            .execution_options(populate_existing=True)
-        )
-        return ThreadStatusElectionResult(ThreadStatusElectionOutcome.WON)
-
-    row_exists = await session.scalar(
-        select(ThreadModel.id).where(ThreadModel.id == thread_id)
-    )
-    if row_exists is None:
-        return ThreadStatusElectionResult(ThreadStatusElectionOutcome.NOT_FOUND)
-
-    matching_receipt = await session.scalar(select(receipt_exists))
-    if not matching_receipt:
-        return ThreadStatusElectionResult(ThreadStatusElectionOutcome.RECEIPT_MISMATCH)
-    return ThreadStatusElectionResult(ThreadStatusElectionOutcome.LOST)
 
 
 async def elect_thread_deleting(
@@ -676,137 +687,87 @@ async def elect_thread_deleting(
     receipt of its own.  This narrow operation cannot target any other state and
     ordinary lifecycle elections still cannot enter or leave ``DELETING``.
     """
-    if not isinstance(cast("object", expectation), ThreadWriteExpectation):
-        raise TypeError("expectation must be a ThreadWriteExpectation")
+    _validate_expectation(expectation)
     eligibility = can_delete(expectation.status.value)
     if not eligibility.allowed:
         raise ValueError(eligibility.reason)
     current = expectation.authority
-    successor = successor_thread_write_authority(
-        expectation,
-        action_type=current.action_type,
-        action_receipt_id=current.action_receipt_id,
+    return await _compare_and_set_thread(
+        session,
+        thread_id,
+        expectation=expectation,
+        successor=current.successor(
+            action_type=current.action_type,
+            action_receipt_id=current.action_receipt_id,
+        ),
+        values={
+            "status": ThreadStatus.DELETING.value,
+            "is_active": False,
+            "updated_at": _utcnow(),
+        },
+    )
+
+
+async def _compare_and_set_thread(
+    session: AsyncSession,
+    thread_id: str,
+    *,
+    expectation: ThreadWriteExpectation,
+    successor: RunWriteAuthority,
+    values: dict[str, object],
+) -> ThreadStatusElectionResult:
+    """Install *successor* with *values* only while *expectation* still holds.
+
+    The successor's receipt must name a journal row of this thread and action;
+    a write that misses resolves to the typed reason it missed.
+    """
+    current = expectation.authority
+    receipt_exists = exists(
+        select(ControlActionModel.id).where(_journal_row_for(thread_id, successor))
     )
     statement = (
         update(ThreadModel)
         .where(
             ThreadModel.id == thread_id,
             ThreadModel.status == expectation.status.value,
-            ThreadModel.run_revision == current.run_revision,
-            ThreadModel.writer_generation == current.writer_generation,
-            ThreadModel.writer_action_type == current.action_type.value,
-            ThreadModel.writer_action_receipt_id == current.action_receipt_id,
-            exists(
-                select(ControlActionModel.id).where(
-                    ControlActionModel.thread_id == thread_id,
-                    ControlActionModel.action_type == current.action_type.value,
-                    ControlActionModel.dispatch_id == current.action_receipt_id,
-                )
+            thread_owned_by(
+                current.action_type,
+                current.action_receipt_id,
+                writer_generation=current.writer_generation,
+                run_revision=current.run_revision,
             ),
+            receipt_exists,
         )
         .values(
-            status=ThreadStatus.DELETING.value,
-            is_active=False,
-            updated_at=_utcnow(),
+            **values,
             run_revision=successor.run_revision,
+            writer_generation=successor.writer_generation,
+            writer_action_type=successor.action_type.value,
+            writer_action_receipt_id=successor.action_receipt_id,
         )
         .execution_options(synchronize_session=False)
     )
-    result = cast("CursorResult[object]", await session.execute(statement))
-    if result.rowcount == 1:
-        await session.scalar(
-            select(ThreadModel)
-            .where(ThreadModel.id == thread_id)
-            .execution_options(populate_existing=True)
-        )
+    if affected_rows(await session.execute(statement)) == 1:
+        # Callers apply repair, approval and journal side effects in this same
+        # transaction. Refresh an already identity-mapped row before returning
+        # so those steps observe the elected status and authority rather than
+        # the witness that just lost ownership.
+        await get_thread(session, thread_id, refresh=True)
         return ThreadStatusElectionResult(ThreadStatusElectionOutcome.WON)
-    if (
-        await session.scalar(select(ThreadModel.id).where(ThreadModel.id == thread_id))
-        is None
-    ):
+
+    if not await thread_exists(session, thread_id):
         return ThreadStatusElectionResult(ThreadStatusElectionOutcome.NOT_FOUND)
-    matching_receipt = await session.scalar(
-        select(
-            exists(
-                select(ControlActionModel.id).where(
-                    ControlActionModel.thread_id == thread_id,
-                    ControlActionModel.action_type == current.action_type.value,
-                    ControlActionModel.dispatch_id == current.action_receipt_id,
-                )
-            )
-        )
-    )
+
+    matching_receipt = await session.scalar(select(receipt_exists))
     if not matching_receipt:
         return ThreadStatusElectionResult(ThreadStatusElectionOutcome.RECEIPT_MISMATCH)
     return ThreadStatusElectionResult(ThreadStatusElectionOutcome.LOST)
 
 
-async def update_thread_status(
-    session: AsyncSession,
-    thread_id: str,
-    status: ThreadStatus | str,
-    *,
-    failure_reason: str | None = None,
-    provider_condition: str | None = None,
-) -> ThreadModel | None:
-    """Update a thread's status with transition validation.
-
-    ``failure_reason`` is additive and leaves the column UNCHANGED when
-    falsy (``None`` or empty), so every existing caller — completed,
-    cancelled, and every already-shipped failed-status write that doesn't
-    pass it — is untouched; there is deliberately no explicit-clear path,
-    since a thread's failure reason is write-once per terminal transition.
-    Pass a non-empty value only on a FAILED transition that has a reason to
-    durably record; the text is capped and flattened to a single line here,
-    the one write boundary every producer passes through, regardless of
-    whether the caller already capped it.
-
-    ``provider_condition`` is the machine-readable counterpart and follows the
-    same additive, falsy-leaves-unchanged rule. It is written INDEPENDENTLY of
-    the reason rather than only alongside it: the two answer different questions
-    (what happened versus what the reader should do), and a caller that knows one
-    but not the other must be able to record what it knows. A caller that knows
-    neither leaves both untouched, which is why a failure carrying no
-    classification reads as NULL here rather than as a fabricated floor.
-    """
-    coerced_status = _coerce_status(status)
-    thread = await session.get(ThreadModel, thread_id)
-    if thread is None:
-        return None
-
-    current = _coerce_status(thread.status)
-    if current == coerced_status:
-        # Idempotent writes also repair a stale denormalized selector (for
-        # example after an interrupted migration or legacy direct write).
-        thread.is_active = coerced_status in ACTIVE_STATUSES
-        thread.updated_at = _utcnow()
-        if failure_reason:
-            thread.failure_reason = _capped_single_line(failure_reason)
-        if provider_condition:
-            thread.provider_condition = provider_condition
-        await session.flush()
-        return thread
-
-    validate_transition(current, coerced_status, thread_id=thread_id)
-
-    thread.status = coerced_status.value
-    thread.is_active = coerced_status in ACTIVE_STATUSES
-    thread.updated_at = _utcnow()
-    if failure_reason:
-        thread.failure_reason = _capped_single_line(failure_reason)
-    if provider_condition:
-        thread.provider_condition = provider_condition
-    await session.flush()
-    return thread
-
-
 class _RepairOptional(TypedDict, total=False):
     repair_reason: str | None
-    execution_readiness: RepairStatus | str | None
     last_requested_action: ControlActionType | str | None
     last_applied_action: ControlActionType | str | None
-    increment_generation: bool
-    increment_recovery_epoch: bool
 
 
 class _RepairArgs(_RepairOptional):
@@ -816,34 +777,33 @@ class _RepairArgs(_RepairOptional):
 async def set_thread_repair_state(
     session: AsyncSession, thread_id: str, **kwargs: Unpack[_RepairArgs]
 ) -> ThreadModel | None:
-    """Persist thread repair metadata used by restart reconciliation."""
+    """Persist thread repair metadata used by restart reconciliation.
+
+    The readiness column is written from the repair status every time: a run is
+    as fit to resume as its repair posture says, so the column carries no
+    judgement of its own and only keeps step with the posture it mirrors.
+    """
     repair_status = kwargs["repair_status"]
     repair_reason = kwargs.get("repair_reason")
-    execution_readiness = kwargs.get("execution_readiness")
     last_requested_action = kwargs.get("last_requested_action")
     last_applied_action = kwargs.get("last_applied_action")
-    increment_generation = kwargs.get("increment_generation", False)
-    increment_recovery_epoch = kwargs.get("increment_recovery_epoch", False)
-    thread = await session.get(ThreadModel, thread_id)
+    thread = await get_thread(session, thread_id)
     if thread is None:
         return None
 
-    thread.repair_status = _coerce_repair_status(repair_status).value
+    thread.repair_status = _coerce(
+        RepairStatus, repair_status, label="repair status"
+    ).value
+    thread.execution_readiness = thread.repair_status
     thread.repair_reason = repair_reason
-    if execution_readiness is not None:
-        thread.execution_readiness = execution_readiness
     if last_requested_action is not None:
-        thread.last_requested_action = _coerce_control_action_type(
-            last_requested_action
+        thread.last_requested_action = _coerce(
+            ControlActionType, last_requested_action, label="control action type"
         ).value
     if last_applied_action is not None:
-        thread.last_applied_action = _coerce_control_action_type(
-            last_applied_action
+        thread.last_applied_action = _coerce(
+            ControlActionType, last_applied_action, label="control action type"
         ).value
-    if increment_generation:
-        thread.repair_generation += 1
-    if increment_recovery_epoch:
-        thread.recovery_epoch += 1
     thread.updated_at = _utcnow()
     await session.flush()
     return thread
@@ -852,7 +812,6 @@ async def set_thread_repair_state(
 class _ApprovalStateOptions(TypedDict, total=False):
     approval_status: ApprovalStatus | str | _UnsetType | None
     approval_request_id: str | _UnsetType | None
-    approval_reason: str | _UnsetType | None
     approval_response_action_id: str | _UnsetType | None
     approval_updated_at: datetime | None
 
@@ -863,22 +822,19 @@ async def set_thread_approval_state(
     """Persist durable plan-approval state on the thread row."""
     approval_status = kwargs.get("approval_status", _UNSET)
     approval_request_id = kwargs.get("approval_request_id", _UNSET)
-    approval_reason = kwargs.get("approval_reason", _UNSET)
     approval_response_action_id = kwargs.get("approval_response_action_id", _UNSET)
     approval_updated_at = kwargs.get("approval_updated_at")
-    thread = await session.get(ThreadModel, thread_id)
+    thread = await get_thread(session, thread_id)
     if thread is None:
         return None
     if not isinstance(approval_status, _UnsetType):
         thread.approval_status = (
-            _coerce_approval_status(approval_status).value
+            _coerce(ApprovalStatus, approval_status, label="approval status").value
             if approval_status is not None
             else None
         )
     if not isinstance(approval_request_id, _UnsetType):
         thread.approval_request_id = approval_request_id
-    if not isinstance(approval_reason, _UnsetType):
-        thread.approval_reason = approval_reason
     if not isinstance(approval_response_action_id, _UnsetType):
         thread.approval_response_action_id = approval_response_action_id
     thread.approval_updated_at = approval_updated_at or _utcnow()
@@ -887,20 +843,18 @@ async def set_thread_approval_state(
 
 
 def _is_degraded_only_execution_state(
-    checkpoint_fields: tuple[str | None, str | None, datetime | None],
-    activity_fields: tuple[int, int, list[str], list[str], list[dict[str, object]]],
-    degraded_reasons: list[str],
+    checkpoint_fields: tuple[str | None, str | None],
+    activity_fields: tuple[int, int, list[str], list[dict[str, object]]],
+    degraded_reasons: list[DegradedReason],
 ) -> bool:
-    checkpoint_id, parent_checkpoint_id, snapshot_created_at = checkpoint_fields
-    task_count, interrupt_count, next_nodes, interrupt_types, tasks = activity_fields
+    checkpoint_id, parent_checkpoint_id = checkpoint_fields
+    task_count, interrupt_count, next_nodes, tasks = activity_fields
     return (
         checkpoint_id is None
         and parent_checkpoint_id is None
-        and snapshot_created_at is None
         and task_count == 0
         and interrupt_count == 0
         and not next_nodes
-        and not interrupt_types
         and not tasks
         and bool(degraded_reasons)
     )
@@ -910,41 +864,33 @@ class _ExecutionStateArgs(TypedDict):
     thread_id: str
     checkpoint_id: str | None
     parent_checkpoint_id: str | None
-    snapshot_created_at: datetime | None
     task_count: int
     interrupt_count: int
     next_nodes: list[str]
-    interrupt_types: list[str]
     tasks: list[dict[str, object]]
-    degraded_reasons: list[str]
+    degraded_reasons: list[DegradedReason]
 
 
 async def record_thread_execution_state(
     session: AsyncSession, **kwargs: Unpack[_ExecutionStateArgs]
 ) -> ThreadExecutionStateModel | None:
     """Create or refresh the latest execution-state projection for a thread."""
-    thread = await session.get(ThreadModel, kwargs["thread_id"])
+    thread = await get_thread(session, kwargs["thread_id"])
     if thread is None:
         return None
 
     existing = await session.get(ThreadExecutionStateModel, kwargs["thread_id"])
     degraded_only = _is_degraded_only_execution_state(
-        (
-            kwargs["checkpoint_id"],
-            kwargs["parent_checkpoint_id"],
-            kwargs["snapshot_created_at"],
-        ),
+        (kwargs["checkpoint_id"], kwargs["parent_checkpoint_id"]),
         (
             kwargs["task_count"],
             kwargs["interrupt_count"],
             kwargs["next_nodes"],
-            kwargs["interrupt_types"],
             kwargs["tasks"],
         ),
         kwargs["degraded_reasons"],
     )
     next_nodes_json = json.dumps(kwargs["next_nodes"])
-    interrupt_types_json = json.dumps(kwargs["interrupt_types"])
     tasks_json = json.dumps(kwargs["tasks"])
     degraded_reasons_json = json.dumps(kwargs["degraded_reasons"])
 
@@ -952,13 +898,10 @@ async def record_thread_execution_state(
         if not degraded_only:
             existing.checkpoint_id = kwargs["checkpoint_id"]
             existing.parent_checkpoint_id = kwargs["parent_checkpoint_id"]
-            existing.snapshot_created_at = kwargs["snapshot_created_at"]
             existing.task_count = kwargs["task_count"]
             existing.interrupt_count = kwargs["interrupt_count"]
             existing.next_nodes_json = next_nodes_json
-            existing.interrupt_types_json = interrupt_types_json
             existing.tasks_json = tasks_json
-            existing.recovery_epoch = thread.recovery_epoch
         existing.recorded_at = _utcnow()
         existing.degraded_reasons_json = degraded_reasons_json
         await session.flush()
@@ -968,13 +911,10 @@ async def record_thread_execution_state(
         thread_id=kwargs["thread_id"],
         checkpoint_id=kwargs["checkpoint_id"],
         parent_checkpoint_id=kwargs["parent_checkpoint_id"],
-        snapshot_created_at=kwargs["snapshot_created_at"],
         recorded_at=_utcnow(),
-        recovery_epoch=thread.recovery_epoch,
         task_count=kwargs["task_count"],
         interrupt_count=kwargs["interrupt_count"],
         next_nodes_json=next_nodes_json,
-        interrupt_types_json=interrupt_types_json,
         tasks_json=tasks_json,
         degraded_reasons_json=degraded_reasons_json,
     )
@@ -987,10 +927,3 @@ async def get_thread_execution_state(
 ) -> ThreadExecutionStateModel | None:
     """Return the latest execution-state projection for a thread."""
     return await session.get(ThreadExecutionStateModel, thread_id)
-
-
-async def get_thread_metadata(session: AsyncSession, thread_id: str) -> str | None:
-    thread = await session.get(ThreadModel, thread_id)
-    if thread is None:
-        return None
-    return thread.thread_metadata

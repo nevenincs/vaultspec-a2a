@@ -10,11 +10,11 @@ from langchain_core.language_models.chat_models import generate_from_stream
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
 
+from ...graph.enums import ProviderCondition
 from .._acp_protocol import handle_client_response, handle_session_update
 from .._acp_types import AcpResponseFuture, AcpSessionContext
 from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpPromptCancelledError, AcpPromptError
-from ..conditions import ProviderCondition
 
 
 def _context() -> AcpSessionContext:

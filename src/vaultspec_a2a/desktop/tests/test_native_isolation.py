@@ -11,16 +11,28 @@ import runpy
 import shutil
 import subprocess
 import sys
-import threading
-import time
 from pathlib import Path
-from typing import TYPE_CHECKING, cast, override
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import pytest
 
+from ...testing import (
+    JsonReplyHandler,
+    LivenessWatch,
+    ProgressDeadline,
+    combined_output,
+    inherited_environment,
+    serve_handler,
+    wait_until,
+)
 from ...tests.native_build import linux_isolation_helper
-from ...utils.process import ProcessContainmentError
+from ...utils import (
+    ProcessContainment,
+    ProcessContainmentError,
+    reap_contained,
+    spawn_contained,
+)
 from ..native_isolation import (
     NativeLaunchAuthority,
     decode_launch_environment,
@@ -83,9 +95,9 @@ def _install_runtime(authority: NativeLaunchAuthority) -> Path:
 
 def test_authority_cannot_grant_private_state_or_all_role_homes(tmp_path: Path) -> None:
     authority = _authority(tmp_path)
-    private = authority.app_home.path / "credentials"
-    private.mkdir()
     state = derive_state_paths(authority.app_home.path)
+    private = state.credentials_dir
+    private.mkdir()
     for workspace, home in (
         (private, authority.home.path),
         (authority.workspace.path, state.temp_homes_dir),
@@ -146,7 +158,7 @@ def test_native_grants_preserve_work_and_deny_other_planes(tmp_path: Path) -> No
             )
         return
     node = _install_runtime(authority)
-    private = authority.app_home.path / "credentials"
+    private = derive_state_paths(authority.app_home.path).credentials_dir
     private.mkdir()
     secret = private / "lifecycle-token"
     secret.write_text("synthetic-control-plane", encoding="utf-8")
@@ -158,28 +170,22 @@ def test_native_grants_preserve_work_and_deny_other_planes(tmp_path: Path) -> No
     )
     (authority.workspace.path / "outside-alias").symlink_to(secret)
 
-    class Relay(http.server.BaseHTTPRequestHandler):
+    class Relay(JsonReplyHandler, http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"role-relay-ok")
 
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            return
-
-    relay = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Relay)
-    serving = threading.Thread(target=relay.serve_forever, daemon=True)
-    serving.start()
-    script = authority.workspace.path / "probe.js"
-    paths = {
-        "private": str(secret),
-        "alias": str(authority.workspace.path / "outside-alias"),
-        "other_role": str(other_home / "auth.json"),
-        "host_process_root": f"/proc/{os.getpid()}/root{secret}",
-    }
-    script.write_text(
-        """
+    with serve_handler(Relay) as relay_port:
+        script = authority.workspace.path / "probe.js"
+        paths = {
+            "private": str(secret),
+            "alias": str(authority.workspace.path / "outside-alias"),
+            "other_role": str(other_home / "auth.json"),
+            "host_process_root": f"/proc/{os.getpid()}/root{secret}",
+        }
+        script.write_text(
+            """
 const fs = require('fs'), cp = require('child_process'), http = require('http');
 const out = {};
 for (const [key, path] of Object.entries(PRIVATE_PATHS)) {
@@ -210,77 +216,77 @@ const request = http.get('http://127.0.0.1:PORT/', response => {
 request.setTimeout(3000, () => request.destroy());
 request.on('error', e => { out.loopback = e.code; console.log(JSON.stringify(out)); });
 """.replace("PRIVATE_PATHS", json.dumps(paths))
-        .replace(
-            "CONTROL_NAMES",
-            json.dumps(
-                [
-                    "VAULTSPEC_A2A_GATEWAY_TOKEN",
-                    "VAULTSPEC_A2A_INTERNAL_TOKEN",
-                    "DATABASE_URL",
-                    "gateway_token",
-                    "VAULTSPEC_A2A_AUTHORING_BEARER",
-                    "VAULTSPEC_A2A_AUTHORING_BASE_URL",
-                ]
-            ),
+            .replace(
+                "CONTROL_NAMES",
+                json.dumps(
+                    [
+                        "VAULTSPEC_A2A_GATEWAY_TOKEN",
+                        "VAULTSPEC_A2A_INTERNAL_TOKEN",
+                        "DATABASE_URL",
+                        "gateway_token",
+                        "VAULTSPEC_A2A_AUTHORING_BEARER",
+                        "VAULTSPEC_A2A_AUTHORING_BASE_URL",
+                    ]
+                ),
+            )
+            .replace(
+                "GRANT_PATHS",
+                json.dumps(
+                    [
+                        str(authority.capsule.path),
+                        str(authority.workspace.path),
+                        str(authority.home.path),
+                        str(private),
+                    ]
+                ),
+            )
+            .replace("PORT", str(relay_port)),
+            encoding="utf-8",
         )
-        .replace(
-            "GRANT_PATHS",
-            json.dumps(
-                [
-                    str(authority.capsule.path),
-                    str(authority.workspace.path),
-                    str(authority.home.path),
-                    str(private),
-                ]
-            ),
+        env = inherited_environment(
+            {
+                "VAULTSPEC_A2A_GATEWAY_TOKEN": "synthetic-gateway",
+                "VAULTSPEC_A2A_INTERNAL_TOKEN": "synthetic-worker",
+                "DATABASE_URL": "synthetic-database",
+                "gateway_token": "synthetic-alias",
+                "VAULTSPEC_A2A_AUTHORING_BEARER": "synthetic-engine",
+                "VAULTSPEC_A2A_AUTHORING_BASE_URL": "http://127.0.0.1:1",
+                "VAULTSPEC_A2A_AUTHORING_ACTOR_TOKEN": "synthetic-role",
+            }
         )
-        .replace("PORT", str(relay.server_port)),
-        encoding="utf-8",
-    )
-    env = {
-        **os.environ,
-        "VAULTSPEC_A2A_GATEWAY_TOKEN": "synthetic-gateway",
-        "VAULTSPEC_A2A_INTERNAL_TOKEN": "synthetic-worker",
-        "DATABASE_URL": "synthetic-database",
-        "gateway_token": "synthetic-alias",
-        "VAULTSPEC_A2A_AUTHORING_BEARER": "synthetic-engine",
-        "VAULTSPEC_A2A_AUTHORING_BASE_URL": "http://127.0.0.1:1",
-        "VAULTSPEC_A2A_AUTHORING_ACTOR_TOKEN": "synthetic-role",
-    }
-    descriptor = os.open(private, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        launch = linux_isolated_launch(
-            authority,
-            [str(node), str(script)],
-            cwd=str(authority.workspace.path),
-            environment=env,
-        )
-        completed = subprocess.run(
-            launch.command,
-            env=launch.environment,
-            cwd=launch.cwd,
-            pass_fds=(descriptor,),
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-        )
-        assert completed.returncode == 0, completed.stdout + completed.stderr
-        observed = json.loads(completed.stdout)
-        assert all(observed[key] == "ENOENT" for key in paths)
-        assert observed["auth"] == "selected-provider"
-        assert observed["child_exit"] == 13
-        assert observed["runtime_write"] == "EROFS"
-        assert observed["loopback"] == 200
-        assert observed["leaked_env"] == []
-        assert observed["inherited_directory_grants"] == []
-        assert observed["actor"] is True
-        assert (authority.workspace.path / "project-write").read_text() == "permitted"
-    finally:
-        os.close(descriptor)
-        relay.shutdown()
-        relay.server_close()
-        serving.join(3)
+        descriptor = os.open(private, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            launch = linux_isolated_launch(
+                authority,
+                [str(node), str(script)],
+                cwd=str(authority.workspace.path),
+                environment=env,
+            )
+            completed = subprocess.run(
+                launch.command,
+                env=launch.environment,
+                cwd=launch.cwd,
+                pass_fds=(descriptor,),
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            assert completed.returncode == 0, combined_output(completed)
+            observed = json.loads(completed.stdout)
+            assert all(observed[key] == "ENOENT" for key in paths)
+            assert observed["auth"] == "selected-provider"
+            assert observed["child_exit"] == 13
+            assert observed["runtime_write"] == "EROFS"
+            assert observed["loopback"] == 200
+            assert observed["leaked_env"] == []
+            assert observed["inherited_directory_grants"] == []
+            assert observed["actor"] is True
+            assert (
+                authority.workspace.path / "project-write"
+            ).read_text() == "permitted"
+        finally:
+            os.close(descriptor)
 
 
 def test_changed_helper_is_refused_before_provider_work(tmp_path: Path) -> None:
@@ -313,6 +319,46 @@ def test_changed_helper_is_refused_before_provider_work(tmp_path: Path) -> None:
     )
     assert completed.returncode != 0
     assert "differs from its pinned closure" in completed.stderr
+    assert not marker.exists()
+
+
+def test_privileged_helper_is_refused_before_provider_work(tmp_path: Path) -> None:
+    """A ``chmod u+s`` staged helper is refused, content and closure untouched.
+
+    Distinct from the changed-content case above: the helper's bytes - and so
+    its pinned closure digest - are exactly what was staged. Only its mode bits
+    change, which is what proves the refusal below comes from
+    ``require_unprivileged_static_helper``'s own privileged-bits check rather
+    than from the closure attestation that already guards tampered content.
+    """
+    authority = _authority(tmp_path)
+    if sys.platform != "linux":
+        with pytest.raises(ProcessContainmentError, match="requires Linux"):
+            linux_isolated_launch(
+                authority, [sys.executable], cwd=str(tmp_path), environment={}
+            )
+        return
+    node = _install_runtime(authority)
+    helper = authority.capsule.path / "isolation" / "bin" / "bubblewrap"
+    helper.chmod(helper.stat().st_mode | 0o4000)  # setuid, content untouched
+    marker = authority.workspace.path / "started"
+    launch = linux_isolated_launch(
+        authority,
+        [str(node), "-e", "require('fs').writeFileSync('started','unsafe')"],
+        cwd=str(authority.workspace.path),
+        environment={},
+    )
+    completed = subprocess.run(
+        launch.command,
+        env=launch.environment,
+        cwd=launch.cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert completed.returncode != 0
+    assert "privileged mode bits" in completed.stderr
     assert not marker.exists()
 
 
@@ -455,21 +501,33 @@ def test_owner_death_removes_a_detached_native_descendant(tmp_path: Path) -> Non
         cwd=str(authority.workspace.path),
         environment={},
     )
-    owner = subprocess.Popen(
+    containment = ProcessContainment.create()
+    owner = spawn_contained(
         launch.command,
+        containment,
         env=launch.environment,
         cwd=launch.cwd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=True,
     )
     try:
         ready = authority.workspace.path / "descendant-ready"
-        deadline = time.monotonic() + 10
-        while not ready.exists() and time.monotonic() < deadline:
-            assert owner.poll() is None
-            time.sleep(0.05)
-        assert ready.exists()
+
+        def _owner_exited() -> str | None:
+            code = owner.poll()
+            if code is None:
+                return None
+            return f"exited with code {code} before the descendant was ready"
+
+        wait_until(
+            ready.exists,
+            deadline=ProgressDeadline(
+                idle_window_s=10.0,
+                watches=(LivenessWatch(label="isolated owner", verdict=_owner_exited),),
+            ),
+            interval_s=0.05,
+            stalled=lambda: f"isolated owner never wrote {ready.name}",
+        )
         descendants: list[tuple[Path, int]] = []
         for entry in Path("/proc").iterdir():
             if not entry.name.isdecimal():
@@ -481,23 +539,30 @@ def test_owner_death_removes_a_detached_native_descendant(tmp_path: Path) -> Non
             except (FileNotFoundError, ProcessLookupError, PermissionError):
                 continue
         assert len(descendants) == 1
-        owner.kill()
-        owner.wait(timeout=5)
+        reap_contained(owner, containment)
         path, identity = descendants[0]
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
+        observed = "unread"
+
+        def _descendant_gone() -> bool:
+            nonlocal observed
             try:
                 if path.stat().st_ino != identity:
-                    break
-                state = (path / "stat").read_text().rsplit(")", 1)[1].split()[0]
-                if state == "Z":
-                    break
+                    observed = "pid reused"
+                    return True
+                observed = (path / "stat").read_text().rsplit(")", 1)[1].split()[0]
             except (FileNotFoundError, ProcessLookupError):
-                break
-            time.sleep(0.05)
-        else:
-            pytest.fail("isolated detached descendant survived its retained owner")
+                observed = "gone"
+                return True
+            return observed == "Z"
+
+        wait_until(
+            _descendant_gone,
+            deadline=ProgressDeadline(idle_window_s=5.0),
+            interval_s=0.05,
+            stalled=lambda: (
+                "isolated detached descendant survived its retained owner "
+                f"(last state {observed})"
+            ),
+        )
     finally:
-        if owner.poll() is None:
-            owner.kill()
-        owner.wait(timeout=5)
+        reap_contained(owner, containment)

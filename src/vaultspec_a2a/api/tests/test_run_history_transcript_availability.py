@@ -20,12 +20,16 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...database import update_thread_status
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    async_catalog_run_fields,
+    elect_status,
+    serve_on_loopback,
+)
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus, TranscriptAvailability
-from .conftest import async_catalog_run_fields, make_app
-from .test_gateway_drain import _relay_terminal, _RelayContext
-from .test_gateway_live import _live_server
+from ._relay_events import RelayContext, relay_terminal
+from .conftest import make_app
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
@@ -34,15 +38,13 @@ if TYPE_CHECKING:
 
     type SessionFactory = async_sessionmaker[AsyncSession]
 
-_PRESET = "mock-success-single"
-
 
 async def _start_run(client: httpx.AsyncClient, run_id: str) -> str:
     """Start one real run through the real run-start verb."""
     started = await client.post(
         "/v1/runs",
         json={
-            "team_preset": _PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "remember this",
             "autonomous": True,
             "run_id": run_id,
@@ -69,12 +71,12 @@ async def test_a_completed_run_without_a_checkpoint_reports_the_transcript_lost(
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-lost-01")
-        await _relay_terminal(
-            client, run_id, _RelayContext(checkpointer, worker, session_factory)
+        await relay_terminal(
+            client, run_id, RelayContext(checkpointer, worker, session_factory)
         )
         await checkpointer.adelete_thread(run_id)
 
@@ -113,12 +115,12 @@ async def test_an_archived_run_without_a_checkpoint_still_answers_the_durable_re
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-archived-01")
-        await _relay_terminal(
-            client, run_id, _RelayContext(checkpointer, worker, session_factory)
+        await relay_terminal(
+            client, run_id, RelayContext(checkpointer, worker, session_factory)
         )
         await checkpointer.adelete_thread(run_id)
         archived = await client.post(f"/v1/runs/{run_id}/archive")
@@ -157,7 +159,7 @@ async def test_a_live_run_before_its_first_checkpoint_is_not_reported_as_a_loss(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-fresh-01")
@@ -189,17 +191,17 @@ async def test_a_parked_run_without_a_checkpoint_is_a_loss_not_a_pending_transcr
     recovery state is there because something already went wrong. Only the
     dispatch-to-first-write window earns the benefit of the doubt.
 
-    The status is moved through the real durable transition guard, so this is
-    the lifecycle the production store actually permits.
+    The status is moved by the real status election, so this is the lifecycle the
+    production store actually permits.
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-parked-01")
         async with session_factory() as db:
-            await update_thread_status(db, run_id, ThreadStatus.INPUT_REQUIRED)
+            await elect_status(db, run_id, ThreadStatus.INPUT_REQUIRED)
             await db.commit()
 
         history = await client.get(f"/v1/runs/{run_id}/history")
@@ -224,7 +226,7 @@ async def test_a_run_with_a_real_checkpoint_reports_its_transcript_available(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client, "hist-present-01")

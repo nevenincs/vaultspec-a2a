@@ -11,13 +11,21 @@ from typing import TYPE_CHECKING, override
 
 import uvicorn
 
+from ..control.config import settings
+
 if TYPE_CHECKING:
     import socket
     from collections.abc import Awaitable
 
     from fastapi import FastAPI
 
-__all__ = ["ShutdownDeadline", "ShutdownServer", "finish_before"]
+__all__ = [
+    "ShutdownDeadline",
+    "ShutdownServer",
+    "bind_shutdown_owner",
+    "build_shutdown_server",
+    "finish_before",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -113,3 +121,36 @@ class ShutdownServer(uvicorn.Server):
                 self._total_seconds
             )
         await super().shutdown(sockets=sockets)
+
+
+def bind_shutdown_owner(app: FastAPI, server: uvicorn.Server) -> None:
+    """Bind the served app to the cooperative transition of its Uvicorn owner."""
+
+    def request_shutdown() -> None:
+        server.should_exit = True
+
+    app.state.request_server_shutdown = request_shutdown
+
+
+def build_shutdown_server(app: FastAPI, *, host: str, port: int) -> ShutdownServer:
+    """Build the server a service entry point runs *app* under.
+
+    Uvicorn is configured from the shared infrastructure settings, the shutdown
+    clock covers the whole configured budget, and the app's administrative
+    shutdown route stops this server cooperatively.
+    """
+    server = ShutdownServer(
+        uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            log_level=settings.log_level.value,
+            access_log=settings.access_log,
+            loop="auto",
+            timeout_graceful_shutdown=settings.shutdown_stream_grace_seconds,
+        ),
+        app=app,
+        total_seconds=settings.shutdown_total_timeout_seconds,
+    )
+    bind_shutdown_owner(app, server)
+    return server

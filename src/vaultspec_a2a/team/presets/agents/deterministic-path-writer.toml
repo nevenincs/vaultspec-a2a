@@ -1,0 +1,13 @@
+[agent]
+id           = "deterministic-path-writer"
+display_name = "Deterministic Path Writer"
+role         = "plan-author"
+description  = """
+In-process ProviderFactory scenario that writes a fixed document to the single
+absolute path named by its persona, then completes. The path is the agent's
+one-line script, the same authoring surface every other scripted scenario
+reads its lines from.
+"""
+
+[agent.persona]
+system_prompt = "/path/a/test/names/at/compile/time"

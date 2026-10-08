@@ -10,11 +10,33 @@ import sys
 import time
 from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO, Protocol, cast
 
+from ..utils import is_single_regular_file, path_is_link_like
+from ._platform_acl import (
+    confirm_opened_secret,
+    credential_file_is_owner_restricted,
+    path_is_owner_restricted,
+    unfollowed_read_flags,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+__all__ = [
+    "DirectoryAuthority",
+    "PrivateFileError",
+    "assert_directory_authority",
+    "confined_file_descriptor",
+    "create_anonymous_file",
+    "create_private_file",
+    "directory_lease",
+    "publish_no_replace",
+    "read_private_file",
+    "resolve_directory_authority",
+]
 
 
 _FILE_READ_ATTRIBUTES = 0x00000080
@@ -125,11 +147,6 @@ class DirectoryAuthority:
     identity: tuple[int, int]
     dir_fd: int | None = None
     native_handle: int | None = None
-
-
-def path_is_link_like(path: Path) -> bool:
-    """Return whether *path* is a symlink or Windows junction."""
-    return path.is_symlink() or path.is_junction()
 
 
 def _directory_identity(path: Path) -> tuple[int, int]:
@@ -664,14 +681,13 @@ def confined_file_descriptor(
 
 
 def _confirm_confined_file(descriptor: int, *, write: bool) -> None:
-    metadata = os.fstat(descriptor)
-    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+    if not is_single_regular_file(os.fstat(descriptor)):
         raise ValueError("workspace file must be regular and have exactly one link")
     if write:
         os.ftruncate(descriptor, 0)
 
 
-def open_shared_read_descriptor(path: Path) -> int:
+def _open_shared_read_descriptor(path: Path) -> int:
     """Open *path* read-only in a way that does not block a concurrent publish.
 
     Returns an OS descriptor the caller owns and must close.
@@ -710,6 +726,143 @@ def open_shared_read_descriptor(path: Path) -> int:
     except BaseException:
         _close_handle(library)(handle)
         raise
+
+
+class _PrivateFileRefusal(StrEnum):
+    """Why :func:`read_private_file` refused a file, worded to follow its name."""
+
+    INACCESSIBLE = "is not accessible"
+    NOT_REGULAR = "is not a regular file"
+    NOT_OWNER_RESTRICTED = "is not owner-restricted"
+    PARENT_NOT_OWNER_RESTRICTED = "is in a directory that is not owner-restricted"
+    MULTIPLY_LINKED = "has more than one hard link"
+    OVERSIZE = "exceeds its size bound"
+    UNOPENABLE = "cannot be opened"
+    CHANGED = "changed identity while being read"
+
+
+class PrivateFileError(OSError):
+    """A private file failed one of :func:`read_private_file`'s refusals.
+
+    Carries the refusal and the path, never anything read from the file.
+    """
+
+    def __init__(self, reason: _PrivateFileRefusal, path: Path) -> None:
+        super().__init__(errno.EACCES, f"private file {reason}", str(path))
+        self.reason = reason
+
+
+def _lstat_leased(leased: DirectoryAuthority, target: Path) -> os.stat_result:
+    """Inspect *target* without following it, through the POSIX lease when held."""
+    if leased.dir_fd is not None:
+        return os.stat(target.name, dir_fd=leased.dir_fd, follow_symlinks=False)
+    return target.stat(follow_symlinks=False)
+
+
+def _inspect_private_name(
+    leased: DirectoryAuthority, target: Path, *, max_bytes: int
+) -> os.stat_result:
+    try:
+        named = _lstat_leased(leased, target)
+    except OSError as exc:
+        raise PrivateFileError(_PrivateFileRefusal.INACCESSIBLE, target) from exc
+    if not stat.S_ISREG(named.st_mode) or path_is_link_like(target):
+        raise PrivateFileError(_PrivateFileRefusal.NOT_REGULAR, target)
+    if not credential_file_is_owner_restricted(target):
+        raise PrivateFileError(_PrivateFileRefusal.NOT_OWNER_RESTRICTED, target)
+    if named.st_size > max_bytes:
+        raise PrivateFileError(_PrivateFileRefusal.OVERSIZE, target)
+    return named
+
+
+def _open_private_name(leased: DirectoryAuthority, target: Path) -> int:
+    try:
+        if os.name == "posix":
+            if leased.dir_fd is None:
+                raise OSError(errno.EBADF, "private file authority is not leased")
+            # A FIFO or device swapped in after inspection must not block the open.
+            return os.open(
+                target.name,
+                unfollowed_read_flags() | os.O_NONBLOCK,
+                dir_fd=leased.dir_fd,
+            )
+        # DELETE sharing keeps a secret read from blocking a concurrent publication.
+        return _open_shared_read_descriptor(target)
+    except OSError as exc:
+        raise PrivateFileError(_PrivateFileRefusal.UNOPENABLE, target) from exc
+
+
+def _read_leased_private_file(
+    leased: DirectoryAuthority, name: str, *, max_bytes: int
+) -> bytes:
+    target = leased.path / name
+    named = _inspect_private_name(leased, target, max_bytes=max_bytes)
+    descriptor = _open_private_name(leased, target)
+    try:
+        if not confirm_opened_secret(descriptor, named=named, path=target):
+            raise PrivateFileError(_PrivateFileRefusal.CHANGED, target)
+        opened = os.fstat(descriptor)
+        if not is_single_regular_file(opened):
+            raise PrivateFileError(_PrivateFileRefusal.MULTIPLY_LINKED, target)
+        if opened.st_size > max_bytes:
+            raise PrivateFileError(_PrivateFileRefusal.OVERSIZE, target)
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = -1
+            contents = handle.read(max_bytes + 1)
+    finally:
+        if descriptor != -1:
+            os.close(descriptor)
+    if len(contents) > max_bytes:
+        raise PrivateFileError(_PrivateFileRefusal.OVERSIZE, target)
+    assert_directory_authority(leased)
+    try:
+        after = _lstat_leased(leased, target)
+    except OSError as exc:
+        raise PrivateFileError(_PrivateFileRefusal.CHANGED, target) from exc
+    if path_is_link_like(target) or (after.st_dev, after.st_ino) != (
+        opened.st_dev,
+        opened.st_ino,
+    ):
+        raise PrivateFileError(_PrivateFileRefusal.CHANGED, target)
+    return contents
+
+
+def read_private_file(
+    path: Path, *, max_bytes: int, private_parent: bool = False
+) -> bytes:
+    """Read one owner-restricted regular file of at most *max_bytes* bytes.
+
+    The one reader for a local secret. The parent directory is resolved to a
+    real, non-link-like directory and leased for the whole read. By name the
+    file must be a regular non-link file, owner-restricted under the credential
+    rule and within the bound. It is opened without following a link,
+    non-blocking on POSIX and with delete sharing on Windows. The descriptor
+    must then be the file that was inspected, singly linked and within the
+    bound; after the read the lease and the name are re-confirmed, so a file
+    replaced mid-read is refused rather than returned. *private_parent* also
+    requires the leased directory to be owner-restricted under the state rule.
+    Decoding and validating the bytes stay with the caller.
+
+    Raises:
+        PrivateFileError: For every refusal; its ``reason`` names which.
+    """
+    try:
+        authority = resolve_directory_authority(path.parent)
+        if private_parent and not path_is_owner_restricted(authority.path):
+            raise PrivateFileError(
+                _PrivateFileRefusal.PARENT_NOT_OWNER_RESTRICTED, path
+            )
+        with directory_lease(authority) as leased:
+            return _read_leased_private_file(leased, path.name, max_bytes=max_bytes)
+    except PrivateFileError:
+        raise
+    except OSError as exc:
+        reason = (
+            _PrivateFileRefusal.CHANGED
+            if exc.errno == errno.ESTALE
+            else _PrivateFileRefusal.INACCESSIBLE
+        )
+        raise PrivateFileError(reason, path) from exc
 
 
 def create_anonymous_file(authority: DirectoryAuthority) -> BinaryIO:

@@ -1,13 +1,14 @@
 """Async database session management and engine configuration.
 
-Provides backend-selectable ``create_async_engine`` wiring,
+Provides ``create_async_engine`` wiring for the SQLite store,
 ``async_sessionmaker`` for FastAPI dependency injection, and schema
 initialisation through Alembic.
 """
 
+import asyncio
 import logging
 import sqlite3
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -15,6 +16,7 @@ from typing import Literal, cast
 from fastapi import Request
 from sqlalchemy import event, text
 from sqlalchemy.engine import Connection
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -30,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "WalCheckpointResult",
+    "WriteContentionError",
     "application_session_factory",
     "begin_write_transaction",
     "checkpoint_wal",
@@ -42,6 +45,8 @@ __all__ = [
     "init_db",
     "inspect_sqlite_database",
     "resolve_session_factory",
+    "retry_contended_write",
+    "retry_write_contention",
     "seat_sqlite_posture",
     "verify_wal_mode",
 ]
@@ -72,8 +77,8 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 # ``auto_vacuum`` is
 # fixed for the life of the file - a later pragma is accepted and silently leaves
 # it at NONE. Changing it on an existing install demands a whole-file VACUUM
-# rewrite, which is what ``admin migrate --fix`` already offers as an explicit,
-# operator-timed act. INCREMENTAL would not earn the trade either: measured
+# rewrite, which is what ``vaultspec-a2a migrate --compact`` already offers as an
+# explicit, operator-timed act. INCREMENTAL would not earn the trade either: measured
 # against a store whose rows had all been deleted, ``incremental_vacuum``
 # returned a single 4 KiB page where a full VACUUM returned essentially the whole
 # 8 MiB file. Returning space to the operating system therefore stays an
@@ -84,7 +89,7 @@ def _set_wal_mode(dbapi_conn: sqlite3.Connection, _connection_record: object) ->
     """Enable WAL journal mode on every new SQLite connection.
 
     WAL allows concurrent readers while a write is in progress,
-    which is critical for the Event Aggregator's high-frequency writes.
+    which is critical for the run event writer's high-frequency writes.
     """
     cursor = dbapi_conn.cursor()
     # check the return value — PRAGMA journal_mode returns the mode that
@@ -125,7 +130,6 @@ async def begin_write_transaction(session: AsyncSession) -> None:
     read, the upgrade to a write fails at once with ``database is locked`` and
     ``busy_timeout`` is never consulted. ``BEGIN IMMEDIATE`` takes the write lock
     before the first read, so contention waits inside ``busy_timeout`` instead.
-    Other dialects ignore the option.
 
     Raises:
         RuntimeError: If *session* already has a transaction open, whose begin
@@ -135,6 +139,125 @@ async def begin_write_transaction(session: AsyncSession) -> None:
         msg = "a write transaction must begin on a session with none open"
         raise RuntimeError(msg)
     await session.connection(execution_options={_SQLITE_BEGIN_MODE: "IMMEDIATE"})
+
+
+# One write's attempts under contention, and the base of the linear backoff
+# between them. ``busy_timeout`` already waits inside each attempt; these cover a
+# lock still held when that wait runs out.
+_WRITE_CONTENTION_ATTEMPTS = 4
+_WRITE_CONTENTION_BACKOFF_SECONDS = 0.05
+
+#: The store named in a contention refusal when the caller names none.
+_APPLICATION_STORE = "the application store"
+
+
+def _is_write_contention(exc: BaseException) -> bool:
+    """Whether SQLite refused the statement because another writer holds a lock.
+
+    Accepts the driver error either bare or wrapped: a pooled session raises
+    SQLAlchemy's ``OperationalError`` around it, while a connection no engine
+    owns - the LangGraph checkpoint saver's - raises ``sqlite3``'s own.
+    """
+    driver_error = exc.orig if isinstance(exc, OperationalError) else exc
+    return (
+        isinstance(driver_error, sqlite3.OperationalError)
+        and "locked" in str(driver_error).lower()
+    )
+
+
+class WriteContentionError(RuntimeError):
+    """Every attempt at one durable write was refused by a competing writer.
+
+    Typed, and distinct from the driver error it is raised from, because the
+    outcome is not a fault in the request or in the store: the write would have
+    succeeded had the lock been free, so the caller's verb has to refuse as
+    retryable rather than report an internal failure. Nothing was applied.
+    """
+
+    def __init__(self, attempts: int, *, store: str = _APPLICATION_STORE) -> None:
+        self.attempts = attempts
+        self.store = store
+        super().__init__(
+            f"{store} held its write lock against this write for "
+            f"all {attempts} attempts; nothing was applied"
+        )
+
+
+async def retry_contended_write[T](
+    attempt: Callable[[], Awaitable[T]],
+    *,
+    reset: Callable[[], Awaitable[None]],
+    settled: Callable[[], Awaitable[T | None]] | None = None,
+    store: str = _APPLICATION_STORE,
+) -> T:
+    """Run one write *attempt*, re-running it while SQLite refuses it as contended.
+
+    The one declaration of this store's write-contention policy: how many
+    attempts a single write gets, how the pauses between them grow, and which
+    driver errors count as contention at all. Every SQLite connection this
+    package writes through retries here - the application engine's pooled
+    sessions and the checkpoint saver's own connection alike - so the two cannot
+    come to disagree about what a contended store means.
+
+    *reset* runs after every refusal and must leave the connection with NO
+    transaction open. That is the load-bearing half: a deferred SQLite
+    transaction left behind by a refusal is joined by the connection's next
+    statement, and a write inside a transaction that has already read is refused
+    at once without ``busy_timeout`` being consulted at all - so a retry on an
+    unreset connection cannot succeed however long the lock has been free.
+
+    *settled* runs after each reset and may end the call with a result of its own
+    instead of another attempt: the durable winner of a race the refused attempt
+    lost. An error that is not write contention propagates at once as itself.
+
+    Raises:
+        WriteContentionError: When every attempt was refused as contended. The
+            typed error is what lets the verb above serve a retryable refusal;
+            letting the driver error through made a busy store read as an
+            internal gateway fault.
+    """
+    retries = 0
+    while True:
+        try:
+            return await attempt()
+        except Exception as exc:
+            if not _is_write_contention(exc):
+                raise
+            if retries + 1 >= _WRITE_CONTENTION_ATTEMPTS:
+                # The refusal leaves nothing open: the verb that serves it reads
+                # the run again to describe it.
+                await reset()
+                raise WriteContentionError(
+                    _WRITE_CONTENTION_ATTEMPTS, store=store
+                ) from exc
+        await reset()
+        if settled is not None:
+            decided = await settled()
+            if decided is not None:
+                return decided
+        retries += 1
+        await asyncio.sleep(_WRITE_CONTENTION_BACKOFF_SECONDS * retries)
+
+
+async def retry_write_contention[T](
+    session: AsyncSession,
+    attempt: Callable[[], Awaitable[T]],
+    *,
+    after_rollback: Callable[[], Awaitable[T | None]] | None = None,
+) -> T:
+    """Retry one contended *attempt* on *session*, rolling it back between tries.
+
+    :func:`retry_contended_write` bound to a pooled ORM session: each refusal
+    rolls *session* back, so the next attempt opens a transaction of its own and
+    re-reads whatever it decides on, and *after_rollback* is that function's
+    ``settled`` hook.
+
+    Raises:
+        WriteContentionError: When every attempt was refused as contended.
+    """
+    return await retry_contended_write(
+        attempt, reset=session.rollback, settled=after_rollback
+    )
 
 
 def configure_sqlite_transactions(engine: AsyncEngine) -> None:
@@ -263,9 +386,8 @@ def _with_sqlite_parent(url: str) -> str:
     """Create a SQLite URL's file directory; return the URL unchanged."""
     from sqlalchemy.engine.url import make_url
 
-    parsed = make_url(url)
-    database = parsed.database
-    if parsed.get_backend_name() == "sqlite" and database and database != ":memory:":
+    database = make_url(url).database
+    if database and database != ":memory:":
         settings.prepare_state_dir(Path(database).parent)
     return url
 
@@ -301,17 +423,8 @@ def get_engine(
             raise RuntimeError(msg)
         return _engine
 
-    engine_kwargs: dict[str, object] = {"echo": echo}
-    if url.startswith("postgresql"):
-        engine_kwargs["pool_pre_ping"] = True
-        engine_kwargs["pool_size"] = settings.db_pool_size
-        engine_kwargs["max_overflow"] = settings.db_pool_max_overflow
-
-    _engine = create_async_engine(url, **engine_kwargs)
-
-    if url.startswith("sqlite"):
-        configure_sqlite_engine(_engine)
-
+    _engine = create_async_engine(url, echo=echo)
+    configure_sqlite_engine(_engine)
     return _engine
 
 
@@ -417,10 +530,9 @@ async def seat_sqlite_posture(engine: AsyncEngine) -> None:
     on a rollback journal until its first connection, and anything inspecting the
     file before then reads a mode the store will not serve in. This writes the
     database header, so a caller that must not mutate a store calls it only once
-    the store is accepted. Other dialects and in-memory stores are left alone.
+    the store is accepted. In-memory stores are left alone.
     """
-    url = str(engine.url)
-    if engine.dialect.name != "sqlite" or url == "sqlite+aiosqlite:///:memory:":
+    if str(engine.url) == "sqlite+aiosqlite:///:memory:":
         return
     async with engine.connect():
         pass
@@ -469,9 +581,6 @@ async def verify_wal_mode(engine: AsyncEngine) -> str:
     Returns:
         The current journal mode string (should be ``'wal'``).
     """
-    if engine.dialect.name != "sqlite":
-        msg = "verify_wal_mode() is only valid for SQLite engines."
-        raise ValueError(msg)
     async with engine.connect() as conn:
         result = await conn.execute(text("PRAGMA journal_mode"))
         row = result.scalar_one()
@@ -479,7 +588,16 @@ async def verify_wal_mode(engine: AsyncEngine) -> str:
 
 
 def inspect_sqlite_database(path: Path) -> dict[str, object]:
-    """Inspect a SQLite file for fallback-mode diagnostics."""
+    """Inspect a SQLite file for storage diagnostics.
+
+    Bounded by the CONFIGURED lock wait, not the driver's own. This read runs on
+    the gateway's boot path and reports a store it cannot read rather than
+    raising, so a store another writer has locked costs boot latency instead of
+    an error - which is exactly what makes the operator's budget load-bearing
+    here. Reading the journal mode out of the header takes a shared lock on a
+    store that is not in WAL, and at the driver's default that wait was five
+    seconds whatever the configuration said.
+    """
     diagnostics: dict[str, object] = {
         "path": str(path),
         "exists": path.exists(),
@@ -490,10 +608,9 @@ def inspect_sqlite_database(path: Path) -> dict[str, object]:
         diagnostics["detail"] = "sqlite file missing"
         return diagnostics
 
-    import sqlite3
-
+    lock_wait_seconds = settings.sqlite_busy_timeout_ms / 1000
     try:
-        conn = sqlite3.connect(str(path))
+        conn = sqlite3.connect(str(path), timeout=lock_wait_seconds)
         try:
             row = conn.execute("PRAGMA journal_mode").fetchone()
         finally:

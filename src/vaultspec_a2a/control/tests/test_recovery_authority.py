@@ -3,36 +3,48 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from langgraph.graph import END, START
+from langgraph.types import interrupt
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...database import create_control_action, create_thread, get_thread
-from ...database.models import Base, RunWriteAuthority
-from ...database.reconciliation import reconcile_threads_on_startup
-from ...database.session import configure_sqlite_transactions
-from ...graph.compiler import CompiledTeamGraph, _add_node, _compile_graph
+from ...conftest import SqlitePosture
+from ...database import (
+    create_control_action,
+    create_thread,
+    get_thread,
+    read_latest_checkpoint,
+)
 from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
     record_graph_completion,
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    add_test_node,
+    compile_test_graph,
+    new_state_graph,
+)
+from ...thread import RunWriteAuthority
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
-    read_checkpoint_evidence,
+    classify_checkpoint_evidence,
 )
-from ...thread.enums import ControlActionType, ThreadStatus
+from ...thread.enums import ControlActionType, InterruptType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
+from ...thread.idempotency import thread_create_action_key
 from ...thread.state import TeamState
 from ..accepted_input import freeze_accepted_input
 from ..dispatch_receipts import prepare_graph_action_receipt
 from ..graph_definition import read_accepted_graph_definition
+from ..reconciliation import reconcile_threads_on_startup
 from ..recovery_authority import (
     RecoveryRequest,
     RecoveryTrigger,
@@ -41,26 +53,28 @@ from ..recovery_authority import (
 from ..run_discovery_service import discover_active_runs
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
+
+    from ...graph.compiler import CompiledTeamGraph
 
 DurableRun = tuple[
     async_sessionmaker[AsyncSession], AsyncSqliteSaver, GraphActionReceipt
 ]
 
 
+pytestmark = pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS)
+
+
 @pytest_asyncio.fixture
 async def durable_run(
-    tmp_path: Path, request: pytest.FixtureRequest
-) -> AsyncIterator[DurableRun]:
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'runs.db'}")
-    configure_sqlite_transactions(engine)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
-    async with sessions() as db:
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> DurableRun:
+    async with session_factory() as db:
         await create_thread(
             db,
             thread_id="run",
@@ -73,7 +87,7 @@ async def durable_run(
             db,
             thread_id="run",
             action_type=ControlActionType.INGEST,
-            idempotency_key="thread-create:run",
+            idempotency_key=thread_create_action_key("run"),
             dispatch_id="accepted",
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             payload=freeze_accepted_input(
@@ -83,11 +97,9 @@ async def durable_run(
                     content="work",
                     workspace_root=str(tmp_path),
                     recursion_limit=25,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     graph_definition=freeze_graph_definition(
-                        load_team_config(
-                            "mock-success-single", workspace_root=tmp_path
-                        ),
+                        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
                         workspace_root=tmp_path,
                     ),
                 ),
@@ -99,9 +111,7 @@ async def durable_run(
         )
         assert receipt is not None
         await db.commit()
-    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "graph.db")) as saver:
-        yield sessions, saver, receipt
-    await engine.dispose()
+    return session_factory, checkpointer, receipt
 
 
 @pytest.mark.asyncio
@@ -111,7 +121,7 @@ async def test_initial_graph_authority_is_bound_to_its_durable_receipt(
     sessions, _, _ = durable_run
     async with sessions() as db:
         definition = await read_accepted_graph_definition(db, "run")
-        assert definition.team_id == "mock-success-single"
+        assert definition.team_id == DEFAULT_TEAM_PRESET
         assert definition.step_timeout_seconds == 60
         with pytest.raises(ValueError, match="no current initial graph authority"):
             await read_accepted_graph_definition(db, "another-run")
@@ -122,13 +132,13 @@ def _work(state: TeamState) -> dict[str, object]:
 
 
 def _graph(saver: AsyncSqliteSaver, *, pause: bool = False) -> CompiledTeamGraph:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
-    _add_node(builder, "work", _work)
-    _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
+    builder = new_state_graph(TeamState)
+    add_test_node(builder, "work", _work)
+    add_test_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(START, "work")
     builder.add_edge("work", GRAPH_COMPLETION_NODE)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
-    return _compile_graph(
+    return compile_test_graph(
         builder,
         checkpointer=saver,
         interrupt_before=["work"] if pause else [],
@@ -194,7 +204,9 @@ async def test_empty_pending_writes_do_not_prove_completion(durable_run: Durable
     checkpoint = await saver.aget_tuple(config)
     assert checkpoint is not None
     assert not checkpoint.pending_writes
-    evidence = await read_checkpoint_evidence(saver, receipt, timeout_seconds=5)
+    evidence = classify_checkpoint_evidence(
+        await read_latest_checkpoint(saver, "run", timeout=5), receipt
+    )
     assert evidence.kind is CheckpointEvidenceKind.PENDING
     async with sessions() as db:
         observed = await reconcile_run_checkpoint(
@@ -243,3 +255,84 @@ async def test_only_startup_demotes_unfinished_execution(durable_run: DurableRun
         assert row is not None
         assert row.run_revision == 1
         assert row.repair_reason == "checkpoint_absent"
+
+
+def _parking_node(state: TeamState) -> dict[str, object]:
+    """Ask for one tool permission and leave the run suspended on it."""
+    del state
+    interrupt(
+        {
+            "type": InterruptType.PERMISSION_REQUEST.value,
+            "request_id": "perm-recovery-park",
+            "tool_name": "bash",
+            "tool_input": {"command": "ls"},
+            "options": [{"optionId": "allow_once", "name": "Allow once"}],
+        }
+    )
+    return {}
+
+
+def _parking_graph(saver: AsyncSqliteSaver) -> CompiledTeamGraph:
+    builder = new_state_graph(TeamState)
+    add_test_node(builder, "ask", _parking_node)
+    add_test_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
+    builder.add_edge(START, "ask")
+    builder.add_edge("ask", GRAPH_COMPLETION_NODE)
+    builder.add_edge(GRAPH_COMPLETION_NODE, END)
+    return compile_test_graph(builder, checkpointer=saver, name="recovery-park-probe")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("durable_run", [ThreadStatus.INPUT_REQUIRED], indirect=True)
+@pytest.mark.parametrize(
+    "trigger", [RecoveryTrigger.READ, RecoveryTrigger.STARTUP, RecoveryTrigger.RETRY]
+)
+async def test_a_parked_run_is_recognised_by_its_checkpoint_not_its_writer(
+    durable_run: DurableRun, trigger: RecoveryTrigger
+) -> None:
+    """A park is ``INPUT_REQUIRED`` plus a pending checkpoint interrupt.
+
+    A permission park elects under the graph-run dispatch that raised it, as a
+    clarification does, so no park carries a ``permission_request_created``
+    writer. Recognising one by that writer's action type therefore matched
+    nothing, and every pass read the run as an unfinished execution rather than
+    as a run waiting for a human. The recognition is the checkpoint's: the run
+    holds an unanswered interrupt, and recovery leaves it alone whatever
+    triggered the pass.
+    """
+    sessions, saver, receipt = durable_run
+    config: RunnableConfig = {"configurable": {"thread_id": "run"}}
+    parked = await _parking_graph(saver).ainvoke(
+        {
+            "active_graph_action_receipt": receipt.model_dump(mode="json"),
+            "graph_action_receipts": {
+                receipt.dispatch_id: receipt.model_dump(mode="json")
+            },
+        },
+        config,
+    )
+    assert "__interrupt__" in parked
+    evidence = classify_checkpoint_evidence(
+        await read_latest_checkpoint(saver, "run", timeout=5), receipt
+    )
+    assert evidence.kind is CheckpointEvidenceKind.INTERRUPTED
+
+    async with sessions() as db:
+        observed = await reconcile_run_checkpoint(
+            db,
+            saver,
+            RecoveryRequest(
+                thread_id="run", trigger=trigger, checkpoint_timeout_seconds=5
+            ),
+        )
+    assert observed.condition == "awaiting_control"
+    assert observed.status is ThreadStatus.INPUT_REQUIRED
+    assert not observed.changed
+
+    async with sessions() as db:
+        row = await get_thread(db, "run")
+    assert row is not None
+    assert row.status == ThreadStatus.INPUT_REQUIRED.value
+    assert row.repair_reason is None
+    # The revision the fixture seated, untouched: nothing elected over the park.
+    assert row.run_revision == 0

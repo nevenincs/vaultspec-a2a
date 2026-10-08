@@ -18,12 +18,19 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import time
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 import psutil
 import pytest
+
+from ...testing import (
+    ProgressDeadline,
+    armed_lane_environment,
+    inherited_environment,
+    wait_until,
+)
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -55,7 +62,11 @@ pytestmark = pytest.mark.middleware
 
 
 def _probe(mode: str, workspace: Path) -> dict[str, Any]:
-    """Run one measurement in a cold interpreter and return its report."""
+    """Run one measurement in a cold interpreter and return its report.
+
+    The child is armed through its environment, as a test gateway's worker is, so
+    the compile it measures reaches the deterministic lane.
+    """
     completed = subprocess.run(
         [
             sys.executable,
@@ -64,6 +75,7 @@ def _probe(mode: str, workspace: Path) -> dict[str, Any]:
             mode,
             str(workspace),
         ],
+        env=inherited_environment(armed_lane_environment()),
         capture_output=True,
         text=True,
         timeout=300,
@@ -84,36 +96,33 @@ def _representative_cpu_load() -> Generator[list[psutil.Process]]:
     # real interpreter. Measuring that idle redirector would make the load proof
     # vacuous, and signalling it would not identify the process burning CPU.
     python = getattr(sys, "_base_executable", sys.executable)
+    containments = [
+        ProcessContainment.create() for _ in range(_REPRESENTATIVE_BUSY_PROCESSES)
+    ]
     processes = [
-        subprocess.Popen(
+        spawn_contained(
             [python, "-c", "value = 1\nwhile True: value = value * 3 % 97"],
+            containment,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        for _ in range(_REPRESENTATIVE_BUSY_PROCESSES)
+        for containment in containments
     ]
     owners = [psutil.Process(process.pid) for process in processes]
     try:
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            if all(owner.cpu_times().user > 0.05 for owner in owners):
-                break
-            time.sleep(0.05)
-        assert all(owner.cpu_times().user > 0.05 for owner in owners), (
-            "the representative CPU load never became non-vacuous"
+        wait_until(
+            lambda: all(owner.cpu_times().user > 0.05 for owner in owners),
+            deadline=ProgressDeadline(idle_window_s=5.0),
+            interval_s=0.05,
+            stalled=lambda: (
+                "the representative CPU load never became non-vacuous (user "
+                f"seconds: {[owner.cpu_times().user for owner in owners]})"
+            ),
         )
         yield owners
     finally:
-        for process in processes:
-            if process.poll() is None:
-                with suppress(ProcessLookupError):
-                    process.terminate()
-        for process in processes:
-            try:
-                process.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5.0)
+        for process, containment in zip(processes, containments, strict=True):
+            reap_contained(process, containment)
 
 
 @pytest.fixture(scope="module")
@@ -168,9 +177,9 @@ def test_compiling_a_graph_keeps_the_loop_serving(
     """The production compile seam pays the import without stalling the loop.
 
     Drives ``GraphLifecycleManager.get_or_compile_graph`` for a bundled preset.
-    The preset resolves to the in-process mock lane, which needs no credential
-    and no network, and still pays the identical cost: ``create`` imports the
-    model stack before it branches on the requested provider.
+    The preset resolves to the in-process deterministic lane, which needs no
+    credential and no network, and still pays the identical cost: ``create``
+    imports the model stack before it branches on the requested provider.
     """
     compiled = cold_compile_probe
 

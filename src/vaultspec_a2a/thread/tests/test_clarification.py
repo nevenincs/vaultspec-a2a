@@ -11,16 +11,15 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
+from ..action_receipts import Fingerprint
 from ..clarification import (
     CLARIFICATION_DECLINE_MARKER,
-    CLARIFICATION_INTERRUPT_TYPE,
     MAX_ANSWER_CHARS,
     MAX_OPTION_CHARS,
     MAX_PROMPT_CHARS,
     MAX_QUESTIONS_PER_REQUEST,
-    MAX_RUN_MESSAGE_CHARS,
     ClarificationAnswers,
     ClarificationContinuation,
     ClarificationDecline,
@@ -34,6 +33,8 @@ from ..clarification import (
     strip_control_characters,
     validate_clarification_answers,
 )
+from ..constants import MAX_RUN_MESSAGE_CHARS
+from ..enums import InterruptType
 
 
 def _choice(
@@ -305,7 +306,7 @@ def test_resolution_fingerprint_is_canonical_and_outcome_sensitive() -> None:
     decline = ClarificationDecline(request_id="clarify-1")
 
     fingerprint = clarification_resolution_fingerprint(first)
-    assert fingerprint.startswith("sha256:")
+    assert TypeAdapter(Fingerprint).validate_python(fingerprint) == fingerprint
     assert fingerprint == clarification_resolution_fingerprint(reordered)
     assert fingerprint != clarification_resolution_fingerprint(changed_answer)
     assert fingerprint != clarification_resolution_fingerprint(continuation)
@@ -488,7 +489,7 @@ def test_a_payload_round_trips_through_the_interrupt_shape() -> None:
     request = _request()
     parsed = ClarificationRequest.from_payload(request.as_interrupt_payload())
     assert parsed == request
-    assert request.as_interrupt_payload()["type"] == CLARIFICATION_INTERRUPT_TYPE
+    assert request.as_interrupt_payload()["type"] == InterruptType.CLARIFICATION_REQUEST
 
 
 @pytest.mark.parametrize(
@@ -512,4 +513,4 @@ def test_an_unreadable_payload_reads_as_no_pending_question(payload: object) -> 
 
 
 def test_no_checkpoint_means_no_pending_question() -> None:
-    assert pending_clarification(None, thread_id="run-1") is None
+    assert pending_clarification(None) is None

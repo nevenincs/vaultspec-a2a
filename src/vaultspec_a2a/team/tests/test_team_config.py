@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from ...authoring.contract import DOCUMENT_AUTHORING_ROLES, RESEARCH_ADR_ROLES
+from ...conftest import ExternalPrerequisiteRule
 from ...thread.errors import (
     AgentConfigNotFoundError,
     ConfigError,
@@ -307,7 +308,7 @@ class TestTeamConfigFromToml:
     def test_doc_editor_diverges_from_solo_coder_only_on_filesystem_write(
         self,
     ) -> None:
-        """agent-flow D2: doc-editor clones solo-coder's shape but flips write off.
+        """The doc-editor clones solo-coder's shape but flips write off.
 
         Both presets are pipeline topology, one worker, authoring_bridge=true; the
         ONE deliberate divergence is the worker's filesystem_write capability.
@@ -416,7 +417,7 @@ agent_id = "coder"
         assert cfg.display_name == "Custom Override"
 
     def test_workspace_override_cannot_follow_a_link_outside_teams(
-        self, tmp_path: Path
+        self, tmp_path: Path, external_prerequisite: ExternalPrerequisiteRule
     ) -> None:
         """An override filename must resolve inside its configured directory."""
         override_dir = tmp_path / ".vaultspec" / "teams"
@@ -428,8 +429,8 @@ agent_id = "coder"
         )
         try:
             (override_dir / "external_config.toml").symlink_to(outside)
-        except OSError:
-            pytest.skip("this host does not permit creating symlinks")
+        except OSError as exc:
+            external_prerequisite.absent("symlinks", str(exc))
         with pytest.raises(TeamConfigNotFoundError):
             load_team_config("external_config", workspace_root=tmp_path)
 
@@ -503,7 +504,7 @@ class TestLoadAgentConfigValidation:
 
     def test_agent_id_with_hyphens_passes(self) -> None:
         """agent_id with hyphens (allowed by pattern) passes validation."""
-        # Hyphens are allowed by _SAFE_AGENT_ID_RE — raises NotFound, not ConfigError
+        # Hyphens are allowed by the role-id grammar — raises NotFound, not ConfigError
         with pytest.raises(AgentConfigNotFoundError):
             load_agent_config("valid-agent-id")
 
@@ -833,7 +834,7 @@ class TestAdrResearchTeamPreset:
     def test_adr_research_harness_opts_into_vaultspec_rag(self) -> None:
         """The live preset's effective harness declares the vaultspec-rag server.
 
-        The ``[team.harness]`` opt-in (P03.S12) is what makes the landed grounding
+        The ``[team.harness]`` opt-in is what makes the landed grounding
         composition effective for this preset's document-authoring workers: the
         loaded preset's effective harness must name ``vaultspec-rag`` in
         ``mcp_servers`` - and ONLY that server (read-only by construction; no

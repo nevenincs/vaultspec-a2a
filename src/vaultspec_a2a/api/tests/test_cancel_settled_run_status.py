@@ -3,7 +3,7 @@
 Real gateway app on a real socket, real SQLite database and checkpointer, real
 in-process dispatch receiver, and - the part that makes this a proof rather than a
 rehearsal - the run is driven to its terminal state by relaying a real worker
-terminal event over the real ``/internal/events`` relay. Nothing here hand-writes
+terminal event over the real ``/internal/events/batch`` relay. Nothing here hand-writes
 a status into the database, so the state the cancel is refused against is the
 state production actually produces.
 
@@ -26,71 +26,49 @@ idempotent verb must not fail a request purely for being the second one.
 from __future__ import annotations
 
 import itertools
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import httpx
 import pytest
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
-from ...graph.compiler import _add_node, _compile_graph
+from ...graph.enums import ProviderCondition
 from ...graph.nodes.action_completion import (
     GRAPH_COMPLETION_NODE,
     record_graph_completion,
 )
-from ...providers import ProviderCondition
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    add_test_node,
+    async_run_start_body,
+    compile_test_graph,
+    new_state_graph,
+    serve_on_loopback,
+)
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import ThreadStatus
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
-from ...thread.state import TeamState
-from .conftest import (
-    SessionFactory,
-    _InProcessWorker,
-    async_catalog_run_fields,
-    make_app,
-)
-from .test_gateway_live import _live_server
+from ._relay_events import terminal_event
+from .conftest import SessionFactory, _InProcessWorker, make_app
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-_PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
 
 
-async def _run_body(client: httpx.AsyncClient) -> dict[str, object]:
-    """A complete run-start body, including the now-required identity and selection.
-
-    The selection is derived from the catalog this gateway actually serves rather
-    than written out here, so these tests keep asserting about CANCEL rather than
-    quietly becoming a second copy of the selection-admission tests.
-    """
-    return {
-        "team_preset": _PRESET,
-        "message": "build it",
-        "autonomous": True,
-        "actor_tokens": {"tokens": {"coder": "tok-coder"}, "engine_bearer": "bearer"},
-        "run_id": f"cancel-settled-{next(_RUN_SEQ):02d}",
-        **await async_catalog_run_fields(client),
-    }
-
-
-def _terminal_envelope(run_id: str, status: str) -> dict[str, object]:
-    """The worker-IPC envelope carrying one run's terminal event."""
-    return {
-        "type": "event",
-        "thread_id": run_id,
-        "payload": {
-            "type": "thread_terminal",
-            "event_type": "thread_terminal",
-            "thread_id": run_id,
-            "status": status,
-        },
-    }
-
-
 async def _start_run(client: httpx.AsyncClient) -> str:
-    resp = await client.post("/v1/runs", json=await _run_body(client))
+    # The selection is derived from the catalog this gateway actually serves
+    # rather than written out here, so these tests keep asserting about CANCEL
+    # rather than quietly becoming a second copy of the selection-admission tests.
+    body = await async_run_start_body(
+        client,
+        f"cancel-settled-{next(_RUN_SEQ):02d}",
+        team_preset=DEFAULT_TEAM_PRESET,
+        tokens={"coder": "tok-coder"},
+    )
+    resp = await client.post("/v1/runs", json=body)
     assert resp.status_code == 201, resp.text
     return resp.json()["run_id"]
 
@@ -98,15 +76,12 @@ async def _start_run(client: httpx.AsyncClient) -> str:
 async def _complete_checkpoint(
     checkpointer: AsyncSqliteSaver, receipt: GraphActionReceipt
 ) -> None:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
-    _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
+    builder = new_state_graph()
+    add_test_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(START, GRAPH_COMPLETION_NODE)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
-    graph = _compile_graph(
-        builder,
-        checkpointer=checkpointer,
-        interrupt_before=None,
-        name="cancel-settled-probe",
+    graph = compile_test_graph(
+        builder, checkpointer=checkpointer, name="cancel-settled-probe"
     )
     await graph.ainvoke(
         {
@@ -127,7 +102,7 @@ async def _settle(
     worker: _InProcessWorker,
 ) -> None:
     """Drive *run_id* terminal through the real worker relay, then confirm it."""
-    envelope = _terminal_envelope(run_id, status)
+    envelope = terminal_event(run_id, status=status)
     payload = cast("dict[str, object]", envelope["payload"])
     if status == ThreadStatus.COMPLETED.value:
         receipt = GraphActionReceipt.model_validate(
@@ -157,7 +132,7 @@ async def _settle(
             dispatch_id=str(worker.dispatches[-1]["dispatch_id"]),
             outcome="no_active_work",
         ).model_dump(mode="json")
-    resp = await client.post("/internal/events", json=envelope)
+    resp = await client.post("/internal/events/batch", json={"events": [envelope]})
     assert resp.status_code == 200, resp.text
     snapshot = await client.get(f"/v1/runs/{run_id}")
     assert snapshot.status_code == 200, snapshot.text
@@ -182,7 +157,7 @@ async def test_cancelling_a_settled_run_is_a_conflict_not_a_bad_gateway(
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client)
@@ -197,7 +172,7 @@ async def test_cancelling_a_settled_run_is_a_conflict_not_a_bad_gateway(
         assert cancel.status_code == 409, cancel.text
         # The refusal names the state, so the caller learns to re-read the run
         # rather than to retry a request that can never succeed.
-        assert settled_status in cancel.json()["detail"]
+        assert settled_status in cancel.json()["detail"]["message"]
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -212,7 +187,7 @@ async def test_cancelling_an_already_cancelled_run_succeeds_idempotently(
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client)
@@ -243,7 +218,7 @@ async def test_accepted_cancel_rejects_late_completion_and_settles_exact_receipt
 ) -> None:
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         run_id = await _start_run(client)
@@ -255,7 +230,8 @@ async def test_accepted_cancel_rejects_late_completion_and_settles_exact_receipt
         assert cancel.json()["accepted"] is True
         await _complete_checkpoint(checkpointer, graph_receipt)
         completion = await client.post(
-            "/internal/events", json=_terminal_envelope(run_id, "completed")
+            "/internal/events/batch",
+            json={"events": [terminal_event(run_id, status="completed")]},
         )
         assert completion.status_code == 200, completion.text
         snapshot = await client.get(f"/v1/runs/{run_id}")
@@ -278,7 +254,7 @@ async def test_cancelling_an_absent_run_is_still_a_not_found(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         absent = await client.post("/v1/runs/no-such-run-at-all/cancel")

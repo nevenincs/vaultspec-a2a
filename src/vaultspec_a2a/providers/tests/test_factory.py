@@ -1,8 +1,8 @@
 """Tests for the provider factory."""
 
+import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 from langchain_core.language_models import BaseChatModel
@@ -12,27 +12,41 @@ from ...control.config import settings
 from ...graph._compiler_models import resolve_model_for_worker
 from ...graph.enums import Provider
 from ...team.team_config import load_agent_config, load_team_config
+from ...testing import settings_override
 from ...thread.errors import ConfigError
 from .._factory_commands import (
     _BIN_PATH,
+    CLAUDE_OAUTH_TOKEN,
+    ProviderCommand,
     _build_kimi_env,
-    _build_zai_env,
     _classify_acp_command,
-    _kimi_home_env,
     classify_provider_command,
     claude_acp_entry,
     kimi_temporary_model_configuration_reason,
 )
 from ..acp_chat_model import AcpChatModel
 from ..cli_resolution import (
+    SYSTEM_CLI_LANES,
     ProviderRuntimeUnavailableError,
     ProviderRuntimeUnavailableReason,
-    resolve_provider_cli_executable,
     resolve_service_executable,
 )
 from ..codex_chat_model import CodexChatModel
-from ..factory import ProviderFactory
-from ..provider_catalog import AuthenticationState, CatalogStatus, ProviderCatalogKey
+from ..execution_modes import BINARY_BACKEND, NODE_BACKEND
+from ..factory import (
+    ProviderFactory,
+    _acp_catalog_auth_overlay,
+    _zai_auth_env,
+    kimi_binary_proof_reason,
+)
+from ..provider_catalog import (
+    SELECTION_SCHEMA_VERSION,
+    AuthenticationState,
+    CatalogStatus,
+    HealthState,
+    ProviderCatalogKey,
+)
+from ..team_selection import FrozenLaneAssignment
 
 # The exact model values a run freezes into its role assignment for each external
 # lane. Literals rather than lookups: an external provider's models are named by
@@ -52,7 +66,9 @@ def get_model_attr(model_obj: BaseChatModel) -> str | None:
 
 
 def test_catalog_registrations_are_execution_mode_specific() -> None:
-    registrations = ProviderFactory().catalog_registrations(Path.cwd())
+    registrations = ProviderFactory().catalog_registrations(
+        Path.cwd(), serve_in_process_lanes=False
+    )
     assert tuple(registration.key for registration in registrations) == (
         ProviderCatalogKey("antigravity", "antigravity-cli"),
         ProviderCatalogKey("claude", f"claude-agent-acp:{settings.acp_backend}"),
@@ -69,16 +85,14 @@ def test_catalog_registrations_are_execution_mode_specific() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "key",
-    (
-        ProviderCatalogKey("zai", f"zai-claude-agent-acp:{settings.acp_backend}"),
-        ProviderCatalogKey("zhipu", "zhipu-openai-compatible-api"),
-    ),
-)
-async def test_unverified_catalog_lanes_are_truthfully_unavailable(
-    key: ProviderCatalogKey,
-) -> None:
+async def test_a_lane_with_no_enumeration_surface_says_so() -> None:
+    """Zhipu has no prompt-free enumeration at all, and reports that.
+
+    The Z.ai lane is deliberately NOT in this population any more: it runs the
+    claude-agent-acp adapter, which does enumerate, so its answer now depends on
+    its credential rather than on a blanket refusal.
+    """
+    key = ProviderCatalogKey("zhipu", "zhipu-openai-compatible-api")
     discovery = await ProviderFactory().catalog_registration(key, Path.cwd()).discover()
     assert discovery.catalog.key == key
     assert discovery.catalog.state.status is CatalogStatus.UNAVAILABLE
@@ -105,9 +119,9 @@ def test_classify_acp_command_binary_returns_bin_path() -> None:
     if _BIN_PATH is None:
         _assert_binary_backend_unavailable(lambda: _classify_acp_command("binary"))
         return
-    command, _ = _classify_acp_command("binary")
-    assert len(command) == 1
-    assert "claude-agent-acp" in command[0]
+    command = _classify_acp_command("binary")
+    assert len(command.argv) == 1
+    assert "claude-agent-acp" in command.argv[0]
 
 
 def test_classify_acp_command_binary_path_matches_bin_path() -> None:
@@ -115,8 +129,8 @@ def test_classify_acp_command_binary_path_matches_bin_path() -> None:
     if _BIN_PATH is None:
         _assert_binary_backend_unavailable(lambda: _classify_acp_command("binary"))
         return
-    command, _ = _classify_acp_command("binary")
-    assert Path(command[0]) == _BIN_PATH
+    command = _classify_acp_command("binary")
+    assert Path(command.argv[0]) == _BIN_PATH
 
 
 def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
@@ -134,10 +148,12 @@ def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
     assert isinstance(model, AcpChatModel)
     assert model.env_vars.get("CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN") == "1"
     assert model.command == [str(_BIN_PATH)]
-    assert model.runtime_authority == "package_bin"
-    assert model.command_origin == "package_bin"
-    assert model.command_kind == "bun_binary"
-    assert model.acp_backend == "binary"
+    launch = model.provider_command
+    assert launch is not None
+    assert launch.runtime_authority == "package_bin"
+    assert launch.command_origin == "package_bin"
+    assert launch.command_kind == "bun_binary"
+    assert launch.acp_backend == BINARY_BACKEND
 
 
 def test_provider_factory_claude_default_never_injects_a_setting_token() -> None:
@@ -150,8 +166,6 @@ def test_provider_factory_claude_default_never_injects_a_setting_token() -> None
         )
         return
     from pydantic import SecretStr
-
-    from ...testing import settings_override
 
     with settings_override(
         claude_auth_channel="subscription_login",
@@ -205,32 +219,110 @@ def test_provider_factory_claude_retains_requested_model_for_acp_selection() -> 
 # ---------------------------------------------------------------------------
 
 
-def test_build_zai_env_injects_base_url_and_token() -> None:
-    """Z.ai env builder maps configured settings to the Anthropic gateway vars."""
-    env = _build_zai_env(
-        zai_base_url="https://api.z.ai/api/anthropic",
-        zai_auth_token="zai-secret",
-    )
+def test_zai_auth_env_injects_base_url_and_token() -> None:
+    """Z.ai env selection maps configured settings to the Anthropic gateway vars."""
+    with settings_override(
+        zai_base_url="https://api.z.ai/api/anthropic", zai_auth_token="zai-secret"
+    ):
+        env, auth_mode = _zai_auth_env()
     assert env == {
         "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
         "ANTHROPIC_AUTH_TOKEN": "zai-secret",
     }
+    assert auth_mode == "zai_auth_token"
 
 
-def test_build_zai_env_without_token_returns_empty() -> None:
+def test_zai_auth_env_without_token_returns_empty() -> None:
     """No token means no auth env — the base URL alone is not injected."""
-    assert _build_zai_env("https://api.z.ai/api/anthropic", None) == {}
+    with settings_override(
+        zai_base_url="https://api.z.ai/api/anthropic", zai_auth_token=None
+    ):
+        assert _zai_auth_env() == ({}, "none_detected")
 
 
-def test_build_zai_env_ignores_blank_token() -> None:
+def test_zai_auth_env_ignores_blank_token() -> None:
     """A whitespace-only token must not produce an ANTHROPIC_AUTH_TOKEN var."""
-    assert _build_zai_env("https://api.z.ai/api/anthropic", "  ") == {}
+    with settings_override(
+        zai_base_url="https://api.z.ai/api/anthropic", zai_auth_token="  "
+    ):
+        assert _zai_auth_env() == ({}, "none_detected")
 
 
-def test_build_zai_env_omits_blank_base_url() -> None:
+def test_zai_auth_env_omits_blank_base_url() -> None:
     """A blank base URL is dropped while a real token still authenticates."""
-    env = _build_zai_env(" ", "zai-secret")
+    with settings_override(zai_base_url=" ", zai_auth_token="zai-secret"):
+        env, auth_mode = _zai_auth_env()
     assert env == {"ANTHROPIC_AUTH_TOKEN": "zai-secret"}
+    assert auth_mode == "zai_auth_token"
+
+
+_ZAI_CATALOG_KEY = ProviderCatalogKey(
+    Provider.ZAI.value, f"zai-claude-agent-acp:{settings.acp_backend}"
+)
+
+
+@pytest.mark.asyncio
+async def test_zai_catalog_discovery_is_the_shared_acp_lifecycle(
+    tmp_path: Path,
+) -> None:
+    """The Z.ai lane enumerates through the adapter it runs, not a stub.
+
+    Without a token the shared lifecycle refuses at the lane's own credential
+    overlay, so the served reason is the Z.ai one. The lane previously answered
+    with a blanket "no verified prompt-free model enumeration" whatever was
+    configured, which is what made its live proof unpassable: no credential
+    could change the answer.
+    """
+    with settings_override(
+        zai_base_url="https://api.z.ai/api/anthropic", zai_auth_token=None
+    ):
+        resolved = (
+            await ProviderFactory()
+            .catalog_registration(_ZAI_CATALOG_KEY, tmp_path)
+            .discover()
+        )
+    assert resolved.catalog.state.status is CatalogStatus.UNAVAILABLE
+    assert resolved.catalog.state.reason == "no Z.ai auth token configured"
+    assert resolved.configured is HealthState.UNAVAILABLE
+    assert resolved.authentication is AuthenticationState.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_the_zai_overlay_reaches_the_probe_the_lane_launches(
+    tmp_path: Path,
+) -> None:
+    """The probe's child is handed the Z.ai credential, never Claude's.
+
+    The overlay the discovery lifecycle applies is the same one a served turn
+    applies, so a catalog built here describes the gateway a run would reach.
+    """
+    del tmp_path
+    with settings_override(
+        zai_base_url="https://api.z.ai/api/anthropic", zai_auth_token="zai-secret"
+    ):
+        overlay = _acp_catalog_auth_overlay(Provider.ZAI)
+    assert overlay.mode == "zai_auth_token"
+    assert overlay.env == {
+        "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+        "ANTHROPIC_AUTH_TOKEN": "zai-secret",
+    }
+    # Claude's own channel is never what this lane's child authenticates with.
+    assert CLAUDE_OAUTH_TOKEN.env_name not in overlay.env
+
+
+@pytest.mark.asyncio
+async def test_the_zai_overlay_refuses_before_resolving_any_launcher() -> None:
+    """A lane with no credential is refused on its own configuration first.
+
+    Readiness already refuses a missing configuration before it resolves a
+    command; discovery now reports the same order, so an absent token is never
+    reported as a missing adapter or an unpinnable CLI.
+    """
+    with (
+        settings_override(zai_auth_token=None),
+        pytest.raises(ProviderRuntimeUnavailableError, match=r"Z\.ai auth token"),
+    ):
+        _acp_catalog_auth_overlay(Provider.ZAI)
 
 
 def test_provider_factory_zai_refuses_without_current_turn_proof(
@@ -243,42 +335,20 @@ def test_provider_factory_zai_refuses_without_current_turn_proof(
     assert refusal.value.reason is ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
 
 
-def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
-    """Kimi builds an AcpChatModel on the `kimi acp` command with the kimi family."""
-    if resolve_provider_cli_executable(Provider.KIMI) is None:
-        with pytest.raises(ValueError, match="Kimi Code CLI not resolvable"):
-            from .._factory_commands import classify_provider_command
+def test_provider_factory_kimi_refuses_without_an_admitted_binary() -> None:
+    """An unenrolled Kimi lane is refused before any launcher is constructed.
 
-            classify_provider_command(Provider.KIMI)
-        return
-    model = ProviderFactory().create(Provider.KIMI, model=_FROZEN_KIMI_MODEL)
-    assert isinstance(model, AcpChatModel)
-    # Kimi drives its own agent, NOT the claude-agent-acp wrapper.
-    assert model.command[-1] == "acp"
-    assert "kimi" in model.command[0].lower()
-    assert model.command[1:] == ["-m", _FROZEN_KIMI_MODEL, "acp"]
-    assert model.provider == Provider.KIMI.value
-    # The backend family discriminator: kimi omits the Claude allowedTools _meta.
-    assert model.acp_family == "kimi"
-    assert model._config.acp_family == "kimi"
-    # A complete temporary definition is explicit and separate from `-m`.
-    if "KIMI_MODEL_API_KEY" in model.env_vars:
-        assert settings.kimi_api_key is not None
-        assert model.env_vars["KIMI_MODEL_API_KEY"] == (
-            settings.kimi_api_key.get_secret_value()
-        )
-        assert model.auth_mode == "temporary_model"
-        assert settings.kimi_api_key.get_secret_value() not in repr(model)
-    else:
-        assert model.auth_mode == "persisted_config"
-    assert "KIMI_API_KEY" not in model.env_vars
-    assert "KIMI_BASE_URL" not in model.env_vars
-    if settings.kimi_code_home and settings.kimi_code_home.strip():
-        assert model.env_vars["KIMI_CODE_HOME"] == settings.kimi_code_home.strip()
-
-
-def test_kimi_persisted_configuration_injects_no_temporary_definition() -> None:
-    assert _kimi_home_env("C:/kimi-home") == {"KIMI_CODE_HOME": "C:/kimi-home"}
+    Kimi carries handshake coverage only, so it holds no completed-turn proof
+    and therefore no admitted binary identity. The refusal is the lane's own,
+    independent of whether the CLI happens to be installed on this host: a lane
+    with no proof has no version range a resolved binary could fall inside.
+    """
+    with pytest.raises(ProviderRuntimeUnavailableError) as refusal:
+        ProviderFactory().create(Provider.KIMI, model=_FROZEN_KIMI_MODEL)
+    assert refusal.value.reason is ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+    assert kimi_binary_proof_reason() is (
+        ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+    )
 
 
 def test_complete_kimi_temporary_definition_uses_current_names() -> None:
@@ -338,15 +408,81 @@ def test_every_partial_kimi_temporary_definition_fails_closed(
         _build_kimi_env(key, base_url, name)
 
 
-def test_classify_provider_command_kimi_resolves_or_hints_install() -> None:
-    """Kimi classifies to the installed Kimi Code ACP executable."""
-    if resolve_provider_cli_executable(Provider.KIMI) is None:
-        with pytest.raises(ValueError, match="Kimi Code CLI not resolvable"):
-            classify_provider_command(Provider.KIMI)
-        return
-    meta = classify_provider_command(Provider.KIMI)
-    assert meta["command_kind"] == "kimi_cli"
-    assert meta["command_origin"] == "system_path_executable"
+def _staged_cli(directory: Path, provider: Provider) -> Path:
+    """Install one executable-shaped file the service-path search will find."""
+    name = SYSTEM_CLI_LANES[provider]
+    staged = directory / (f"{name}.cmd" if os.name == "nt" else name)
+    staged.write_text("", encoding="utf-8")
+    staged.chmod(0o755)
+    return staged
+
+
+@pytest.mark.parametrize("provider", [Provider.CODEX, Provider.KIMI])
+def test_a_system_cli_lane_classifies_to_an_absolute_launcher(
+    tmp_path: Path, provider: Provider
+) -> None:
+    """The classified launcher is the absolute file the search found.
+
+    The search path is stated rather than inherited, so this pins the resolution
+    production performs on a host where exactly one answer exists.
+    """
+    staged = _staged_cli(tmp_path, provider)
+    command = classify_provider_command(provider, search_path=str(tmp_path))
+    assert command.command_kind == f"{provider.value}_cli"
+    assert command.command_origin == "system_path_executable"
+    assert Path(command.argv[0]).is_absolute()
+    assert os.path.normcase(command.argv[0]) == os.path.normcase(str(staged))
+
+
+@pytest.mark.parametrize("provider", [Provider.CODEX, Provider.KIMI])
+def test_an_unresolved_system_cli_lane_is_refused_not_given_a_bare_name(
+    tmp_path: Path, provider: Provider
+) -> None:
+    """No launcher means no command, rather than a name a child would resolve.
+
+    A bare name is resolved by whoever launches it - Windows ``cmd.exe`` reads
+    the working directory first, and that directory is the agent's own
+    workspace - so a classification that produced one handed the choice of
+    binary to the agent.
+    """
+    with pytest.raises(ConfigError, match="not installed"):
+        classify_provider_command(provider, search_path=str(tmp_path))
+
+
+def test_a_relative_launcher_cannot_be_classified_at_all(tmp_path: Path) -> None:
+    """The absolute-launcher rule is enforced where commands are built.
+
+    Every origin - the system CLIs, the node entry, the packaged binary, the
+    capsule - passes through this one constructor, so the invariant is stated
+    once here rather than re-checked per lane or at spawn.
+    """
+    with pytest.raises(ValueError, match="absolute"):
+        ProviderCommand(
+            argv=("kimi", "acp"),
+            runtime_authority="system_cli",
+            command_origin="system_path_executable",
+            command_kind="kimi_cli",
+            command_executable="kimi",
+            command_target="kimi",
+        )
+    with pytest.raises(ValueError, match="at least one argument"):
+        ProviderCommand(
+            argv=(),
+            runtime_authority="system_cli",
+            command_origin="system_path_executable",
+            command_kind="kimi_cli",
+            command_executable="kimi",
+            command_target="kimi",
+        )
+    absolute = str(tmp_path / "kimi")
+    assert ProviderCommand(
+        argv=(absolute, "acp"),
+        runtime_authority="system_cli",
+        command_origin="system_path_executable",
+        command_kind="kimi_cli",
+        command_executable="kimi",
+        command_target=absolute,
+    ).argv == (absolute, "acp")
 
 
 def test_classify_provider_command_zai_returns_acp_meta() -> None:
@@ -355,11 +491,11 @@ def test_classify_provider_command_zai_returns_acp_meta() -> None:
         with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
             classify_provider_command(Provider.ZAI)
         return
-    meta = classify_provider_command(Provider.ZAI)
-    assert meta["command_kind"] == "node_entry"
-    assert meta["acp_backend"] == "node"
+    command = classify_provider_command(Provider.ZAI)
+    assert command.command_kind == "node_entry"
+    assert command.acp_backend == NODE_BACKEND
     node = str(resolve_service_executable("node"))
-    assert meta["command_executable"] == Path(node).name
+    assert command.command_executable == Path(node).name
 
 
 def test_provider_factory_explicit_string_model() -> None:
@@ -410,16 +546,26 @@ def test_factory_applies_exact_codex_model_scoped_controls() -> None:
     assert model.service_tier == "priority"
 
 
-def test_factory_applies_exact_kimi_model_scoped_effort() -> None:
-    model = ProviderFactory().create(
-        Provider.KIMI,
-        model="configured-alias",
-        execution_mode="kimi-code-acp",
-        native_controls={"thinking_effort:entry": "deep"},
+def test_the_kimi_model_scoped_effort_rides_the_launch_environment() -> None:
+    """The selected native control reaches the CLI's own variable.
+
+    Asserted on the environment builder rather than through a constructed
+    model: the lane carries no completed-turn proof, so a served construction
+    is refused before any environment is composed - and that refusal is pinned
+    by ``test_provider_factory_kimi_refuses_without_an_admitted_binary``.
+    """
+    env = _build_kimi_env(
+        kimi_api_key="temporary-key",
+        kimi_base_url="https://kimi.example.invalid/v1",
+        kimi_temporary_model_name="configured-alias",
+        kimi_thinking_effort="deep",
     )
-    assert isinstance(model, AcpChatModel)
-    assert model.command[1:3] == ["-m", "configured-alias"]
-    assert model.env_vars["KIMI_MODEL_THINKING_EFFORT"] == "deep"
+    assert env["KIMI_MODEL_THINKING_EFFORT"] == "deep"
+    assert env["KIMI_MODEL_NAME"] == "configured-alias"
+    # The control is independent of the tuple, exactly as the launch path emits it.
+    assert _build_kimi_env(kimi_thinking_effort="deep") == {
+        "KIMI_MODEL_THINKING_EFFORT": "deep"
+    }
 
 
 def test_factory_refuses_unproven_acp_session_controls(
@@ -463,29 +609,32 @@ def test_compiler_uses_fallback_only_after_a_valid_lane_is_runtime_unavailable()
     team = load_team_config("vaultspec-solo-coder")
     worker_ref = team.workers[0]
     agent = load_agent_config(worker_ref.agent_id)
-    assignment: dict[str, dict[str, Any]] = {
-        worker_ref.agent_id: {
-            "schema_version": 1,
-            "provider": "codex",
-            "execution_mode": "unavailable-mode",
-            "catalog_revision": "rev",
-            "entry_id": "primary",
-            "model_name": "primary-model",
-            "controls": [],
-            "provenance": {"selection_source": "team_selection"},
-            "fallbacks": [
-                {
-                    "schema_version": 1,
-                    "provider_id": "codex",
-                    "execution_mode": "codex-app-server",
-                    "catalog_revision": "rev",
-                    "entry_id": "fallback",
-                    "model_name": "fallback-model",
-                    "controls": [],
-                    "defaulted_control_ids": [],
-                }
-            ],
-        }
+    assignment = {
+        worker_ref.agent_id: FrozenLaneAssignment.model_validate(
+            {
+                "schema_version": SELECTION_SCHEMA_VERSION,
+                "provider_id": "codex",
+                "execution_mode": "unavailable-mode",
+                "catalog_revision": "rev",
+                "entry_id": "primary",
+                "model_name": "primary-model",
+                "controls": [],
+                "defaulted_control_ids": [],
+                "provenance": {"selection_source": "team_selection"},
+                "fallbacks": [
+                    {
+                        "schema_version": SELECTION_SCHEMA_VERSION,
+                        "provider_id": "codex",
+                        "execution_mode": "codex-app-server",
+                        "catalog_revision": "rev",
+                        "entry_id": "fallback",
+                        "model_name": "fallback-model",
+                        "controls": [],
+                        "defaulted_control_ids": [],
+                    }
+                ],
+            }
+        )
     }
 
     with pytest.raises(ValueError, match="cannot execute mode"):
@@ -518,30 +667,20 @@ class TestProviderAdmission:
     without building a model.
     """
 
-    @pytest.mark.parametrize("provider", (Provider.DETERMINISTIC, Provider.MOCK))
-    def test_in_process_fast_path_rejects_native_controls(
-        self, provider: Provider
-    ) -> None:
+    def test_in_process_fast_path_rejects_native_controls(self) -> None:
         with pytest.raises(ValueError, match="no exact native-control executor"):
             ProviderFactory().create(
-                provider,
+                Provider.DETERMINISTIC,
                 model="exact",
-                execution_mode=(
-                    "in-process-deterministic"
-                    if provider is Provider.DETERMINISTIC
-                    else "in-process-mock"
-                ),
+                execution_mode="in-process-deterministic",
                 native_controls={"unsupported": "value"},
             )
 
-    @pytest.mark.parametrize("provider", (Provider.DETERMINISTIC, Provider.MOCK))
-    def test_an_in_process_lane_has_no_implicit_default(
-        self, provider: Provider
-    ) -> None:
+    def test_an_in_process_lane_has_no_implicit_default(self) -> None:
         from ..factory import _admit_and_resolve_model_name
 
         with pytest.raises(ValueError, match="exact model value frozen"):
-            _admit_and_resolve_model_name(provider, None)
+            _admit_and_resolve_model_name(Provider.DETERMINISTIC, None)
 
     def test_an_external_lane_has_no_implicit_default(self) -> None:
         """Omitting a model may not silently choose the artifact producer.

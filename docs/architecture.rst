@@ -8,7 +8,8 @@ External boundaries
 -------------------
 
 :mod:`vaultspec_a2a.api` exposes application programming interface (API)
-schemas and Hypertext Transfer Protocol (HTTP) and WebSocket entry points.
+schemas and Hypertext Transfer Protocol (HTTP) and server-sent event (SSE)
+entry points.
 :mod:`vaultspec_a2a.protocols` adapts Model Context Protocol (MCP) traffic.
 :mod:`vaultspec_a2a.cli` exposes command-line interface (CLI) operator commands.
 
@@ -54,8 +55,8 @@ Repository control-surface ownership
 
 Each control surface has one owner so local development, automation, and
 continuous integration (CI) don't make conflicting lifecycle or configuration
-decisions. Docker Compose (Compose) owns only development/test Jaeger and
-VidaiMock fixtures. Production gateway and worker run as native binaries.
+decisions. Docker Compose (Compose) owns only the development/test Jaeger
+fixture. Production gateway and worker run as native binaries.
 
 .. list-table::
    :header-rows: 1
@@ -78,7 +79,7 @@ VidaiMock fixtures. Production gateway and worker run as native binaries.
      - Owns identity, allocation, liveness, and lifecycle.
    * - Development/test fixtures
      - Compose
-     - Owns Jaeger/VidaiMock fixture state and teardown.
+     - Owns Jaeger fixture state and teardown.
    * - Dependencies and tools
      - ``uv.lock``
      - Selects resolved dependency and tool versions.

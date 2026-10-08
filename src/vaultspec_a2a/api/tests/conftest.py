@@ -1,57 +1,50 @@
-"""Middleware test configuration + shared fixtures for api/tests/.
+"""The app factory and in-process worker shared by api/tests/.
 
-Centralises engine, session_factory, session, checkpointer, and make_app so
-that all test modules use the same isolated file-backed SQLite setup and
-app-state injection.
+``make_app`` injects the root ``session_factory`` and ``checkpointer`` fixtures
+- a per-test SQLite file and a real ``AsyncSqliteSaver`` - into app state, so
+every test module shares one isolated store setup.
 
 The gateway no longer runs agent execution locally.  Tests wire a
 real in-process dispatch receiver (a minimal FastAPI ASGI app served via
 ``httpx.ASGITransport``) so that HTTP serialisation and routing are exercised
 without a live worker process.  No ``MockTransport``, no ``unittest.mock``.
-
-The ``checkpointer`` fixture uses ``AsyncSqliteSaver`` backed by a per-test
-SQLite file so that gateway read-path enrichment exercises the real
-checkpointer implementation, not a ``MemorySaver`` stub.
 """
 
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager, suppress
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast, override
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
-import pytest
-import pytest_asyncio
-import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, Request
 from httpx import ASGITransport
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...conftest import materialize_schema
+from ...control._worker_health import internal_auth_headers
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
 from ...control.event_handlers import CheckpointPruneRegistry
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import create_thread
-from ...providers.factory import ProviderCatalogRegistration, ProviderFactory
-from ...providers.in_process_catalog import served_in_process_lanes
-from ...streaming.aggregator import EventAggregator
-from ...testing.tests._support.catalog_selection import in_process_selection
+from ...providers.in_process_catalog import in_process_catalog_key
+from ...providers.lane_registry import registered_lanes
+from ...streaming import RelayHub
+from ...testing import LaneInventoryFactory, adopted_spawner
 from ...tests._write_authority import make_test_write_authority
+from ...utils import bearer_header
+from ...worker._dispatch_contract import CAPACITY_FULL
+from ...worker.app import capacity_refusal, verify_dispatch_token
 from ..app import create_app
+from ..dependencies import LIFECYCLE_CAPABILITY_HEADER
+from ..internal import internal_router
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncGenerator
 
+    from starlette.types import ASGIApp, Receive, Scope, Send
+
+    from ...providers.factory import ProviderCatalogRegistration
     from ...providers.provider_catalog_service import ProviderCatalogService
     from ...thread.enums import ThreadStatus
 
@@ -71,59 +64,7 @@ type JsonValue = (
 # typed, so the container contract is still stated.
 type DispatchPayload = dict[str, Any]
 
-_PACKAGE_DIR = str(Path(__file__).resolve().parent)
-
-
-# API tests are middleware-layer; they drive the real SQLite/ASGI fixtures below.
-_PURE_FILES: frozenset[str] = frozenset()
-
-
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Mark tests here as ``middleware`` (plus ``unit`` for the pure-logic files)."""
-    for item in items:
-        if not str(item.path).startswith(_PACKAGE_DIR):
-            continue
-        item.add_marker(pytest.mark.middleware)
-        if item.path.name in _PURE_FILES:
-            item.add_marker(pytest.mark.unit)
-
-
 __all__: list[str] = []
-
-
-# ---------------------------------------------------------------------------
-# Engine / Session fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def engine(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncEngine]:
-    """File-backed async SQLAlchemy engine with all tables created."""
-    case_dir = tmp_path_factory.mktemp("api-test-db")
-    # Copy the session schema template instead of replaying the DDL. The DDL is
-    # byte-identical every time and cost ~340ms - more than this package's tests
-    # spent doing their actual work. The database is still per-test and still
-    # real; only its materialization changes.
-    db_file = materialize_schema(case_dir / "test.db")
-    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(engine: AsyncEngine) -> SessionFactory:
-    """Async session factory bound to the file-backed engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest_asyncio.fixture
-async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
-    """Provide a fresh async session for direct DB assertions."""
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with factory() as sess:
-        yield sess
 
 
 async def seed_run_with_status(
@@ -146,26 +87,6 @@ async def seed_run_with_status(
 
 
 # ---------------------------------------------------------------------------
-# Real checkpointer fixture — AsyncSqliteSaver backed by a per-test file
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def checkpointer(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncSqliteSaver]:
-    """Real AsyncSqliteSaver backed by a temporary SQLite file per test.
-
-    Replaces the former MemorySaver stub so that gateway read-path enrichment
-    exercises the real checkpointer implementation (AsyncSqliteSaver).
-    """
-    case_dir = tmp_path_factory.mktemp("api-test-checkpoints")
-    db_file = case_dir / "test_checkpoints.db"
-    async with AsyncSqliteSaver.from_conn_string(str(db_file)) as cp:
-        yield cp
-
-
-# ---------------------------------------------------------------------------
 # In-process dispatch receiver — real FastAPI ASGI, no mock
 # ---------------------------------------------------------------------------
 
@@ -177,11 +98,17 @@ class _InProcessWorker:
     HTTP serialisation and Pydantic validation are exercised on every request.
     Not a mock, not a fake transport handler, not ``unittest.mock``.
 
+    The dispatch route is guarded by the worker's own bearer dependency and
+    refuses at capacity with the worker's own refusal, so the gateway classifies
+    a genuine definite non-delivery from the response the real worker sends.
+    The client presents the worker-IPC header for *internal_token*, the secret the
+    gateway under test seated.
+
     Attributes:
         dispatches: All dispatch request bodies received so far.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, internal_token: str | None) -> None:
         self.dispatches: list[DispatchPayload] = []
         self.dispatch_received = asyncio.Event()
         self.release_dispatch = asyncio.Event()
@@ -190,30 +117,13 @@ class _InProcessWorker:
 
         _app = FastAPI()
 
-        async def _dispatch(request: Request) -> JSONResponse | dict[str, str]:
-            expected = settings.internal_token
-            if expected is not None:
-                authorization = request.headers.get("authorization")
-                if authorization != f"Bearer {expected}":
-                    return JSONResponse(
-                        status_code=401,
-                        content={"detail": "Invalid internal token"},
-                        headers={"WWW-Authenticate": "Bearer"},
-                    )
+        async def _dispatch(request: Request) -> dict[str, str]:
             body = cast("DispatchPayload", await request.json())
             self.dispatches.append(body)
             self.dispatch_received.set()
             await self.release_dispatch.wait()
             if self._at_capacity:
-                # Byte-for-byte the refusal the real worker returns once its
-                # concurrent-thread cap is reached, so the gateway classifies a
-                # genuine definite non-delivery from a genuine HTTP response.
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "detail": "Worker at capacity — too many concurrent threads"
-                    },
-                )
+                raise capacity_refusal(CAPACITY_FULL)
             thread_id = body.get("thread_id", "")
             if not isinstance(thread_id, str):
                 thread_id = ""
@@ -227,17 +137,14 @@ class _InProcessWorker:
             _dispatch,
             methods=["POST"],
             response_model=None,
+            dependencies=[Depends(verify_dispatch_token)],
         )
         _app.add_api_route("/health", _health, methods=["GET"])
 
         self._client = httpx.AsyncClient(
             transport=ASGITransport(app=_app),
             base_url="http://test-worker:8001",
-            headers=(
-                {"Authorization": f"Bearer {settings.internal_token}"}
-                if settings.internal_token is not None
-                else None
-            ),
+            headers=internal_auth_headers(internal_token),
         )
 
     @property
@@ -263,33 +170,71 @@ class _InProcessWorker:
 # App factory
 # ---------------------------------------------------------------------------
 
-type AppFixture = tuple[FastAPI, EventAggregator, _InProcessWorker, AsyncSqliteSaver]
+type AppFixture = tuple[FastAPI, RelayHub, _InProcessWorker, AsyncSqliteSaver]
+
+# The credentials every ``make_app`` gateway holds. Known constants, so a test
+# that wants to present them, or to present something else, can name them.
+SEATED_ATTACH_TOKEN = "seated-attach-token-0123456789abcdef"
+SEATED_LIFECYCLE_CAPABILITY = "seated-lifecycle-capability-0123456789abcdef"
+
+_AUTHORIZATION = b"authorization"
+_CAPABILITY = LIFECYCLE_CAPABILITY_HEADER.lower().encode("latin-1")
+
+
+class _SeatedCredentials:
+    """Present the app's own credentials on every request that carries none.
+
+    Route-behaviour suites reach the gateway through clients of their own - a
+    ``TestClient``, an ASGI transport, a socket - that do not authenticate. This
+    layer is the credentialed client they share: it adds the attach bearer and the
+    lifecycle capability the app currently holds, so every request still crosses
+    the production gates and is verified by the production comparison. A header a
+    request already carries is never replaced, so presenting a wrong credential is
+    still refused. The relay plane is skipped because it verifies a different
+    credential on the same ``Authorization`` header.
+
+    Credentials are read from app state per request rather than captured, since
+    suites reseat them after the factory returns.
+    """
+
+    def __init__(self, app: ASGIApp, *, owner: FastAPI) -> None:
+        self._app = app
+        self._owner = owner
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and not scope["path"].startswith(
+            internal_router.prefix
+        ):
+            scope = {**scope, "headers": self._credentialed(scope["headers"])}
+        await self._app(scope, receive, send)
+
+    def _credentialed(
+        self, headers: list[tuple[bytes, bytes]]
+    ) -> list[tuple[bytes, bytes]]:
+        presented = {name for name, _ in headers}
+        credentialed = list(headers)
+        token = getattr(self._owner.state, "v1_service_token", None)
+        if isinstance(token, str) and token and _AUTHORIZATION not in presented:
+            credentialed.append(
+                (_AUTHORIZATION, bearer_header(token)["Authorization"].encode())
+            )
+        capability = getattr(self._owner.state, "lifecycle_capability", None)
+        if isinstance(capability, str) and capability and _CAPABILITY not in presented:
+            credentialed.append((_CAPABILITY, capability.encode()))
+        return credentialed
 
 
 _session_catalog_service_cache: ProviderCatalogService | None = None
 
 
-class _InProcessCatalogFactory(ProviderFactory):
-    """Use production registrations without probing external provider CLIs."""
-
-    @override
-    def catalog_registrations(
-        self, workspace_root: Path, *, serve_in_process_lanes: bool | None = None
-    ) -> tuple[ProviderCatalogRegistration, ...]:
-        registrations = super().catalog_registrations(
-            workspace_root, serve_in_process_lanes=serve_in_process_lanes
-        )
-        in_process = set(
-            served_in_process_lanes(
-                armed=bool(serve_in_process_lanes),
-                mock_api_base=settings.mock_api_base,
-            )
-        )
-        return tuple(
-            registration
-            for registration in registrations
-            if registration.key in in_process
-        )
+def _in_process_only(
+    served: tuple[ProviderCatalogRegistration, ...],
+) -> tuple[ProviderCatalogRegistration, ...]:
+    """Keep production's in-process registrations, so no provider CLI is probed."""
+    in_process = {in_process_catalog_key(lane) for lane in registered_lanes()}
+    return tuple(
+        registration for registration in served if registration.key in in_process
+    )
 
 
 def _session_catalog_service() -> ProviderCatalogService:
@@ -317,7 +262,7 @@ def _session_catalog_service() -> ProviderCatalogService:
         from ...providers.provider_catalog_service import ProviderCatalogService
 
         _session_catalog_service_cache = ProviderCatalogService(
-            factory=_InProcessCatalogFactory(),
+            factory=LaneInventoryFactory(_in_process_only),
             ttl=timedelta(hours=6),
             serve_in_process_lanes=True,
         )
@@ -327,7 +272,9 @@ def _session_catalog_service() -> ProviderCatalogService:
 def make_app(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
-    aggregator: EventAggregator | None = None,
+    relay_hub: RelayHub | None = None,
+    *,
+    stamp_credentials: bool = True,
 ) -> AppFixture:
     """Create a test FastAPI app with explicit app-state injection.
 
@@ -335,23 +282,30 @@ def make_app(
     minimal FastAPI app) for the worker client, and injects the real
     AsyncSqliteSaver checkpointer from the calling fixture.
 
+    The gateway holds ``SEATED_ATTACH_TOKEN`` and ``SEATED_LIFECYCLE_CAPABILITY``
+    and enforces them through the production gates. By default every request
+    that presents no credential of its own is sent with them; pass
+    ``stamp_credentials=False`` for a test that exercises the gates themselves
+    and so must present exactly what it chooses, or nothing.
+
     Returns:
-        Tuple of (app, aggregator, worker, checkpointer).
+        Tuple of (app, relay_hub, worker, checkpointer).
     """
 
     @asynccontextmanager
     async def _test_lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         yield
 
-    app = create_app(
-        lifespan=_test_lifespan,
-        allow_unauthenticated_v1_for_testing=True,
-    )
+    app = create_app(lifespan=_test_lifespan)
+    app.state.v1_service_token = SEATED_ATTACH_TOKEN
+    app.state.lifecycle_capability = SEATED_LIFECYCLE_CAPABILITY
+    if stamp_credentials:
+        app.add_middleware(cast("Any", _SeatedCredentials), owner=app)
 
-    if aggregator is None:
-        aggregator = EventAggregator()
+    if relay_hub is None:
+        relay_hub = RelayHub()
 
-    worker = _InProcessWorker()
+    worker = _InProcessWorker(app.state.internal_token)
 
     # ONE catalog service for the whole session, not one per app.
     #
@@ -367,8 +321,8 @@ def make_app(
     # length of a suite so a long run does not re-probe mid-flight.
     app.state.provider_catalog_service = _session_catalog_service()
 
-    # Store singletons in app.state so WebSocket handlers can read them
-    app.state.aggregator = aggregator
+    # Store singletons in app.state so route handlers can read them
+    app.state.relay_hub = relay_hub
     app.state.checkpointer = checkpointer
     # The gateway lifespan seats one beside the store it prunes through, and a
     # relayed terminal schedules nothing without it.
@@ -385,129 +339,8 @@ def make_app(
     app.state.circuit_breaker = cb
 
     # PHASE-1a: lazy worker spawner — pre-marked as spawned for tests
-    spawner = LazyWorkerSpawner(
-        worker_url="http://test-worker:8001",
-        worker_port=8001,
-        auto_spawn=False,
-    )
-    spawner.replace_process(None)
+    spawner = adopted_spawner("http://test-worker:8001")
     app.state.worker_spawner = spawner
     app.state.db_session_factory = session_factory
 
-    return app, aggregator, worker, checkpointer
-
-
-_CATALOG_FIELD_CACHE: dict[str, dict[str, Any]] = {}
-
-
-def catalog_run_fields(
-    client: Any, *, workspace_root: str | None = None
-) -> dict[str, Any]:
-    """Return the run-start fields an explicit catalog selection now requires.
-
-    Run-start refuses a body without a ``selection``, and revalidates that
-    selection against the catalog SERVED FOR ITS WORKSPACE - so a hand-written
-    reference is refused even when its shape is perfect. The reference is read
-    from the live served catalog the way a real client must, through the shared
-    selection mechanism, which returns an IN-PROCESS lane and refuses to return
-    any other. These suites assert on gateway plumbing, so the lane that answers
-    must be the one that bills nothing.
-
-    A canned literal would be the tempting shortcut and would be wrong twice
-    over: it would break whenever the catalog's revision moved, and it would let
-    a test assert against a lane the gateway would never serve. Reading keeps
-    the fixture honest about what the gateway is offering at that moment.
-
-    ``workspace_root`` is returned alongside because the same gate refuses a
-    selection with no existing workspace to anchor it in.
-    """
-    root = workspace_root or str(Path.cwd())
-    cached = _CATALOG_FIELD_CACHE.get(root)
-    if cached is not None:
-        return {
-            "selection": dict(cached["selection"]),
-            "metadata": dict(cached["metadata"]),
-        }
-    response = client.get("/v1/provider-catalog", params={"workspace_root": root})
-    assert response.status_code == 200, response.text
-    fields: dict[str, Any] = {
-        "selection": in_process_selection(response.json()),
-        "metadata": {"workspace_root": root},
-    }
-    _CATALOG_FIELD_CACHE[root] = fields
-    return {
-        "selection": dict(fields["selection"]),
-        "metadata": dict(fields["metadata"]),
-    }
-
-
-async def async_catalog_run_fields(
-    client: Any, *, workspace_root: str | None = None
-) -> dict[str, Any]:
-    """The async twin of :func:`catalog_run_fields`, for httpx.AsyncClient callers.
-
-    Deliberately a twin rather than a shared core: the sync and async clients do
-    not share a request method, and the alternative - threading a maybe-awaitable
-    through one function - reads worse than two short ones that each do the
-    obvious thing. Both consume the same cache, so whichever runs first pays for
-    the catalog and the other does not.
-    """
-    root = workspace_root or str(Path.cwd())
-    cached = _CATALOG_FIELD_CACHE.get(root)
-    if cached is None:
-        # Read on a budget of its OWN. Callers build clients with short timeouts
-        # to assert the gateway answers promptly; the first catalog read in a
-        # process also probes every provider lane and legitimately outlasts that.
-        # Borrowing the caller's budget made a cold probe look like an
-        # unresponsive gateway. Later reads come from the cache above.
-        #
-        # The budget is widened PER REQUEST rather than by building a second
-        # client. A second client keeps only the caller's base_url and silently
-        # drops its TRANSPORT, so every in-process caller - anything on
-        # ``httpx.ASGITransport``, whose base_url is an unroutable name like
-        # ``http://test`` - resolved that name against real DNS and died with
-        # ``getaddrinfo failed``. Those callers only ever passed when an earlier
-        # real-socket test had already warmed the cache above, so the failure
-        # moved with test order. Reusing the caller's client keeps its transport.
-        response = await client.get(
-            "/v1/provider-catalog",
-            params={"workspace_root": root},
-            timeout=180.0,
-        )
-        assert response.status_code == 200, response.text
-        cached = {
-            "selection": in_process_selection(response.json()),
-            "metadata": {"workspace_root": root},
-        }
-        _CATALOG_FIELD_CACHE[root] = cached
-    return {
-        "selection": dict(cached["selection"]),
-        "metadata": dict(cached["metadata"]),
-    }
-
-
-@asynccontextmanager
-async def _live_server(app: FastAPI) -> AsyncGenerator[str]:
-    """Serve *app* on an ephemeral loopback port and yield its base URL.
-
-    A real uvicorn server on a real TCP socket, not ``ASGITransport``: an SSE
-    consumer must read frames while the producer is still emitting, and the
-    in-memory transport buffers a whole response before returning one.
-    """
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=0, log_level="warning", lifespan="on"
-    )
-    server = uvicorn.Server(config)
-    task = asyncio.create_task(server.serve())
-    try:
-        for _ in range(500):
-            if server.started and server.servers:
-                break
-            await asyncio.sleep(0.01)
-        assert server.started and server.servers, "uvicorn did not start"
-        port = server.servers[0].sockets[0].getsockname()[1]
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        server.should_exit = True
-        with suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(task, timeout=5.0)
+    return app, relay_hub, worker, checkpointer

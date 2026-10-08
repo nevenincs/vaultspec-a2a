@@ -4,19 +4,29 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 import time
 from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, override
+from http.server import BaseHTTPRequestHandler
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ...control.config import settings
 from ...desktop._platform_acl import harden_credential_path
-from ...testing import armed_environment, settings_override
-from ...testing.links import plant_link_to_file
-from ...testing.tests._support.listeners import health_listener
+from ...testing import (
+    JsonReplyHandler,
+    armed_environment,
+    health_listener,
+    plant_link_to_file,
+    serve_handler,
+    settings_override,
+)
+from .._engine_trust import (
+    CHALLENGE_HEADER,
+    PID_HEADER,
+    PROOF_HEADER,
+    STARTED_MS_HEADER,
+)
 from ..discovery import resolve_engine
 from ._engine_peer import (
     TEST_BEARER,
@@ -37,34 +47,23 @@ def attacker_listener(
     """Capture real incoming headers from a listener without the engine's secret."""
     requests: list[dict[str, str]] = []
 
-    class _Attacker(BaseHTTPRequestHandler):
+    class _Attacker(JsonReplyHandler, BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def do_GET(self) -> None:
             requests.append(dict(self.headers.items()))
             self.send_response(200)
-            self.send_header("x-vaultspec-engine-proof", proof)
-            self.send_header("x-vaultspec-engine-pid", "1")
-            self.send_header("x-vaultspec-engine-started-ms", "1")
+            self.send_header(PROOF_HEADER, proof)
+            self.send_header(PID_HEADER, "1")
+            self.send_header(STARTED_MS_HEADER, "1")
             self.send_header("Content-Length", "0")
             self.end_headers()
 
         def do_POST(self) -> None:
             self.do_GET()
 
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", port), _Attacker)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield server.server_address[1], requests
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5.0)
+    with serve_handler(_Attacker, port=port) as bound:
+        yield bound, requests
 
 
 def test_workspace_legacy_record_cannot_select_an_authoring_endpoint(
@@ -108,7 +107,7 @@ def test_stale_port_listener_gets_only_a_challenge(
         with settings_override(engine_service_json=path):
             assert resolve_engine(liveness_timeout=0.5) is None
         assert len(requests) == 1
-        assert "x-vaultspec-engine-challenge" in requests[0]
+        assert CHALLENGE_HEADER in requests[0]
         assert "Authorization" not in requests[0]
         assert "x-authoring-actor-token" not in requests[0]
         assert TEST_BEARER not in str(requests)
@@ -122,7 +121,7 @@ def test_old_valid_proof_cannot_be_replayed(secure_engine_dir: Path) -> None:
         write_engine_record(path, port)
         with settings_override(engine_service_json=path):
             assert resolve_engine(liveness_timeout=0.5) is None
-        assert requests[0]["x-vaultspec-engine-challenge"] != "0" * 64
+        assert requests[0][CHALLENGE_HEADER] != "0" * 64
 
 
 @pytest.mark.parametrize(

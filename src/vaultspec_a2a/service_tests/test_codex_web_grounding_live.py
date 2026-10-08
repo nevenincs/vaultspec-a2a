@@ -90,17 +90,17 @@ from ..providers._codex_config_home import (
     cleanup_codex_config_home,
     resolve_codex_web_search_mode,
 )
-from ..providers._json_contract import JsonObject, json_object
 from ..providers._subprocess import spawn_acp_process
 from ..providers.codex_chat_model import CodexChatModel
 from ..providers.factory import ProviderFactory
 from ..providers.lane_admission import is_web_lane_proven
-from ..testing.tests._support.json_contract import json_list, json_text
+from ..testing import json_list, json_object, json_text
 from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
+    from ..providers import JsonObject
     from ..thread.state import TeamState
 
 # The harness servers a real research run declares. Included so the rendered
@@ -233,7 +233,7 @@ def _published_version() -> str:
 
 def test_package_index_reader_rejects_a_non_object_payload() -> None:
     """The live index reader must not reinterpret an array as package metadata."""
-    with pytest.raises(TypeError, match="package index response"):
+    with pytest.raises(AssertionError, match="package index response"):
         json_object([], at="package index response")
 
 
@@ -243,7 +243,7 @@ def test_completed_web_search_reader_rejects_non_object_params() -> None:
         config_toml="",
         frames=[{"method": "item/completed", "params": []}],
     )
-    with pytest.raises(TypeError, match="item-completed params"):
+    with pytest.raises(AssertionError, match="item-completed params"):
         observation.web_searches()
 
 
@@ -284,7 +284,7 @@ def test_observation_reader_rejects_a_missing_or_falsy_frame_params() -> None:
         {"method": "item/agentMessage/delta", "params": []},
     ]
     for frame in frames:
-        with pytest.raises(TypeError, match=r"frame\.params"):
+        with pytest.raises(AssertionError, match=r"frame\.params"):
             _record_observation_frame(_TurnObservation(config_toml=""), frame)
 
 
@@ -295,7 +295,7 @@ def test_observation_reader_rejects_a_missing_or_falsy_completed_turn() -> None:
         {"method": "turn/completed", "params": {"turn": []}},
     ]
     for frame in frames:
-        with pytest.raises(TypeError, match=r"params\.turn"):
+        with pytest.raises(AssertionError, match=r"params\.turn"):
             _record_observation_frame(
                 _TurnObservation(config_toml=""),
                 frame,
@@ -473,10 +473,9 @@ async def _confirm_codex_serves(client: _CodexAppServerClient, wanted: str) -> s
 
 
 def _require_codex(rule: ExternalPrerequisiteRule) -> None:
-    """Skip unless the Codex CLI is installed AND carries a session credential."""
+    """Require the Codex CLI AND a session credential for it."""
     rule("codex-cli")
-    if not (Path.home() / ".codex" / "auth.json").is_file():
-        rule.absent("codex-cli", "no ~/.codex/auth.json; run 'codex login'")
+    rule("codex-credential")
 
 
 @pytest.fixture(scope="module")
@@ -491,7 +490,9 @@ def published_version(external_prerequisite: ExternalPrerequisiteRule) -> str:
     try:
         return _published_version()
     except (httpx.HTTPError, ValueError, KeyError) as exc:
-        pytest.skip(f"no outbound network to {_SOURCE_HOST} ({exc!r})")
+        external_prerequisite.absent(
+            "outbound-network", f"no outbound network to {_SOURCE_HOST} ({exc!r})"
+        )
 
 
 @pytest.fixture(scope="module")

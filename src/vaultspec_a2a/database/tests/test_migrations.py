@@ -5,9 +5,10 @@ Verifies:
 2. Downgrade base removes all app-owned tables
 3. LangGraph checkpoint tables are excluded from migrations
 4. run_migrations() programmatic API works
-5. (Postgres) upgrade/downgrade/column/data-migration on a real Postgres instance
+5. No revision script describes the schema through the application package
 """
 
+import ast
 import asyncio
 import hashlib
 import json
@@ -21,22 +22,42 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 
 from .. import migrations as _migrations_package
+from .._write_authority_check_parser import extract_named_check_predicates
 from ..migrate import (
     build_migration_config,
     migration_script_location,
     run_migrations,
 )
+from ..write_authority_schema import normalize_schema_expression
 
 _APP_TABLES = {
     "threads",
-    "artifacts",
     "permission_logs",
     "cost_tracking",
     "thread_execution_state",
-    "task_queue_entries",
     "thread_deletion_saga",
     "permission_requests",
     "control_actions",
+}
+#: Revision 0026 retired these; head must not carry them.
+_RETIRED_TABLES = {"artifacts", "task_queue_entries"}
+_RETIRED_COLUMNS = {
+    "threads": {"approval_reason", "repair_generation", "recovery_epoch"},
+    "thread_execution_state": {
+        "snapshot_created_at",
+        "recovery_epoch",
+        "interrupt_types_json",
+    },
+    "control_actions": {"worker_generation"},
+    "permission_requests": {"worker_generation"},
+}
+_ACTIVE_INDEX_ORDERING = {
+    "ix_threads_active_order": "(created_at DESC, id DESC)",
+    "ix_threads_active_workspace_order": "(workspace_key, created_at DESC, id DESC)",
+    "ix_threads_active_feature_order": "(feature_tag, created_at DESC, id DESC)",
+    "ix_threads_active_workspace_feature_order": (
+        "(workspace_key, feature_tag, created_at DESC, id DESC)"
+    ),
 }
 _LANGGRAPH_TABLES = {"checkpoints", "writes"}
 _ALEMBIC_INI = (
@@ -104,6 +125,181 @@ def _get_tables(db_path: Path) -> set[str]:
         conn.close()
 
 
+def _get_columns(db_path: Path, table: str) -> set[str]:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        return {
+            str(row[0])
+            for row in conn.execute("SELECT name FROM pragma_table_info(?)", (table,))
+        }
+    finally:
+        conn.close()
+
+
+def _deadline_check(db_path: Path) -> str:
+    """Return the journal's recovery-deadline CHECK as the store holds it.
+
+    Read as a named predicate rather than as whole-table DDL: a batch rebuild
+    reorders a table's constraints, so comparing the CREATE statement text would
+    fail a round trip that restored the invariant exactly.
+    """
+    checks = extract_named_check_predicates(
+        _stored_sql(db_path, "table", "control_actions")
+    )
+    predicate = checks.get("ck_control_actions_recovery_deadline_required")
+    assert predicate is not None, checks
+    return normalize_schema_expression(predicate)
+
+
+def _insert_refusal_row(
+    db_path: Path,
+    *,
+    deadline: str,
+    action_id: str = "refusal-action",
+    key: str = "permission-rejection:refusal-key",
+    result_status: str = "rejected_invalid_state",
+) -> None:
+    """Write one journal row of a recovery type straight through the CHECK."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT INTO control_actions (id, thread_id, action_type, "
+            "idempotency_key, requested_at, result_status, recovery_deadline_at) "
+            f"VALUES (?, 'refusal-run', 'permission_response_submitted', ?, "
+            f"'2026-10-07 00:00:00', ?, {deadline})",
+            (action_id, key, result_status),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _delete_refusal_row(db_path: Path, action_id: str = "refusal-action") -> None:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("DELETE FROM control_actions WHERE id = ?", (action_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _column_declaration(db_path: Path, table: str, column: str) -> tuple[str, int]:
+    """Return one column's declared SQL type and NOT NULL flag, via PRAGMA."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute("SELECT * FROM pragma_table_info(?)", (table,)).fetchall()
+    finally:
+        conn.close()
+    declared = {str(row[1]): (str(row[2]).upper(), int(row[3])) for row in rows}
+    assert column in declared, f"{table}.{column} is absent: {sorted(declared)}"
+    return declared[column]
+
+
+def _insert_measured_cost_row(db_path: Path) -> None:
+    """Write one accounting row carrying real counts and the structural zero cost."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT INTO cost_tracking (id, thread_id, agent_id, provider, model,"
+            " input_tokens, output_tokens, estimated_cost, created_at)"
+            " VALUES ('money-row','money-run','coder-1','codex','gpt-5.4',"
+            "210,35,0,'2026-10-08 00:00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _measured_counts(db_path: Path) -> tuple[int, int]:
+    """Return the stored accounting row's input and output token counts."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT input_tokens, output_tokens FROM cost_tracking WHERE id = ?",
+            ("money-row",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "the accounting row did not survive the migration"
+    return (int(row[0]), int(row[1]))
+
+
+def _stored_money(db_path: Path) -> list[int]:
+    """Return the raw ``estimated_cost`` units a downgraded store holds."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        return [
+            int(row[0])
+            for row in conn.execute(
+                "SELECT estimated_cost FROM cost_tracking ORDER BY id"
+            )
+        ]
+    finally:
+        conn.close()
+
+
+def _insert_answered_permission_row(db_path: Path) -> None:
+    """Write one answered request carrying the retired copies of its answer."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT INTO permission_requests (request_id, thread_id,"
+            " pause_reason_type, tool_call, description, allowed_options_json,"
+            " request_status, response_option_id, idempotency_key, created_at,"
+            " responded_at)"
+            " VALUES ('perm-answer-copy','answer-copy-run','bash','bash',"
+            "'Allow action?','[{\"optionId\":\"allow_once\"}]',"
+            "'answered_pending_apply','allow_once',"
+            "'permission-response:perm-answer-copy:0','2026-10-08 00:00:00',"
+            "'2026-10-08 00:00:01')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _permission_request_lifecycle(db_path: Path) -> tuple[str, str, str]:
+    """Return the stored request's offer, state and answered instant."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT allowed_options_json, request_status, responded_at"
+            " FROM permission_requests WHERE request_id = ?",
+            ("perm-answer-copy",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "the permission request did not survive the migration"
+    return (str(row[0]), str(row[1]), str(row[2]))
+
+
+def _restored_answer_copy(db_path: Path) -> tuple[str | None, str | None]:
+    """Return what a downgraded store holds in the restored answer columns."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT response_option_id, idempotency_key FROM permission_requests"
+            " WHERE request_id = ?",
+            ("perm-answer-copy",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "the permission request did not survive the downgrade"
+    return (row[0], row[1])
+
+
+def _stored_sql(db_path: Path, kind: str, name: str) -> str:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?", (kind, name)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, f"{kind} {name} is absent"
+    return str(row[0])
+
+
 class TestAlembicUpgradeDowngrade:
     def test_control_action_lease_columns_upgrade_and_downgrade(
         self, runtime_dir: Path
@@ -138,6 +334,193 @@ class TestAlembicUpgradeDowngrade:
         conn.close()
         assert not {"dispatch_id", "claim_token", "claim_expires_at"} & downgraded
 
+    def test_schema_retirement_drops_and_restores_its_schema(
+        self, runtime_dir: Path
+    ) -> None:
+        """0026 retires dead schema, keeps run order descending, and reverses.
+
+        Stepping on down to 0016 proves the restored write-authority CHECKs sit
+        where 0017 put them: 0017's downgrade drops those columns natively,
+        which SQLite refuses while a table-level CHECK names them.
+        """
+        db = runtime_dir / "schema-retirement.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0025")
+        assert _get_tables(db) >= _RETIRED_TABLES
+
+        command.upgrade(cfg, "0026")
+        assert not (_RETIRED_TABLES & _get_tables(db))
+        for table, retired in _RETIRED_COLUMNS.items():
+            assert not (retired & _get_columns(db, table)), table
+        for index, ordering in _ACTIVE_INDEX_ORDERING.items():
+            ddl = _stored_sql(db, "index", index)
+            assert ordering in ddl, ddl
+            assert "WHERE is_active IS 1" in ddl, ddl
+        for table in ("threads", "control_actions"):
+            assert "repair_started" not in _stored_sql(db, "table", table)
+
+        command.downgrade(cfg, "0025")
+        assert _get_tables(db) >= _RETIRED_TABLES
+        for table, retired in _RETIRED_COLUMNS.items():
+            assert retired <= _get_columns(db, table), table
+        for index, ordering in _ACTIVE_INDEX_ORDERING.items():
+            assert ordering in _stored_sql(db, "index", index)
+        for table in ("threads", "control_actions"):
+            assert "repair_started" in _stored_sql(db, "table", table)
+
+        command.downgrade(cfg, "0016")
+        assert "writer_action_type" not in _get_columns(db, "threads")
+
+    def test_schema_retirement_refuses_a_stored_retired_action(
+        self, runtime_dir: Path
+    ) -> None:
+        """A journal row naming a retired action type stops 0026 before any DDL."""
+        db = runtime_dir / "retired-action.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0025")
+        conn = sqlite3.connect(str(db))
+        try:
+            conn.execute(
+                "INSERT INTO control_actions (id, thread_id, action_type, "
+                "idempotency_key, requested_at, result_status, worker_generation) "
+                "VALUES ('retired-action', 'retired-run', 'repair_started', "
+                "'retired-key', '2026-10-07 00:00:00', 'applied', 0)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        with pytest.raises(RuntimeError, match="repair action type"):
+            command.upgrade(cfg, "0026")
+
+        conn = sqlite3.connect(str(db))
+        try:
+            version = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+        finally:
+            conn.close()
+        assert version == ("0025",)
+        assert _get_tables(db) >= _RETIRED_TABLES
+        assert "worker_generation" in _get_columns(db, "control_actions")
+
+    def test_dispatchable_deadline_narrows_and_reverses(
+        self, runtime_dir: Path
+    ) -> None:
+        """0027 binds the deadline to a dispatchable row and steps back.
+
+        The narrowed predicate only ADMITS what 0021 rejected, so a refusal row
+        with no deadline is storable at 0027 and not at 0021. The downgrade
+        therefore refuses such a store before any DDL, and reverses cleanly once
+        the row is gone.
+        """
+        db = runtime_dir / "dispatchable-deadline.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0026")
+        before = _deadline_check(db)
+        assert "result_status" not in before, before
+
+        command.upgrade(cfg, "0027")
+        assert "'accepted_not_applied','queued'" in _deadline_check(db)
+
+        _insert_refusal_row(db, deadline="NULL")
+        with pytest.raises(RuntimeError, match="carries no recovery deadline"):
+            command.downgrade(cfg, "0026")
+        assert "'accepted_not_applied','queued'" in _deadline_check(db)
+
+        _delete_refusal_row(db)
+        command.downgrade(cfg, "0026")
+        assert _deadline_check(db) == before
+
+    def test_a_refusal_row_without_a_deadline_is_storable_only_at_head(
+        self, runtime_dir: Path
+    ) -> None:
+        """The CHECK itself, exercised by the write the old invariant refused."""
+        db = runtime_dir / "deadlineless-refusal.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0026")
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_refusal_row(db, deadline="NULL")
+
+        command.upgrade(cfg, "0027")
+        _insert_refusal_row(db, deadline="NULL")
+        # A row still owed a delivery keeps the deadline requirement.
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_refusal_row(
+                db,
+                deadline="NULL",
+                action_id="still-owed",
+                key="still-owed-key",
+                result_status="accepted_not_applied",
+            )
+
+    def test_the_unwritten_money_column_is_dropped_and_restored(
+        self, runtime_dir: Path
+    ) -> None:
+        """0028 retires the price column and steps back without losing counts.
+
+        The downgrade restores exactly the storage 0014 installed - a NOT NULL
+        ``BIGINT`` of scaled dollar units - back-filled with the structural zero
+        that is the only value the column ever held, because no writer ever set
+        it. The measured token counts must survive in both directions: a schema
+        operation may not destroy a real provider-reported measurement.
+        """
+        db = runtime_dir / "cost-money-retirement.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0027")
+        assert "estimated_cost" in _get_columns(db, "cost_tracking")
+        _insert_measured_cost_row(db)
+
+        command.upgrade(cfg, "0028")
+        assert "estimated_cost" not in _get_columns(db, "cost_tracking")
+        assert _measured_counts(db) == (210, 35)
+
+        command.downgrade(cfg, "0027")
+        restored = _column_declaration(db, "cost_tracking", "estimated_cost")
+        assert restored == ("BIGINT", 1), restored
+        assert _measured_counts(db) == (210, 35)
+        assert _stored_money(db) == [0]
+
+        command.upgrade(cfg, "0028")
+        assert "estimated_cost" not in _get_columns(db, "cost_tracking")
+
+    def test_the_answer_copy_columns_are_dropped_and_restored(
+        self, runtime_dir: Path
+    ) -> None:
+        """0029 retires the request row's copy of its answer and steps back.
+
+        The two columns held a second copy of a decision the accepted response
+        action and the decision log already own, and nothing read them. The
+        request's OWN record - the offer it made, the state of the ask and when
+        it was answered - must survive in both directions: a schema operation may
+        not destroy the lifecycle a pending-permission surface reads.
+
+        The downgrade restores exactly the storage 0002 installed, nullable and
+        defaultless, and holds NULL rather than back-filling a value from the
+        response journal it never removed anything from.
+        """
+        db = runtime_dir / "permission-answer-copy.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0028")
+        retired = {"response_option_id", "idempotency_key"}
+        assert retired <= _get_columns(db, "permission_requests")
+        _insert_answered_permission_row(db)
+        lifecycle = _permission_request_lifecycle(db)
+
+        command.upgrade(cfg, "0029")
+        assert not (retired & _get_columns(db, "permission_requests"))
+        assert _permission_request_lifecycle(db) == lifecycle
+
+        command.downgrade(cfg, "0028")
+        for column in sorted(retired):
+            assert _column_declaration(db, "permission_requests", column) == (
+                "VARCHAR",
+                0,
+            ), column
+        assert _permission_request_lifecycle(db) == lifecycle
+        assert _restored_answer_copy(db) == (None, None)
+
+        command.upgrade(cfg, "0029")
+        assert not (retired & _get_columns(db, "permission_requests"))
+
     def test_upgrade_head_creates_all_app_tables(self, runtime_dir: Path) -> None:
         db = runtime_dir / "test.db"
         cfg = _make_config(db)
@@ -145,6 +528,7 @@ class TestAlembicUpgradeDowngrade:
 
         tables = _get_tables(db)
         assert tables >= _APP_TABLES
+        assert not (tables & _RETIRED_TABLES)
         # alembic_version is also expected
         assert "alembic_version" in tables
 
@@ -156,7 +540,7 @@ class TestAlembicUpgradeDowngrade:
 
         tables = _get_tables(db)
         # Only alembic_version should remain (Alembic's own tracking table)
-        assert not (_APP_TABLES & tables)
+        assert not ((_APP_TABLES | _RETIRED_TABLES) & tables)
 
     def test_langgraph_tables_excluded(self, runtime_dir: Path) -> None:
         """Pre-create LangGraph tables, run upgrade, verify they are untouched."""
@@ -224,10 +608,10 @@ class TestAlembicUpgradeDowngrade:
         assert {
             "approval_status",
             "approval_request_id",
-            "approval_reason",
             "approval_response_action_id",
             "approval_updated_at",
         } <= columns
+        assert "approval_reason" not in columns
 
     def test_upgrade_head_adds_thread_execution_state_table(
         self,
@@ -251,16 +635,21 @@ class TestAlembicUpgradeDowngrade:
             "thread_id",
             "checkpoint_id",
             "parent_checkpoint_id",
-            "snapshot_created_at",
             "recorded_at",
-            "recovery_epoch",
             "task_count",
             "interrupt_count",
             "next_nodes_json",
-            "interrupt_types_json",
             "tasks_json",
             "degraded_reasons_json",
         } <= columns
+        assert (
+            not {
+                "snapshot_created_at",
+                "recovery_epoch",
+                "interrupt_types_json",
+            }
+            & columns
+        )
 
     def test_upgrade_head_adds_thread_deletion_saga_table(
         self,
@@ -377,6 +766,69 @@ class TestAlembicUpgradeDowngrade:
         } <= partial_indexes
 
 
+class TestRevisionsAreSelfContained:
+    """No revision describes the schema through the application package.
+
+    A version script states the schema at ONE moment in the chain. Importing the
+    application package replaces that statement with whatever the package means
+    today: deleting a model symbol breaks a historical revision outright, and
+    changing one silently rewrites the DDL history already replayed into every
+    existing store. So every structural fact a revision needs - a constant, a
+    predicate, a custom column type - is spelled inside the revision, frozen at
+    the moment it describes, even when that duplicates a live symbol.
+
+    Asserted over the whole chain rather than over one script, because the rule
+    is the chain's and a new revision is exactly where it gets broken next.
+    """
+
+    @staticmethod
+    def _package_references(script: Path) -> list[str]:
+        """Return every import in *script* that reaches the application package.
+
+        A relative import counts as a reference even though Alembic loads these
+        scripts by location and would raise on one: the rule is about reaching
+        into the package at all, not about which spelling happens to fail.
+        """
+        root = _migrations_package.__name__.partition(".")[0]
+        found: list[str] = []
+        for node in ast.walk(ast.parse(script.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                found.extend(
+                    alias.name
+                    for alias in node.names
+                    if alias.name.partition(".")[0] == root
+                )
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if node.level:
+                    found.append("." * node.level + module)
+                elif module.partition(".")[0] == root:
+                    found.append(module)
+        return sorted(found)
+
+    def test_no_revision_imports_the_application_package(self) -> None:
+        """Every packaged revision is self-contained."""
+        versions = migration_script_location() / "versions"
+        scripts = sorted(
+            path for path in versions.glob("*.py") if path.name != "__init__.py"
+        )
+        assert len(scripts) >= 27, (
+            f"only {len(scripts)} revision scripts were found under {versions}; "
+            "this guard compared almost nothing"
+        )
+
+        offenders = {
+            script.name: references
+            for script in scripts
+            if (references := self._package_references(script))
+        }
+
+        assert offenders == {}, (
+            "these revisions re-describe the schema through the application "
+            f"package instead of freezing what they ship: {offenders}"
+        )
+
+
 class TestPackageResourceResolution:
     """The runtime migration path resolves scripts from installed package data."""
 
@@ -404,20 +856,9 @@ class TestPackageResourceResolution:
             "sqlite+aiosqlite:///runtime.db"
         )
 
-    @pytest.mark.parametrize(
-        "database_url",
-        [
-            "sqlite+aiosqlite:///C:/Vault%20Spec/runtime%25.db",
-            (
-                "postgresql+asyncpg://operator:p%40ss@localhost/vaultspec"
-                "?application_name=desktop%25capsule"
-            ),
-        ],
-    )
-    def test_runtime_config_preserves_percent_encoded_urls(
-        self, database_url: str
-    ) -> None:
-        """Alembic interpolation preserves Windows and PostgreSQL URL escapes."""
+    def test_runtime_config_preserves_percent_encoded_urls(self) -> None:
+        """Alembic interpolation preserves Windows URL escapes."""
+        database_url = "sqlite+aiosqlite:///C:/Vault%20Spec/runtime%25.db"
         cfg = build_migration_config(database_url)
 
         assert cfg.get_main_option("sqlalchemy.url") == database_url

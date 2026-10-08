@@ -1,13 +1,18 @@
-"""Layer 1 test configuration — auto-applies the ``core`` marker."""
+"""Test configuration for streaming-tier tests."""
+
+from __future__ import annotations
 
 import pytest
 
-_PACKAGE_DIR = str(__import__("pathlib").Path(__file__).resolve().parent)
+from ..subscribers import RelayHub
 
 
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Mark tests collected from THIS directory as ``core``."""
-    for item in items:
-        if str(item.path).startswith(_PACKAGE_DIR):
-            item.add_marker(pytest.mark.core)
-            item.add_marker(pytest.mark.unit)
+@pytest.fixture
+def aggregator() -> RelayHub:
+    """Return a fresh RelayHub for each test.
+
+    Shared by the connection-cap and subscription-cap siblings, which drive
+    the real relay hub at its real shipped defaults rather than a tuned-down
+    one.
+    """
+    return RelayHub()

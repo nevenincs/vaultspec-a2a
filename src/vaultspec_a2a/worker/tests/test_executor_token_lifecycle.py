@@ -1,4 +1,4 @@
-"""Live proof of actor-token threading through a real Executor dispatch (R7).
+"""Live proof of actor-token threading through a real Executor dispatch.
 
 Drives a genuine ingest through the real ``Executor``, a real
 ``AsyncSqliteSaver`` checkpointer, a real ``WorkerBridge`` over an in-process
@@ -27,15 +27,20 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
 from langchain_core.messages import AIMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...control.accepted_input import freeze_accepted_input
 from ...control.execution_authority import resolve_execution_authority
-from ...control.tests._catalog_authority import current_execution_metadata
 from ...ipc.schemas import DispatchRequest
-from ...providers.team_selection import model_assignment_digest
+from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
 from ...team.team_config import load_team_config
+from ...testing import (
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    add_test_node,
+    compile_test_graph,
+    current_execution_metadata,
+    new_state_graph,
+)
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
@@ -48,6 +53,8 @@ from ..ipc import WorkerBridge
 from .test_executor import _install_gated_graph
 
 if TYPE_CHECKING:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
     from ...thread.state import TeamState
     from ..graph_lifecycle import RegisteredCompiledGraph
 
@@ -59,10 +66,10 @@ _REVIEWER_TOKEN = "secret-reviewer-token"
 _BEARER = "secret-machine-bearer"
 
 
-def _current_assignment() -> dict[str, dict[str, object]]:
+def _current_assignment() -> dict[str, FrozenLaneAssignment]:
     return resolve_execution_authority(
         current_execution_metadata(
-            pathlib.Path.cwd(), required_roles=("mock-coder-success",)
+            pathlib.Path.cwd(), required_roles=(DEFAULT_REQUIRED_ROLE,)
         )
     ).model_assignment
 
@@ -70,7 +77,7 @@ def _current_assignment() -> dict[str, dict[str, object]]:
 def _accepted_ingest(thread_id: str, bundle: ActorTokenBundle) -> DispatchRequest:
     workspace = pathlib.Path(_WORKSPACE)
     definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
     request = DispatchRequest(
@@ -79,7 +86,7 @@ def _accepted_ingest(thread_id: str, bundle: ActorTokenBundle) -> DispatchReques
         workspace_root=_WORKSPACE,
         thread_id=thread_id,
         content="build it",
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=definition,
         recursion_limit=10,
         actor_tokens=bundle,
@@ -161,15 +168,14 @@ def _install_probe_graph(
         observed["coder_token"] = store.actor_token(thread_id, "coder")
         observed["unheld_role"] = store.actor_token(thread_id, "no-such-role")
         observed["bearer"] = store.engine_bearer(thread_id)
-        observed["held_during_run"] = store.has(thread_id)
         return {"messages": [AIMessage(content="done")], "next": "FINISH"}
 
     builder = new_state_graph()
-    builder.add_node("coder", coder_node)
+    add_test_node(builder, "coder", coder_node)
     builder.add_edge("__start__", "coder")
     builder.add_edge("coder", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(
-        checkpointer=executor._checkpointer
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=executor._checkpointer
     )
 
     cache_key = (
@@ -183,34 +189,33 @@ def _install_probe_graph(
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_tokens_injected_during_run_and_dropped_after() -> None:
+async def test_tokens_injected_during_run_and_dropped_after(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     thread_id = "run-lifecycle"
     observed: dict[str, Any] = {}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        bridge = _make_bridge()
-        executor = Executor(checkpointer=cp, bridge=bridge)
-        try:
-            bundle = ActorTokenBundle(
-                tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
-                engine_bearer=_BEARER,
-            )
-            req = _accepted_ingest(thread_id, bundle)
-            _install_probe_graph(executor, req, observed)
-            await executor.handle_dispatch(req)
+    bridge = _make_bridge()
+    executor = Executor(checkpointer=checkpointer, bridge=bridge)
+    try:
+        bundle = ActorTokenBundle(
+            tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
+            engine_bearer=_BEARER,
+        )
+        req = _accepted_ingest(thread_id, bundle)
+        _install_probe_graph(executor, req, observed)
+        await executor.handle_dispatch(req)
 
-            # Injection: the owning role received its own token while running.
-            assert observed["coder_token"] == _CODER_TOKEN
-            assert observed["bearer"] == _BEARER
-            assert observed["held_during_run"] is True
-            # Isolation: a role the run does not hold reads nothing.
-            assert observed["unheld_role"] is None
-            # Disposal: the active window closed, so the run holds nothing now.
-            assert executor.token_store.has(thread_id) is False
-            assert executor.token_store.actor_token(thread_id, "coder") is None
-        finally:
-            await bridge.close()
-            await executor.shutdown()
+        # Injection: the owning role received its own token while running.
+        assert observed["coder_token"] == _CODER_TOKEN
+        assert observed["bearer"] == _BEARER
+        # Isolation: a role the run does not hold reads nothing.
+        assert observed["unheld_role"] is None
+        # Disposal: the active window closed, so the run holds nothing now.
+        assert executor.token_store.engine_bearer(thread_id) is None
+        assert executor.token_store.actor_token(thread_id, "coder") is None
+    finally:
+        await bridge.close()
+        await executor.shutdown()
 
 
 def _bundle() -> ActorTokenBundle:
@@ -221,123 +226,124 @@ def _bundle() -> ActorTokenBundle:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_tokens_retained_through_interrupt_and_dropped_on_resume() -> None:
+async def test_tokens_retained_through_interrupt_and_dropped_on_resume(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """A parked (INPUT_REQUIRED) run keeps its tokens; a terminal resume drops them."""
     thread_id = "run-parked"
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        bridge = _make_bridge()
-        executor = Executor(checkpointer=cp, bridge=bridge)
-        try:
-            ingest = _accepted_ingest(thread_id, _bundle())
-            _install_gated_graph(executor, ingest)
-            await executor.handle_dispatch(ingest)
+    bridge = _make_bridge()
+    executor = Executor(checkpointer=checkpointer, bridge=bridge)
+    try:
+        ingest = _accepted_ingest(thread_id, _bundle())
+        _install_gated_graph(executor, ingest)
+        await executor.handle_dispatch(ingest)
 
-            # Retained across the park: the run interrupted, not terminated, so its
-            # tokens must survive to serve a later gate resume.
-            assert executor.token_store.has(thread_id) is True
-            assert executor.token_store.actor_token(thread_id, "coder") == _CODER_TOKEN
+        # Retained across the park: the run interrupted, not terminated, so its
+        # tokens must survive to serve a later gate resume.
+        assert executor.token_store.engine_bearer(thread_id) == _BEARER
+        assert executor.token_store.actor_token(thread_id, "coder") == _CODER_TOKEN
 
-            resume = _accepted_resume(ingest)
-            await executor.handle_dispatch(resume)
+        resume = _accepted_resume(ingest)
+        await executor.handle_dispatch(resume)
 
-            # Terminal (completed): the active window truly closed, tokens dropped.
-            assert executor.token_store.has(thread_id) is False
-        finally:
-            await bridge.close()
-            await executor.shutdown()
+        # Terminal (completed): the active window truly closed, tokens dropped.
+        assert executor.token_store.engine_bearer(thread_id) is None
+    finally:
+        await bridge.close()
+        await executor.shutdown()
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_cancel_of_parked_run_drops_tokens_at_terminal() -> None:
+async def test_cancel_of_parked_run_drops_tokens_at_terminal(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """Cancelling a parked (no active ingest) run is terminal and releases tokens."""
     thread_id = "run-parked-cancel"
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        bridge = _make_bridge()
-        executor = Executor(checkpointer=cp, bridge=bridge)
-        try:
-            ingest = _accepted_ingest(thread_id, _bundle())
-            _install_gated_graph(executor, ingest)
-            await executor.handle_dispatch(ingest)
-            assert executor.token_store.has(thread_id) is True
+    bridge = _make_bridge()
+    executor = Executor(checkpointer=checkpointer, bridge=bridge)
+    try:
+        ingest = _accepted_ingest(thread_id, _bundle())
+        _install_gated_graph(executor, ingest)
+        await executor.handle_dispatch(ingest)
+        assert executor.token_store.engine_bearer(thread_id) == _BEARER
 
-            # No ingest is active for the parked run, so the cancel is itself the
-            # terminal boundary and releases the tokens here.
-            await executor.handle_dispatch(
-                DispatchRequest(
-                    action="cancel",
-                    thread_id=thread_id,
-                    team_preset="gate-preset",
-                    recursion_limit=10,
-                )
+        # No ingest is active for the parked run, so the cancel is itself the
+        # terminal boundary and releases the tokens here.
+        await executor.handle_dispatch(
+            DispatchRequest(
+                action="cancel",
+                thread_id=thread_id,
+                team_preset="gate-preset",
+                recursion_limit=10,
             )
-            assert executor.token_store.has(thread_id) is False
-        finally:
-            await bridge.close()
-            await executor.shutdown()
+        )
+        assert executor.token_store.engine_bearer(thread_id) is None
+    finally:
+        await bridge.close()
+        await executor.shutdown()
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_tokens_absent_from_durable_checkpoint() -> None:
+async def test_tokens_absent_from_durable_checkpoint(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     thread_id = "run-checkpoint"
     observed: dict[str, Any] = {}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        bridge = _make_bridge()
-        executor = Executor(checkpointer=cp, bridge=bridge)
-        try:
-            bundle = ActorTokenBundle(
-                tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
-                engine_bearer=_BEARER,
-            )
-            req = _accepted_ingest(thread_id, bundle)
-            _install_probe_graph(executor, req, observed)
-            await executor.handle_dispatch(req)
+    bridge = _make_bridge()
+    executor = Executor(checkpointer=checkpointer, bridge=bridge)
+    try:
+        bundle = ActorTokenBundle(
+            tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
+            engine_bearer=_BEARER,
+        )
+        req = _accepted_ingest(thread_id, bundle)
+        _install_probe_graph(executor, req, observed)
+        await executor.handle_dispatch(req)
 
-            # The run produced a durable checkpoint; no token may appear in it.
-            tuple_ = await cp.aget_tuple({"configurable": {"thread_id": thread_id}})
-            assert tuple_ is not None, "the run must have written a checkpoint"
-            serialized = json.dumps(str(tuple_))
-            for secret in (_CODER_TOKEN, _REVIEWER_TOKEN, _BEARER):
-                assert secret not in serialized
-        finally:
-            await bridge.close()
-            await executor.shutdown()
+        # The run produced a durable checkpoint; no token may appear in it.
+        tuple_ = await checkpointer.aget_tuple(
+            {"configurable": {"thread_id": thread_id}}
+        )
+        assert tuple_ is not None, "the run must have written a checkpoint"
+        serialized = json.dumps(str(tuple_))
+        for secret in (_CODER_TOKEN, _REVIEWER_TOKEN, _BEARER):
+            assert secret not in serialized
+    finally:
+        await bridge.close()
+        await executor.shutdown()
 
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_tokens_absent_from_logs_during_dispatch(
     caplog: pytest.LogCaptureFixture,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     thread_id = "run-logs"
     observed: dict[str, Any] = {}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
-        await cp.setup()
-        bridge = _make_bridge()
-        executor = Executor(checkpointer=cp, bridge=bridge)
-        try:
-            bundle = ActorTokenBundle(
-                tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
-                engine_bearer=_BEARER,
-            )
-            req = _accepted_ingest(thread_id, bundle)
-            _install_probe_graph(executor, req, observed)
-            with caplog.at_level(logging.DEBUG):
-                await executor.handle_dispatch(req)
+    bridge = _make_bridge()
+    executor = Executor(checkpointer=checkpointer, bridge=bridge)
+    try:
+        bundle = ActorTokenBundle(
+            tokens={"coder": _CODER_TOKEN, "reviewer": _REVIEWER_TOKEN},
+            engine_bearer=_BEARER,
+        )
+        req = _accepted_ingest(thread_id, bundle)
+        _install_probe_graph(executor, req, observed)
+        with caplog.at_level(logging.DEBUG):
+            await executor.handle_dispatch(req)
 
-            # Scan every field of every captured record: rendered message, raw
-            # args, and structured extras all must be token-free.
-            for record in caplog.records:
-                blob = " ".join(
-                    [
-                        record.getMessage(),
-                        repr(record.args),
-                        repr(dict(record.__dict__)),
-                    ]
-                )
-                for secret in (_CODER_TOKEN, _REVIEWER_TOKEN, _BEARER):
-                    assert secret not in blob, f"token leaked in log: {record.name}"
-        finally:
-            await bridge.close()
-            await executor.shutdown()
+        # Scan every field of every captured record: rendered message, raw
+        # args, and structured extras all must be token-free.
+        for record in caplog.records:
+            blob = " ".join(
+                [
+                    record.getMessage(),
+                    repr(record.args),
+                    repr(dict(record.__dict__)),
+                ]
+            )
+            for secret in (_CODER_TOKEN, _REVIEWER_TOKEN, _BEARER):
+                assert secret not in blob, f"token leaked in log: {record.name}"
+    finally:
+        await bridge.close()
+        await executor.shutdown()

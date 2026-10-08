@@ -20,17 +20,19 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import pytest_asyncio
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ...conftest import SqlitePosture
 from ...database import create_control_action, create_thread, get_thread
-from ...database.models import Base, RunWriteAuthority
-from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import DEFAULT_TEAM_PRESET
 from ...tests._checkpoint_seeding import real_input_checkpoint
+from ...thread import RunWriteAuthority
 from ...thread.checkpoint_evidence import CheckpointEvidenceKind
 from ...thread.enums import ControlActionType, RepairStatus, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
+from ...thread.idempotency import thread_create_action_key
 from ..accepted_input import freeze_accepted_input
 from ..dispatch_receipts import prepare_graph_action_receipt
 from ..recovery_authority import (
@@ -40,7 +42,6 @@ from ..recovery_authority import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
@@ -55,15 +56,17 @@ CrashedRun = tuple[
 ]
 
 
+pytestmark = pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS)
+
+
 @pytest_asyncio.fixture
-async def crashed_at_input(tmp_path: Path) -> AsyncIterator[CrashedRun]:
+async def crashed_at_input(
+    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> CrashedRun:
     """A run the gateway still believes is running, with only its input durable."""
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'runs.db'}")
-    configure_sqlite_transactions(engine)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
-    async with sessions() as db:
+    async with session_factory() as db:
         await create_thread(
             db,
             thread_id=_THREAD,
@@ -76,7 +79,7 @@ async def crashed_at_input(tmp_path: Path) -> AsyncIterator[CrashedRun]:
             db,
             thread_id=_THREAD,
             action_type=ControlActionType.INGEST,
-            idempotency_key=f"thread-create:{_THREAD}",
+            idempotency_key=thread_create_action_key(_THREAD),
             dispatch_id=_DISPATCH,
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             payload=freeze_accepted_input(
@@ -86,11 +89,9 @@ async def crashed_at_input(tmp_path: Path) -> AsyncIterator[CrashedRun]:
                     content="work",
                     workspace_root=str(tmp_path),
                     recursion_limit=25,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     graph_definition=freeze_graph_definition(
-                        load_team_config(
-                            "mock-success-single", workspace_root=tmp_path
-                        ),
+                        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
                         workspace_root=tmp_path,
                     ),
                 ),
@@ -102,22 +103,22 @@ async def crashed_at_input(tmp_path: Path) -> AsyncIterator[CrashedRun]:
         )
         assert receipt is not None
         await db.commit()
-    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "graph.db")) as saver:
-        checkpoint, metadata = await real_input_checkpoint(
-            {
-                "thread_id": _THREAD,
-                "active_graph_action_receipt": receipt.model_dump(mode="json"),
-                "graph_action_receipts": {
-                    receipt.dispatch_id: receipt.model_dump(mode="json")
-                },
-            }
-        )
-        config: RunnableConfig = {
-            "configurable": {"thread_id": _THREAD, "checkpoint_ns": ""}
+    checkpoint, metadata = await real_input_checkpoint(
+        {
+            "thread_id": _THREAD,
+            "active_graph_action_receipt": receipt.model_dump(mode="json"),
+            "graph_action_receipts": {
+                receipt.dispatch_id: receipt.model_dump(mode="json")
+            },
         }
-        await saver.aput(config, checkpoint, metadata, checkpoint["channel_versions"])
-        yield sessions, saver, receipt
-    await engine.dispose()
+    )
+    config: RunnableConfig = {
+        "configurable": {"thread_id": _THREAD, "checkpoint_ns": ""}
+    }
+    await checkpointer.aput(
+        config, checkpoint, metadata, checkpoint["channel_versions"]
+    )
+    return session_factory, checkpointer, receipt
 
 
 @pytest.mark.asyncio

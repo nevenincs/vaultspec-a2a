@@ -18,10 +18,10 @@ import pytest
 from httpx import ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...control.config import settings
 from ...control.health import assemble_desktop_readiness
 from ...testing import armed_desktop_app_home as _armed_desktop
 from ...testing import settings_override
+from ...utils import bearer_header
 from .conftest import make_app
 
 if TYPE_CHECKING:
@@ -37,9 +37,7 @@ async def _armed_health(app: FastAPI) -> dict[str, Any]:
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as client:
-        response = await client.get(
-            "/health", headers={"Authorization": f"Bearer {token}"}
-        )
+        response = await client.get("/health", headers=bearer_header(token))
     assert response.status_code == 200, response.text
     return cast("dict[str, Any]", response.json())
 
@@ -108,12 +106,13 @@ async def test_armed_liveness_answer_stays_constant_without_the_attach_credentia
     engine = create_async_engine(f"sqlite+aiosqlite:///{store_dir / 'gateway.db'}")
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    app, _aggregator, _worker, _checkpointer = make_app(factory, checkpointer)
+    # This test is about the unauthenticated branch, so no credential may ride
+    # along with its requests.
+    app, _aggregator, _worker, _checkpointer = make_app(
+        factory, checkpointer, stamp_credentials=False
+    )
     app.state.db_engine = engine
     app.state.db_session_factory = factory
-    # The explicit test bypass would authorise every caller; this test is about
-    # the unauthenticated branch, so the real gate has to be in force.
-    app.state.allow_unauthenticated_v1_for_testing = False
 
     with _armed_desktop(tmp_path / "liveness-home"):
         async with httpx.AsyncClient(
@@ -164,8 +163,6 @@ async def test_health_reports_live_journal_mode_and_storage_footprint(
 
     database_url = f"sqlite+aiosqlite:///{db_file.as_posix()}"
     with settings_override(
-        database_backend="sqlite",
-        checkpoint_backend="sqlite",
         database_url=database_url,
         checkpoint_database_url=None,
     ):
@@ -192,10 +189,6 @@ async def test_health_reports_live_journal_mode_and_storage_footprint(
     assert body["checks"]["database"]["journal_mode"] == "wal"
 
     storage = body["storage"]
-    if settings.resolved_database_backend == "sqlite":
-        assert storage["database"]["size_bytes"] >= 0
-        assert storage["volume"]["free_bytes"] > 0
-        assert storage["volume"]["total_bytes"] >= storage["volume"]["free_bytes"]
-    else:
-        # A remote backend's capacity is not this process's filesystem to measure.
-        assert storage is None or "database" not in storage
+    assert storage["database"]["size_bytes"] >= 0
+    assert storage["volume"]["free_bytes"] > 0
+    assert storage["volume"]["total_bytes"] >= storage["volume"]["free_bytes"]

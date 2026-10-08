@@ -1,10 +1,12 @@
 """Real-composition proofs for serving the in-process provider lanes.
 
 The lanes exist so a certification run can freeze a provider that cannot spend.
-That is only true if the whole chain holds - serving policy, catalog shape,
-admission, health derivation, selection freezing, and construction - so the
-central test here drives that chain end to end through the production seams
-rather than asserting on any one link in isolation.
+That is only true if the whole chain holds - the lane-plugin seam, serving
+policy, catalog shape, admission, health derivation, selection freezing, and
+construction - so the central test here drives that chain end to end through the
+production seams rather than asserting on any one link in isolation. Every test
+holds the deterministic lane through its real plugin, exactly as a source-run
+gateway does.
 """
 
 from __future__ import annotations
@@ -17,23 +19,29 @@ from pydantic import ValidationError
 
 from ...control.config import Settings
 from ...graph.enums import Provider
-from ...testing import armed_environment
-from ..deterministic_chat_model import DeterministicResearchAdrChatModel
+from ...testing import (
+    DEFAULT_REQUIRED_ROLE,
+    DETERMINISTIC_LANE,
+    DeterministicResearchAdrChatModel,
+    armed_desktop_app_home,
+    armed_environment,
+    seated_lanes,
+    settings_override,
+)
 from ..factory import ProviderFactory, _discover_in_process_catalog
 from ..in_process_catalog import (
-    IN_PROCESS_EXECUTION_MODES,
-    IN_PROCESS_MODEL_VALUES,
     build_in_process_catalog,
+    discover_in_process_catalog,
     in_process_catalog_key,
+    in_process_lane,
     served_in_process_lanes,
 )
 from ..lane_admission import (
-    IN_PROCESS_CATALOG_LANES,
     PROVEN_CATALOG_TURN_LANES,
     catalog_lane_admission_reason,
     is_catalog_lane_admissible,
 )
-from ..mock_chat_model import MockChatModel
+from ..lane_registry import LanePluginError, registered_lanes
 from ..provider_catalog import (
     AuthenticationState,
     CatalogStatus,
@@ -41,14 +49,94 @@ from ..provider_catalog import (
     ProviderRecord,
     SelectionReference,
 )
-from ..provider_catalog_service import _DISPLAY_NAMES, _health_for
+from ..provider_catalog_service import (
+    _health_for,
+    stamp_catalog_expiry,
+)
 from ..team_selection import freeze_team_selection
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-_DETERMINISTIC = in_process_catalog_key(Provider.DETERMINISTIC)
-_MOCK = in_process_catalog_key(Provider.MOCK)
+_DETERMINISTIC = in_process_catalog_key(DETERMINISTIC_LANE)
+
+
+def _held_keys() -> set[ProviderCatalogKey]:
+    return {in_process_catalog_key(lane) for lane in registered_lanes()}
+
+
+# -- the lane-plugin seam -----------------------------------------------------
+
+
+def test_the_plugin_lane_is_the_only_lane_held() -> None:
+    """The build compiles in no lane, so the plugin's lane is the whole set."""
+    assert registered_lanes() == (DETERMINISTIC_LANE,)
+    assert in_process_lane(Provider.DETERMINISTIC) is DETERMINISTIC_LANE
+
+
+def test_without_a_plugin_the_lane_is_not_held() -> None:
+    """Nothing in the product names the lane; only its plugin brings it."""
+    with settings_override(lane_plugins=()):
+        assert in_process_lane(Provider.DETERMINISTIC) is None
+        assert _DETERMINISTIC not in _held_keys()
+        assert not is_catalog_lane_admissible(_DETERMINISTIC)
+        with pytest.raises(ValueError, match="Unsupported provider"):
+            ProviderFactory().create(Provider.DETERMINISTIC, model="deterministic")
+
+
+def test_a_plugin_named_while_the_lanes_are_unarmed_refuses_the_process() -> None:
+    with (
+        settings_override(serve_in_process_lanes=False),
+        pytest.raises(LanePluginError, match="honoured only while"),
+    ):
+        ProviderFactory()
+
+
+def test_a_plugin_named_under_the_desktop_profile_refuses_the_process(
+    tmp_path: Path,
+) -> None:
+    # Arming the desktop profile unseats the plugin, so it is named again here.
+    with (
+        armed_desktop_app_home(tmp_path),
+        seated_lanes(),
+        pytest.raises(LanePluginError, match="desktop profile"),
+    ):
+        registered_lanes()
+
+
+@pytest.mark.parametrize(
+    ("module", "reason"),
+    (
+        ("vaultspec_a2a.testing.lanes.absent", "cannot be imported"),
+        ("vaultspec_a2a.testing.environment", "exposes no register_lanes"),
+    ),
+)
+def test_a_plugin_that_cannot_register_refuses_the_process(
+    module: str, reason: str
+) -> None:
+    with (
+        settings_override(lane_plugins=(module,)),
+        pytest.raises(LanePluginError, match=reason),
+    ):
+        registered_lanes()
+
+
+def _plugins_from(value: str | None) -> tuple[str, ...]:
+    """Read the plugin list the way the service does: from a fresh settings object."""
+    with armed_environment(VAULTSPEC_A2A_LANE_PLUGINS=value):
+        return Settings().lane_plugins
+
+
+def test_the_plugin_list_is_read_as_comma_separated_module_paths() -> None:
+    assert _plugins_from(None) == ()
+    assert _plugins_from("") == ()
+    assert _plugins_from("pkg.one, pkg.two,pkg.one") == ("pkg.one", "pkg.two")
+
+
+@pytest.mark.parametrize("value", ("pkg.one,,pkg.two", "pkg one", "pkg.1st"))
+def test_a_malformed_plugin_list_is_refused_rather_than_guessed(value: str) -> None:
+    with pytest.raises(ValidationError, match="lane_plugins"):
+        _plugins_from(value)
 
 
 # -- serving policy -----------------------------------------------------------
@@ -56,20 +144,11 @@ _MOCK = in_process_catalog_key(Provider.MOCK)
 
 def test_nothing_is_served_until_a_deployment_arms_it() -> None:
     """Hidden is the default posture, so no product deployment offers these."""
-    assert served_in_process_lanes(armed=False, mock_api_base=None) == ()
-    assert served_in_process_lanes(armed=False, mock_api_base="http://host:8100") == ()
+    assert served_in_process_lanes(armed=False) == ()
 
 
-def test_arming_serves_the_deterministic_lane_alone_without_a_tape_server() -> None:
-    """The mock lane proxies HTTP, so it is withheld until it has somewhere to go."""
-    assert served_in_process_lanes(armed=True, mock_api_base=None) == (_DETERMINISTIC,)
-    assert served_in_process_lanes(armed=True, mock_api_base="   ") == (_DETERMINISTIC,)
-
-
-def test_a_configured_tape_server_additionally_serves_the_mock_lane() -> None:
-    assert served_in_process_lanes(
-        armed=True, mock_api_base="http://localhost:8100"
-    ) == (_DETERMINISTIC, _MOCK)
+def test_arming_serves_every_registered_lane() -> None:
+    assert served_in_process_lanes(armed=True) == (_DETERMINISTIC,)
 
 
 def _armed_by(value: str | None) -> bool:
@@ -101,85 +180,70 @@ def test_an_absent_declaration_leaves_the_lanes_hidden() -> None:
 # -- catalog shape ------------------------------------------------------------
 
 
-@pytest.mark.parametrize("key", (_DETERMINISTIC, _MOCK))
-def test_the_static_catalog_carries_everything_a_selection_revalidates(
-    key: ProviderCatalogKey,
-) -> None:
-    """Available, revisioned, bounded-expiry, non-empty - the selectable shape."""
+def test_the_static_catalog_carries_everything_a_selection_revalidates() -> None:
+    """Available, revisioned, non-empty, and bounded once the service stamps it."""
     before = datetime.now(UTC)
-    catalog = build_in_process_catalog(key)
+    catalog = build_in_process_catalog(DETERMINISTIC_LANE)
 
-    assert catalog.key == key
+    assert catalog.key == _DETERMINISTIC
     assert catalog.state.status is CatalogStatus.AVAILABLE
     assert catalog.state.revision
-    assert catalog.state.expires_at is not None
-    assert catalog.state.expires_at > before
+    assert catalog.state.expires_at is None
     assert catalog.models
 
+    stamped = stamp_catalog_expiry(catalog)
+    assert stamped.state.expires_at is not None
+    assert stamped.state.expires_at > before
+    assert stamped.state.revision == catalog.state.revision
+    assert stamped.models == catalog.models
 
-@pytest.mark.parametrize("key", (_DETERMINISTIC, _MOCK))
-def test_entries_advertise_only_selectors_the_executor_answers_to(
-    key: ProviderCatalogKey,
-) -> None:
+
+def test_entries_advertise_only_selectors_the_executor_answers_to() -> None:
     """The catalog serves the exact selectors its in-process executor implements."""
-    catalog = build_in_process_catalog(key)
-    provider = Provider(key.provider_id)
+    catalog = build_in_process_catalog(DETERMINISTIC_LANE)
 
     served = {model.provider_value for model in catalog.models}
-    assert served == set(IN_PROCESS_MODEL_VALUES[provider])
+    assert served == set(DETERMINISTIC_LANE.model_values)
     assert len({model.entry_id for model in catalog.models}) == len(catalog.models)
 
 
 def test_the_revision_is_stable_across_builds() -> None:
     """A static catalog that re-revisioned would invalidate every live selection."""
-    first = build_in_process_catalog(_DETERMINISTIC)
-    second = build_in_process_catalog(_DETERMINISTIC)
+    first = build_in_process_catalog(DETERMINISTIC_LANE)
+    second = build_in_process_catalog(DETERMINISTIC_LANE)
 
     assert first.state.revision == second.state.revision
-
-
-def test_each_lane_gets_its_own_revision_and_entry_ids() -> None:
-    deterministic = build_in_process_catalog(_DETERMINISTIC)
-    mock = build_in_process_catalog(_MOCK)
-
-    assert deterministic.state.revision != mock.state.revision
-    assert not {model.entry_id for model in deterministic.models} & {
-        model.entry_id for model in mock.models
-    }
 
 
 @pytest.mark.parametrize(
     "key",
     (
         ProviderCatalogKey("deterministic", "openai-api"),
-        ProviderCatalogKey("mock", "codex-app-server"),
         ProviderCatalogKey("claude", "in-process-deterministic"),
         ProviderCatalogKey("not-a-provider", "in-process-deterministic"),
     ),
 )
-def test_building_refuses_a_lane_identity_it_does_not_declare(
+def test_discovery_refuses_a_lane_identity_it_does_not_hold(
     key: ProviderCatalogKey,
 ) -> None:
     """Identity is the pair; an in-process provider under a foreign mode is not it."""
     with pytest.raises(ValueError, match="in-process provider lane"):
-        build_in_process_catalog(key)
+        discover_in_process_catalog(key)
 
 
 # -- admission ----------------------------------------------------------------
 
 
-@pytest.mark.parametrize("key", (_DETERMINISTIC, _MOCK))
-def test_the_declared_in_process_lanes_are_admitted(key: ProviderCatalogKey) -> None:
-    assert key in IN_PROCESS_CATALOG_LANES
-    assert is_catalog_lane_admissible(key)
-    assert catalog_lane_admission_reason(key) is None
+def test_the_held_in_process_lane_is_admitted() -> None:
+    assert _DETERMINISTIC in _held_keys()
+    assert is_catalog_lane_admissible(_DETERMINISTIC)
+    assert catalog_lane_admission_reason(_DETERMINISTIC) is None
 
 
 @pytest.mark.parametrize(
     "key",
     (
         ProviderCatalogKey("deterministic", "openai-api"),
-        ProviderCatalogKey("mock", "kimi-code-acp"),
         ProviderCatalogKey("claude", "claude-agent-acp:node"),
         ProviderCatalogKey("kimi", "kimi-code-acp"),
         ProviderCatalogKey("openai", "openai-api"),
@@ -197,8 +261,8 @@ def test_serving_the_in_process_lanes_did_not_widen_admission(
 
 
 def test_the_external_proof_declaration_is_untouched() -> None:
-    """In-process admission is a sibling declaration, never an entry in the proofs."""
-    assert not IN_PROCESS_CATALOG_LANES & set(PROVEN_CATALOG_TURN_LANES)
+    """In-process admission is a sibling source, never an entry in the proofs."""
+    assert not _held_keys() & set(PROVEN_CATALOG_TURN_LANES)
     assert set(PROVEN_CATALOG_TURN_LANES) == {
         ProviderCatalogKey("codex", "codex-app-server")
     }
@@ -228,29 +292,17 @@ async def test_the_deterministic_lane_is_reachable_through_the_real_registration
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("key", "expected_model"),
-    (
-        (_DETERMINISTIC, DeterministicResearchAdrChatModel),
-        (_MOCK, MockChatModel),
-    ),
-)
-async def test_an_in_process_lane_is_selectable_freezable_and_constructible(
-    key: ProviderCatalogKey, expected_model: type
-) -> None:
+async def test_an_in_process_lane_is_selectable_freezable_and_constructible() -> None:
     """Drive discovery -> health -> freeze -> construction, for real.
 
     Every stage is the production one: the factory's own discovery adapter, the
-    service's own health derivation, the real selection freezer, and the real
-    construction path. The point of running them together is that a broken link
-    anywhere - an unadmitted key, a health axis that never reaches available, an
-    execution mode the factory refuses - fails here rather than surfacing as a
-    skipped certification run.
-
-    Discovery is driven through the adapter rather than a registration because
-    the mock lane's registration additionally requires a configured tape server;
-    that gating is a serving-policy fact, proven above, not a selection fact.
+    service's own health derivation and expiry stamp, the real selection freezer,
+    and the real construction path. The point of running them together is that a
+    broken link anywhere - an unadmitted key, a health axis that never reaches
+    available, an execution mode the factory refuses - fails here rather than
+    surfacing as a skipped certification run.
     """
+    key = _DETERMINISTIC
     discovery = await _discover_in_process_catalog(key)
 
     assert discovery.authentication is AuthenticationState.NOT_APPLICABLE
@@ -268,10 +320,10 @@ async def test_an_in_process_lane_is_selectable_freezable_and_constructible(
 
     record = ProviderRecord(
         provider_id=key.provider_id,
-        display_name=_DISPLAY_NAMES[Provider(key.provider_id)],
+        display_name=DETERMINISTIC_LANE.display_name,
         execution_mode=key.execution_mode,
         health=health,
-        catalog=discovery.catalog,
+        catalog=stamp_catalog_expiry(discovery.catalog),
     )
     entry = discovery.catalog.models[0]
     frozen = freeze_team_selection(
@@ -283,32 +335,29 @@ async def test_an_in_process_lane_is_selectable_freezable_and_constructible(
         ),
         overrides={},
         fallbacks=(),
-        required_roles=("mock-coder-success",),
+        required_roles=(DEFAULT_REQUIRED_ROLE,),
         records=(record,),
     )
 
-    compiled = frozen.compiler_map()["mock-coder-success"]
-    assert compiled["provider"] == key.provider_id
-    assert compiled["execution_mode"] == key.execution_mode
-    assert compiled["model_name"] == entry.provider_value
+    compiled = frozen.compiler_map()[DEFAULT_REQUIRED_ROLE]
+    assert compiled.provider_id.value == key.provider_id
+    assert compiled.execution_mode == key.execution_mode
+    assert compiled.model_name == entry.provider_value
 
     model = ProviderFactory().create(
-        Provider(compiled["provider"]),
-        model=compiled["model_name"],
-        execution_mode=compiled["execution_mode"],
+        compiled.provider_id,
+        model=compiled.model_name,
+        execution_mode=compiled.execution_mode,
     )
-    assert isinstance(model, expected_model)
+    assert isinstance(model, DeterministicResearchAdrChatModel)
 
 
-@pytest.mark.parametrize("provider", tuple(IN_PROCESS_EXECUTION_MODES))
-def test_construction_refuses_an_in_process_lane_under_a_foreign_mode(
-    provider: Provider,
-) -> None:
+def test_construction_refuses_an_in_process_lane_under_a_foreign_mode() -> None:
     """The frozen mode is checked, so a mode the catalog never served cannot run."""
     with pytest.raises(ValueError, match="cannot execute mode"):
         ProviderFactory().create(
-            provider,
-            model=IN_PROCESS_MODEL_VALUES[provider][0],
+            DETERMINISTIC_LANE.provider,
+            model=DETERMINISTIC_LANE.model_values[0],
             execution_mode="codex-app-server",
         )
 
@@ -320,7 +369,7 @@ def test_unarmed_registrations_offer_no_in_process_lane(tmp_path: Path) -> None:
     )
 
     served = {registration.key for registration in registrations}
-    assert not served & IN_PROCESS_CATALOG_LANES
+    assert not served & _held_keys()
     with pytest.raises(ValueError, match="no catalog registration exists"):
         ProviderFactory().catalog_registration(
             _DETERMINISTIC, tmp_path, serve_in_process_lanes=False
@@ -336,4 +385,4 @@ def test_arming_appends_without_reordering_the_external_lanes(tmp_path: Path) ->
     assert [item.key for item in armed[: len(unarmed)]] == [
         item.key for item in unarmed
     ]
-    assert {item.key for item in armed[len(unarmed) :]} <= IN_PROCESS_CATALOG_LANES
+    assert {item.key for item in armed[len(unarmed) :]} <= _held_keys()

@@ -8,11 +8,11 @@ from .. import (
     ConfigError,
     ContextOverflowError,
     DatabaseError,
-    EventAggregatorError,
     NicknameConflictError,
     PermissionDeniedError,
     ProtocolError,
     ProviderSessionError,
+    StreamSubscriptionError,
     TeamConfigNotFoundError,
     TokenBudgetExceededError,
     VaultspecError,
@@ -46,7 +46,7 @@ class TestInheritanceHierarchy:
             ConfigError,
             AgentProcessError,
             ProtocolError,
-            EventAggregatorError,
+            StreamSubscriptionError,
             DatabaseError,
             PermissionDeniedError,
             TokenBudgetExceededError,
@@ -275,10 +275,10 @@ class TestWorkerExecutionErrorRetainsItsCause:
     def test_the_wrapper_message_names_the_provider_failure(self) -> None:
         """``str`` carries attribution AND the wrapped provider fault.
 
-        This is the loss point the whole failure surface depended on: the
-        wrapper used to report only which worker and model died, so a client
-        received the same sentence for an expired credential, an overloaded
-        provider, and an empty credit balance.
+        This is the loss point the whole failure surface depends on: a wrapper
+        reporting only which worker and model died would give a client the same
+        sentence for an expired credential, an overloaded provider, and an
+        empty credit balance.
         """
         from ...providers.acp_exceptions import AcpErrorCode, AcpPromptError
 
@@ -317,9 +317,11 @@ class TestWorkerExecutionErrorRetainsItsCause:
 
     def test_a_wrapper_with_no_cause_reports_attribution_only(self) -> None:
         """Nothing is appended when there is no failure to attribute."""
-        err = WorkerExecutionError(worker="coder", model="mock", message_count=2)
+        err = WorkerExecutionError(
+            worker="coder", model="deterministic", message_count=2
+        )
 
-        assert str(err) == "worker='coder' model=mock messages=2"
+        assert str(err) == "worker='coder' model=deterministic messages=2"
         assert err.message == str(err)
 
 
@@ -344,12 +346,12 @@ class TestAllExports:
             "ContextOverflowError",
             "DatabaseError",
             "DocumentConformanceError",
-            "EventAggregatorError",
             "HarnessToolContractError",
             "NicknameConflictError",
             "PermissionDeniedError",
             "ProtocolError",
             "ProviderSessionError",
+            "StreamSubscriptionError",
             "SupervisorRoutingError",
             "TeamConfigNotFoundError",
             "TokenBudgetExceededError",
@@ -369,7 +371,7 @@ class TestAllExports:
         """
         assert ContextOverflowError is _errors_module.ContextOverflowError
         assert DatabaseError is _errors_module.DatabaseError
-        assert EventAggregatorError is _errors_module.EventAggregatorError
+        assert StreamSubscriptionError is _errors_module.StreamSubscriptionError
         assert PermissionDeniedError is _errors_module.PermissionDeniedError
         assert TokenBudgetExceededError is _errors_module.TokenBudgetExceededError
         assert ProviderSessionError is _errors_module.ProviderSessionError

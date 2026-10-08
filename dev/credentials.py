@@ -45,20 +45,33 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
-import subprocess
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
-from dev.exit_codes import FAILED, OK, TOOL_MISSING
+from dev import runner
+from dev.exit_codes import FAILED, OK
+from dev.paths import REPO_ROOT
 
-#: The repository root, which is where `.env` lives.
-REPO_ROOT: Final = Path(__file__).resolve().parents[1]
+if TYPE_CHECKING:
+    from pathlib import Path
 
-#: The environment file. Never read for anything but the names a scope
-#: declares, and never echoed.
+__all__ = [
+    "ENV_FILE",
+    "ENV_FILE_VARIABLE",
+    "MISSING_CREDENTIAL",
+    "SCOPES",
+    "Scope",
+    "describe",
+    "main",
+    "missing_required",
+    "read_env_file",
+    "resolve",
+    "run",
+]
+
+#: The environment file, at the repository root. Never read for anything but
+#: the names a scope declares, and never echoed.
 ENV_FILE: Final = REPO_ROOT / ".env"
 
 #: The variable the service reads its operator settings file from. Spelled out
@@ -109,12 +122,15 @@ class Scope:
 #: escalate to a failure only when a caller guaranteed it with
 #: `--require-prerequisite`. Making them required here would break exactly the
 #: hosts that system was built to accommodate.
+#:
+#: Spelled out rather than read from the service's credential registry, which
+#: this stdlib-only module cannot import; a test holds the list to it. A name
+#: the service accepts for no lane is not granted: `ANTHROPIC_API_KEY` reaches
+#: no provider child in production, so a scope that injected it would only let
+#: a development run authenticate in a way a served one cannot.
 _PROVIDER_CREDENTIALS: Final[tuple[str, ...]] = (
-    "ANTHROPIC_API_KEY",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "OPENAI_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
     "KIMI_MODEL_API_KEY",
     "KIMI_MODEL_BASE_URL",
     "KIMI_MODEL_CAPABILITIES",
@@ -153,11 +169,10 @@ SCOPES: Final[dict[str, Scope]] = {
         settings_file=True,
     ),
     "compose": Scope(
-        summary="Runs development-only Jaeger and VidaiMock fixtures.",
+        summary="Runs the development-only Jaeger fixture.",
         optional=(
             "JAEGER_OTLP_PORT",
             "JAEGER_UI_PORT",
-            "VIDAIMOCK_PORT",
         ),
     ),
     "live-tests": Scope(
@@ -329,8 +344,10 @@ def run(scope_name: str, argv: list[str]) -> int:
         The command's own exit status, so every contract code in
         :mod:`dev.exit_codes` passes through unchanged;
         :data:`MISSING_CREDENTIAL` when a required variable is absent and the
-        command was therefore never started; :data:`TOOL_MISSING` when the
-        executable is not on `PATH`.
+        command was therefore never started; otherwise whatever
+        :func:`dev.runner.run` reports, which is
+        :data:`dev.exit_codes.TOOL_MISSING` when the executable is not on
+        `PATH`.
     """
     scope = SCOPES[scope_name]
     child = resolve(scope, dict(os.environ), read_env_file())
@@ -340,18 +357,7 @@ def run(scope_name: str, argv: list[str]) -> int:
         _report_missing(scope_name, scope, absent)
         return MISSING_CREDENTIAL
 
-    executable = shutil.which(argv[0])
-    if executable is None:
-        print(f"credentials: {argv[0]} is not on PATH.", file=sys.stderr, flush=True)
-        return TOOL_MISSING
-
-    completed = subprocess.run(
-        [executable, *argv[1:]],
-        cwd=REPO_ROOT,
-        env=child,
-        check=False,
-    )
-    return completed.returncode
+    return runner.run(argv, child, cwd=REPO_ROOT, replace_env=True)
 
 
 def main(argv: list[str] | None = None) -> int:

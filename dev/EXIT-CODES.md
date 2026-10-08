@@ -83,7 +83,8 @@ summary AND the exit code, never from the exit code alone.
 executable found at dispatch time is `127` — the shell's own
 command-not-found status, legible without a lookup table. `init` keeps `2`
 because its report distinguishes *which* host tool, and callers of `init`
-already read that report.
+already read that report. Nothing else claims `2`: a guard or gate that could
+not run — its tree is missing, a source file does not parse — exits `7`.
 
 ## Aggregators: one rule
 
@@ -152,19 +153,20 @@ by `keep_going`, not by silencing every dimension at once.
 Findings-suppression is declared in two places, and scanning for one of them
 alone under-reports:
 
-1. **`advisory=True` on a target**, with `findings_codes` defaulting to `{1}`.
-   The dispatcher applies `advisory_result`.
+1. **`advisory=True` on a target.** The dispatcher applies `advisory_result`,
+   which suppresses exactly `FINDINGS_CODES` (`{1}`) and nothing else.
 2. **A per-invocation wrapper**, as in `vaultspec-rag`'s
    `_advisory(finding_exit, ...)`, which states the finding status at the call
    site and needs no flag on the target at all.
 
 Both implement the same rule; neither is a shortcut past it. The second exists
-because the default is not universal: **vulture reports dead code with 3**, and
+because `{1}` is not universal: **vulture reports dead code with 3**, and
 reserves 1 for invalid input and 2 for invalid arguments. Read under `{1}`, a
 vulture finding looks like a broken scanner and a broken vulture invocation
 looks like a finding — both backwards, and both silent. So a tool that does not
-use 1 must SAY which status it uses, whether by `findings_codes` on the target
-or by the wrapper's argument. That requirement is what makes this different
+use 1 must SAY which status it uses, and the wrapper's argument is where it
+says so: the target flag has no per-target findings set, so it cannot be
+widened to cover such a tool. That requirement is what makes this different
 from a blanket flag, and it is why the flag alone is not the thing to grep for.
 
 ## Partial and skipped work

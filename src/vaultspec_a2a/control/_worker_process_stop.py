@@ -1,141 +1,84 @@
-"""Exact retained worker-process shutdown and descendant reaping."""
+"""Owned worker-process shutdown through its OS containment."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 from typing import TYPE_CHECKING
 
-import psutil
-
+from ..utils import ProcessContainmentError
 from ..utils.async_cleanup import complete_cleanup
-from ..utils.process import ProcessContainment, ProcessContainmentError
 
 if TYPE_CHECKING:
-    import subprocess
-
     from ..lifecycle.shutdown import ShutdownDeadline
+    from ..utils import ProcessContainment
 
 __all__ = [
-    "_reap_retained_processes",
     "_shutdown_worker_process",
     "_stop_worker_tree",
 ]
 
 logger = logging.getLogger("vaultspec_a2a.control.worker_management")
 
+# The root handle's wait only collects an exit status; the containment already
+# bounded the reap of the tree, so this window stays short.
+_ROOT_REAP_TIMEOUT = 0.1
+
 
 async def _stop_worker_tree(
     process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None,
+    containment: ProcessContainment,
     *,
     term_timeout: float,
     kill_timeout: float = 5.0,
 ) -> None:
     try:
-        if containment is not None and containment.assigned:
-            reaped = await containment.terminate(
-                term_timeout=term_timeout, kill_timeout=kill_timeout
-            )
-        else:
-            reaped = await _stop_exact_popen_tree(
-                process,
-                term_timeout=term_timeout,
-                kill_timeout=kill_timeout,
-            )
-        if not reaped:
+        if not await containment.terminate(
+            term_timeout=term_timeout, kill_timeout=kill_timeout
+        ):
             raise ProcessContainmentError(
                 f"Worker process tree {process.pid} did not terminate"
             )
     finally:
-        await asyncio.to_thread(process.wait, 0.1)
+        await _reap_root_handle(process)
 
 
-def _retained_process_owner(
-    process: subprocess.Popen[bytes],
-) -> psutil.Process | None:
-    """Return a reuse-guarded psutil identity for the exact live ``Popen``."""
-    if process.poll() is not None:
-        return None
+async def _reap_root_handle(process: subprocess.Popen[bytes]) -> None:
+    """Collect the root's exit status without replacing the reap's own outcome.
+
+    The containment, not this handle, is authoritative for the tree, so this
+    wait exists only to clear the root from the process table. It runs after a
+    reap that proved the tree gone, or after one whose
+    :class:`ProcessContainmentError` is the diagnostic the caller needs; a root
+    can still be in the window in either case (a loaded host, or a tree an
+    earlier pass already reaped). Letting ``TimeoutExpired`` out of the
+    enclosing ``finally`` would raise on a clean shutdown and discard a real
+    failure's cause, so it is logged instead.
+    """
     try:
-        owner = psutil.Process(process.pid)
-        owner.create_time()
-    except psutil.NoSuchProcess:
-        return None
-    # The first poll proved our retained handle live before lookup; the second
-    # rejects an exit/reuse race during lookup. ``owner`` has cached creation
-    # identity, so every later signal refuses a reused numeric pid.
-    if process.poll() is not None:
-        return None
-    return owner
-
-
-def _suspend_owned_tree(owner: psutil.Process) -> list[psutil.Process]:
-    owner.suspend()
-    retained = [owner]
-    for child in owner.children(recursive=True):
-        try:
-            if child.is_running():
-                child.suspend()
-                retained.append(child)
-        except psutil.NoSuchProcess:
-            pass
-    return retained
-
-
-def _signal_retained_processes(targets: list[psutil.Process], *, kill: bool) -> None:
-    for target in targets:
-        try:
-            if target.is_running():
-                if kill:
-                    target.kill()
-                else:
-                    target.terminate()
-        except psutil.NoSuchProcess:
-            pass
-
-
-async def _stop_exact_popen_tree(
-    process: subprocess.Popen[bytes],
-    *,
-    term_timeout: float,
-    kill_timeout: float,
-) -> bool:
-    """Stop the exact retained root and its observed tree without reopening a pid."""
-    owner = _retained_process_owner(process)
-    if owner is None:
-        return process.poll() is not None
-    try:
-        retained = _suspend_owned_tree(owner)
-        _signal_retained_processes(list(reversed(retained)), kill=False)
-        _, alive = await asyncio.to_thread(
-            psutil.wait_procs, retained, timeout=term_timeout
+        await asyncio.to_thread(process.wait, _ROOT_REAP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "Worker root (PID %d) did not report its exit status within %.1fs",
+            process.pid,
+            _ROOT_REAP_TIMEOUT,
         )
-        _signal_retained_processes(alive, kill=True)
-        if alive:
-            _, alive = await asyncio.to_thread(
-                psutil.wait_procs, alive, timeout=kill_timeout
-            )
-        return not alive
-    except (psutil.AccessDenied, psutil.NoSuchProcess):
-        return process.poll() is not None
 
 
 async def _shutdown_worker_process(
     process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None = None,
+    containment: ProcessContainment,
     *,
     deadline: ShutdownDeadline | None = None,
 ) -> None:
     """Shut down the worker child process and its whole tree.
 
-    Assigned containment reaps through a POSIX process group or Windows Job
-    Object. Missing or unassigned containment uses exact retained process
-    identities, including creation-time reuse guards, and never treats an empty
-    containment as authority for a live root.
+    The worker was started inside *containment*, so its POSIX process group or
+    Windows Job Object is authoritative for the whole tree, including
+    descendants that outlive a root which already exited. A repeat call after a
+    completed reap is a no-op.
     """
-    if process.poll() is not None and containment is None:
-        return
     logger.info(
         "Shutting down worker process (PID %d)",
         process.pid,
@@ -156,23 +99,3 @@ async def _shutdown_worker_process(
         )
     )
     logger.info("Worker process stopped")
-
-
-async def _reap_retained_processes(
-    processes: list[psutil.Process], *, deadline: ShutdownDeadline | None
-) -> None:
-    """Reap retained process identities without acting on a reused pid."""
-    if not processes:
-        return
-    remaining = deadline.remaining() if deadline is not None else 5.0
-    term_timeout = max((remaining - 0.1) / 2.0, 0.0)
-    _signal_retained_processes(list(reversed(processes)), kill=False)
-    _, alive = await asyncio.to_thread(
-        psutil.wait_procs, processes, timeout=term_timeout
-    )
-    _signal_retained_processes(alive, kill=True)
-    if alive:
-        remaining = deadline.remaining() if deadline is not None else 2.5
-        _, alive = await asyncio.to_thread(psutil.wait_procs, alive, timeout=remaining)
-    if alive:
-        raise ProcessContainmentError("Retained worker descendants did not terminate")

@@ -28,10 +28,10 @@ from httpx import ASGITransport, AsyncClient
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...lifecycle.shutdown import ShutdownDeadline
+from ...testing import record_completed_checkpoint, seed_accepted_thread
 from ...tests._checkpoint_seeding import real_checkpoint
 from ..app import _settle_checkpoint_prunes
 from .conftest import make_app
-from .test_internal import _record_completed_checkpoint, _seed_accepted_thread
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -83,20 +83,20 @@ async def own_store(tmp_path: Path) -> AsyncIterator[tuple[AsyncSqliteSaver, Pat
 @pytest.mark.asyncio(loop_scope="function")
 async def test_a_spent_shutdown_budget_still_waits_out_the_prune(
     session_factory: SessionFactory,
-    own_store: tuple[AsyncSqliteSaver, Path],
+    checkpointer: AsyncSqliteSaver,
+    checkpoint_file: Path,
 ) -> None:
     """The phase runs on its floor, so no delete outlives the checkpointer."""
-    saver, path = own_store
     thread_id = "spent-budget-run"
-    await _seed_superseded_history(saver, thread_id)
-    app: FastAPI = make_app(session_factory, saver)[0]
+    await _seed_superseded_history(checkpointer, thread_id)
+    app: FastAPI = make_app(session_factory, checkpointer)[0]
     spent = ShutdownDeadline.start(0.0)
     assert spent.remaining() == 0.0
 
-    app.state.checkpoint_prunes.schedule(thread_id, saver)
+    app.state.checkpoint_prunes.schedule(thread_id, checkpointer)
     await _settle_checkpoint_prunes(app, spent)
 
-    assert _stored_checkpoint_ids(path, thread_id) == [f"cp-{thread_id}"], (
+    assert _stored_checkpoint_ids(checkpoint_file, thread_id) == [f"cp-{thread_id}"], (
         "the phase returned with the prune still in flight, leaving it to "
         "delete through a checkpointer the shutdown closes next"
     )
@@ -132,32 +132,38 @@ async def test_one_apps_shutdown_leaves_another_apps_prune_to_its_owner(
 @pytest.mark.asyncio(loop_scope="function")
 async def test_a_relayed_terminal_prunes_through_the_relaying_apps_registry(
     session_factory: SessionFactory,
-    own_store: tuple[AsyncSqliteSaver, Path],
+    checkpointer: AsyncSqliteSaver,
+    checkpoint_file: Path,
 ) -> None:
     """The whole path: real relay, the app's registry, its shutdown phase."""
-    saver, store = own_store
-    app: FastAPI = make_app(session_factory, saver)[0]
+    app: FastAPI = make_app(session_factory, checkpointer)[0]
     async with session_factory() as session:
-        thread_id, receipt = await _seed_accepted_thread(session)
+        thread_id, receipt = await seed_accepted_thread(session)
         await session.commit()
-    await _record_completed_checkpoint(saver, receipt)
-    await _put_checkpoint(saver, thread_id, f"a-{thread_id}")
+    await record_completed_checkpoint(checkpointer, receipt)
+    await _put_checkpoint(checkpointer, thread_id, f"a-{thread_id}")
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         relayed = await client.post(
-            "/internal/events",
+            "/internal/events/batch",
             json={
-                "type": "event",
-                "thread_id": thread_id,
-                "payload": {"event_type": "thread_terminal", "status": "completed"},
+                "events": [
+                    {
+                        "thread_id": thread_id,
+                        "payload": {
+                            "event_type": "thread_terminal",
+                            "status": "completed",
+                        },
+                    }
+                ]
             },
         )
         assert relayed.status_code == 200
 
     await _settle_checkpoint_prunes(app, ShutdownDeadline.start(5.0))
 
-    assert _stored_checkpoint_ids(store, thread_id) == [f"cp-{thread_id}"], (
+    assert _stored_checkpoint_ids(checkpoint_file, thread_id) == [f"cp-{thread_id}"], (
         "the relayed terminal scheduled no prune the app's shutdown could wait for"
     )

@@ -14,29 +14,29 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ....authoring import AgentTool, CatalogSnapshot
 from ....control.config import settings
 from ....providers._acp_authoring import (
     AUTHORING_MCP_SERVER_NAME,
     AuthoringToolBinding,
     authoring_allowed_tool_names,
 )
+from ....testing import authoring_tool_binding, combined_output, simulator_command
 from ....thread.actor_tokens import ActorTokenBundle
 from ....worker.authoring_binding import AuthoringBindingProvider
 from ....worker.catalog_store import RunCatalogStore
 from ....worker.token_store import RunTokenStore
-from ...nodes.worker import create_worker_node
+from ...nodes.worker import WorkerNodeOptions, create_worker_node
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ....thread.state import TeamState
 
-SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
 PYTHON_EXE = sys.executable
 
 # The thread id _make_state carries; the provider keys tokens/catalog by it and
@@ -88,35 +88,7 @@ def _make_state() -> TeamState:
 
 
 def binding(server_url: str = "http://127.0.0.1:8200/mcp") -> AuthoringToolBinding:
-    snapshot = CatalogSnapshot(
-        schema_version="authoring.semantic_tools.v1",
-        tools=(
-            AgentTool(
-                name="read_context",
-                description="read",
-                input_schema={"type": "object"},
-                risk_tier="read_only",
-                permission_requirement="auto_permitted",
-                idempotency_required=False,
-                commands=("read_context",),
-            ),
-            AgentTool(
-                name="propose_changeset",
-                description="propose",
-                input_schema={"type": "object"},
-                risk_tier="mutating",
-                permission_requirement="human_approval_required",
-                idempotency_required=True,
-                commands=("create_proposal",),
-            ),
-        ),
-    )
-    return AuthoringToolBinding(
-        snapshot=snapshot,
-        server_url=server_url,
-        bearer_token="machine-bearer-xyz",
-        actor_token="actor-token-abc",
-    )
+    return authoring_tool_binding(server_url=server_url)
 
 
 @pytest.mark.asyncio
@@ -128,14 +100,12 @@ async def test_binding_surfaces_authoring_server_to_real_subprocess(
 
     record_file = tmp_path / "session_new.json"
     model = AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
+        command=simulator_command(
             "--response",
             "authored",
             "--record-session-new",
             str(record_file),
-        ],
+        ),
         # Armed run: an env auth token so config-home isolation engages (matching
         # test_stdio_binding_surfaces_bridge_into_isolated_home), which the
         # harness-armed spawn assertion now requires. Production-faithful: a real
@@ -147,8 +117,9 @@ async def test_binding_surfaces_authoring_server_to_real_subprocess(
         model=model,
         system_prompt="You are a coder.",
         name="coder",
-        autonomous=True,
-        authoring_binding_provider=stdio_provider(),
+        options=WorkerNodeOptions(
+            autonomous=True, authoring_binding_provider=stdio_provider()
+        ),
     )
 
     result = await node(_make_state())
@@ -191,6 +162,39 @@ def _stdio_binding(
     )
 
 
+async def _run_stdio_worker_turn(
+    tmp_path: Path, record_file: Path, *, record_flag: str, env_vars: dict[str, str]
+) -> None:
+    """Drive one worker turn through the real subprocess, recording *record_flag*.
+
+    Shared by the stdio session-advertisement test and the actor-scope-hoisting
+    test below, which differ only in which simulator recording they capture and
+    the env vars the armed run carries.
+    """
+    from ....providers.acp_chat_model import AcpChatModel
+
+    model = AcpChatModel(
+        command=simulator_command(
+            "--response",
+            "authored",
+            record_flag,
+            str(record_file),
+        ),
+        env_vars=env_vars,
+        workspace_root=str(tmp_path),
+    )
+    node = create_worker_node(
+        model=model,
+        system_prompt="You are a coder.",
+        name="coder",
+        options=WorkerNodeOptions(
+            autonomous=True, authoring_binding_provider=stdio_provider()
+        ),
+    )
+
+    await node(_make_state())
+
+
 @pytest.mark.asyncio
 async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
     tmp_path: Path,
@@ -199,40 +203,24 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
 
     When the binding carries the engine transport (engine_base_url + run_id) the
     worker prefers the stdio bridge (a spawned subprocess). Neither session-injected
-    transport surfaces to the model per the S20 registration-scope matrix, so this
+    transport surfaces to the model per the registration-scope matrix, so this
     is a transport-mechanics choice, not a surfacing one. The session/new the real
     CLI receives must carry a stdio server entry (command + args, no url/type) whose
     env carries the run's engine facts — proving the wiring reaches a subprocess.
     """
     from ....providers._acp_authoring import AUTHORING_MCP_SERVER_NAME
-    from ....providers.acp_chat_model import AcpChatModel
 
     record_file = tmp_path / "session_new.json"
-    model = AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
-            "--response",
-            "authored",
-            "--record-session-new",
-            str(record_file),
-        ],
+    await _run_stdio_worker_turn(
+        tmp_path,
+        record_file,
+        record_flag="--record-session-new",
         # Armed run: an env auth token so config-home isolation engages (matching
         # test_stdio_binding_surfaces_bridge_into_isolated_home), which the
         # harness-armed spawn assertion now requires. Production-faithful: a real
         # armed run always carries its lane token.
         env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},
-        workspace_root=str(tmp_path),
     )
-    node = create_worker_node(
-        model=model,
-        system_prompt="You are a coder.",
-        name="coder",
-        autonomous=True,
-        authoring_binding_provider=stdio_provider(),
-    )
-
-    await node(_make_state())
 
     params = json.loads(record_file.read_text(encoding="utf-8"))
     servers = params["mcpServers"]
@@ -275,30 +263,10 @@ async def test_stdio_binding_hoists_actor_scope_without_machine_bearer(
     tmp_path: Path,
 ) -> None:
     """The real child gets actor-scoped relay access and no workspace projection."""
-    from ....providers.acp_chat_model import AcpChatModel
-
     record_file = tmp_path / "config_home.json"
-    model = AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
-            "--response",
-            "authored",
-            "--record-config-home",
-            str(record_file),
-        ],
-        env_vars={},
-        workspace_root=str(tmp_path),
+    await _run_stdio_worker_turn(
+        tmp_path, record_file, record_flag="--record-config-home", env_vars={}
     )
-    node = create_worker_node(
-        model=model,
-        system_prompt="You are a coder.",
-        name="coder",
-        autonomous=True,
-        authoring_binding_provider=stdio_provider(),
-    )
-
-    await node(_make_state())
 
     recorded = json.loads(record_file.read_text(encoding="utf-8"))
     # No config-home redirect: the child inherits the operator's own setting,
@@ -335,14 +303,12 @@ async def test_no_binding_leaves_session_without_mcp_servers(
 
     record_file = tmp_path / "session_new.json"
     model = AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
+        command=simulator_command(
             "--response",
             "plain",
             "--record-session-new",
             str(record_file),
-        ],
+        ),
         env_vars={},
         workspace_root=str(tmp_path),
     )
@@ -350,7 +316,7 @@ async def test_no_binding_leaves_session_without_mcp_servers(
         model=model,
         system_prompt="You are a coder.",
         name="coder",
-        autonomous=True,
+        options=WorkerNodeOptions(autonomous=True),
     )
 
     result = await node(_make_state())
@@ -383,4 +349,4 @@ def test_worker_import_does_not_load_the_authoring_provider_module() -> None:
         check=True,
         timeout=300,
     )
-    assert proc.stdout.strip() == "False", proc.stdout + proc.stderr
+    assert proc.stdout.strip() == "False", combined_output(proc)

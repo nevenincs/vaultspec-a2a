@@ -8,242 +8,73 @@ that combines those two authorities and constructs a clarification resume.
 
 from __future__ import annotations
 
-import json
-import logging
 from dataclasses import dataclass
-from inspect import Parameter, Signature
-from typing import TYPE_CHECKING, Any, cast, override
-
-from sqlalchemy import select
+from typing import TYPE_CHECKING, Any, cast
 
 from ..database import (
+    CheckpointRead,
     ControlActionModel,
     ThreadModel,
-    ThreadStatusElectionOutcome,
     begin_write_transaction,
-    elect_thread_status,
+    get_control_action,
     get_control_action_by_idempotency_key,
-    get_pending_permission_requests,
     get_thread,
     mark_control_action_applied,
+    read_latest_checkpoint,
     settle_control_action_lease,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
-from ..ipc.schemas import DispatchRequest, to_dispatch_action
-from ..thread.clarification import (
+from ..thread import (
     ClarificationAnswers,
     ClarificationRequest,
-    ClarificationResolution,
-    clarification_resolution_fingerprint,
-    parse_clarification_resolution,
     pending_clarification,
     validate_clarification_answers,
 )
-from ..thread.dispatch_policy import FailureType, evaluate_dispatch_failure
-from ..thread.enums import (
-    NON_ACTIVE_STATUSES,
-    ControlActionResultStatus,
-    ControlActionType,
-    ThreadStatus,
+from ..thread.clarification import (
+    ClarificationResolution,
+    clarification_resolution_fingerprint,
+    parse_clarification_resolution,
 )
-from ._thread_metadata import dispatchable_workspace_root
-from .accepted_input import AcceptedActionInput, freeze_accepted_input
+from ..thread.dispatch_policy import FailureType
+from ..thread.enums import NON_ACTIVE_STATUSES, ControlActionType
+from ..thread.idempotency import (
+    ResumeIntent,
+    clarification_response_action_key,
+    resume_intent,
+)
+from .accepted_input import freeze_accepted_input, read_accepted_input
 from .action_lease import (
+    RUN_NOT_FOUND,
     ControlActionClaim,
     ControlActionClaimRequest,
+    ControlActionOutcome,
     DispatchFailureDisposition,
-    finalize_control_action_acceptance,
     prepare_control_action_claim,
-    record_dispatch_failure,
 )
-from .dispatch import safe_dispatch
-from .dispatch_receipts import bind_graph_action_receipt
-from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
-from .graph_definition import read_accepted_graph_definition
+from .leased_dispatch import DispatchRefusal, build_followon_dispatch, dispatch_leased
+from .pause import project_checkpoint_read
 from .repair_transitions import record_undelivered_dispatch
-from .thread_state_service import read_run_snapshot
 
 if TYPE_CHECKING:
-    import httpx
-    from langgraph.checkpoint.base import CheckpointTuple
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.checkpoints import Checkpointer
-    from .circuit_breaker import WorkerCircuitBreaker
-    from .worker_management import LazyWorkerSpawner
+    from ..database import Checkpointer
+    from ..ipc.schemas import DispatchRequest
+    from .leased_dispatch import DispatchTransport
 
 __all__ = [
     "ClarificationRuntime",
-    "reconcile_clarification_pause",
-    "redrive_clarification_actions",
     "respond_to_clarification",
+    "settle_clarification_dispatch_receipt",
 ]
 
-logger = logging.getLogger(__name__)
-
-_IDEMPOTENCY_PREFIX = "clarification-response:"
-
-#: The writers a clarification pause is recorded under: the dispatches that run
-#: the graph. A permission pause and the answer to one hold writers of their
-#: own, and this projection never records or clears either.
-_GRAPH_RUN_WRITERS = frozenset(
-    {
-        ControlActionType.INGEST,
-        ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-        ControlActionType.RESUME,
-    }
-)
-_PARKABLE_STATUSES = frozenset({ThreadStatus.SUBMITTED, ThreadStatus.RUNNING})
-
-
-@dataclass(frozen=True, slots=True)
-class _ClarificationResultIdentity:
-    request_id: str
-    thread_id: str
-    action_id: str | None
-    idempotency_key: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class _ClarificationResultOutcome:
-    accepted: bool
-    applied: bool
-    action_status: str
-    dispatched: bool
-    error_detail: str | None
-    error_status_code: int | None
-    failure_type: FailureType | None
-
-
-_CLARIFICATION_RESULT_SIGNATURE = Signature(
-    [
-        Parameter("request_id", Parameter.POSITIONAL_OR_KEYWORD),
-        Parameter("thread_id", Parameter.POSITIONAL_OR_KEYWORD),
-        Parameter("accepted", Parameter.POSITIONAL_OR_KEYWORD),
-        Parameter("applied", Parameter.POSITIONAL_OR_KEYWORD),
-        Parameter("action_status", Parameter.POSITIONAL_OR_KEYWORD),
-        Parameter("action_id", Parameter.POSITIONAL_OR_KEYWORD, default=None),
-        Parameter("idempotency_key", Parameter.POSITIONAL_OR_KEYWORD, default=None),
-        Parameter("dispatched", Parameter.POSITIONAL_OR_KEYWORD, default=False),
-        Parameter("error_detail", Parameter.POSITIONAL_OR_KEYWORD, default=None),
-        Parameter("error_status_code", Parameter.POSITIONAL_OR_KEYWORD, default=None),
-        Parameter("failure_type", Parameter.POSITIONAL_OR_KEYWORD, default=None),
-    ]
-)
-_CLARIFICATION_RESULT_FIELDS = tuple(_CLARIFICATION_RESULT_SIGNATURE.parameters)
-
-
-def _split_clarification_result_args(
-    args: tuple[object, ...], kwargs: dict[str, object]
-) -> tuple[_ClarificationResultIdentity, _ClarificationResultOutcome]:
-    bound = _CLARIFICATION_RESULT_SIGNATURE.bind(*args, **kwargs)
-    bound.apply_defaults()
-    values = bound.arguments
-    return (
-        _ClarificationResultIdentity(
-            cast("str", values["request_id"]),
-            cast("str", values["thread_id"]),
-            cast("str | None", values.get("action_id")),
-            cast("str | None", values.get("idempotency_key")),
-        ),
-        _ClarificationResultOutcome(
-            cast("bool", values["accepted"]),
-            cast("bool", values["applied"]),
-            cast("str", values["action_status"]),
-            cast("bool", values.get("dispatched", False)),
-            cast("str | None", values.get("error_detail")),
-            cast("int | None", values.get("error_status_code")),
-            cast("FailureType | None", values.get("failure_type")),
-        ),
-    )
-
-
-@dataclass(frozen=True, slots=True, init=False, repr=False)
-class ClarificationResult:
-    """Protocol-neutral outcome of resolving one questionnaire."""
-
-    _identity: _ClarificationResultIdentity
-    _outcome: _ClarificationResultOutcome
-    __signature__ = _CLARIFICATION_RESULT_SIGNATURE
-    __match_args__ = _CLARIFICATION_RESULT_FIELDS
-
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        identity, outcome = _split_clarification_result_args(args, kwargs)
-        object.__setattr__(self, "_identity", identity)
-        object.__setattr__(self, "_outcome", outcome)
-
-    @property
-    def request_id(self) -> str:
-        return self._identity.request_id
-
-    @property
-    def thread_id(self) -> str:
-        return self._identity.thread_id
-
-    @property
-    def accepted(self) -> bool:
-        return self._outcome.accepted
-
-    @property
-    def applied(self) -> bool:
-        return self._outcome.applied
-
-    @property
-    def action_status(self) -> str:
-        return self._outcome.action_status
-
-    @property
-    def action_id(self) -> str | None:
-        return self._identity.action_id
-
-    @property
-    def idempotency_key(self) -> str | None:
-        return self._identity.idempotency_key
-
-    @property
-    def dispatched(self) -> bool:
-        return self._outcome.dispatched
-
-    @property
-    def error_detail(self) -> str | None:
-        return self._outcome.error_detail
-
-    @property
-    def error_status_code(self) -> int | None:
-        return self._outcome.error_status_code
-
-    @property
-    def failure_type(self) -> FailureType | None:
-        return self._outcome.failure_type
-
-    @override
-    def __repr__(self) -> str:
-        values = ", ".join(
-            f"{name}={getattr(self, name)!r}" for name in _CLARIFICATION_RESULT_FIELDS
-        )
-        return f"ClarificationResult({values})"
-
-
-@dataclass(frozen=True, slots=True)
-class ClarificationRecoverySummary:
-    """Counts from one restart recovery pass over clarification actions."""
-
-    examined: int = 0
-    applied: int = 0
-    dispatched: int = 0
-    deferred: int = 0
-    conflicted: int = 0
+_RESOLUTION_CONFLICT = "A different clarification resolution is already accepted"
 
 
 @dataclass(frozen=True, slots=True)
 class ClarificationRuntime:
     checkpointer: Checkpointer
-    worker_client: httpx.AsyncClient
-    circuit_breaker: WorkerCircuitBreaker
-    worker_spawner: LazyWorkerSpawner
-    recursion_limit: int
-    trace_headers: dict[str, str] | None
+    transport: DispatchTransport
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,42 +95,9 @@ class _ClaimContext:
     parked_matches: bool
 
 
-@dataclass(frozen=True, slots=True)
-class _ResultError:
-    detail: str
-    status_code: int
-    failure_type: FailureType | None = None
-
-
-def _idempotency_key(request_id: str) -> str:
-    """Build this action's key as a READABLE prefix, never a digest.
-
-    Its siblings in ``thread.idempotency`` hash their inputs, and converging
-    this one onto them would look like an obvious cleanup. It would break
-    restart recovery silently. The recovery sweep below finds every unapplied
-    clarification action with ``idempotency_key.like(f"{_IDEMPOTENCY_PREFIX}%")``
-    - a prefix match that a sha256 digest cannot satisfy, because a digest has
-    no queryable prefix. The query would simply match nothing, parked leases
-    would never be redriven, and nothing would raise.
-
-    So the difference from its siblings is a REQUIREMENT, not drift. Any change
-    here has to move the recovery query with it.
-    """
-    return f"{_IDEMPOTENCY_PREFIX}{request_id}"
-
-
-def _checkpoint_receipt(checkpoint_tuple: object | None, request_id: str) -> str | None:
+def _checkpoint_receipt(checkpoint: CheckpointRead, request_id: str) -> str | None:
     """Read one application receipt from checkpoint channel values."""
-    checkpoint_value: object = getattr(checkpoint_tuple, "checkpoint", None)
-    if not isinstance(checkpoint_value, dict):
-        return None
-    checkpoint = cast("dict[str, object]", checkpoint_value)
-    values = checkpoint.get("channel_values")
-    if not isinstance(values, dict):
-        return None
-    receipts = cast("dict[str, object]", values).get(
-        "clarification_resolution_receipts"
-    )
+    receipts = checkpoint.channel_values.get("clarification_resolution_receipts")
     if not isinstance(receipts, dict):
         return None
     fingerprint = cast("dict[str, object]", receipts).get(request_id)
@@ -312,12 +110,50 @@ def _stored_resolution(
     if not action.payload_json or action.request_id is None:
         return None
     try:
-        accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+        accepted = read_accepted_input(action)
         return parse_clarification_resolution(
             accepted.intent, request_id=action.request_id
         )
-    except (json.JSONDecodeError, ValueError):
+    except ValueError:
         return None
+
+
+async def _settle_accepted_action(db: AsyncSession, action: ControlActionModel) -> bool:
+    """Mark one accepted clarification resume applied, releasing any lease.
+
+    The caller owns the proof and the transaction boundary: this is only the
+    write that records application, through the lease when the row still holds
+    one so no expired claim is left behind to redrive.
+    """
+    if action.claim_token:
+        return await settle_control_action_lease(
+            db,
+            action.id,
+            claim_token=action.claim_token,
+        )
+    return await mark_control_action_applied(db, action.id) is not None
+
+
+async def settle_clarification_dispatch_receipt(
+    db: AsyncSession,
+    action: ControlActionModel,
+) -> bool:
+    """Settle one clarification resume the worker has proven it applied.
+
+    The steady-state owner. The caller has already proven that this exact resume
+    was incorporated into the run's checkpoint, which is the standard every other
+    accepted action is settled on, so the row is settled here rather than left
+    for a recovery sweep to find. The settlement moves no status: the run leaves
+    its pause through the pause recorder, which the same receipt prompts. The
+    caller owns the transaction commit.
+    """
+    if (
+        action.action_type != ControlActionType.RESUME.value
+        or resume_intent(action.idempotency_key) is not ResumeIntent.CLARIFICATION
+        or action.applied_at is not None
+    ):
+        return False
+    return await _settle_accepted_action(db, action)
 
 
 async def _settle_from_receipt(
@@ -325,22 +161,14 @@ async def _settle_from_receipt(
     action: ControlActionModel,
     *,
     fingerprint: str,
-    checkpoint_tuple: object | None,
+    checkpoint: CheckpointRead,
 ) -> bool:
     """Settle only when checkpoint truth carries this request and fingerprint."""
-    if _checkpoint_receipt(checkpoint_tuple, action.request_id or "") != fingerprint:
+    if _checkpoint_receipt(checkpoint, action.request_id or "") != fingerprint:
         return False
     if action.applied_at is not None:
         return True
-    settled = False
-    if action.claim_token:
-        settled = await settle_control_action_lease(
-            db,
-            action.id,
-            claim_token=action.claim_token,
-        )
-    else:
-        settled = await mark_control_action_applied(db, action.id) is not None
+    settled = await _settle_accepted_action(db, action)
     if settled:
         await db.commit()
     return settled
@@ -352,9 +180,11 @@ def _result(
     accepted: bool = True,
     applied: bool | None = None,
     dispatched: bool = False,
-    error: _ResultError | None = None,
-) -> ClarificationResult:
-    return ClarificationResult(
+    error_detail: str | None = None,
+    error_status_code: int | None = None,
+    failure_type: FailureType | None = None,
+) -> ControlActionOutcome:
+    return ControlActionOutcome(
         request_id=action.request_id or "",
         thread_id=action.thread_id,
         accepted=accepted,
@@ -363,9 +193,9 @@ def _result(
         action_id=action.id,
         idempotency_key=action.idempotency_key,
         dispatched=dispatched,
-        error_detail=error.detail if error else None,
-        error_status_code=error.status_code if error else None,
-        failure_type=error.failure_type if error else None,
+        error_detail=error_detail,
+        error_status_code=error_status_code,
+        failure_type=failure_type,
     )
 
 
@@ -373,23 +203,22 @@ async def _replay_existing_action(
     db: AsyncSession,
     existing: ControlActionModel,
     fingerprint: str,
-    checkpoint_snapshot: object | None,
+    checkpoint: CheckpointRead,
     parked_matches: bool,
-) -> ClarificationResult | None:
+) -> ControlActionOutcome | None:
     stored = _stored_resolution(existing)
     if stored is None or clarification_resolution_fingerprint(stored) != fingerprint:
         return _result(
             existing,
             accepted=False,
-            error=_ResultError(
-                "A different clarification resolution is already accepted", 409
-            ),
+            error_detail=_RESOLUTION_CONFLICT,
+            error_status_code=409,
         )
     if await _settle_from_receipt(
         db,
         existing,
         fingerprint=fingerprint,
-        checkpoint_tuple=checkpoint_snapshot,
+        checkpoint=checkpoint,
     ):
         await db.refresh(existing)
         return _result(existing, applied=True)
@@ -409,7 +238,7 @@ def _invalid_parked_answers(
     resolution: ClarificationResolution,
     thread_id: str,
     request_id: str,
-) -> ClarificationResult | None:
+) -> ControlActionOutcome | None:
     if (
         parked is None
         or parked.request_id != request_id
@@ -419,25 +248,19 @@ def _invalid_parked_answers(
     violations = validate_clarification_answers(parked, resolution.answers)
     if not violations:
         return None
-    return ClarificationResult(
+    return ControlActionOutcome(
         request_id=request_id,
         thread_id=thread_id,
-        accepted=False,
-        applied=False,
-        action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
         error_detail="; ".join(violations),
         error_status_code=422,
     )
 
 
-def _run_not_found(request_id: str, thread_id: str) -> ClarificationResult:
-    return ClarificationResult(
+def _run_not_found(request_id: str, thread_id: str) -> ControlActionOutcome:
+    return ControlActionOutcome(
         request_id=request_id,
         thread_id=thread_id,
-        accepted=False,
-        applied=False,
-        action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-        error_detail="Run not found",
+        error_detail=RUN_NOT_FOUND,
         error_status_code=404,
     )
 
@@ -449,7 +272,7 @@ async def respond_to_clarification(
     request_id: str,
     resolution: ClarificationResolution,
     runtime: ClarificationRuntime,
-) -> ClarificationResult:
+) -> ControlActionOutcome:
     """Reserve, lease, and dispatch one typed clarification resolution.
 
     The service owns its transaction boundary.  A fresh competing dispatcher
@@ -466,14 +289,16 @@ async def respond_to_clarification(
     # The checkpoint read is remote I/O, so it happens before the durable
     # transaction opens: holding the write lock across it would block every
     # other writer for the length of a checkpoint round trip.
-    checkpoint_snapshot = await read_run_snapshot(checkpointer, thread_id)
-    parked = pending_clarification(checkpoint_snapshot, thread_id=thread_id)
+    checkpoint = await read_latest_checkpoint(checkpointer, thread_id)
+    # A checkpoint that cannot be projected reads as no pending clarification,
+    # as an absent one does, so the answer path refuses rather than failing.
+    parked = pending_clarification(project_checkpoint_read(checkpoint, thread_id))
     attempt = _ClarificationAttempt(
         thread_id=thread_id,
         request_id=request_id,
         resolution=resolution,
         runtime=runtime,
-        checkpoint_snapshot=checkpoint_snapshot,
+        checkpoint=checkpoint,
         parked=parked,
     )
 
@@ -496,7 +321,7 @@ class _ClarificationAttempt:
     request_id: str
     resolution: ClarificationResolution
     runtime: ClarificationRuntime
-    checkpoint_snapshot: CheckpointTuple | None
+    checkpoint: CheckpointRead
     parked: ClarificationRequest | None
 
     @property
@@ -507,25 +332,22 @@ class _ClarificationAttempt:
 
 async def _respond_under_write_lock(
     db: AsyncSession, attempt: _ClarificationAttempt
-) -> ClarificationResult:
+) -> ControlActionOutcome:
     thread = await get_thread(db, attempt.thread_id)
     if thread is None:
         return _run_not_found(attempt.request_id, attempt.thread_id)
 
     fingerprint = clarification_resolution_fingerprint(attempt.resolution)
-    idempotency_key = _idempotency_key(attempt.request_id)
+    idempotency_key = clarification_response_action_key(attempt.request_id)
     existing = await get_control_action_by_idempotency_key(
         db,
         thread_id=attempt.thread_id,
         idempotency_key=idempotency_key,
     )
     if existing is None and not attempt.is_parked:
-        return ClarificationResult(
+        return ControlActionOutcome(
             request_id=attempt.request_id,
             thread_id=attempt.thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             error_detail="Clarification request is not pending for this run",
             error_status_code=404,
         )
@@ -541,7 +363,7 @@ async def _respond_under_write_lock(
             db,
             existing,
             fingerprint,
-            attempt.checkpoint_snapshot,
+            attempt.checkpoint,
             attempt.is_parked,
         )
         if replay is not None:
@@ -564,7 +386,7 @@ async def _respond_under_write_lock(
 
 async def _claim_and_dispatch(
     db: AsyncSession, thread: ThreadModel, context: _ClaimContext
-) -> ClarificationResult:
+) -> ControlActionOutcome:
     # ``prepare_control_action_claim`` rolls back the caller's session when this request
     # loses a concurrent insert.  SQLAlchemy expires every loaded ORM instance
     # on that rollback, so all thread fields needed after the election must be
@@ -572,46 +394,23 @@ async def _claim_and_dispatch(
     # async I/O and raise MissingGreenlet.
     thread_status = thread.status
     write_expectation = thread_write_expectation(thread)
-    worker_generation = thread.repair_generation
-    team_preset = thread.team_preset
-    workspace_root = dispatchable_workspace_root(thread.thread_metadata)
-    if workspace_root is None:
-        return ClarificationResult(
+    dispatch = await build_followon_dispatch(
+        db,
+        thread_id=context.thread_id,
+        thread_metadata=thread.thread_metadata,
+        action=ControlActionType.RESUME,
+        option_id=context.payload,
+    )
+    if isinstance(dispatch, DispatchRefusal):
+        # Nothing was claimed, so the refusal carries its typed failure alone
+        # and the one protocol mapping serves it, as it does for every verb.
+        return ControlActionOutcome(
             request_id=context.request_id,
             thread_id=context.thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            error_detail="The accepted run's project is unavailable",
-            error_status_code=409,
-            failure_type=FailureType.NO_ACTIVE_PROJECT,
-        )
-    try:
-        graph_definition = await read_accepted_graph_definition(db, context.thread_id)
-        team_preset = graph_definition.team_id
-        execution_authority = resolve_execution_authority(thread.thread_metadata)
-    except (ExecutionAuthorityError, ValueError) as exc:
-        return ClarificationResult(
-            request_id=context.request_id,
-            thread_id=context.thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            error_detail=str(exc),
-            error_status_code=409,
-            failure_type=FailureType.INCOMPATIBLE_STATE,
+            error_detail=dispatch.reason,
+            failure_type=dispatch.failure_type,
         )
 
-    dispatch = DispatchRequest(
-        action=to_dispatch_action(ControlActionType.RESUME),
-        thread_id=context.thread_id,
-        option_id=context.payload,
-        team_preset=team_preset,
-        graph_definition=graph_definition,
-        workspace_root=workspace_root,
-        recursion_limit=context.runtime.recursion_limit,
-        model_assignment=execution_authority.model_assignment,
-    )
     claim = await prepare_control_action_claim(
         db,
         request=ControlActionClaimRequest(
@@ -622,22 +421,20 @@ async def _claim_and_dispatch(
             request_id=context.request_id,
             payload=freeze_accepted_input(dispatch, intent=context.payload),
             dispatch_id=dispatch.dispatch_id,
-            worker_generation=worker_generation,
-            recovery_timeout_seconds=graph_definition.run_timeout_seconds,
+            recovery_timeout_seconds=(
+                dispatch.require_graph_definition().run_timeout_seconds
+            ),
         ),
     )
     if not claim.authority_matches:
-        return ClarificationResult(
+        return ControlActionOutcome(
             request_id=context.request_id,
             thread_id=context.thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             error_status_code=409,
             failure_type=FailureType.INCOMPATIBLE_STATE,
             error_detail="Accepted action no longer owns the current run",
         )
-    action = await db.get(ControlActionModel, claim.action_id, populate_existing=True)
+    action = await get_control_action(db, claim.action_id, refresh=True)
     if action is None:
         raise RuntimeError("claimed clarification action disappeared")
     result = await _claimed_action_result(db, action, claim, context, thread_status)
@@ -659,14 +456,13 @@ async def _claimed_action_result(
     claim: ControlActionClaim,
     context: _ClaimContext,
     thread_status: str,
-) -> ClarificationResult | None:
+) -> ControlActionOutcome | None:
     if not claim.payload_matches:
         return _result(
             action,
             accepted=False,
-            error=_ResultError(
-                "A different clarification resolution is already accepted", 409
-            ),
+            error_detail=_RESOLUTION_CONFLICT,
+            error_status_code=409,
         )
 
     if claim.applied or action.applied_at is not None:
@@ -676,7 +472,8 @@ async def _claimed_action_result(
         result = _result(
             action,
             accepted=False,
-            error=_ResultError("Clarification application cannot be confirmed", 409),
+            error_detail="Clarification application cannot be confirmed",
+            error_status_code=409,
         )
         await db.rollback()
         return result
@@ -684,7 +481,8 @@ async def _claimed_action_result(
         result = _result(
             action,
             accepted=False,
-            error=_ResultError("Run is not active", 409),
+            error_detail="Run is not active",
+            error_status_code=409,
         )
         await db.rollback()
         return result
@@ -701,27 +499,10 @@ async def _dispatch_claimed(
     claim: ControlActionClaim,
     dispatch: DispatchRequest,
     context: _DispatchContext,
-) -> ClarificationResult:
-    dispatch = dispatch.model_copy(update={"dispatch_id": claim.dispatch_id})
-    await finalize_control_action_acceptance(db, claim)
-    dispatch = await bind_graph_action_receipt(db, dispatch)
-    outcome = await safe_dispatch(
-        context.runtime.worker_client,
-        dispatch,
-        context.runtime.circuit_breaker,
-        context.runtime.worker_spawner,
-        trace_headers=context.runtime.trace_headers,
-    )
-    if not outcome.success:
-        _policy, failure_type = evaluate_dispatch_failure(outcome.failure_type)
-        detail = outcome.detail or "Worker dispatch failed"
-        if failure_type is None:
-            raise RuntimeError("failed dispatch carries no failure type")
-        await begin_write_transaction(db)
-        settlement = await record_dispatch_failure(
-            db, claim, failure_type, detail=detail
-        )
-        if settlement is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
+) -> ControlActionOutcome:
+    failure = await dispatch_leased(db, claim, dispatch, context.runtime.transport)
+    if failure is not None:
+        if failure.disposition is DispatchFailureDisposition.DEFINITE_NON_DELIVERY:
             # A released claim means the worker certainly scheduled no task, so
             # the answer demonstrably did not reach the parked node. The run is
             # untouched by that - it is still parked on the same questionnaire,
@@ -732,148 +513,30 @@ async def _dispatch_claimed(
             await record_undelivered_dispatch(
                 db,
                 context.thread_id,
-                reason=f"Clarification resume not delivered: {detail}",
+                reason=f"Clarification resume not delivered: {failure.detail}",
             )
         await db.commit()
+        # No status is chosen here. A dispatch outcome carries its typed failure
+        # and nothing else, so the one protocol mapping decides what every verb
+        # that met the same outcome serves for it.
         return _result(
             action,
-            error=_ResultError(
-                detail,
-                503 if failure_type is FailureType.CIRCUIT_OPEN else 502,
-                failure_type,
-            ),
+            error_detail=failure.detail,
+            failure_type=failure.failure_type,
         )
 
     # A very fast worker may already have checkpointed the receipt before its HTTP
     # acknowledgement reaches us. Settle opportunistically, but never infer
     # application merely from the acknowledgement.
-    latest_checkpoint = await read_run_snapshot(
+    latest_checkpoint = await read_latest_checkpoint(
         context.runtime.checkpointer, context.thread_id
     )
     applied = await _settle_from_receipt(
         db,
         action,
         fingerprint=context.fingerprint,
-        checkpoint_tuple=latest_checkpoint,
+        checkpoint=latest_checkpoint,
     )
     if applied:
         await db.refresh(action)
     return _result(action, applied=applied, dispatched=True)
-
-
-async def reconcile_clarification_pause(
-    db: AsyncSession, *, thread_id: str, checkpointer: Checkpointer
-) -> None:
-    """Make the run's status say whether its checkpoint is parked on a question.
-
-    The checkpoint owns the pause and the status is its durable projection: a
-    parked run reads ``input_required`` and refuses follow-up turns, and a
-    resumed one reads ``running`` again. A relayed frame only prompts this read,
-    so a stale or replayed nudge changes nothing the checkpoint does not show.
-
-    The witness is taken before the checkpoint read, so an election that loses
-    to a writer that moved in between changes nothing. The status moves under
-    the current writer's own identity because the pause is a fact about the
-    dispatch that raised it, not a new control action.
-    """
-    thread = await get_thread(db, thread_id)
-    expectation = thread_write_expectation(thread) if thread is not None else None
-    await db.rollback()
-    if (
-        expectation is None
-        or expectation.authority.action_type not in _GRAPH_RUN_WRITERS
-    ):
-        return
-    recorded_as_parked = expectation.status is ThreadStatus.INPUT_REQUIRED
-    if not recorded_as_parked and expectation.status not in _PARKABLE_STATUSES:
-        return
-    snapshot = await read_run_snapshot(checkpointer, thread_id)
-    if snapshot is None:
-        # An unreadable checkpoint proves neither a pause nor its end.
-        return
-    parked = pending_clarification(snapshot, thread_id=thread_id) is not None
-    if parked == recorded_as_parked:
-        return
-    await begin_write_transaction(db)
-    try:
-        if not parked and await get_pending_permission_requests(
-            db, thread_id=thread_id
-        ):
-            # The run is held by a permission request, which owns its own exit.
-            return
-        election = await elect_thread_status(
-            db,
-            thread_id,
-            expectation=expectation,
-            status=ThreadStatus.INPUT_REQUIRED if parked else ThreadStatus.RUNNING,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=expectation.authority.action_type,
-                action_receipt_id=expectation.authority.action_receipt_id,
-            ),
-        )
-        if election.outcome is ThreadStatusElectionOutcome.WON:
-            await db.commit()
-    finally:
-        if db.in_transaction():
-            await db.rollback()
-
-
-async def redrive_clarification_actions(
-    session_factory: async_sessionmaker[AsyncSession],
-    *,
-    runtime: ClarificationRuntime,
-) -> ClarificationRecoverySummary:
-    """Settle receipted actions and redrive expired parked leases after restart."""
-    async with session_factory() as db:
-        rows = (
-            (
-                await db.execute(
-                    select(ControlActionModel).where(
-                        ControlActionModel.idempotency_key.like(
-                            f"{_IDEMPOTENCY_PREFIX}%"
-                        ),
-                        ControlActionModel.applied_at.is_(None),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-
-    applied = dispatched = deferred = conflicted = 0
-    for row in rows:
-        resolution = _stored_resolution(row)
-        if resolution is None or row.request_id is None:
-            conflicted += 1
-            continue
-        async with session_factory() as db:
-            result = await respond_to_clarification(
-                db,
-                thread_id=row.thread_id,
-                request_id=row.request_id,
-                resolution=resolution,
-                runtime=runtime,
-            )
-            # The receipt that would have resumed the status may have been lost
-            # with the previous process, so restart re-projects the pause too.
-            await reconcile_clarification_pause(
-                db, thread_id=row.thread_id, checkpointer=runtime.checkpointer
-            )
-        if result.applied:
-            applied += 1
-        elif result.dispatched:
-            dispatched += 1
-        elif result.error_status_code is not None:
-            conflicted += 1
-        else:
-            deferred += 1
-    summary = ClarificationRecoverySummary(
-        examined=len(rows),
-        applied=applied,
-        dispatched=dispatched,
-        deferred=deferred,
-        conflicted=conflicted,
-    )
-    logger.info("Clarification recovery pass complete: %s", summary)
-    return summary

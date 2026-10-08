@@ -13,12 +13,13 @@ from typing import Any
 
 import pytest
 
-from ._support.catalog_selection import (
-    IN_PROCESS_PROVIDER_IDS,
+from ...providers.provider_catalog import SELECTION_SCHEMA_VERSION
+from ..catalog import (
     NoSelectableLaneError,
     in_process_selection,
     named_lane_selection,
 )
+from ..lanes import LANES
 
 
 def _lane(
@@ -45,7 +46,6 @@ def _payload(*lanes: dict[str, Any]) -> dict[str, Any]:
 
 
 CODEX = _lane("codex", "codex-app-server")
-MOCK = _lane("mock", "in-process-mock", entries=("mock-1", "mock-2"))
 DETERMINISTIC = _lane("deterministic", "in-process-deterministic", entries=("det-1",))
 
 
@@ -87,33 +87,17 @@ def test_the_dangerous_combination_has_no_callable_form() -> None:
     assert named["provider_id"].default is inspect.Parameter.empty
 
 
-def test_the_preferred_in_process_lane_wins_when_served() -> None:
-    """A preset pinned to mock must not be answered by the deterministic lane.
-
-    The lanes are not interchangeable - mock replays a tape, deterministic
-    answers fixed content - so a run answered by the wrong one completes while
-    exercising something else. That substitution looks green, which is what makes
-    it worth a test.
-    """
-    selection = in_process_selection(
-        _payload(DETERMINISTIC, MOCK), prefer_provider_id="mock"
-    )
-    assert selection["provider_id"] == "mock"
-    assert selection["entry_id"] == "mock-1"
-
-
-def test_an_unserved_preference_falls_back_within_the_in_process_lanes() -> None:
-    """A preference that cannot be honoured degrades, but never off-lane."""
-    selection = in_process_selection(
-        _payload(CODEX, DETERMINISTIC), prefer_provider_id="mock"
-    )
+def test_a_served_in_process_lane_is_selected_over_an_external_one() -> None:
+    """With both served, the in-process lane is the one selected, on its entry."""
+    selection = in_process_selection(_payload(CODEX, DETERMINISTIC))
+    assert selection["provider_id"] in {lane.provider.value for lane in LANES}
     assert selection["provider_id"] == "deterministic"
-    assert selection["provider_id"] in IN_PROCESS_PROVIDER_IDS
+    assert selection["entry_id"] == "det-1"
 
 
 def test_an_unselectable_in_process_lane_is_not_used() -> None:
     """Health is checked, not assumed, even for a lane that bills nothing."""
-    unhealthy = _lane("mock", "in-process-mock", selectable=False)
+    unhealthy = _lane("deterministic", "in-process-deterministic", selectable=False)
     with pytest.raises(NoSelectableLaneError):
         in_process_selection(_payload(unhealthy))
 
@@ -121,7 +105,9 @@ def test_an_unselectable_in_process_lane_is_not_used() -> None:
 def test_a_lane_advertising_no_models_is_not_selectable() -> None:
     """Healthy-but-empty is refused: run start would refuse it too."""
     with pytest.raises(NoSelectableLaneError):
-        in_process_selection(_payload(_lane("mock", "in-process-mock", entries=())))
+        in_process_selection(
+            _payload(_lane("deterministic", "in-process-deterministic", entries=()))
+        )
 
 
 def test_a_named_lane_carries_the_revision_the_catalog_just_served() -> None:
@@ -139,7 +125,7 @@ def test_a_named_lane_carries_the_revision_the_catalog_just_served() -> None:
         controls={"effort": "low"},
     )
     assert selection == {
-        "schema_version": 1,
+        "schema_version": SELECTION_SCHEMA_VERSION,
         "provider_id": "codex",
         "execution_mode": "codex-app-server",
         "catalog_revision": "rev-99",
@@ -162,13 +148,13 @@ def test_a_named_entry_the_lane_no_longer_advertises_is_refused() -> None:
 def test_a_named_lane_that_is_not_served_is_refused_with_what_was() -> None:
     with pytest.raises(NoSelectableLaneError) as refusal:
         named_lane_selection(
-            _payload(MOCK),
+            _payload(DETERMINISTIC),
             provider_id="codex",
             execution_mode="codex-app-server",
             entry_id="entry-a",
         )
     assert "not uniquely served" in str(refusal.value)
-    assert "mock/in-process-mock" in str(refusal.value)
+    assert "deterministic/in-process-deterministic" in str(refusal.value)
 
 
 def test_a_named_lane_that_is_served_but_unselectable_is_refused() -> None:

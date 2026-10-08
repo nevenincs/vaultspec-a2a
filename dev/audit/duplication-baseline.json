@@ -1,0 +1,38 @@
+{
+  "categories": {
+    "test-arrangement-rhyme": "Two tests of one surface, or two phases of one scenario, sharing an arrange/act block above jscpd's token threshold. This repository's own policy already treats this as the expected shape of test code, not debt (see the sibling AST structural-duplication guard's _ACCEPTED_TESTS): collapsing it into one parametrized case would hide which configuration or phase failed.",
+    "migration-revision-boilerplate": "Each Alembic revision under database/migrations/versions/ is an immutable record of one schema change. The shared column, index and CHECK scaffolding across revisions is the migration convention, not debt: making a later revision depend on an earlier one's helper would break replay independence."
+  },
+  "accepted": [
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 24,
+      "first": {"path": "src/vaultspec_a2a/api/tests/test_clarification_edge.py", "start": 81},
+      "second": {"path": "src/vaultspec_a2a/api/tests/test_clarification_relay_sse.py", "start": 91},
+      "fragment_sha256": "d6afd90d009f1b62830cb995ae6cbd3a98831cafa32eb32c01cfc6fc1755d3e5",
+      "note": "Both build the minimal clarification-node-pair graph (producer + proceed + gate, one question set) to park a run, but for different transports: test_clarification_edge parks directly via graph.ainvoke on the app's own checkpointer, while test_clarification_relay_sse feeds the same park through a real worker producer and worker bridge over a real socket so the relayed SSE frame is genuine. A shared helper would couple the direct-invoke test module to the socket-relay test module's transport plumbing for one 24-line graph-builder; each already folds its own in-module duplication (see the removed same-file entries this round)."
+    },
+    {
+      "category": "test-arrangement-rhyme",
+      "lines": 27,
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_verdict_subscriber.py", "start": 135},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py", "start": 511},
+      "fragment_sha256": "9f06df4ea6776125c3cfbb38e5dd87245a5b0da19c15a1f0b98541c30a90bcf1",
+      "note": "Both seed a thread parked at a document-approval gate with an authoring checkpoint, but _seed_parked_thread (non-live) takes a general _ParkedThreadSeed (many proposal/changeset ids, optional gate_pending, an explicit checkpointer.setup()) while _seed_parked_gate (live) is deliberately single-proposal-shaped to match the live round-trip scenarios and skips the setup call its suite's checkpointer fixture already does. Merging them would make the live-engine suite's seed shape depend on the deterministic suite's more general one, or force the deterministic suite to carry live-only fields it never uses."
+    },
+    {
+      "category": "migration-revision-boilerplate",
+      "lines": 31,
+      "first": {"path": "src/vaultspec_a2a/database/migrations/versions/0006_task_queue_entries.py", "start": 22},
+      "second": {"path": "src/vaultspec_a2a/database/migrations/versions/0026_remediation_schema_retirement.py", "start": 291},
+      "fragment_sha256": "907eec36400d48c087642e6f1eb68477ea2f04d15b87cad34af62f86952f3f6b"
+    },
+    {
+      "category": "migration-revision-boilerplate",
+      "lines": 38,
+      "first": {"path": "src/vaultspec_a2a/database/migrations/versions/0008_active_run_selectors.py", "start": 101},
+      "second": {"path": "src/vaultspec_a2a/database/migrations/versions/0009_active_run_partial_indexes.py", "start": 102},
+      "fragment_sha256": "3f08cc2a926669a984c6654664d3588e31b6f884ae61338250d137f7ced9a5a5"
+    }
+  ]
+}

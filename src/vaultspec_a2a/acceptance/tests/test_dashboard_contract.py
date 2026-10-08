@@ -2,8 +2,7 @@
 
 Every scenario drives the versioned public surface of one real authenticated
 gateway - a real gateway process, a real gateway-owned worker, and real SQLite
-control and checkpoint stores - behind a real gateway service credential. None
-uses the test-only authentication bypass.
+control and checkpoint stores - behind a real gateway service credential.
 
 These certify the provider-INDEPENDENT gateway contract: run admission, run
 creation and addressability, the status snapshot's shape, cancellation routing,
@@ -31,14 +30,12 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...testing.tests._support.sse import read_frame
+from ...testing import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET, read_frame
 from ...thread.enums import (
     TERMINAL_STATUS_VALUES,
     TERMINAL_STATUSES,
     ThreadStatus,
 )
-from ._harness import DEFAULT_REQUIRED_ROLE, DEFAULT_TEAM_PRESET
-from .conftest import wait_for_terminal
 
 if TYPE_CHECKING:
     from ._harness import CertifiedGateway
@@ -47,7 +44,7 @@ if TYPE_CHECKING:
 def test_authenticated_prepare_reserves_without_run_or_token(
     gateway: CertifiedGateway,
 ) -> None:
-    """S78: a prepare reserves capacity but mints neither run nor token.
+    """A prepare reserves capacity but mints neither run nor token.
 
     Discriminating: the response carries a reservation, a non-secret lease, and
     the validated required-role set, but NO run id and NO actor tokens, and
@@ -56,7 +53,7 @@ def test_authenticated_prepare_reserves_without_run_or_token(
     a real gate rather than a disabled one.
     """
     run_id = "run-contract-prepare"
-    response = gateway.prepare(run_id)
+    response = gateway.runs.prepare(run_id)
     assert response.status_code == 201, response.text
     body = response.json()
 
@@ -87,7 +84,7 @@ def test_authenticated_prepare_reserves_without_run_or_token(
     assert unauth.status_code == 401, unauth.text
 
     # Keep the shared gateway's bounded capacity clean for later scenarios.
-    released = gateway.release(run_id, body["reservation_id"])
+    released = gateway.runs.release(run_id, body["reservation_id"])
     assert released.status_code == 201, released.text
     assert released.json()["released"] is True
 
@@ -95,14 +92,14 @@ def test_authenticated_prepare_reserves_without_run_or_token(
 def test_authenticated_start_creates_a_dispatched_run(
     gateway: CertifiedGateway,
 ) -> None:
-    """S170: a one-shot start creates a durable run that discovery then finds.
+    """A one-shot start creates a durable run that discovery then finds.
 
     Discriminating against the prepare above: start returns a run id and that run
     is immediately addressable through run-status (HTTP 200), whereas a prepare
     created nothing addressable. An unauthenticated start is refused 401.
     """
     run_id = "run-contract-start"
-    response = gateway.start(run_id)
+    response = gateway.runs.start(run_id)
     assert response.status_code == 201, response.text
     body = response.json()
 
@@ -147,7 +144,7 @@ def test_authenticated_start_creates_a_dispatched_run(
 def test_authenticated_status_snapshot_is_coherent_or_a_real_not_found(
     gateway: CertifiedGateway,
 ) -> None:
-    """S171: status is a coherent snapshot for a real run and a real 404 otherwise.
+    """Status is a coherent snapshot for a real run and a real 404 otherwise.
 
     Discriminating on snapshot SHAPE, which is independent of a run's eventual
     outcome: a real run resolves to a snapshot whose run id, topology preset, and
@@ -158,10 +155,10 @@ def test_authenticated_status_snapshot_is_coherent_or_a_real_not_found(
     literal.
     """
     run_id = "run-contract-status"
-    started = gateway.start(run_id)
+    started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
 
-    snapshot = wait_for_terminal(gateway, run_id)
+    snapshot = gateway.wait_for_status(run_id)
     assert snapshot["run_id"] == run_id
     assert snapshot["topology"]["team_preset"] == DEFAULT_TEAM_PRESET
     assert any(role["agent_id"] == DEFAULT_REQUIRED_ROLE for role in snapshot["roles"])
@@ -177,14 +174,14 @@ def test_authenticated_status_snapshot_is_coherent_or_a_real_not_found(
 def test_cancel_verb_routes_authenticated_and_reports_real_not_found(
     gateway: CertifiedGateway,
 ) -> None:
-    """S172: the versioned cancel verb is attach-gated and 404s an absent run.
+    """The versioned cancel verb is attach-gated and 404s an absent run.
 
     Discriminating on the provider-independent half of the cancel contract: an
     authenticated cancel of an unrelated run id returns a real 404 (not a blanket
     acceptance), and the identical cancel without the attach credential is refused
     401 - so the verb is genuinely routed and gated. Driving a live run all the
     way to a terminal CANCELLED status needs a run held non-terminal by the
-    deterministic provider and is certified in the Compose service suite.
+    deterministic provider and is certified in the service suite.
     """
     absent = gateway.cancel("run-contract-cancel-absent", idempotency_key="cancel-1")
     assert absent.status_code == 404, absent.text
@@ -213,7 +210,7 @@ async def _open_terminal_frame(
 async def test_authenticated_progress_stream_relays_bounded_lifecycle_frame(
     gateway: CertifiedGateway,
 ) -> None:
-    """S173: the authenticated progress channel opens, is gated, and relays a frame.
+    """The authenticated progress channel opens, is gated, and relays a frame.
 
     Discriminating: an unauthenticated stream open is refused 401; the
     authenticated open returns 200 with the SSE media type and relays the run's
@@ -223,9 +220,9 @@ async def test_authenticated_progress_stream_relays_bounded_lifecycle_frame(
     empty frame cannot pass.
     """
     run_id = "run-contract-progress"
-    started = gateway.start(run_id)
+    started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
-    wait_for_terminal(gateway, run_id)
+    gateway.wait_for_status(run_id)
 
     # The gate is real: an unauthenticated stream open never begins.
     unauth = httpx.get(f"{gateway.base_url}{gateway.stream_path(run_id)}", timeout=30.0)

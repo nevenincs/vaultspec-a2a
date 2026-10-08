@@ -15,6 +15,7 @@ wrong.
 
 from __future__ import annotations
 
+import json
 from collections import OrderedDict
 from collections.abc import Iterator, Mapping
 from types import MappingProxyType
@@ -24,9 +25,11 @@ import pytest
 
 from ..coercion import (
     coerce_int,
+    coerce_nonempty_str,
     coerce_object_list,
     coerce_object_mapping,
     coerce_string_list,
+    decode_json_object,
 )
 
 
@@ -61,6 +64,20 @@ def test_a_fractional_float_is_rejected_rather_than_truncated(value: float) -> N
 def test_every_other_type_is_rejected(value: object) -> None:
     """A numeric string is the dangerous case: int() would accept it."""
     assert coerce_int(value) is None
+
+
+@pytest.mark.parametrize("value", ["a", "feature-tag", " padded ", "   ", "\n"])
+def test_a_non_empty_string_is_returned_exactly_as_given(value: str) -> None:
+    """Never stripped, so whitespace-only text is non-empty and survives intact."""
+    assert coerce_nonempty_str(value) == value
+
+
+@pytest.mark.parametrize(
+    "value", ["", None, 0, 1, False, b"abc", ["a"], {"a": "b"}, object()]
+)
+def test_an_empty_string_or_any_non_string_is_refused(value: object) -> None:
+    """The empty name is absent, and bytes or a number is never converted."""
+    assert coerce_nonempty_str(value) is None
 
 
 class _HandRolledMapping(Mapping[str, object]):
@@ -125,6 +142,46 @@ def test_a_mapping_that_is_not_a_dict_is_refused(value: Mapping[str, object]) ->
 def test_a_non_object_value_is_refused(value: object) -> None:
     """None, scalars, non-string-keyed dicts, and pair-lists are all refused."""
     assert coerce_object_mapping(value) is None
+
+
+def test_decode_json_object_accepts_well_formed_object_text() -> None:
+    """The text-shaped counterpart decodes exactly what the same adapter accepts."""
+    assert decode_json_object('{"a": 1, "b": [2, 3]}') == {"a": 1, "b": [2, 3]}
+
+
+def test_decode_json_object_treats_an_absent_column_as_no_object() -> None:
+    assert decode_json_object(None) is None
+
+
+@pytest.mark.parametrize(
+    "encoded",
+    [
+        "",
+        "not json at all",
+        "{",
+        '{"a": 1',
+        '{"a": 1,}',
+    ],
+)
+def test_decode_json_object_refuses_malformed_json(encoded: str) -> None:
+    assert decode_json_object(encoded) is None
+
+
+@pytest.mark.parametrize(
+    "encoded",
+    ["null", "1", "1.5", "true", '"a string"', "[1, 2, 3]", '[["a", 1]]'],
+)
+def test_decode_json_object_refuses_well_formed_json_that_is_not_an_object(
+    encoded: str,
+) -> None:
+    """Valid JSON that does not decode to a string-keyed object is still refused."""
+    assert decode_json_object(encoded) is None
+
+
+def test_decode_json_object_narrows_like_an_already_parsed_value() -> None:
+    """A decoded object and an equivalent in-memory ``dict`` narrow identically."""
+    encoded = '{"a": 1, "b": {"c": 2}}'
+    assert decode_json_object(encoded) == coerce_object_mapping(json.loads(encoded))
 
 
 def test_a_plain_list_passes_through_as_a_copy() -> None:

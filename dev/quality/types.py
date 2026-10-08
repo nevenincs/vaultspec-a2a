@@ -41,18 +41,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from dev.exit_codes import FAILED, OK, TOOL_BROKEN
-from dev.paths import repo_relative
+from dev.paths import PYTHON_PATHS, repo_relative
 from dev.process import ToolUnavailableError, run_tool
 
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Iterable, Sequence
-
-#: Python trees `ty` is pointed at. Kept identical to ``dev.toolchain``'s
-#: PYTHON_PATHS; the two are asserted equal by this module's guard test rather
-#: than imported, because ``dev.toolchain`` imports the runner and this module
-#: must stay importable from a bare interpreter.
-PYTHON_PATHS: Final[tuple[str, ...]] = ("src", "dev", "docs", "scripts", "packaging")
 
 #: Platforms swept by ``--platforms``.
 PLATFORMS: Final[tuple[str, ...]] = ("linux", "darwin", "win32")

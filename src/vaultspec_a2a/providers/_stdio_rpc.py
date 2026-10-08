@@ -24,7 +24,6 @@ tests; this module is where it would land.
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, TypedDict, Unpack
 
@@ -36,12 +35,19 @@ from ._subprocess import kill_process_tree
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+__all__ = [
+    "OutputBudget",
+    "ProtocolErrorFactory",
+    "drain_stderr",
+    "read_response",
+]
+
 _JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
-MAX_OUTPUT_BYTES: Final = 1_048_576
+_MAX_OUTPUT_BYTES: Final = 1_048_576
 
 
-class OutputBudgetLike(Protocol):
+class _OutputBudgetLike(Protocol):
     """The subset of an output budget this reader charges against."""
 
     def charge(self, size: int) -> None:
@@ -62,7 +68,7 @@ class _ReadResponseOptions(TypedDict):
 
     request_id: int
     timeout: float
-    output_budget: OutputBudgetLike
+    output_budget: _OutputBudgetLike
     max_frames: int
     max_frame_bytes: int
     protocol_error: ProtocolErrorFactory
@@ -80,7 +86,7 @@ class OutputBudget:
     """
 
     protocol_error: ProtocolErrorFactory
-    limit: int = MAX_OUTPUT_BYTES
+    limit: int = _MAX_OUTPUT_BYTES
     consumed: int = 0
 
     def charge(self, size: int) -> None:
@@ -90,25 +96,11 @@ class OutputBudget:
             raise self.protocol_error("discovery output exceeds one MiB")
 
 
-async def cancel_task[T](task: asyncio.Task[T]) -> None:
-    """Cancel *task* and absorb the resulting cancellation.
-
-    Generic in the task's result because the drain tasks it reaps differ in what
-    they return - one accumulates the child's stderr, another discards it - and
-    that difference is irrelevant to cancelling: the result is never read on this
-    path. Pinning it to one concrete type is what pushed a third caller into
-    writing its own copy.
-    """
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
-
-
 async def drain_stderr(
     stderr: asyncio.StreamReader | None,
     process: asyncio.subprocess.Process,
     metadata: Mapping[str, object] | None,
-    output_budget: OutputBudgetLike,
+    output_budget: _OutputBudgetLike,
 ) -> None:
     """Consume the child's stderr against *output_budget*, reaping it on refusal.
 

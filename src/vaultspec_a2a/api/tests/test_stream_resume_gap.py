@@ -18,18 +18,22 @@ import httpx
 import pytest
 from sqlalchemy import text
 
-from ...database.run_event_repository import RunEventStore
-from ...streaming.aggregator import EventAggregator
+from ...database import RunEventStore
+from ...streaming import RelayHub
 from ...streaming.run_event_writer import RunEventWriter
 from ...streaming.subscribers import SequenceAllocation
-from ...testing import settings_override
+from ...testing import (
+    SseReader,
+    record_completed_checkpoint,
+    seed_accepted_thread,
+    serve_on_loopback,
+    settings_override,
+)
 from ...thread.enums import ThreadStatus
 from .._replay_writer_seat import replay_writer_seat
 from .._stream_replay import ResumePosition, replay_window
-from ._sse_reader import SseReader
-from .conftest import _live_server, make_app, seed_run_with_status
-from .test_internal import _record_completed_checkpoint, _seed_accepted_thread
-from .test_stream_resume_replay import _progress_event, _relay, _terminal_event
+from ._relay_events import progress_event, relay_events, terminal_event
+from .conftest import make_app, seed_run_with_status
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -58,36 +62,32 @@ async def test_a_cursor_behind_the_trimmed_window_is_told_where_the_replay_start
     retention has cut to its newest rows - the state any later process, or
     any restart, actually finds.
     """
-    producer, _agg, _worker, _cp = make_app(
-        session_factory, checkpointer, EventAggregator()
-    )
-    viewer, _vagg, _vworker, _vcp = make_app(
-        session_factory, checkpointer, EventAggregator()
-    )
+    producer, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
+    viewer, _vagg, _vworker, _vcp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     with settings_override(stream_replay_window_events=_RETAINED):
         async with (
-            _live_server(producer) as producer_base,
+            serve_on_loopback(producer) as producer_base,
             httpx.AsyncClient(base_url=producer_base, timeout=10.0) as relay_client,
         ):
-            await _relay(
+            await relay_events(
                 relay_client,
-                [_progress_event(_RUN, index) for index in (1, 2, 3, 4, 5)],
+                [progress_event(_RUN, index) for index in (1, 2, 3, 4, 5)],
             )
         assert replay_writer_seat(viewer) is None, (
             "the viewer gateway must serve the table, not another app's ring"
         )
 
         async with (
-            _live_server(viewer) as viewer_base,
+            serve_on_loopback(viewer) as viewer_base,
             httpx.AsyncClient(base_url=viewer_base, timeout=10.0) as client,
             client.stream(
                 "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": f"{_RUN}:1"}
             ) as response,
         ):
             assert response.status_code == 200
-            reader = SseReader(response.aiter_bytes())
+            reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
             notice = await reader.next_frame()
             replayed = [await reader.next_frame() for _ in range(_RETAINED)]
@@ -112,19 +112,19 @@ async def test_a_resume_with_the_feature_off_is_told_the_replay_is_unavailable(
     resumed, which is the failure the notice exists to prevent; refusing the
     stream outright would deny a viewer the live frames it can still have.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     with settings_override(stream_replay_enabled=False):
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=10.0) as client,
             client.stream(
                 "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": "-"}
             ) as response,
         ):
             assert response.status_code == 200
-            reader = SseReader(response.aiter_bytes())
+            reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
             notice = await reader.next_frame()
 
@@ -143,21 +143,21 @@ async def test_a_store_that_cannot_answer_is_reported_rather_than_assumed_empty(
     database the stream reads, which is what a store the gateway cannot serve
     from looks like from here.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
     async with session_factory() as session:
         await session.execute(text("DROP TABLE run_events"))
         await session.commit()
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         client.stream(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": f"{_RUN}:3"}
         ) as response,
     ):
         assert response.status_code == 200
-        reader = SseReader(response.aiter_bytes())
+        reader = SseReader(response.aiter_lines())
         assert (await reader.next_frame()).type == "stream_snapshot"
         notice = await reader.next_frame()
 
@@ -170,18 +170,18 @@ async def test_a_run_with_nothing_retained_cannot_serve_a_cursor(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """A position in a window that no longer exists is answered, not ignored."""
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         client.stream(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": f"{_RUN}:9"}
         ) as response,
     ):
         assert response.status_code == 200
-        reader = SseReader(response.aiter_bytes())
+        reader = SseReader(response.aiter_lines())
         assert (await reader.next_frame()).type == "stream_snapshot"
         notice = await reader.next_frame()
 
@@ -201,38 +201,38 @@ async def test_a_cursor_past_the_runs_mark_is_answered_and_still_goes_live(
     client is not at the head of the window, it is past the end of the run.
     Reported as complete, it reads to the consumer as a successful resume.
 
-    Worse than the silence is what the claim used to buy. The stream seeded
-    its de-duplication mark from the cursor, so every live frame at or below
+    Worse than the silence is what the claim would buy. Seeding the stream's
+    de-duplication mark from the cursor would drop every live frame at or below
     5000 - which is every frame this run will ever send, including its
-    terminal - was dropped as a repeat, and the viewer heartbeated over a
-    run it could see nothing of. The mark is now clamped to what the run has
-    actually produced, so the stream goes live immediately after the notice
-    and closes on the terminal like any other.
+    terminal - as a repeat, and the viewer would heartbeat over a run it could
+    see nothing of. The mark is clamped to what the run has actually produced,
+    so the stream goes live immediately after the notice and closes on the
+    terminal like any other.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     async with session_factory() as session:
-        _, receipt = await _seed_accepted_thread(session, thread_id=_RUN)
+        _, receipt = await seed_accepted_thread(session, thread_id=_RUN)
         await session.commit()
-    await _record_completed_checkpoint(checkpointer, receipt)
+    await record_completed_checkpoint(checkpointer, receipt)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        await _relay(client, [_progress_event(_RUN, index) for index in (1, 2, 3)])
+        await relay_events(client, [progress_event(_RUN, index) for index in (1, 2, 3)])
         async with client.stream(
             "GET",
             f"/v1/runs/{_RUN}/stream",
             headers={"Last-Event-ID": f"{_RUN}:5000"},
         ) as response:
             assert response.status_code == 200
-            reader = SseReader(response.aiter_bytes())
+            reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
             notice = await reader.next_frame()
 
-            await _relay(client, [_progress_event(_RUN, 4)])
+            await relay_events(client, [progress_event(_RUN, 4)])
             live = await reader.next_frame()
-            await _relay(client, [_terminal_event(_RUN, 5)])
+            await relay_events(client, [terminal_event(_RUN, 5)])
             closing = await reader.next_frame()
 
     assert notice.type == "progress_dropped"
@@ -254,21 +254,21 @@ async def test_a_caught_up_resume_is_given_no_notice_at_all(
     The counterweight to every case above: a notice on each routine
     reconnection would train a consumer to ignore the one that matters.
     """
-    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, EventAggregator())
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer, RelayHub())
     await seed_run_with_status(session_factory, _RUN, ThreadStatus.RUNNING)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        await _relay(client, [_progress_event(_RUN, index) for index in (1, 2)])
+        await relay_events(client, [progress_event(_RUN, index) for index in (1, 2)])
         async with client.stream(
             "GET", f"/v1/runs/{_RUN}/stream", headers={"Last-Event-ID": f"{_RUN}:2"}
         ) as response:
             assert response.status_code == 200
-            reader = SseReader(response.aiter_bytes())
+            reader = SseReader(response.aiter_lines())
             assert (await reader.next_frame()).type == "stream_snapshot"
-            await _relay(client, [_progress_event(_RUN, 3)])
+            await relay_events(client, [progress_event(_RUN, 3)])
             following = await reader.next_frame()
 
     assert following.type == "agent_status"

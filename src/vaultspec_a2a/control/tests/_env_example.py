@@ -10,23 +10,31 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ...control.config import Settings
-from ...control.env_registry import ENV_FILE_VARIABLE
+from ...control.env_registry import ENV_FILE_VARIABLE, FOREIGN_PROVIDER_ENV_NAMES
 from ...control.settings_base import field_env_names
+from ...domain_config import DomainSettingsConfig
 from ...protocols.mcp.authoring_stdio import AuthoringBridgeSettings
-from ...testing.session_root import TestSessionSettings
+from ...testing import TestSessionSettings
+
+if TYPE_CHECKING:
+    from pydantic_settings import BaseSettings
 
 __all__ = [
     "DOCUMENTED_BUT_NOT_READ",
     "ENV_EXAMPLE",
     "INTEGRATION_EXAMPLE",
     "REPO_ROOT",
+    "SERVICE_SETTINGS",
     "Assignment",
     "assignments",
     "declared_names",
+    "declaring_class",
     "documented",
     "harness_section",
+    "service_fields",
     "service_section",
     "setting_field_by_name",
 ]
@@ -35,30 +43,31 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 INTEGRATION_EXAMPLE = REPO_ROOT / ".env.integration.example"
 
+#: The settings classes the service reads its environment through: the
+#: infrastructure settings and the behavioural knobs. They declare disjoint
+#: fields, so every name an operator can set belongs to exactly one of them.
+SERVICE_SETTINGS: tuple[type[BaseSettings], ...] = (Settings, DomainSettingsConfig)
+
 #: The heading of the section the repository's own tooling reads. Its names
 #: are held to the harness by ``dev/tests/test_harness_env_names.py``.
 _HARNESS_HEADING = "# Development harness\n"
 
 #: Names the example documents outside service settings, each with the
 #: owner that does. Anything else in the file is a dead or misspelled setting.
-DOCUMENTED_BUT_NOT_READ = {
+_DOCUMENTED_ELSEWHERE = {
     "VAULTSPEC_A2A_ENV_FILE": "the settings loader",
     "VAULTSPEC_A2A_NATIVE_PACKET_COUNT": "native launch environment decoder",
     "VAULTSPEC_A2A_NATIVE_PACKET_0": "native launch environment decoder chunk family",
     # Read by the langsmith SDK straight from the process environment.
-    "LANGSMITH_API_KEY": "langsmith SDK",
     "LANGSMITH_ENDPOINT": "langsmith SDK",
     "LANGSMITH_PROJECT": "langsmith SDK",
     "LANGSMITH_TRACING": "langsmith SDK",
-    "LANGCHAIN_TRACING_V2": "langsmith SDK",
-    # Documented as deliberately absent: the agent scrub strips it.
-    "ANTHROPIC_API_KEY": "documented absence",
     # Substituted by the development fixture Compose file, not the service.
     "JAEGER_OTLP_PORT": "development fixture docker compose",
     "JAEGER_UI_PORT": "development fixture docker compose",
-    # Named in the port table as the place a Postgres port is embedded.
-    "DATABASE_URL": "port table prose",
 }
+
+_NAME = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
 
 _ASSIGNMENT = re.compile(r"^(?P<commented># )?(?P<name>[A-Z][A-Z0-9_]*)=(?P<value>.*)$")
 
@@ -109,25 +118,65 @@ def assignments(text: str) -> list[Assignment]:
     return found
 
 
+def service_fields() -> list[str]:
+    """Every field the service settings declare, infrastructure first."""
+    return [
+        field
+        for settings_cls in SERVICE_SETTINGS
+        for field in settings_cls.model_fields
+    ]
+
+
+def declaring_class(field: str) -> type[BaseSettings]:
+    """The service settings class that declares *field*."""
+    return next(
+        settings_cls
+        for settings_cls in SERVICE_SETTINGS
+        if field in settings_cls.model_fields
+    )
+
+
 def setting_field_by_name() -> dict[str, str]:
     """Map every environment name the service settings read to its field."""
     return {
         name: field
-        for field in Settings.model_fields
-        for name in field_env_names(Settings, field)
+        for field in service_fields()
+        for name in field_env_names(declaring_class(field), field)
     }
+
+
+def _documented_foreign_names() -> dict[str, str]:
+    """The registry's foreign provider names the example mentions.
+
+    The registry declares each as a name the service never reads and the agent
+    scrub strips, so a mention of one needs no owner of its own. A foreign name
+    a settings class does read as an alias is already declared.
+    """
+    text = ENV_EXAMPLE.read_text(encoding="utf-8") if ENV_EXAMPLE.is_file() else ""
+    unread = (FOREIGN_PROVIDER_ENV_NAMES & set(_NAME.findall(text))) - declared_names()
+    return dict.fromkeys(sorted(unread), "foreign provider name, stripped from agents")
 
 
 def declared_names() -> set[str]:
     """Every environment name any settings class in the code reads.
 
-    The service settings, the authoring bridge's child-process contract, and
-    the test harness's own session settings: the three places a name can be
-    declared, so the three a name spelled in the code can legitimately mean.
+    The service settings (infrastructure and behavioural), the authoring
+    bridge's child-process contract, and the test harness's own session
+    settings: the three places a name can be declared, so the three a name
+    spelled in the code can legitimately mean.
     """
     return {ENV_FILE_VARIABLE.env_name} | {
         name
-        for settings_cls in (Settings, AuthoringBridgeSettings, TestSessionSettings)
+        for settings_cls in (
+            *SERVICE_SETTINGS,
+            AuthoringBridgeSettings,
+            TestSessionSettings,
+        )
         for field in settings_cls.model_fields
         for name in field_env_names(settings_cls, field)
     }
+
+
+#: Every name the example documents without a settings class reading it, each
+#: with what accounts for it.
+DOCUMENTED_BUT_NOT_READ = {**_DOCUMENTED_ELSEWHERE, **_documented_foreign_names()}

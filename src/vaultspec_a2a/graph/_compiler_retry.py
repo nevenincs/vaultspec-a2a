@@ -5,7 +5,8 @@ from __future__ import annotations
 from langgraph.errors import GraphRecursionError, NodeTimeoutError
 from langgraph.types import RetryPolicy
 
-from ..providers.conditions import ProviderCondition, condition_is_retryable
+from ..graph.enums import ProviderCondition
+from ..providers.conditions import condition_is_retryable
 from ..thread.errors import (
     DocumentConformanceError,
     ProviderSessionError,
@@ -148,7 +149,7 @@ def _worker_retry_on(exc: Exception) -> bool:
     return _retry_verdict(exc)
 
 
-#: RetryPolicy applied to every worker and supervisor node (T05). Every timing
+#: RetryPolicy applied to every worker and supervisor node. Every timing
 #: field is explicit so a LangGraph dependency update cannot silently widen the
 #: number of attempts or the elapsed retry budget. The served ACP wire exposes
 #: no retry delay and Codex exposes only ``willRetry``, so there is no provider

@@ -3,94 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import json
-import subprocess
-import sys
-import time
-from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-import httpx
-
-from ..testing.ports import free_port
+from ..testing import foreign_worker, free_port
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
     from pathlib import Path
-
-
-_FOREIGN_WORKER_SERVER = """
-import json
-import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
-port = int(sys.argv[1])
-body = json.loads(sys.argv[2])
-log_path = sys.argv[3]
-
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        with open(log_path, "a", encoding="utf-8") as log:
-            log.write("GET " + self.path + "\\n")
-        payload = json.dumps(body).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def do_POST(self):
-        with open(log_path, "a", encoding="utf-8") as log:
-            log.write("POST " + self.path + "\\n")
-        self.send_response(503)
-        self.end_headers()
-
-    def log_message(self, *args):
-        pass
-
-
-HTTPServer(("127.0.0.1", port), Handler).serve_forever()
-"""
-
-
-@contextmanager
-def _worker_on_port(
-    tmp_path: Path, port: int, body: dict[str, Any]
-) -> Generator[tuple[subprocess.Popen[bytes], Path]]:
-    """Run a real worker process serving *body* on ``/health`` at *port*."""
-    log_path = tmp_path / f"worker-requests-{port}.log"
-    log_path.write_text("", encoding="utf-8")
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            _FOREIGN_WORKER_SERVER,
-            str(port),
-            json.dumps(body),
-            str(log_path),
-        ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    try:
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            try:
-                with httpx.Client(timeout=1.0) as client:
-                    if client.get(f"http://127.0.0.1:{port}/health").status_code == 200:
-                        break
-            except httpx.HTTPError:
-                time.sleep(0.05)
-        else:
-            raise AssertionError("worker process never came up")
-        yield proc, log_path
-    finally:
-        with contextlib.suppress(Exception):
-            proc.kill()
-            proc.wait(timeout=10)
 
 
 def test_provenance_mismatch_fails_closed_without_eviction(
@@ -123,8 +41,11 @@ def test_provenance_mismatch_fails_closed_without_eviction(
     )
     body = {"status": "healthy", "gateway_url": foreign_gateway_url}
 
-    with _worker_on_port(tmp_path, port, body) as (worker, request_log):
-        spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=False)
+    request_log = tmp_path / f"worker-requests-{port}.log"
+    with foreign_worker(port, body, request_log=request_log) as worker:
+        spawner = LazyWorkerSpawner(
+            f"http://127.0.0.1:{port}", port, auto_spawn=False, internal_token=None
+        )
         asyncio.run(spawner.ensure_worker())
 
         # Fails closed: the foreign-gateway worker is not adopted as ours.
@@ -154,8 +75,11 @@ def test_matching_provenance_attaches(tmp_path: Path) -> None:
     port = free_port()
     body = {"status": "healthy", "gateway_url": settings.gateway_url}
 
-    with _worker_on_port(tmp_path, port, body) as (worker, request_log):
-        spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=False)
+    request_log = tmp_path / f"worker-requests-{port}.log"
+    with foreign_worker(port, body, request_log=request_log) as worker:
+        spawner = LazyWorkerSpawner(
+            f"http://127.0.0.1:{port}", port, auto_spawn=False, internal_token=None
+        )
         asyncio.run(spawner.ensure_worker())
 
         assert spawner.spawned is True

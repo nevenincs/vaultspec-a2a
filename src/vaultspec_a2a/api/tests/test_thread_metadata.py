@@ -15,9 +15,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...streaming.aggregator import EventAggregator
-from ...testing import session_scratch_dir
-from .conftest import SessionFactory, catalog_run_fields
+from ...streaming import RelayHub
+from ...testing import DEFAULT_TEAM_PRESET, catalog_run_fields, session_scratch_dir
+from .conftest import SessionFactory
 from .conftest import make_app as _make_app_4
 
 
@@ -56,19 +56,13 @@ def _run_workspace():
 def _make_app(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
-    aggregator: EventAggregator | None = None,
-) -> tuple[FastAPI, EventAggregator]:
+    relay_hub: RelayHub | None = None,
+) -> tuple[FastAPI, RelayHub]:
     """Shim: forwards to shared make_app(), dropping extra returns."""
     app, agg, _worker, _cp = _make_app_4(
-        session_factory, checkpointer, aggregator=aggregator
+        session_factory, checkpointer, relay_hub=relay_hub
     )
     return app, agg
-
-
-# A preset that declares no required roles, so a run starts without the
-# engine-minted actor-token bundle the versioned verb demands of every
-# production preset.
-_BUNDLE_FREE_PRESET = "mock-success-single"
 
 
 def _list_summaries(
@@ -126,7 +120,7 @@ class TestCreateThreadWithMetadata:
                 resp = client.post(
                     "/v1/runs",
                     json={
-                        "team_preset": _BUNDLE_FREE_PRESET,
+                        "team_preset": DEFAULT_TEAM_PRESET,
                         "message": "Implement auth flow",
                         "metadata": metadata,
                         "run_id": "thread-meta-01",
@@ -157,7 +151,7 @@ class TestCreateThreadWithMetadata:
             resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "Hello",
                     "metadata": metadata,
                     "run_id": "thread-meta-02",
@@ -188,7 +182,7 @@ class TestCreateThreadWithMetadata:
                 resp = client.post(
                     "/v1/runs",
                     json={
-                        "team_preset": _BUNDLE_FREE_PRESET,
+                        "team_preset": DEFAULT_TEAM_PRESET,
                         "message": "Hello",
                         "metadata": metadata,
                         "run_id": "thread-meta-03",
@@ -218,7 +212,7 @@ class TestCreateThreadWithMetadata:
                 resp1 = client.post(
                     "/v1/runs",
                     json={
-                        "team_preset": _BUNDLE_FREE_PRESET,
+                        "team_preset": DEFAULT_TEAM_PRESET,
                         "message": "First",
                         "metadata": metadata,
                         "run_id": "thread-meta-04",
@@ -232,7 +226,7 @@ class TestCreateThreadWithMetadata:
                 resp2 = client.post(
                     "/v1/runs",
                     json={
-                        "team_preset": _BUNDLE_FREE_PRESET,
+                        "team_preset": DEFAULT_TEAM_PRESET,
                         "message": "Second",
                         "metadata": metadata,
                         "run_id": "thread-meta-05",
@@ -262,7 +256,7 @@ class TestCreateThreadWithMetadata:
             resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "Hello",
                     "title": "Legacy",
                     "run_id": "thread-meta-06",
@@ -302,7 +296,7 @@ class TestListThreadsWithMetadata:
                 client.post(
                     "/v1/runs",
                     json={
-                        "team_preset": _BUNDLE_FREE_PRESET,
+                        "team_preset": DEFAULT_TEAM_PRESET,
                         "message": "Hello",
                         "metadata": metadata,
                         "run_id": "thread-meta-07",
@@ -329,7 +323,7 @@ class TestListThreadsWithMetadata:
             client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "Hello",
                     "title": "Legacy",
                     "run_id": "thread-meta-08",
@@ -373,7 +367,7 @@ class TestGetMetadataEndpoint:
                 create_resp = client.post(
                     "/v1/runs",
                     json={
-                        "team_preset": _BUNDLE_FREE_PRESET,
+                        "team_preset": DEFAULT_TEAM_PRESET,
                         "message": "Hello",
                         "metadata": metadata,
                         "run_id": "thread-meta-09",
@@ -415,7 +409,7 @@ class TestGetMetadataEndpoint:
             create_resp = client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _BUNDLE_FREE_PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "Hello",
                     "run_id": "thread-meta-10",
                     **fields,
@@ -487,7 +481,7 @@ class TestAutoDiscovery:
                 create_resp = client.post(
                     "/v1/runs",
                     json={
-                        "team_preset": _BUNDLE_FREE_PRESET,
+                        "team_preset": DEFAULT_TEAM_PRESET,
                         "message": "Hello",
                         "metadata": metadata,
                         "run_id": "thread-meta-11",

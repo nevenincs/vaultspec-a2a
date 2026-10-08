@@ -13,8 +13,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control._worker_health import (
     WorkerState,
-    _build_worker_restart_detail,
-    _worker_stderr_log_path,
+    build_worker_restart_detail,
+    worker_stderr_log_path,
 )
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.health import build_sqlite_fallback_diagnostics
@@ -80,7 +80,7 @@ def test_build_worker_restart_detail_includes_log_tail(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    detail = _build_worker_restart_detail(
+    detail = build_worker_restart_detail(
         returncode=17,
         stderr_log_path=stderr_log,
     )
@@ -94,7 +94,7 @@ def test_worker_stderr_log_path_lives_in_a2a_home() -> None:
     """Gateway-managed worker stderr logs live in the state home's runtime dir."""
     from ...control.config import settings
 
-    log_path = _worker_stderr_log_path(8123)
+    log_path = worker_stderr_log_path(8123)
 
     assert log_path.name == "worker-autospawn-8123.stderr.log"
     assert log_path.parent == settings.a2a_home / "runtime"
@@ -107,6 +107,7 @@ def test_lazy_worker_spawner_avoids_stderr_log_path_when_auto_spawn_disabled() -
         worker_url="http://worker:8001",
         worker_port=8001,
         auto_spawn=False,
+        internal_token=None,
     )
 
     assert spawner.stderr_log_path is None
@@ -118,6 +119,7 @@ def test_worker_watchdog_keeps_stderr_log_path_null_when_auto_spawn_disabled() -
         worker_url="http://worker:8001",
         worker_port=8001,
         auto_spawn=False,
+        internal_token=None,
     )
     app_state = SimpleNamespace()
     worker_state = WorkerState()
@@ -147,7 +149,7 @@ async def test_health_reports_worker_stderr_log_path(
         worker_last_restart_detail="returncode=9; stderr_log=example.log",
         worker_restart_count=1,
         worker_last_restart_reason="process_exited",
-        worker_stderr_log_path=str(_worker_stderr_log_path(8001)),
+        worker_stderr_log_path=str(worker_stderr_log_path(8001)),
     )
     app.state.worker_state = ws
 
@@ -174,8 +176,8 @@ async def test_health_ready_for_adopted_worker_without_heartbeat(
     process (``worker_pid`` None) and no ``worker_last_heartbeat_ts`` (so
     ``worker_connected`` is False). The heartbeat-push gate is authoritative only for
     an owned worker; for an externally-managed one the probe-driven ``worker_status``
-    governs, so readiness must be True. Before the fix the
-    ``worker_spawned and not worker_connected`` term flipped this to not-ready.
+    governs, so readiness must be True: a
+    ``worker_spawned and not worker_connected`` term must not flip it to not-ready.
     """
     app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
     app.state.worker_state = WorkerState(worker_status="up")
@@ -195,7 +197,7 @@ async def test_health_ready_for_adopted_worker_without_heartbeat(
 
 
 def test_build_sqlite_fallback_diagnostics_reports_wal_state(tmp_path: Path) -> None:
-    """SQLite fallback diagnostics should inspect real file-backed journal mode."""
+    """SQLite store diagnostics should inspect real file-backed journal mode."""
     case_dir = tmp_path / "api-test-sqlite-health"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_path = case_dir / "health.db"
@@ -208,16 +210,14 @@ def test_build_sqlite_fallback_diagnostics_reports_wal_state(tmp_path: Path) -> 
             conn.close()
 
     diagnostics = build_sqlite_fallback_diagnostics(
-        database_backend="sqlite",
-        checkpoint_backend="sqlite",
         database_path=db_path,
         checkpoint_path=checkpoint_path,
         busy_timeout_ms=5000,
     )
 
-    assert diagnostics is not None
     assert diagnostics["active"] is True
-    assert diagnostics["production_certifying"] is False
+    assert "production_certifying" not in diagnostics
+    assert "limitations" not in diagnostics
     assert diagnostics["busy_timeout_ms"] == 5000
     db_diag = cast("dict[str, object]", diagnostics["database"])
     assert db_diag["wal_enabled"] is True
@@ -230,14 +230,12 @@ async def test_health_reports_sqlite_fallback_diagnostics(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """GET /health should expose explicit SQLite fallback diagnostics."""
+    """GET /health should expose the SQLite store diagnostics and no Postgres claims."""
     app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
     app.state.worker_status = "up"
     app.state.sqlite_fallback_diagnostics = {
         "active": True,
         "busy_timeout_ms": 5000,
-        "production_certifying": False,
-        "limitations": ["sqlite_fallback_not_production_certifying"],
         "database": {"path": "test.db", "wal_enabled": True, "journal_mode": "wal"},
     }
 
@@ -250,8 +248,10 @@ async def test_health_reports_sqlite_fallback_diagnostics(
     assert resp.status_code == 200
     body = resp.json()
     assert body["sqlite_fallback"]["active"] is True
-    assert body["sqlite_fallback"]["production_certifying"] is False
     assert body["sqlite_fallback"]["database"]["journal_mode"] == "wal"
+    assert "production_certifying" not in body
+    assert "postgres_required" not in body
+    assert all("postgres_required" not in check for check in body["checks"].values())
 
 
 @pytest.mark.asyncio

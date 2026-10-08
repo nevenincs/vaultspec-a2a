@@ -12,26 +12,19 @@ checkpointer - no mocks - and assert the page it returns.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import update
 
-from ...conftest import materialize_schema
 from ...control.thread_listing import list_threads_service
-from ...database import create_thread
+from ...database import ThreadModel, create_thread
+from ...testing import settings_override
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import RepairStatus
 
-
-@pytest_asyncio.fixture
-async def session_factory(tmp_path_factory: pytest.TempPathFactory):
-    case_dir = tmp_path_factory.mktemp("list-service-db")
-    materialize_schema(Path(case_dir / "test.db"))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{case_dir / 'test.db'}")
-    yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    await engine.dispose()
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 class _Checkpointer:
@@ -64,7 +57,6 @@ async def _seed(
                 title=f"thread-{index}",
                 thread_id=f"t{index:02d}",
                 repair_status=RepairStatus.HEALTHY,
-                execution_readiness="healthy",
             )
             ids.append(thread.id)
             await session.commit()
@@ -121,22 +113,43 @@ async def test_an_uncertain_checkpoint_degrades_the_thread(
     """
     await _seed(session_factory, 6)
 
-    from ...domain_config import domain_config
-
-    original = domain_config.thread_list_checkpoint_deadline_seconds
-    domain_config.thread_list_checkpoint_deadline_seconds = 0.05
-    try:
+    with settings_override(thread_list_checkpoint_deadline_seconds=0.05):
         async with session_factory() as session:
             result = await list_threads_service(
                 session, checkpointer=_Checkpointer(present=set(), delay=1.0)
             )
-    finally:
-        domain_config.thread_list_checkpoint_deadline_seconds = original
 
     assert any(
         s.repair_status == RepairStatus.CHECKPOINT_UNAVAILABLE.value
         for s in result.threads
     ), result.threads
+
+
+@pytest.mark.asyncio
+async def test_a_corrupt_repair_status_column_degrades_instead_of_failing_the_page(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """One row with an out-of-vocabulary repair_status must not fail the page.
+
+    Nothing in the schema enforces the column's vocabulary, so a legacy value
+    or an out-of-band write can leave a string RepairStatus does not know.
+    That row must degrade, not take the whole listing down with it.
+    """
+    await _seed(session_factory, 2)
+    async with session_factory() as session:
+        await session.execute(
+            update(ThreadModel)
+            .where(ThreadModel.id == "t00")
+            .values(repair_status="not-a-real-status")
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        result = await list_threads_service(session, checkpointer=None)
+
+    assert result.total == 2
+    corrupted = next(s for s in result.threads if s.thread_id == "t00")
+    assert corrupted.repair_status == RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
 
 
 @pytest.mark.asyncio
@@ -146,11 +159,7 @@ async def test_the_whole_list_stays_bounded_under_a_slow_store(
     """A page of slow-reading threads must not cost the per-read sum."""
     await _seed(session_factory, 10)
 
-    from ...domain_config import domain_config
-
-    original = domain_config.thread_list_checkpoint_deadline_seconds
-    domain_config.thread_list_checkpoint_deadline_seconds = 0.3
-    try:
+    with settings_override(thread_list_checkpoint_deadline_seconds=0.3):
         loop = asyncio.get_running_loop()
         started = loop.time()
         async with session_factory() as session:
@@ -158,7 +167,5 @@ async def test_the_whole_list_stays_bounded_under_a_slow_store(
                 session, checkpointer=_Checkpointer(present=set(), delay=0.5)
             )
         elapsed = loop.time() - started
-    finally:
-        domain_config.thread_list_checkpoint_deadline_seconds = original
 
     assert elapsed < 2.0, f"list took {elapsed:.2f}s; not bounded by the batch deadline"

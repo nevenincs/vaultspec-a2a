@@ -1,15 +1,15 @@
-"""Define domain settings and the process-wide domain configuration.
+"""Define the domain settings and the process-wide domain configuration.
 
-:class:`vaultspec_a2a.domain_config.DomainConfig` represents resolved domain
-configuration. :class:`vaultspec_a2a.domain_config.DomainSettingsConfig`
-defines environment-based settings behavior.
+:class:`vaultspec_a2a.domain_config.DomainSettingsConfig` declares the
+behavioural knobs the domain, streaming, graph and worker layers consume, and
+reads them from the ``VAULTSPEC_A2A_``-prefixed environment and the operator's
+environment file.
 
-:data:`vaultspec_a2a.domain_config.domain_config` reads the environment-based
-settings the first time one of its values is read, not when this module is
-imported.
+:data:`vaultspec_a2a.domain_config.domain_config` reads those settings the
+first time one of its values is read, not when this module is imported.
 
-The settings govern :mod:`vaultspec_a2a.context`, :mod:`vaultspec_a2a.graph`,
-:mod:`vaultspec_a2a.streaming`, and :mod:`vaultspec_a2a.control.config`.
+The infrastructure settings in :mod:`vaultspec_a2a.control.config` declare none
+of these fields, so each knob has exactly one owner and one value in a process.
 """
 
 from pydantic import Field
@@ -21,58 +21,67 @@ from .control.settings_base import (
     built_at_first_use,
     read_configuration,
 )
+from .thread.constants import MAX_SEED_TRANSCRIPT_MESSAGES
 
 
-class DomainConfig(ProjectSettings):
-    """Behavioural knobs consumed by Layer 1 (domain) modules.
+class DomainSettingsConfig(ProjectSettings):
+    """Behavioural knobs consumed by the domain, streaming, graph and worker layers.
 
-    Based on ``BaseSettings`` rather than ``BaseModel`` so that this class and
-    its env-reading subclass declare ``model_config`` with one and the same
-    type. Two pydantic bases that declare it differently are an unresolvable
-    conflict for a subclass of both, and nothing constructs this class directly:
-    the only instance is the ``DomainSettingsConfig`` singleton below.
+    Read through the :data:`domain_config` singleton, which shares its
+    environment and ``.env`` sources with the infrastructure settings without
+    sharing any field with them.
     """
 
-    # -- Event aggregator debounce / buffer --------------------------------
+    model_config = SettingsConfigDict(
+        env_file=ProjectSettings.operator_env_file(),
+        env_file_encoding="utf-8",
+        env_prefix=ENV_PREFIX,
+        extra="ignore",
+        env_ignore_empty=True,
+    )
+
+    # -- Event production, relay queues and checkpoint reads ---------------
 
     tool_call_debounce_seconds: float = Field(
         default=0.100,
-        description="Aggregator: debounce window for ToolCallUpdateEvents (seconds).",
+        description="Producer: debounce window for ToolCallUpdate events (seconds).",
     )
     plan_update_debounce_seconds: float = Field(
         default=0.250,
-        description="Aggregator: debounce window for PlanUpdateEvents (seconds).",
+        description="Producer: debounce window for PlanUpdate events (seconds).",
     )
     chunk_flush_interval_seconds: float = Field(
         default=0.050,
-        description="Aggregator: interval between streaming chunk flushes (seconds).",
+        description="Producer: interval between streaming chunk flushes (seconds).",
     )
     debounce_map_max_entries: int = Field(
         default=1000,
         description=(
-            "Aggregator: maximum debounce-map entries before oldest are evicted."
+            "Producer: maximum debounce-map entries before oldest are evicted."
         ),
     )
     chunk_buffer_max_bytes: int = Field(
         default=4096,
         description=(
-            "Aggregator: maximum bytes buffered per streaming chunk before flush."
+            "Producer: maximum bytes buffered per streaming chunk before flush."
         ),
     )
     tool_arg_truncate_len: int = Field(
         default=1000,
         description=(
-            "Aggregator: maximum length of tool argument strings before truncation."
+            "Producer: maximum length of tool argument strings before truncation."
         ),
     )
     event_queue_maxsize: int = Field(
         default=512,
-        description="Aggregator: asyncio queue depth for outgoing events.",
+        description=(
+            "Relay hub: asyncio queue depth for each subscriber's outgoing events."
+        ),
     )
     max_subscriptions_per_client: int = Field(
         default=512,
         description=(
-            "Aggregator: maximum thread subscriptions a single client may hold. "
+            "Relay hub: maximum thread subscriptions a single client may hold. "
             "The gateway's connection limit bounds how many clients exist; this "
             "bounds the fan-out work each one can demand, since every "
             "subscription is matched against every broadcast event. Zero "
@@ -89,14 +98,15 @@ class DomainConfig(ProjectSettings):
             "caller. Zero disables the limit, which is a deliberate operator "
             "choice rather than the default. Declared here rather than beside "
             "the infrastructure fields because the subscriber registry that this "
-            "bounds lives in the domain layer and must enforce it directly; "
-            "``Settings`` inherits the field, so the operator-facing name and the "
-            "value both stay single-sourced."
+            "bounds lives in the domain layer and must enforce it directly; the "
+            "gateway's early refusal reads the same value from here."
         ),
     )
     aget_state_timeout_seconds: float = Field(
         default=10.0,
-        description="Aggregator: timeout (seconds) for checkpointer aget_state calls.",
+        description=(
+            "Checkpoint reads: timeout (seconds) for checkpointer aget_state calls."
+        ),
     )
     ingest_event_stall_timeout_seconds: float = Field(
         default=90.0,
@@ -116,6 +126,20 @@ class DomainConfig(ProjectSettings):
             "loud and retriable at this value instead of leaving a thread "
             "stuck RUNNING forever with no checkpoint, no error, and no log "
             "line."
+        ),
+    )
+    pending_permission_max_age_seconds: float = Field(
+        default=300.0,
+        ge=0.0,
+        description=(
+            "Worker stream state: how long the in-memory record of a pending "
+            "permission request is kept for a run the worker NO LONGER HOLDS "
+            "(seconds). It bounds nothing else: a run still executing, and a "
+            "run still parked on the request, keep theirs however long the "
+            "human they are waiting for takes, because dropping a held park's "
+            "record lets the next projection of the same unanswered request "
+            "emit a duplicate frame for it. What this collects is the residue "
+            "of a run whose end this worker never saw."
         ),
     )
 
@@ -188,12 +212,6 @@ class DomainConfig(ProjectSettings):
             "Minimum remaining token budget required before mounting any document."
         ),
     )
-    task_queue_pending_horizon: int = Field(
-        default=2,
-        description=(
-            "Number of upcoming task-queue entries to include in the agent prompt."
-        ),
-    )
 
     # -- Run continuation ----------------------------------------------------
 
@@ -213,10 +231,10 @@ class DomainConfig(ProjectSettings):
         ge=1,
         description=(
             "How many continuations may wait across the whole service. "
-            "Deliberately conservative and matched to the recovery pass's own "
-            "page size, so one pass can examine every continuation the "
-            "service admitted rather than leaving a tail of them to the next "
-            "pass. At the served per-run depth of one this is also the number "
+            "Deliberately conservative, and also the recovery pass's page "
+            "size, so one pass can examine every continuation the service "
+            "admitted rather than leaving a tail of them to the next pass. "
+            "At the served per-run depth of one this is also the number "
             "of distinct runs that may hold a waiting turn at once. Exceeding "
             "it is a typed refusal, never a silent drop."
         ),
@@ -224,7 +242,7 @@ class DomainConfig(ProjectSettings):
     successor_transcript_depth: int = Field(
         default=20,
         ge=1,
-        le=100,
+        le=MAX_SEED_TRANSCRIPT_MESSAGES,
         description=(
             "Maximum number of predecessor user and assistant messages "
             "seeded into a successor run."
@@ -291,6 +309,18 @@ class DomainConfig(ProjectSettings):
             "expires and frees its bounded slot when no commit binds it."
         ),
     )
+    provider_catalog_ttl_seconds: float = Field(
+        default=300.0,
+        description=(
+            "How long a discovered provider catalog is served before the next "
+            "read rediscovers its lanes. A lane reports no expiry of its own, so "
+            "this alone decides when a served catalog goes stale - and a run's "
+            "selection names the revision it was read at, so this is also how "
+            "long a client's reading of the catalog stays usable. Shortening it "
+            "makes every read probe every registered lane again, over subprocess "
+            "spawns and network calls."
+        ),
+    )
     run_start_catalog_budget_seconds: float = Field(
         default=120.0,
         description=(
@@ -310,27 +340,10 @@ class DomainConfig(ProjectSettings):
     )
 
 
-class DomainSettingsConfig(DomainConfig):
-    """Env-reading subclass of DomainConfig.
-
-    Reads ``VAULTSPEC_A2A_``-prefixed environment variables and the project's
-    ``.env`` so that Layer 1 consumers get production values without importing
-    the full infrastructure ``Settings`` object from ``control.config``.
-    """
-
-    model_config = SettingsConfigDict(
-        env_file=ProjectSettings.operator_env_file(),
-        env_file_encoding="utf-8",
-        env_prefix=ENV_PREFIX,
-        extra="ignore",
-        env_ignore_empty=True,
-    )
-
-
-# Module-level singleton — Layer 1 modules import this directly. It is built
-# the first time one of its values is read, so importing this module cannot
-# fail on a configuration the settings refuse: that refusal belongs to the
-# process that starts the service, which renders it as one named error.
+# Layer 1 modules import this directly. It is built the first time one of its
+# values is read, so importing this module cannot fail on a configuration the
+# settings refuse: that refusal belongs to the process that starts the service,
+# which renders it as one named error.
 domain_config = built_at_first_use(lambda: read_configuration(DomainSettingsConfig))
 
 __all__ = ["DomainSettingsConfig", "domain_config"]

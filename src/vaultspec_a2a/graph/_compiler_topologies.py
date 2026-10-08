@@ -18,13 +18,13 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.runtime import Runtime
 
+    from ..providers.team_selection import FrozenLaneAssignment
     from ..worker.authoring_binding import AuthoringBindingProvider
     from .nodes.worker import WorkerNode
     from .protocols import (
         CostPort,
         ProviderFactoryProtocol,
         RuntimeIdentityPort,
-        TaskQueuePort,
     )
     from .run_context import RunContext
 
@@ -34,9 +34,7 @@ from langgraph.types import Command
 from ..thread.errors import (
     ConfigError,
 )
-from ..thread.state import (
-    TeamState,  # noqa: TC001 - LangGraph inspects route annotations
-)
+from ..thread.state import TeamState
 from ._compiler_models import resolve_supervisor_model
 from ._compiler_prompts import (
     build_supervisor_prompt,
@@ -46,15 +44,18 @@ from ._compiler_prompts import (
 from ._compiler_retry import _NODE_RETRY_POLICY
 from .compiler import (
     _ROLE_TO_PHASE,
-    _add_node,
     _compile_worker_node,
-    _loop_route,
     _route_from_supervisor,
+    add_graph_node,
 )
 from .nodes._config_contract import accepting_runnable_config
 from .nodes.action_completion import GRAPH_COMPLETION_NODE
-from .nodes.phase_gate import review_requests_revision
-from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
+from .nodes.phase_gate import review_requests_revision, revision_granted
+from .nodes.supervisor import (
+    SupervisorOptions,
+    create_plan_approval_node,
+    create_supervisor_node,
+)
 from .nodes.vault_reader import create_mount_node
 
 __all__ = ["_compile_pipeline", "_compile_pipeline_loop", "_compile_star"]
@@ -140,12 +141,10 @@ def _star_worker_context(
 class _TopologyOptional(TypedDict, total=False):
     workspace_root: Path | None
     autonomous: bool
-    feature_tag: str | None
-    task_queue_port: TaskQueuePort | None
     cost_port: CostPort | None
     runtime_identity_port: RuntimeIdentityPort | None
     authoring_binding_provider: AuthoringBindingProvider | None
-    frozen_assignment: dict[str, dict[str, Any]] | None
+    frozen_assignment: dict[str, FrozenLaneAssignment] | None
 
 
 class _TopologyOptions(_TopologyOptional):
@@ -178,16 +177,18 @@ def _compile_star(
         {"provider": sv_provider.value, "model_name": sv_model_name},
     )
 
-    _add_node(
+    add_graph_node(
         builder,
         "supervisor",
         create_supervisor_node(
             model=supervisor_model,
             system_prompt=supervisor_prompt,
             workers=worker_ids,
-            worker_phase_map=worker_phase_map or None,
-            autonomous=options.get("autonomous", False),
-            workspace_root=options.get("workspace_root"),
+            options=SupervisorOptions(
+                worker_phase_map=worker_phase_map or None,
+                autonomous=options.get("autonomous", False),
+                workspace_root=options.get("workspace_root"),
+            ),
         ),
         metadata=sv_meta,
         retry_policy=_NODE_RETRY_POLICY,
@@ -211,13 +212,11 @@ def _compile_star(
             provider_factory=options["provider_factory"],
             frozen_assignment=options.get("frozen_assignment"),
             autonomous=options.get("autonomous", False),
-            feature_tag=options.get("feature_tag"),
-            task_queue_port=options.get("task_queue_port"),
             cost_port=options.get("cost_port"),
             runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),
         )
-        _add_node(
+        add_graph_node(
             builder,
             agent_cfg.id,
             worker_node,
@@ -227,7 +226,7 @@ def _compile_star(
         builder.add_edge(agent_cfg.id, "supervisor")
         # Insert mount node between supervisor routing and worker invocation.
         mount_fn = create_mount_node(options.get("workspace_root"))
-        _add_node(builder, f"mount_{agent_cfg.id}", mount_fn)
+        add_graph_node(builder, f"mount_{agent_cfg.id}", mount_fn)
         builder.add_edge(f"mount_{agent_cfg.id}", agent_cfg.id)
         compiled_worker_ids.append(agent_cfg.id)
 
@@ -242,7 +241,7 @@ def _compile_star(
     # The dedicated approval node owns the plan-approval
     # interrupt; the supervisor only marks approval_status="pending". The node
     # is replay-safe because nothing before its interrupt() has side effects.
-    _add_node(
+    add_graph_node(
         builder,
         "plan_approval",
         create_plan_approval_node(compiled_worker_ids, worker_phase_map or None),
@@ -343,8 +342,6 @@ def _compile_pipeline(
             provider_factory=options["provider_factory"],
             frozen_assignment=options.get("frozen_assignment"),
             autonomous=options.get("autonomous", False),
-            feature_tag=options.get("feature_tag"),
-            task_queue_port=options.get("task_queue_port"),
             cost_port=options.get("cost_port"),
             runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),
@@ -352,8 +349,8 @@ def _compile_pipeline(
         # Insert mount node between pipeline stages.
         mount_fn = create_mount_node(options.get("workspace_root"))
         mount_id = f"mount_{agent_cfg.id}"
-        _add_node(builder, mount_id, mount_fn)
-        _add_node(
+        add_graph_node(builder, mount_id, mount_fn)
+        add_graph_node(
             builder,
             agent_cfg.id,
             worker_node,
@@ -496,8 +493,6 @@ def _compile_pipeline_loop(
             provider_factory=options["provider_factory"],
             frozen_assignment=options.get("frozen_assignment"),
             autonomous=options.get("autonomous", False),
-            feature_tag=options.get("feature_tag"),
-            task_queue_port=options.get("task_queue_port"),
             cost_port=options.get("cost_port"),
             runtime_identity_port=options.get("runtime_identity_port"),
             authoring_binding_provider=options.get("authoring_binding_provider"),
@@ -508,8 +503,8 @@ def _compile_pipeline_loop(
         # Insert mount node before each worker.
         mount_id = f"mount_{agent_cfg.id}"
         mount_fn = create_mount_node(options.get("workspace_root"))
-        _add_node(builder, mount_id, mount_fn)
-        _add_node(
+        add_graph_node(builder, mount_id, mount_fn)
+        add_graph_node(
             builder,
             agent_cfg.id,
             worker_node,
@@ -529,14 +524,17 @@ def _compile_pipeline_loop(
     # Loop-back target is the mount node before the loop target worker.
     loop_target_worker: str = pre_loop[-1] if pre_loop else all_sequential[0]
     loop_target_mount: str = mount_map[loop_target_worker]
-    max_loops = team_config.topology.max_loops
+    # ``max_loops`` counts passes of the loop node, the first one included, so it
+    # grants one revision fewer than it has passes.
+    revision_budget = team_config.topology.max_loops - 1
 
     def _loop_router(state: TeamState) -> str:
-        return _loop_route(
+        granted = revision_granted(
             revision_requested=review_requests_revision(state.get("messages") or []),
-            loop_count=state.get("loop_count", 0),
-            max_loops=max_loops,
+            spent=state.get("loop_count", 0),
+            budget=revision_budget,
         )
+        return "revise" if granted else "FINISH"
 
     builder.add_conditional_edges(
         loop_node_id,

@@ -11,6 +11,11 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from ..utils import is_single_regular_file
+from ._linux_helper import GROUP_OTHER_WRITE_BITS, PRIVILEGED_MODE_BITS
+
+__all__ = ["RESOLVER_TARGET", "host_resolver_data", "parse_resolver"]
+
 RESOLVER_TARGET = PurePosixPath("/etc/resolv.conf")
 _MAX_BYTES = 16384
 _ROOT_OWNER = frozenset({0})
@@ -45,7 +50,7 @@ _NUMERIC_OPTIONS = {"ndots": (0, 15), "timeout": (1, 30), "attempts": (1, 5)}
 
 
 @dataclass(frozen=True, slots=True)
-class ResolverData:
+class _ResolverData:
     nameservers: tuple[str, ...]
     search: tuple[str, ...]
     options: tuple[str, ...]
@@ -85,7 +90,7 @@ def _option(value: str) -> str:
     return value
 
 
-def parse_resolver(data: bytes) -> ResolverData:
+def parse_resolver(data: bytes) -> _ResolverData:
     """Refuse ambiguous/unsupported settings rather than silently changing DNS."""
     if len(data) > _MAX_BYTES:
         raise ValueError("native resolver data exceeds its bound")
@@ -122,7 +127,7 @@ def parse_resolver(data: bytes) -> ResolverData:
             raise ValueError("native resolver settings exceed their bound")
     if not nameservers:
         raise ValueError("native resolver requires an explicit nameserver")
-    return ResolverData(tuple(nameservers), search, tuple(options))
+    return _ResolverData(tuple(nameservers), search, tuple(options))
 
 
 def _resolver_owners(target: PurePosixPath) -> frozenset[int]:
@@ -149,7 +154,7 @@ def _trusted_directory(
 ) -> None:
     if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid not in owners:
         raise ValueError("native resolver directory is not host-owned")
-    if metadata.st_mode & 0o022 and not (
+    if metadata.st_mode & GROUP_OTHER_WRITE_BITS and not (
         sticky_alias and metadata.st_mode & stat.S_ISVTX
     ):
         raise ValueError("native resolver directory is writable by other identities")
@@ -204,9 +209,9 @@ def _signature(metadata: os.stat_result) -> tuple[int, ...]:
 
 def _read_snapshot(descriptor: int, *, owners: frozenset[int] = _ROOT_OWNER) -> bytes:
     before = os.fstat(descriptor)
-    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+    if not is_single_regular_file(before):
         raise ValueError("native resolver requires a regular single-link source")
-    if before.st_mode & (0o022 | stat.S_ISUID | stat.S_ISGID):
+    if before.st_mode & (GROUP_OTHER_WRITE_BITS | PRIVILEGED_MODE_BITS):
         raise ValueError("native resolver source has unsafe permissions")
     if before.st_uid not in owners:
         raise ValueError("native resolver source is not host-owned")

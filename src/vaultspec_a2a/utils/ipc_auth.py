@@ -1,12 +1,15 @@
-"""Shared internal-IPC bearer-token verification (gateway <-> worker).
+"""Shared bearer-credential presentation and verification.
 
-The single home for the bearer rule that both sides of the internal IPC enforce:
-when the token is unset, auth is disabled in DEVELOPMENT but a hard
-misconfiguration in every other environment; otherwise the ``Authorization`` header
-must be exactly ``Bearer <token>``. Framework-free by design - the caller maps the
-verdict onto its transport's error (an HTTP 500/401, a WebSocket close), so
-per-caller nuances (the worker's ``WWW-Authenticate`` header, a WS close code) stay
-with the caller while the rule itself lives in one place.
+The single home for the ``Authorization: Bearer <secret>`` form on every
+credential plane - the worker IPC, the attach gate, the authoring relay, and
+the lifecycle probes: :func:`bearer_header` builds it and :func:`bearer_matches`
+compares it in constant time. :func:`verify_internal_bearer` states the
+internal-IPC rule on top of them: when the token is unset, auth is disabled in
+DEVELOPMENT but a hard misconfiguration in every other environment; otherwise
+the ``Authorization`` header must be exactly ``Bearer <token>``. Framework-free
+by design - the caller maps the verdict onto its transport's error (an HTTP
+500/401), so per-caller nuances (the worker's ``WWW-Authenticate`` header)
+stay with the caller while the rule itself lives in one place.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from enum import StrEnum
 
 from .enums import Environment
 
-__all__ = ["BearerVerdict", "verify_internal_bearer"]
+__all__ = ["BearerVerdict", "bearer_header", "bearer_matches", "verify_internal_bearer"]
 
 
 class BearerVerdict(StrEnum):
@@ -32,6 +35,22 @@ class BearerVerdict(StrEnum):
     OK = "ok"  # authorized, or auth disabled in dev mode
     MISCONFIGURED = "misconfigured"  # token unset outside DEVELOPMENT
     UNAUTHORIZED = "unauthorized"  # header missing or not an exact Bearer match
+
+
+def bearer_header(secret: str) -> dict[str, str]:
+    """Return the ``Authorization`` header that presents *secret* as a bearer."""
+    return {"Authorization": f"Bearer {secret}"}
+
+
+def bearer_matches(header: str | None, secret: str) -> bool:
+    """Whether *header* is exactly ``Bearer <secret>``.
+
+    Compared in constant time so verifying a secret never leaks its bytes
+    through data-dependent timing; a missing header compares as empty and so
+    never matches.
+    """
+    supplied = (header or "").encode("utf-8")
+    return hmac.compare_digest(supplied, f"Bearer {secret}".encode())
 
 
 def verify_internal_bearer(
@@ -72,10 +91,6 @@ def verify_internal_bearer(
                 "token, or supply the token."
             )
         return BearerVerdict.OK, ""
-    # Constant-time compare so verifying the worker-IPC secret never leaks its
-    # bytes through data-dependent timing; parity with the attach, lifecycle, and
-    # WebSocket gates on the same credential planes.
-    supplied = (authorization or "").encode("utf-8")
-    if not hmac.compare_digest(supplied, f"Bearer {token}".encode()):
+    if not bearer_matches(authorization, token):
         return BearerVerdict.UNAUTHORIZED, "Invalid internal token"
     return BearerVerdict.OK, ""

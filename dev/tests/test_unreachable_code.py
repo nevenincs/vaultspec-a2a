@@ -89,29 +89,20 @@ def test_root_conftest_pytest_hooks_are_framework_consumers(tmp_path: Path) -> N
     assert ("sample.plugin", "unused_helper") in findings
 
 
-def test_main_guard_and_configured_script_imports_are_entry_points(
-    tmp_path: Path,
-) -> None:
-    """Direct module commands and configured scripts reach their package code."""
+def test_a_main_guard_is_an_entry_point(tmp_path: Path) -> None:
+    """A module runnable with ``python -m`` reaches its own package code."""
     spec = _tree(
         tmp_path,
         {
             "__init__.py": "",
             "cli.py": "def main():\n    return 1\n",
             "admin.py": (
-                "def main():\n    return 0\n"
+                "from .engine import run\n"
+                "def main():\n    return run()\n"
                 "if __name__ == '__main__':\n    raise SystemExit(main())\n"
             ),
             "engine.py": "def run():\n    return 1\n",
         },
-    )
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
-    (scripts / "engine_serve.py").write_text(
-        "from sample.engine import run\n", encoding="utf-8"
-    )
-    (tmp_path / "procs.toml").write_text(
-        'serve = ["{python}", "scripts/engine_serve.py"]\n', encoding="utf-8"
     )
 
     result = scan_unreachable_code(spec)

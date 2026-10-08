@@ -1,15 +1,12 @@
-"""F17: a completed run's REST snapshot must show terminal tool-call status.
+"""A completed run's REST snapshot must show terminal tool-call status.
 
-The live incident: run 866679f3 served 15 tool_calls, every one
-``status: pending`` with empty ``locations``/``content``, on a run whose
-transcript proves they were not pending - the model narrated their results,
-and one was actively policy-rejected. ``enrich_snapshot_from_state``'s
-checkpoint reconstruction assumed every tool call was a genuine
-``ToolNode``-dispatched ``BaseTool`` (cross-referenced against a
-``ToolMessage``); a provider-internal action (Codex's
+``enrich_snapshot_from_state``'s checkpoint reconstruction cannot assume every
+tool call is a genuine ``ToolNode``-dispatched ``BaseTool`` (cross-referenced
+against a ``ToolMessage``): a provider-internal action (Codex's
 ``commandExecution``/``fileChange``/``mcpToolCall``) never produces one, so
-every one fell to the ``else PENDING`` branch permanently, regardless of what
-it actually did.
+without its own terminal report it would fall to the ``else PENDING`` branch
+permanently, regardless of what it actually did - on a run whose transcript
+proves the calls were not pending.
 
 These tests drive the real production seam: ``codex_chat_model``'s own
 ``_completed_action_chunk`` builds the tool-call chunk exactly as a live turn
@@ -28,11 +25,12 @@ from langchain_core.messages import AIMessageChunk, BaseMessageChunk
 
 from ...graph.enums import ToolCallStatus
 from ...providers._codex_protocol import _completed_action_chunk
-from ...thread.snapshots import ThreadStateData
+from ...thread.enums import ThreadStatus
+from ...thread.snapshots import ThreadStateSnapshot
 from ..snapshot import MinimalState, enrich_snapshot_from_state
 
 if TYPE_CHECKING:
-    from ...providers._json_contract import JsonObject
+    from ...providers import JsonObject
 
 
 def _checkpointed_action_message(item: JsonObject) -> BaseMessageChunk:
@@ -52,19 +50,20 @@ def _state_with_messages(*messages: object) -> MinimalState:
     return MinimalState(values={"messages": list(messages)})
 
 
-def _snapshot(thread_id: str = "thread-1") -> ThreadStateData:
-    return ThreadStateData(thread_id=thread_id, status="completed", last_sequence=1)
+def _snapshot(thread_id: str = "thread-1") -> ThreadStateSnapshot:
+    return ThreadStateSnapshot(
+        thread_id=thread_id, status=ThreadStatus.COMPLETED, last_sequence=1
+    )
 
 
 class TestSettledSnapshotReachesTerminalToolCallStatus:
     """Reconstructing a completed run's snapshot from its checkpoint alone."""
 
     def test_a_completed_command_reaches_completed_not_pending(self) -> None:
-        """Fails on unfixed code: every provider action stayed PENDING forever.
+        """A provider action's own terminal report advances it past PENDING.
 
-        On the current (pre-fix) reconstruction this call has no ToolMessage
-        to correlate against, so it falls to the else-PENDING branch and
-        never advances - the exact defect F17 measured.
+        The call has no ToolMessage to correlate against, so only the status
+        its own report carries can move it off the else-PENDING branch.
         """
         message = _checkpointed_action_message(
             {
@@ -87,14 +86,13 @@ class TestSettledSnapshotReachesTerminalToolCallStatus:
         assert call.content, "expected the command/exit-code detail as content"
 
     def test_a_policy_rejected_command_reaches_failed_not_completed(self) -> None:
-        """The exact live incident: a rejected command must not read as success.
+        """A rejected command must not read as success.
 
-        The reference run's transcript: "The hash check hit a policy
-        rejection because I wrapped PowerShell inside PowerShell." That
-        rejection appeared nowhere in the served tool-call record. A status
-        this repo does not recognise as success (here, an app-server
-        "failed") must resolve FAILED, never a silent COMPLETED nor the
-        permanent-PENDING the unfixed code produces.
+        A transcript that says "The hash check hit a policy rejection because I
+        wrapped PowerShell inside PowerShell." needs that rejection to show in
+        the served tool-call record. A status this repo does not recognise as
+        success (here, an app-server "failed") must resolve FAILED, never a
+        silent COMPLETED nor a permanent PENDING.
         """
         message = _checkpointed_action_message(
             {
@@ -118,7 +116,7 @@ class TestSettledSnapshotReachesTerminalToolCallStatus:
     def test_an_mcp_tool_call_denial_reaches_failed_not_completed(self) -> None:
         """An MCP tool-call item whose status is not a recognised success.
 
-        Ties F16/F17: an MCP auto-denial (``codex-permission``'s area) must
+        An MCP auto-denial must
         not silently read as a successful mcpToolCall in the served
         snapshot, whatever exact status string codex reports for it. This
         repo's own status vocabulary is the only one honoured as success;
@@ -159,7 +157,7 @@ class TestSettledSnapshotReachesTerminalToolCallStatus:
         call = result.tool_calls[0]
         assert call.status == str(ToolCallStatus.COMPLETED)
         assert call.locations, "expected the changed file paths as locations"
-        paths = {loc["path"] for loc in call.locations}
+        paths = {loc.path for loc in call.locations}
         assert paths == {"src/module.py", "README.md"}
 
     def test_a_genuine_tool_node_call_still_correlates_against_tool_message(
@@ -177,7 +175,7 @@ class TestSettledSnapshotReachesTerminalToolCallStatus:
         ai_message = AIMessage(
             content="",
             tool_calls=[
-                {"id": "call_5", "name": "mark_task_complete", "args": {}},
+                {"id": "call_5", "name": "lookup_record", "args": {}},
             ],
         )
         tool_message = ToolMessage(content="done", tool_call_id="call_5")
@@ -201,7 +199,7 @@ class TestSettledSnapshotReachesTerminalToolCallStatus:
         ai_message = AIMessage(
             content="",
             tool_calls=[
-                {"id": "call_6", "name": "mark_task_complete", "args": {}},
+                {"id": "call_6", "name": "lookup_record", "args": {}},
             ],
         )
         state = _state_with_messages(ai_message)

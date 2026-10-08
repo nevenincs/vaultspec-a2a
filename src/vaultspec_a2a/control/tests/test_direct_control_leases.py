@@ -9,314 +9,118 @@ the worker's synchronous dispatch-ID admission boundary.
 from __future__ import annotations
 
 import asyncio
-import sqlite3
-from contextlib import asynccontextmanager
+import time
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import anyio
 import httpx
 import pytest
-import pytest_asyncio
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from langchain_core.messages import AIMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...api.tests.clarification_harness import new_state_graph
-from ...control import cancel_service
-from ...control._permission_response_contract import (
-    PermissionInput,
-    PermissionRuntime,
-    permission_response_action_key,
-)
-from ...control.accepted_input import freeze_accepted_input
-from ...control.action_lease import prepare_control_action_claim
-from ...control.cancel_service import CancelResult, CancelRuntime, cancel_thread
+from ...conftest import SqlitePosture
+from ...control._permission_response_contract import PermissionInput
+from ...control.cancel_service import cancel_thread
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.config import settings
-from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.execution_authority import resolve_execution_authority
+from ...control.leased_dispatch import DispatchTransport
 from ...control.message_service import send_followup_message
 from ...control.permission_service import respond_to_permission
-from ...control.worker_management import LazyWorkerSpawner
 from ...database import (
-    create_control_action,
+    RecoveryAttemptModel,
+    ThreadModel,
+    begin_write_transaction,
     create_thread,
     get_control_action_by_idempotency_key,
     get_permission_request,
     get_thread,
     record_permission_request,
 )
-from ...database.models import Base, RecoveryAttemptModel, ThreadModel
-from ...database.session import begin_write_transaction, configure_sqlite_engine
-from ...ipc.schemas import DispatchRequest
-from ...team.team_config import load_team_config
-from ...testing import session_scratch_dir
+from ...testing import (
+    adopted_spawner,
+    park_permission,
+    seed_accepted_thread,
+    served_worker,
+    session_scratch_dir,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType, ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
-from ...thread.idempotency import default_cancel_key
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
-from ._catalog_authority import current_execution_metadata
+from ...thread.idempotency import (
+    default_cancel_key,
+    permission_response_action_key,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ...worker.graph_lifecycle import RegisteredCompiledGraph
+    from ...control.action_lease import ControlActionOutcome
 
 
 _TEST_INTERNAL_TOKEN = "direct-control-lease-test-token"
-
-
-@pytest.fixture(autouse=True)
-def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give both sides of real worker dispatch the current IPC credential."""
-    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    tmp_path: Path,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'direct-control-leases.db'}",
-        connect_args={"timeout": 5},
-    )
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    await engine.dispose()
-
-
-@asynccontextmanager
-async def _worker_runtime(
-    checkpoint_path: Path,
-    *,
-    receipt_threads: tuple[str, ...] = (),
-) -> AsyncGenerator[tuple[httpx.AsyncClient, FastAPI, WorkerBridge, AsyncSqliteSaver]]:
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
-        await saver.setup()
-        relayed_events: list[dict[str, object]] = []
-        event_sink = FastAPI()
-
-        @event_sink.post("/internal/events/batch")
-        async def accept_event_batch(request: Request) -> JSONResponse:
-            body = await request.json()
-            relayed_events.extend(cast("list[dict[str, object]]", body["events"]))
-            return JSONResponse({"status": "ok"})
-
-        bridge = WorkerBridge("http://control", "direct-control-lease-test")
-        await bridge._client.aclose()
-        bridge._client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=event_sink),
-            base_url="http://control",
-        )
-        executor = Executor(saver, bridge)
-        for thread_id in receipt_threads:
-            _install_receipt_graph(executor, saver, thread_id)
-        app = create_worker_app()
-        app.state.executor = executor
-        app.state.relayed_events = relayed_events
-        async with anyio.create_task_group() as tasks:
-            app.state.task_group = tasks
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="http://worker",
-                headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-            ) as client:
-                yield client, app, bridge, saver
-            tasks.cancel_scope.cancel()
-        await executor.shutdown()
-        await bridge.close()
 
 
 def _circuit_breaker() -> WorkerCircuitBreaker:
     return WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30.0)
 
 
-def _spawner(worker_url: str = "http://worker") -> LazyWorkerSpawner:
-    spawner = LazyWorkerSpawner(
-        worker_url=worker_url,
-        worker_port=8001,
-        auto_spawn=False,
-    )
-    spawner.replace_process(None)
-    return spawner
-
-
-def _install_receipt_graph(
-    executor: Executor,
-    checkpointer: AsyncSqliteSaver,
-    thread_id: str,
-) -> None:
-    """Register a real one-node graph so Executor emits application truth."""
-
-    async def complete(_state: Any) -> dict[str, Any]:
-        return {"messages": [AIMessage(content="applied")], "next": "FINISH"}
-
-    builder = new_state_graph()
-    builder.add_node("worker", complete)
-    builder.add_edge("__start__", "worker")
-    builder.add_edge("worker", "__end__")
-    graph: RegisteredCompiledGraph = builder.compile(checkpointer=checkpointer)
-    workspace = Path(_ACTIVE_PROJECT)
-    definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
-        workspace_root=workspace,
-    )
-    executor.register_compiled_graph(
-        thread_id,
-        (
-            "mock-success-single",
-            str(workspace),
-            False,
-            resolve_execution_authority(
-                current_execution_metadata(workspace)
-            ).model_assignment_digest,
-            definition.digest(),
-        ),
-        graph,
-    )
-
-
 # A follow-up inherits the active project its run was created with, so a thread
 # seeded for a dispatch-behaviour test needs a real one: without it the message
 # service refuses before reaching the behaviour under test. The directory is
 # real because the refusal is about presence, not shape.
-_ACTIVE_PROJECT = str(session_scratch_dir("vaultspec-active-project-"))
-
-
-def _active_project_metadata() -> str:
-    """Return current execution authority naming a real active project."""
-    return current_execution_metadata(Path(_ACTIVE_PROJECT))
-
-
-async def _running_thread(
-    sessions: async_sessionmaker[AsyncSession],
-    thread_id: str,
-    *,
-    team_preset: str = "mock-success-single",
-) -> None:
-    async with sessions() as db:
-        await _create_current_thread(
-            db,
-            thread_id=thread_id,
-            status=ThreadStatus.RUNNING,
-            team_preset=team_preset,
-        )
-        await db.commit()
+_ACTIVE_PROJECT = session_scratch_dir("vaultspec-active-project-")
 
 
 async def _create_current_thread(
-    db: AsyncSession,
-    *,
-    thread_id: str,
-    status: ThreadStatus,
-    team_preset: str = "mock-success-single",
+    db: AsyncSession, *, thread_id: str, status: ThreadStatus
 ) -> None:
     """Persist a thread with the complete current initial graph authority."""
-    authority = make_test_write_authority()
-    workspace = Path(_ACTIVE_PROJECT)
-    metadata = _active_project_metadata()
-    execution_authority = resolve_execution_authority(metadata)
-    definition = freeze_graph_definition(
-        load_team_config(team_preset, workspace_root=workspace),
-        workspace_root=workspace,
-    )
-    await create_thread(
+    await seed_accepted_thread(
         db,
-        write_authority=authority,
         thread_id=thread_id,
         status=status,
-        team_preset=team_preset,
-        metadata=metadata,
-    )
-    dispatch = DispatchRequest(
-        dispatch_id=authority.action_receipt_id,
-        action="ingest",
-        thread_id=thread_id,
-        content="seed accepted graph authority",
-        team_preset=team_preset,
-        graph_definition=definition,
-        workspace_root=str(workspace),
-        recursion_limit=25,
-        model_assignment=execution_authority.model_assignment,
-    )
-    await create_control_action(
-        db,
-        thread_id=thread_id,
-        action_type=authority.action_type,
-        idempotency_key=f"thread-create:{thread_id}",
-        dispatch_id=authority.action_receipt_id,
-        payload=freeze_accepted_input(
-            dispatch, intent={"content": "seed accepted graph authority"}
-        ),
+        workspace=_ACTIVE_PROJECT,
         recovery_deadline_at=datetime(2100, 1, 1, tzinfo=UTC),
     )
-    receipt = await prepare_graph_action_receipt(
-        db,
-        thread_id=thread_id,
-        dispatch_id=authority.action_receipt_id,
-    )
-    assert receipt is not None
+
+
+async def _running_thread(
+    sessions: async_sessionmaker[AsyncSession], thread_id: str
+) -> None:
+    async with sessions() as db:
+        await _create_current_thread(
+            db, thread_id=thread_id, status=ThreadStatus.RUNNING
+        )
+        await db.commit()
 
 
 @pytest.mark.asyncio
 async def test_permission_ack_without_graph_event_remains_pending_application(
-    tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Worker scheduling ACK is not permission application truth."""
     thread_id = "permission-ack-only-thread"
-    request_id = f"{thread_id}:permission"
-    async with session_factory() as db:
-        await _create_current_thread(
-            db,
-            thread_id=thread_id,
-            status=ThreadStatus.INPUT_REQUIRED,
-        )
-        await record_permission_request(
-            db,
-            request_id=request_id,
-            thread_id=thread_id,
-            pause_reason_type="bash",
-            description="Allow the command?",
-            allowed_options=[
-                {
-                    "option_id": "allow_once",
-                    "name": "Allow once",
-                    "kind": "allow_once",
-                }
-            ],
-            tool_call="bash",
-        )
-        await db.commit()
+    request_id = await _parked_permission(session_factory, checkpointer, thread_id)
 
     # The real worker accepts and schedules the dispatch, but no graph is
     # registered for this thread. Executor therefore produces no first graph
     # event and no dispatch_applied receipt.
-    async with _worker_runtime(tmp_path / "permission-ack-only.db") as (
-        worker_client,
-        _worker_app,
-        _bridge,
-        _checkpointer,
-    ):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
         async with session_factory() as db:
             result = await respond_to_permission(
                 db,
+                thread_id=thread_id,
                 response=PermissionInput(
                     request_id, "allow_once", "permission-client-retry"
                 ),
-                runtime=PermissionRuntime(
-                    _circuit_breaker(), _spawner(), worker_client, 25, None
+                checkpointer=checkpointer,
+                transport=DispatchTransport(
+                    worker_client=worker.client,
+                    circuit_breaker=_circuit_breaker(),
+                    worker_spawner=adopted_spawner(),
                 ),
             )
         assert result.accepted is True
@@ -341,10 +145,12 @@ async def test_permission_ack_without_graph_event_remains_pending_application(
 
 
 async def _parked_permission(
-    sessions: async_sessionmaker[AsyncSession], thread_id: str
+    sessions: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    thread_id: str,
 ) -> str:
     """Seed a run parked on a permission question and return its request id."""
-    request_id = f"{thread_id}:permission"
+    request_id = await park_permission(checkpointer, thread_id=thread_id)
     async with sessions() as db:
         await _create_current_thread(
             db,
@@ -373,6 +179,7 @@ async def _parked_permission(
 @pytest.mark.asyncio
 async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Ownership is given back only for a delivery proven not to have happened.
 
@@ -386,8 +193,12 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
     """
     definite_thread = "definite-resume-thread"
     ambiguous_thread = "ambiguous-resume-thread"
-    definite_request = await _parked_permission(session_factory, definite_thread)
-    ambiguous_request = await _parked_permission(session_factory, ambiguous_thread)
+    definite_request = await _parked_permission(
+        session_factory, checkpointer, definite_thread
+    )
+    ambiguous_request = await _parked_permission(
+        session_factory, checkpointer, ambiguous_thread
+    )
 
     shut = _circuit_breaker()
     shut.force_open()
@@ -397,9 +208,13 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
     ):
         definite = await respond_to_permission(
             db,
+            thread_id=definite_thread,
             response=PermissionInput(definite_request, "allow_once", "definite-retry"),
-            runtime=PermissionRuntime(
-                shut, _spawner("http://127.0.0.1:1"), no_worker, 25, None
+            checkpointer=checkpointer,
+            transport=DispatchTransport(
+                worker_client=no_worker,
+                circuit_breaker=shut,
+                worker_spawner=adopted_spawner("http://127.0.0.1:1"),
             ),
         )
     assert definite.failure_type is FailureType.CIRCUIT_OPEN
@@ -410,15 +225,15 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
     ):
         ambiguous = await respond_to_permission(
             db,
+            thread_id=ambiguous_thread,
             response=PermissionInput(
                 ambiguous_request, "allow_once", "ambiguous-retry"
             ),
-            runtime=PermissionRuntime(
-                _circuit_breaker(),
-                _spawner("http://127.0.0.1:1"),
-                unreachable,
-                25,
-                None,
+            checkpointer=checkpointer,
+            transport=DispatchTransport(
+                worker_client=unreachable,
+                circuit_breaker=_circuit_breaker(),
+                worker_spawner=adopted_spawner("http://127.0.0.1:1"),
             ),
         )
     assert ambiguous.failure_type is FailureType.UNREACHABLE
@@ -464,8 +279,8 @@ async def test_definite_resume_failure_releases_and_ambiguous_failure_retains(
 
 @pytest.mark.asyncio
 async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
-    tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A run that is leaving refuses before the lease, so nothing is written.
 
@@ -487,12 +302,7 @@ async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
         assert before is not None
         requested_before = before.last_requested_action
 
-    async with _worker_runtime(tmp_path / f"busy-{status.value}.db") as (
-        _worker_client,
-        worker_app,
-        _bridge,
-        _checkpointer,
-    ):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
         async with session_factory() as db:
             result = await send_followup_message(
                 db,
@@ -501,10 +311,10 @@ async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
                 agent_id="vaultspec-supervisor",
                 idempotency_key="busy-refusal-key",
             )
-        assert result.queued is False
+        assert result.accepted is False
         assert result.failure_type is FailureType.RUN_BUSY
-        assert result.action_id == ""
-        assert len(worker_app.state.dispatch_ids) == 0
+        assert result.action_id is None
+        assert len(worker.app.state.dispatch_ids) == 0
 
     async with session_factory() as db:
         action = await get_control_action_by_idempotency_key(
@@ -518,71 +328,75 @@ async def test_a_followup_reserves_nothing_while_the_run_is_cancelling(
 
 
 @pytest.mark.asyncio
+@pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS, timeout=0.15)
 async def test_cancel_retries_sqlite_lock_before_claim(
-    tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
-    monkeypatch: pytest.MonkeyPatch,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
+    """A real SQLite writer holding the lock forces a genuine retry, not a lost cancel.
+
+    ``_claim_cancel`` opens its acceptance transaction with ``begin_write_transaction``
+    (``BEGIN IMMEDIATE``), so a sibling connection already holding that write lock makes
+    the claim's first attempt wait out the driver's short ``timeout`` and fail with a
+    real ``database is locked`` ``OperationalError`` - exactly what
+    ``retry_write_contention`` exists to absorb.
+    """
     thread_id = "locked-cancel-thread"
     await _running_thread(session_factory, thread_id)
-    original_claim = prepare_control_action_claim
-    attempts = 0
+    acquired = anyio.Event()
 
-    async def locked_once(*args: Any, **kwargs: Any) -> Any:
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            raise OperationalError(
-                "INSERT INTO control_actions",
-                {},
-                sqlite3.OperationalError("database is locked"),
-            )
-        return await original_claim(*args, **kwargs)
+    async def _hold_write_lock() -> None:
+        async with session_factory() as locker:
+            await begin_write_transaction(locker)
+            acquired.set()
+            await anyio.sleep(0.3)
+            await locker.commit()
 
-    monkeypatch.setattr(cancel_service, "prepare_control_action_claim", locked_once)
-    async with _worker_runtime(tmp_path / "locked-cancel-checkpoints.db") as (
-        worker_client,
-        worker_app,
-        _bridge,
-        _checkpointer,
-    ):
-        async with session_factory() as db:
-            result = await cancel_thread(
-                db,
-                thread_id=thread_id,
-                idempotency_key=None,
-                runtime=CancelRuntime(
-                    _circuit_breaker(), _spawner(), worker_client, 25
-                ),
-            )
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_hold_write_lock)
+            await acquired.wait()
+            started = time.monotonic()
+            async with session_factory() as db:
+                result = await cancel_thread(
+                    db,
+                    thread_id=thread_id,
+                    idempotency_key=None,
+                    transport=DispatchTransport(
+                        worker_client=worker.client,
+                        circuit_breaker=_circuit_breaker(),
+                        worker_spawner=adopted_spawner(),
+                    ),
+                )
+            elapsed = time.monotonic() - started
+
         assert result.accepted
-        assert attempts == 2
-        assert len(worker_app.state.dispatch_ids) == 1
+        # A lucky immediate claim finishes in milliseconds; this bound only holds
+        # if the claim genuinely waited out the lock and retried.
+        assert elapsed >= 0.15
+        assert len(worker.app.state.dispatch_ids) == 1
 
 
 @pytest.mark.asyncio
 async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
-    tmp_path: Path,
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     thread_id = "resource-cancel-thread"
     await _running_thread(session_factory, thread_id)
 
-    async with _worker_runtime(tmp_path / "cancel-checkpoints.db") as (
-        worker_client,
-        worker_app,
-        _bridge,
-        _checkpointer,
-    ):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
 
-        async def cancel(label: str) -> CancelResult:
+        async def cancel(label: str) -> ControlActionOutcome:
             async with session_factory() as db:
                 return await cancel_thread(
                     db,
                     thread_id=thread_id,
                     idempotency_key=label,
-                    runtime=CancelRuntime(
-                        _circuit_breaker(), _spawner(), worker_client, 25
+                    transport=DispatchTransport(
+                        worker_client=worker.client,
+                        circuit_breaker=_circuit_breaker(),
+                        worker_spawner=adopted_spawner(),
                     ),
                 )
 
@@ -598,7 +412,7 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
             if not result.accepted:
                 assert result.failure_type is FailureType.CONFLICT
                 assert result.thread_status == ThreadStatus.RUNNING.value
-        assert len(worker_app.state.dispatch_ids) == 1
+        assert len(worker.app.state.dispatch_ids) == 1
 
         async with session_factory() as db:
             action = await get_control_action_by_idempotency_key(
@@ -607,7 +421,7 @@ async def test_concurrent_cancel_retry_labels_elect_one_resource_dispatch(
                 idempotency_key=default_cancel_key(thread_id),
             )
         assert action is not None
-        assert action.dispatch_id in worker_app.state.dispatch_ids
+        assert action.dispatch_id in worker.app.state.dispatch_ids
 
 
 @pytest.mark.asyncio
@@ -628,11 +442,10 @@ async def test_ambiguous_cancel_preserves_durable_cancelling_intent(
             db,
             thread_id=thread_id,
             idempotency_key="desktop-cancel-attempt",
-            runtime=CancelRuntime(
-                _circuit_breaker(),
-                _spawner("http://127.0.0.1:1"),
-                unreachable_client,
-                25,
+            transport=DispatchTransport(
+                worker_client=unreachable_client,
+                circuit_breaker=_circuit_breaker(),
+                worker_spawner=adopted_spawner("http://127.0.0.1:1"),
             ),
         )
 
@@ -678,11 +491,16 @@ async def test_definite_cancel_non_delivery_never_rolls_back_lifecycle_authority
             db,
             thread_id=thread_id,
             idempotency_key="definite-cancel-attempt",
-            runtime=CancelRuntime(_circuit_breaker(), _spawner(), worker_client, 25),
+            transport=DispatchTransport(
+                worker_client=worker_client,
+                circuit_breaker=_circuit_breaker(),
+                worker_spawner=adopted_spawner(),
+            ),
         )
     assert result.cancelled is False
     assert result.accepted is False
     assert result.failure_type is FailureType.AT_CAPACITY
+    assert result.error_detail == "Cancel dispatch failed"
     assert result.thread_status == ThreadStatus.CANCELLING.value
     async with session_factory() as db:
         action = await get_control_action_by_idempotency_key(
@@ -722,8 +540,10 @@ async def test_terminal_state_before_cancel_prevents_dispatch_reservation(
             db,
             thread_id=thread_id,
             idempotency_key="too-late",
-            runtime=CancelRuntime(
-                _circuit_breaker(), _spawner("http://127.0.0.1:1"), worker_client, 25
+            transport=DispatchTransport(
+                worker_client=worker_client,
+                circuit_breaker=_circuit_breaker(),
+                worker_spawner=adopted_spawner("http://127.0.0.1:1"),
             ),
         )
     assert result.accepted is False
@@ -737,31 +557,14 @@ async def test_terminal_state_before_cancel_prevents_dispatch_reservation(
     assert action is None
 
 
-@pytest_asyncio.fixture
-async def posture_session_factory(
-    tmp_path: Path,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    """Sessions on the production SQLite posture, on a real file.
-
-    The default fixture above leaves journal mode and lock waiting at driver
-    defaults, which is enough for the election proofs. Contention between a
-    service's read and its write is only faithful under the posture the product
-    actually serves on: write-ahead logging, the configured busy timeout, and
-    SQLAlchemy owning every ``BEGIN``.
-    """
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'posture.db'}")
-    configure_sqlite_engine(engine)
-    try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-        yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    finally:
-        await engine.dispose()
-
-
+# The election proofs above keep journal mode and lock waiting at driver
+# defaults. Contention between a service's read and its write is only faithful
+# under the posture the product actually serves on: write-ahead logging, the
+# configured busy timeout, and SQLAlchemy owning every ``BEGIN``.
 @pytest.mark.asyncio
+@pytest.mark.sqlite_engine(SqlitePosture.APPLICATION)
 async def test_cancel_waits_for_a_concurrent_writer_rather_than_failing(
-    posture_session_factory: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """A commit landing between the cancel preflight and its claim must not refuse.
 
@@ -771,14 +574,14 @@ async def test_cancel_waits_for_a_concurrent_writer_rather_than_failing(
     operator sees a 500 for an entirely ordinary race.
     """
     thread_id = "cancel-under-contention"
-    await _running_thread(posture_session_factory, thread_id)
+    await _running_thread(session_factory, thread_id)
     app = FastAPI()
 
     @app.post("/dispatch")
     async def accept_dispatch() -> JSONResponse:
         return JSONResponse({"status": "accepted"})
 
-    async with posture_session_factory() as sibling:
+    async with session_factory() as sibling:
         sibling_thread = await sibling.get(ThreadModel, thread_id)
         assert sibling_thread is not None
         await sibling.rollback()
@@ -791,19 +594,21 @@ async def test_cancel_waits_for_a_concurrent_writer_rather_than_failing(
         held.last_sequence = 7
         await sibling.flush()
 
-        async def _cancel() -> CancelResult:
+        async def _cancel() -> ControlActionOutcome:
             async with (
                 httpx.AsyncClient(
                     transport=httpx.ASGITransport(app=app), base_url="http://worker"
                 ) as worker_client,
-                posture_session_factory() as db,
+                session_factory() as db,
             ):
                 return await cancel_thread(
                     db,
                     thread_id=thread_id,
                     idempotency_key="contended-cancel",
-                    runtime=CancelRuntime(
-                        _circuit_breaker(), _spawner(), worker_client, 25
+                    transport=DispatchTransport(
+                        worker_client=worker_client,
+                        circuit_breaker=_circuit_breaker(),
+                        worker_spawner=adopted_spawner(),
                     ),
                 )
 
@@ -818,7 +623,7 @@ async def test_cancel_waits_for_a_concurrent_writer_rather_than_failing(
     assert result.failure_type is None
     assert result.thread_status == ThreadStatus.CANCELLING.value
 
-    async with posture_session_factory() as db:
+    async with session_factory() as db:
         thread = await get_thread(db, thread_id)
         action = await get_control_action_by_idempotency_key(
             db,

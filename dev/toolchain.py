@@ -16,8 +16,7 @@ The verbs split by CONSEQUENCE, not by tool:
 ``test``
     GATES. See :data:`TEST` for what each lane proves.
 ``health``
-    MEASURES. Always exits 0; composes the gates rather than restating any
-    threshold, so the report and the gate cannot disagree.
+    MEASURES. Always exits 0.
 
 THRESHOLDS ARE INDUSTRY DEFAULTS, NOT THIS TREE'S CURRENT WORST. Every numeric
 limit backing these targets - in ``pyproject.toml`` under ``[tool.ruff.lint]``,
@@ -37,7 +36,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dev.exit_codes import FINDINGS_CODES
+from dev.paths import PACKAGE_PATH, PYTHON_PATHS, SKIPPED_DIRS, TEST_TIERS
 from dev.runner import (
     Cmd,
     Echo,
@@ -49,13 +48,22 @@ from dev.runner import (
     uv_run_env,
 )
 
-#: The shipped package. Every production-scoped scan is rooted here.
-PACKAGE = "src/vaultspec_a2a"
-
-#: Python trees that carry committed source and are therefore linted. Naming
-#: the trees rather than the repository root is what stops a new top-level
-#: folder from linting itself into an exception by simply existing.
-PYTHON_PATHS = ("src", "dev", "docs", "scripts", "packaging")
+__all__ = [
+    "AUDIT",
+    "BUILD",
+    "CI",
+    "DEFAULTS",
+    "DEPS",
+    "FIX",
+    "HEALTH",
+    "LINT",
+    "TEST",
+    "VERBS",
+    "Target",
+    "Verb",
+    "find_verb",
+    "public_targets",
+]
 
 #: Shell scripts invoked from outside any Python entry point: by a workflow
 #: step, or as a cloud environment's setup script. actionlint shellchecks a
@@ -70,27 +78,15 @@ SHELL_PATHS = (
 #: cannot encode them, which aborts the run before any finding is reported.
 UTF8 = {"PYTHONIOENCODING": "utf-8"}
 
-#: The test tiers, as glob suffixes. Every production-scoped scan excludes all
-#: four; naming only the two top-level ones covers a fraction of the tree,
-#: because most test code lives in per-package `*/tests/` directories.
-TEST_TIERS = ("tests", "service_tests", "desktop_tests", "acceptance")
-
 #: Complexipy exclusion patterns scoped to the production-only ``lint complexity``
-#: target. Patterns are relative to :data:`PACKAGE`; direct and nested forms cover
-#: each test tier and cache directory without changing the test-focused audit target.
-COMPLEXIPY_EXCLUDE_PATTERNS = (
-    "tests/**",
-    "**/tests/**",
-    "service_tests/**",
-    "**/service_tests/**",
-    "desktop_tests/**",
-    "**/desktop_tests/**",
-    "acceptance/**",
-    "**/acceptance/**",
-    "__pycache__/**",
-    "**/__pycache__/**",
-    ".pytest_cache/**",
-    "**/.pytest_cache/**",
+#: target. Patterns are relative to the package; direct and nested forms cover
+#: each test tier and skipped directory without changing the test-focused audit
+#: target. The nested form is the load-bearing one: most test code lives in
+#: per-package `*/tests/` directories, not in the top-level tiers.
+COMPLEXIPY_EXCLUDE_PATTERNS = tuple(
+    pattern
+    for name in (*TEST_TIERS, *sorted(SKIPPED_DIRS))
+    for pattern in (f"{name}/**", f"**/{name}/**")
 )
 
 #: Complexipy parses repeated ``--exclude`` flags independently, so retain all
@@ -130,12 +126,9 @@ class Target:
         name: The target token typed on the command line.
         summary: One-line description shown by ``help``.
         steps: The steps to run, in order.
-        advisory: When true the target reports findings but always exits 0.
-        findings_codes: The statuses this target's tool uses to mean "I found
-            something". Only these are suppressed when `advisory` is set;
-            every other non-zero status is the tool failing to RUN, and
-            propagates. Defaults to `FINDINGS_CODES` ({1}), which is right for
-            every scanner here but vulture, which reports dead code with 3.
+        advisory: When true the target's findings do not gate. Only the
+            statuses in `FINDINGS_CODES` ({1}) are suppressed; every other
+            non-zero status is the tool failing to RUN, and propagates.
         keep_going: When true a failing step does not stop the remaining steps.
             Aggregate dashboards set this so one red dimension does not hide
             every dimension after it.
@@ -145,7 +138,6 @@ class Target:
     summary: str
     steps: tuple[Step, ...]
     advisory: bool = False
-    findings_codes: frozenset[int] = FINDINGS_CODES
     keep_going: bool = False
 
 
@@ -219,8 +211,8 @@ DEPS = Verb(
             (Cmd(("uv", "sync", "--locked", "--no-default-groups")),),
         ),
         Target(
-            "server",
-            "Resolve the server runtime profile from the lock.",
+            "otlp",
+            "Resolve the base runtime plus the optional OTLP exporter from the lock.",
             (
                 Cmd(
                     (
@@ -229,7 +221,7 @@ DEPS = Verb(
                         "--locked",
                         "--no-default-groups",
                         "--extra",
-                        "server",
+                        "otlp",
                     )
                 ),
             ),
@@ -275,7 +267,7 @@ DEPS = Verb(
         ),
         Target(
             "docker-ci",
-            "Verify rootless Docker and install pinned integration CLI plugins.",
+            "Verify rootless Docker and install the pinned Docker Compose plugin.",
             (dev_module("ci_docker"),),
         ),
         Target(
@@ -323,7 +315,7 @@ LINT = Verb(
     summary="Run gating static analysis; a finding fails the build.",
     note=(
         "'all' chains only the dimensions that hold the line today. complexity, "
-        "cyclomatic, shape, limits, and size are REAL GATES at "
+        "limits, and size are REAL GATES at "
         "industry thresholds whose burndown is unfinished - run each by name, or "
         "'just health' for the ranked backlog. Chaining a permanently-red gate "
         "would hide every dimension behind it and teach people to ignore red. A "
@@ -400,27 +392,21 @@ LINT = Verb(
         Target(
             "complexity",
             "Cognitive complexity over production code (Sonar limit 15).",
-            (uv_run_env(UTF8, "complexipy", PACKAGE, *COMPLEXIPY_EXCLUDES),),
-        ),
-        Target(
-            "cyclomatic",
-            "Cyclomatic complexity over production code (ceiling 10).",
-            (dev_module("health", "--gate", "cyclomatic"),),
-        ),
-        Target(
-            "shape",
-            "Module length, function length, parameter count, and nesting.",
-            (dev_module("health", "--gate"),),
+            (uv_run_env(UTF8, "complexipy", PACKAGE_PATH, *COMPLEXIPY_EXCLUDES),),
         ),
         Target(
             "limits",
             "Function-shape limits: paths, branches, returns, arguments, statements.",
-            (uv_run("ruff", "check", PACKAGE, "--select", FUNCTION_LIMITS),),
+            (uv_run("ruff", "check", PACKAGE_PATH, "--select", FUNCTION_LIMITS),),
         ),
         Target(
             "nesting",
             "Nesting depth (PLR1702, preview-scoped, ruff default of 5).",
-            (uv_run("ruff", "check", PACKAGE, "--select", "PLR1702", "--preview"),),
+            (
+                uv_run(
+                    "ruff", "check", PACKAGE_PATH, "--select", "PLR1702", "--preview"
+                ),
+            ),
         ),
         Target(
             "size",
@@ -428,7 +414,7 @@ LINT = Verb(
             (
                 uv_run(
                     "pylint",
-                    PACKAGE,
+                    PACKAGE_PATH,
                     "--rcfile=pyproject.toml",
                     "--recursive=y",
                     "--score=n",
@@ -446,6 +432,12 @@ LINT = Verb(
             (dev_module("guards.storage_anchors"),),
         ),
         Target(
+            "duplication",
+            "JSCPD blocking scan (Q.2): every tier plus dev/, against the "
+            "adjudicated baseline.",
+            (dev_module("audit.duplication", "--blocking"),),
+        ),
+        Target(
             "dependencies",
             "Deptry dependency-declaration drift.",
             (uv_run("deptry", "."),),
@@ -458,9 +450,9 @@ LINT = Verb(
         # Two questions about the same artifacts. actionlint asks whether the
         # YAML is well-formed and its expressions resolve; the contract asks
         # whether a `run:` step is calling a recipe or re-implementing one. A
-        # workflow can be perfectly valid YAML and still repeat `uv sync
-        # --locked --no-default-groups --extra server --group all` in five
-        # jobs, which is what this repository's did.
+        # workflow can be perfectly valid YAML and still repeat one locked
+        # `uv sync` invocation in five jobs, which is what this repository's
+        # did.
         Target(
             "workflow",
             "Lint the workflows, then hold them to the CI/justfile contract.",
@@ -507,6 +499,16 @@ LINT = Verb(
             # which is a burndown, and lived in `strict` and `audit` until it
             # reached zero; all three now hold that line without a baseline or
             # exclusion behind any of the three numbers.
+            #
+            # `duplication` (Q.2) GRADUATED on arrival: it holds zero new and
+            # zero stale against its adjudicated baseline from the run that
+            # wrote the baseline, the same bar every other entry here met
+            # before joining, not an exception to it.
+            #
+            # `anchors` (Q.3) held zero the whole time it sat outside this
+            # chain - its own DEFERRED debt list was emptied before this
+            # plan and never refilled - so it was simply never added, not a
+            # burndown still in progress.
             tuple(
                 Ref(name)
                 for name in (
@@ -525,6 +527,8 @@ LINT = Verb(
                     "toml",
                     "workflow",
                     "shell",
+                    "duplication",
+                    "anchors",
                 )
             ),
             keep_going=True,
@@ -541,8 +545,6 @@ LINT = Verb(
                     "type-strict",
                     "type-guards",
                     "complexity",
-                    "cyclomatic",
-                    "shape",
                     "limits",
                     "nesting",
                     "size",
@@ -555,6 +557,8 @@ LINT = Verb(
                     "toml",
                     "workflow",
                     "shell",
+                    "duplication",
+                    "anchors",
                 )
             ),
             keep_going=True,
@@ -614,13 +618,12 @@ AUDIT = Verb(
     note=(
         "Only 'deps' gates - a published advisory against a pinned version is a "
         "verdict, not a lead. Every other target reports findings and still exits "
-        "0, because each yields something to confirm: vulture infers reachability "
-        "it cannot see, bandit reports this project's deliberate subprocess design "
-        "alongside anything real, and a duplication clone may be two things that "
-        "merely look alike. What none of them may do is report a scan that did not "
-        "happen as a scan that found nothing - 'dead-code', 'duplication' and "
-        "'reachability' each own that distinction themselves and exit 7 when the "
-        "measurement was unavailable."
+        "0, because each yields something to confirm: bandit reports this "
+        "project's deliberate subprocess design alongside anything real, and a "
+        "duplication clone may be two things that merely look alike. What none of "
+        "them may do is report a scan that did not happen as a scan that found "
+        "nothing - 'duplication' and 'reachability' each own that distinction "
+        "themselves and exit 7 when the measurement was unavailable."
     ),
     targets=(
         # `uv audit` exits 0 even when it prints advisories, so this target -
@@ -657,14 +660,14 @@ AUDIT = Verb(
                     "-c",
                     "pyproject.toml",
                     "-r",
-                    PACKAGE,
+                    PACKAGE_PATH,
                     *BANDIT_EXCLUDES,
                     "-q",
                 ),
             ),
             advisory=True,
         ),
-        # These three do NOT carry `advisory=True`, and that is not an
+        # These two do NOT carry `advisory=True`, and that is not an
         # oversight. Each runner owns its tool's whole measurement and
         # therefore its own exit contract: it returns OK when the scan RAN,
         # findings and all, and ADVISORY_BROKEN when it could not. Layering
@@ -674,20 +677,13 @@ AUDIT = Verb(
         # resolve a package, so on a machine with no Node the old duplication
         # target reported exactly like a clean tree.
         Target(
-            "dead-code",
-            "Vulture dead-code scan, with the denominator it was found in.",
-            (dev_module("audit.dead_code"),),
-        ),
-        Target(
             "duplication",
             "Copy-paste clone detection over production Python.",
             (dev_module("audit.duplication"),),
         ),
-        # The reachability audit is what makes the dead-code dimension mean
-        # something over this tree: vulture has no model of framework
-        # registration, so it reports every FastAPI handler and every typer
-        # command as unused. This walks the import graph from the shipped
-        # entry points instead.
+        # The reachability audit walks the import graph from the shipped
+        # entry points, so a framework-registered FastAPI handler or typer
+        # command is not reported as unused.
         Target(
             "reachability",
             "Shipped code no shipped entry point reaches.",
@@ -701,13 +697,13 @@ AUDIT = Verb(
         Target(
             "docstrings",
             "Docstring coverage over the public surface.",
-            (uv_run("interrogate", "-c", "pyproject.toml", PACKAGE),),
+            (uv_run("interrogate", "-c", "pyproject.toml", PACKAGE_PATH),),
             advisory=True,
         ),
         Target(
             "complexity",
             "Cognitive complexity over the test tree.",
-            (uv_run_env(UTF8, "complexipy", PACKAGE, "--failed"),),
+            (uv_run_env(UTF8, "complexipy", PACKAGE_PATH, "--failed"),),
             advisory=True,
         ),
         Target(
@@ -718,8 +714,6 @@ AUDIT = Verb(
                 Ref("deps"),
                 Echo("=== security ==="),
                 Ref("security"),
-                Echo("=== dead code ==="),
-                Ref("dead-code"),
                 Echo("=== reachability ==="),
                 Ref("reachability"),
                 Echo("=== duplication ==="),
@@ -793,10 +787,10 @@ TEST = Verb(
                     "-m",
                     "service",
                     "--require-prerequisite=docker",
-                    "src/vaultspec_a2a/service_tests/test_lifecycle.py",
-                    "src/vaultspec_a2a/service_tests/test_cancel_health_trace.py",
-                    "src/vaultspec_a2a/service_tests/test_worker_attach_provenance.py",
-                    "src/vaultspec_a2a/service_tests/test_development_fixture_boundary.py",
+                    f"{PACKAGE_PATH}/service_tests/test_lifecycle.py",
+                    f"{PACKAGE_PATH}/service_tests/test_cancel_health_trace.py",
+                    f"{PACKAGE_PATH}/service_tests/test_worker_attach_provenance.py",
+                    f"{PACKAGE_PATH}/service_tests/test_development_fixture_boundary.py",
                 ),
             ),
         ),
@@ -812,7 +806,7 @@ TEST = Verb(
                 _pytest(
                     "-m",
                     "not service",
-                    f"--cov={PACKAGE}",
+                    f"--cov={PACKAGE_PATH}",
                     "--cov-report=term-missing",
                 ),
             ),
@@ -833,10 +827,6 @@ TEST = Verb(
 BUILD = Verb(
     name="build",
     summary="Build the distributable artifacts.",
-    note=(
-        "The container targets require Docker and say so through the doctor "
-        "probe rather than failing on a missing binary."
-    ),
     targets=(
         Target(
             "package",
@@ -886,36 +876,6 @@ BUILD = Verb(
             ),
         ),
         Target(
-            "docker",
-            "Build the development-only VidaiMock fixture image.",
-            (
-                Cmd(
-                    (
-                        "uv",
-                        "run",
-                        "--no-sync",
-                        "--frozen",
-                        "--no-default-groups",
-                        "--group",
-                        "tooling",
-                        "python",
-                        "-m",
-                        "dev.doctor",
-                        "docker",
-                    )
-                ),
-                Cmd(
-                    (
-                        "docker",
-                        "compose",
-                        "-f",
-                        "service/docker-compose.integration.yml",
-                        "build",
-                    )
-                ),
-            ),
-        ),
-        Target(
             "clean",
             "Remove generated package, documentation, and cache artifacts.",
             (
@@ -935,7 +895,7 @@ BUILD = Verb(
         ),
         Target(
             "all",
-            "Build every artifact producible without Docker.",
+            "Build every artifact.",
             (Ref("package"), Ref("docs")),
             keep_going=True,
         ),
@@ -950,10 +910,7 @@ BUILD = Verb(
 HEALTH = Verb(
     name="health",
     summary="Rank the worst offenders across every code-health dimension.",
-    note=(
-        "MEASUREMENT ONLY - always exits 0. Composes the same tools the gates "
-        "run, so the report and the gate cannot disagree about a number."
-    ),
+    note="MEASUREMENT ONLY - always exits 0.",
     targets=(
         Target(
             "report",
@@ -1009,7 +966,7 @@ CI = Verb(
                         "--locked",
                         "--no-default-groups",
                         "--extra",
-                        "server",
+                        "otlp",
                         "--group",
                         "all",
                     )

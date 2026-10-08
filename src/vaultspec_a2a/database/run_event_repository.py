@@ -20,24 +20,25 @@ frames.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
-from sqlalchemy import CursorResult, Delete, Insert, delete, func, select
+from sqlalchemy import Delete, Insert, delete, func, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from ..thread.enums import TERMINAL_STATUS_VALUES
-from .models import RunEventModel, ThreadModel
+from ._helpers import affected_rows
+from .models import RunEventModel
 from .session import begin_write_transaction
+from .thread_repository import (
+    select_settled_thread_ids,
+    thread_exists,
+    thread_last_sequence,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
-    from sqlalchemy.ext.asyncio import (
-        AsyncConnection,
-        AsyncEngine,
-        AsyncSession,
-        async_sessionmaker,
-    )
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 __all__ = ["RunEventRecord", "RunEventStore", "retained_high_water_mark"]
 
@@ -71,8 +72,8 @@ class RunEventRecord:
         }
 
 
-def _idempotent_insert(dialect: str) -> Insert:
-    """Return an INSERT for *dialect* that ignores a row this log already holds.
+def _idempotent_insert() -> Insert:
+    """Return an INSERT that ignores a row this log already holds.
 
     A flush that failed partway leaves its earlier rows durable, and the retry
     carries the whole batch again. A plain INSERT would then fail forever on
@@ -81,18 +82,8 @@ def _idempotent_insert(dialect: str) -> Insert:
     idempotency guard rather than a permanent refusal: the stored row and the
     retried row are the same frame under the same number, so keeping the
     stored one loses nothing.
-
-    The construct is dialect-specific in SQLAlchemy, so it is selected from the
-    bound dialect rather than guessed; both backends this service ships
-    implement it.
     """
-    if dialect == "sqlite":
-        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
-        return sqlite_insert(RunEventModel).on_conflict_do_nothing()
-    from sqlalchemy.dialects.postgresql import insert as postgres_insert
-
-    return postgres_insert(RunEventModel).on_conflict_do_nothing()
+    return sqlite_insert(RunEventModel).on_conflict_do_nothing()
 
 
 def _trim_statement(thread_id: str, window: int) -> Delete:
@@ -138,15 +129,6 @@ async def retained_high_water_mark(session: AsyncSession, thread_id: str) -> int
     ).scalar_one()
 
 
-def _dialect_of(session: AsyncSession) -> str:
-    """Return the dialect name the session's engine speaks."""
-    bind = cast("AsyncEngine | AsyncConnection | None", session.bind)
-    if bind is None:
-        msg = "a run-event session must be bound to an engine"
-        raise RuntimeError(msg)
-    return bind.dialect.name
-
-
 @dataclass(frozen=True, slots=True)
 class RunEventStore:
     """The application-engine reads and writes of the replay log."""
@@ -170,8 +152,7 @@ class RunEventStore:
         async with self.session_factory() as session:
             await begin_write_transaction(session)
             await session.execute(
-                _idempotent_insert(_dialect_of(session)),
-                [record.as_row() for record in records],
+                _idempotent_insert(), [record.as_row() for record in records]
             )
             if window is not None:
                 for thread_id in dict.fromkeys(record.thread_id for record in records):
@@ -232,38 +213,18 @@ class RunEventStore:
         be, since every later attempt carries the same doomed rows.
         """
         async with self.session_factory() as session:
-            return (
-                await session.execute(
-                    select(ThreadModel.id).where(ThreadModel.id == thread_id)
-                )
-            ).scalar_one_or_none() is not None
+            return await thread_exists(session, thread_id)
 
     async def settled_sequence(self, thread_id: str) -> int | None:
         """Return the cursor captured on *thread_id* when it settled.
 
-        Read here rather than through the thread repository because it is the
-        second half of ONE question - where this run's numbering stands -
+        The second half of ONE question - where this run's numbering stands -
         whose first half is :meth:`high_water_mark`. A caller seeding an
         allocator asks both against the same store and must not have to reach
         for two of them.
         """
         async with self.session_factory() as session:
-            return (
-                await session.execute(
-                    select(ThreadModel.last_sequence).where(ThreadModel.id == thread_id)
-                )
-            ).scalar_one_or_none()
-
-    async def trim_to_window(self, thread_id: str, window: int) -> int:
-        """Keep *thread_id*'s newest *window* rows, delete the rest, count them."""
-        async with self.session_factory() as session:
-            await begin_write_transaction(session)
-            result = cast(
-                "CursorResult[Any]",
-                await session.execute(_trim_statement(thread_id, window)),
-            )
-            await session.commit()
-            return result.rowcount
+            return await thread_last_sequence(session, thread_id)
 
     async def delete_for_runs_settled_before(self, cutoff: datetime) -> int:
         """Delete every retained frame of a run that settled before *cutoff*.
@@ -278,22 +239,15 @@ class RunEventStore:
         """
         async with self.session_factory() as session:
             await begin_write_transaction(session)
-            settled = (
-                select(ThreadModel.id)
-                .where(
-                    ThreadModel.status.in_(TERMINAL_STATUS_VALUES),
-                    ThreadModel.updated_at < cutoff,
+            result = await session.execute(
+                delete(RunEventModel).where(
+                    RunEventModel.thread_id.in_(
+                        select_settled_thread_ids(before=cutoff)
+                    )
                 )
-                .scalar_subquery()
-            )
-            result = cast(
-                "CursorResult[Any]",
-                await session.execute(
-                    delete(RunEventModel).where(RunEventModel.thread_id.in_(settled))
-                ),
             )
             await session.commit()
-            return result.rowcount
+            return affected_rows(result)
 
     async def delete_produced_before(self, cutoff: datetime) -> int:
         """Delete every retained frame produced before *cutoff*, and count them.
@@ -304,11 +258,8 @@ class RunEventStore:
         """
         async with self.session_factory() as session:
             await begin_write_transaction(session)
-            result = cast(
-                "CursorResult[Any]",
-                await session.execute(
-                    delete(RunEventModel).where(RunEventModel.created_at < cutoff)
-                ),
+            result = await session.execute(
+                delete(RunEventModel).where(RunEventModel.created_at < cutoff)
             )
             await session.commit()
-            return result.rowcount
+            return affected_rows(result)

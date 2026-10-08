@@ -7,33 +7,37 @@ provider payload, or the free-form ``metadata`` dict. A frame type absent from
 the catalog is degraded to its identity keys rather than relayed. It is also
 bounded: an authenticated caller cannot open an unbounded number of streams.
 
-These drive the real edge over a real TCP socket behind the production discovery
+These drive the real edge over a real TCP socket behind the app's seated attach
 bearer - no mocks, no auth bypass - relaying forbidden content into the same
-aggregator the live server reads from and asserting it never crosses the encoded
+relay hub the live server reads from and asserting it never crosses the encoded
 boundary while the permitted fields do. Every exclusion assertion is paired with
 a permitted-field assertion, so an empty or dropped frame cannot satisfy it.
 """
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, cast
 
 import httpx
 import pytest
 
-from ...control.config import settings
-from ...streaming.aggregator import EventAggregator
+from ...domain_config import domain_config
+from ...streaming import RelayHub
 from ...streaming.sse_frames import MAX_PROGRESS_CONTENT_CHARS
-from ...testing.tests._support.sse import read_frame
+from ...testing import ProgressDeadline, read_frame, serve_on_loopback, wait_for_async
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
-from .conftest import AppFixture, SessionFactory, _live_server, make_app
+from ...utils import bearer_header
+from .conftest import (
+    SEATED_ATTACH_TOKEN,
+    AppFixture,
+    SessionFactory,
+    make_app,
+)
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-_SERVICE_TOKEN = "discovery-service-token"
 _ARTIFACT_BODY = "SECRET-ARTIFACT-BODY-8f21c9"
 _DIFF_BODY = "SECRET-EDIT-DIFF-3a7be1"
 _METADATA_BODY = "SECRET-METADATA-VALUE-19dd73"
@@ -43,17 +47,14 @@ _PLAN_BODY = "SECRET-PLAN-PROSE-64c1af"
 def _secured(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> AppFixture:
-    """Build the real gateway fixture with its production bearer armed."""
-    app, agg, worker, cp = make_app(session_factory, checkpointer, aggregator)
-    app.state.v1_service_token = _SERVICE_TOKEN
-    app.state.allow_unauthenticated_v1_for_testing = False
-    return app, agg, worker, cp
+    """Build the real gateway fixture; every caller presents its own bearer."""
+    return make_app(session_factory, checkpointer, aggregator, stamp_credentials=False)
 
 
 async def _seed_running_run(session_factory: SessionFactory) -> str:
-    from ...database.thread_repository import create_thread
+    from ...database import create_thread
 
     async with session_factory() as session:
         thread = await create_thread(
@@ -66,12 +67,13 @@ async def _seed_running_run(session_factory: SessionFactory) -> str:
         return thread.id
 
 
-async def _await_subscriber(agg: EventAggregator) -> None:
-    for _ in range(200):
-        if agg.subscriber_count() > 0:
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError("stream subscriber never registered")
+async def _await_subscriber(agg: RelayHub) -> None:
+    async def _registered() -> bool | None:
+        return True if agg.subscriber_count() > 0 else None
+
+    await wait_for_async(
+        _registered, deadline=ProgressDeadline(idle_window_s=2.0), interval_s=0.01
+    )
 
 
 def _assert_team_status_frame(frame: dict[str, object], raw: str, run_id: str) -> None:
@@ -92,16 +94,16 @@ def _assert_team_status_frame(frame: dict[str, object], raw: str, run_id: str) -
 async def test_authenticated_stream_excludes_artifact_body_keeps_identity(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """S27/S99: an artifact body cannot cross the authenticated edge; identity does."""
-    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    """An artifact body cannot cross the authenticated edge; identity does."""
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -139,16 +141,16 @@ async def test_authenticated_stream_excludes_artifact_body_keeps_identity(
 async def test_authenticated_stream_excludes_edit_diff_keeps_tool_metadata(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """S27/S99: an edit diff cannot cross; the tool-call metadata does."""
-    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    """An edit diff cannot cross; the tool-call metadata does."""
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -192,17 +194,17 @@ async def test_authenticated_stream_excludes_edit_diff_keeps_tool_metadata(
 async def test_authenticated_stream_bounds_the_token_delta(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """S159: a message frame's token content is bounded, not relayed whole."""
-    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    """A message frame's token content is bounded, not relayed whole."""
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
     oversized = "T" * (MAX_PROGRESS_CONTENT_CHARS + 5000)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -241,18 +243,18 @@ async def test_authenticated_stream_keeps_the_consumer_read_lifecycle_fields(
     ``team_status.agents[].agent_id``/``state`` drive roster liveness, and
     ``error.message`` is the rendered fault reason. All three survive today only
     because their types are now enumerated - before the catalog closed they rode
-    the default-allow path. Each is relayed through the real aggregator and read
+    the default-allow path. Each is relayed through the real relay hub and read
     back off a real socket.
     """
-    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -330,15 +332,15 @@ async def test_authenticated_stream_degrades_an_uncatalogued_frame(
     This inverts the pre-catalog edge behaviour. The type NAME survives, so a
     consumer classifying frames by name still routes it; its payload does not.
     """
-    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -375,15 +377,15 @@ async def test_authenticated_stream_drops_plan_prose_and_keeps_classification(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """Plan entries are rebuilt item by item; the model-authored text stays home."""
-    app, agg, _worker, _cp = _secured(session_factory, checkpointer, EventAggregator())
+    app, agg, _worker, _cp = _secured(session_factory, checkpointer, RelayHub())
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -417,11 +419,11 @@ async def test_authenticated_stream_drops_plan_prose_and_keeps_classification(
 async def test_global_stream_quota_refuses_an_authenticated_caller_at_capacity(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """S160 (global): the connection cap holds even behind a valid bearer."""
-    limit = settings.max_stream_connections
+    """The global connection cap holds even behind a valid bearer."""
+    limit = domain_config.max_stream_connections
     assert limit > 0, "the global stream limit must be enabled for this proof"
 
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     for index in range(limit):
         aggregator.add_subscriber(f"prefill-{index}")
 
@@ -429,11 +431,11 @@ async def test_global_stream_quota_refuses_an_authenticated_caller_at_capacity(
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
     ):
         refused = await client.get(f"/v1/runs/{run_id}/stream")
@@ -446,13 +448,13 @@ async def test_global_stream_quota_refuses_an_authenticated_caller_at_capacity(
 async def test_global_stream_quota_admits_the_authenticated_caller_below_capacity(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """S160 (global): the cap is the discriminator, not the bearer.
+    """The global cap is the discriminator, not the bearer.
 
     One slot below capacity the same authenticated request opens, proving the
     refusal above is the connection limit rather than an auth artefact.
     """
-    limit = settings.max_stream_connections
-    aggregator = EventAggregator()
+    limit = domain_config.max_stream_connections
+    aggregator = RelayHub()
     for index in range(limit - 1):
         aggregator.add_subscriber(f"prefill-{index}")
 
@@ -460,11 +462,11 @@ async def test_global_stream_quota_admits_the_authenticated_caller_below_capacit
     run_id = await _seed_running_run(session_factory)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(
             base_url=base,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_SERVICE_TOKEN}"},
+            headers=bearer_header(SEATED_ATTACH_TOKEN),
         ) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):

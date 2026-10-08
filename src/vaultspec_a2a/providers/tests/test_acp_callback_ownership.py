@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...workspace.concurrency import git_workspace_mutex
+from ...testing import request_permission_params
+from .._acp_request import jsonrpc_result
 from .._acp_rpc_handlers import (
     on_fs_write_text_file,
     on_request_permission,
@@ -21,6 +22,7 @@ from .._acp_rpc_handlers import (
 )
 from .._acp_rpc_terminal_handlers import release_owned_terminal
 from .._acp_types import AcpModelConfig, AcpSessionContext
+from .._write_lock import ProviderWriteLock
 from ._terminal_process import retain_terminal_process
 
 if TYPE_CHECKING:
@@ -28,13 +30,10 @@ if TYPE_CHECKING:
 
     from .._json_contract import JsonObject, JsonValue
 
-_PERMISSION_OPTIONS: list[JsonValue] = [
-    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
-    {"optionId": "reject", "name": "Reject", "kind": "reject_once"},
-]
 
-
-def _config(root: Path) -> AcpModelConfig:
+def _config(
+    root: Path, *, write_lock: ProviderWriteLock | None = None
+) -> AcpModelConfig:
     return AcpModelConfig(
         agent_config=None,
         permission_callback=None,
@@ -44,13 +43,9 @@ def _config(root: Path) -> AcpModelConfig:
         mcp_servers=[],
         use_exec=False,
         provider=None,
-        runtime_authority=None,
-        acp_backend=None,
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
+        write_lock=write_lock if write_lock is not None else ProviderWriteLock(),
     )
 
 
@@ -283,18 +278,26 @@ async def test_owner_write_remains_permitted(
         acp_session_context,
         _config(tmp_path),
     )
-    assert response == {"jsonrpc": "2.0", "id": 1, "result": {}}
+    assert response == jsonrpc_result(1, {})
     assert (tmp_path / "nested/created.txt").read_text(
         encoding="utf-8"
     ) == "owner content"
 
 
-@pytest.mark.asyncio(loop_scope="module")
+@pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["replace", "close"])
-async def test_write_rechecks_session_after_waiting_for_workspace_mutex(
+async def test_write_rechecks_session_after_waiting_for_the_path_lock(
     tmp_path: Path, acp_session_context: AcpSessionContext, change: str
 ) -> None:
-    async with git_workspace_mutex:
+    """Session authority is re-read after the wait, not carried over it.
+
+    The write waits on the lock for its own target file, held here through the
+    production API, so the wait is the one a competing writer of that file
+    imposes. A session replaced or closed during the wait must refuse the write
+    that was admitted under the old one.
+    """
+    write_lock = ProviderWriteLock()
+    async with write_lock.hold(tmp_path / "created.txt"):
         pending = asyncio.create_task(
             on_fs_write_text_file(
                 1,
@@ -304,7 +307,7 @@ async def test_write_rechecks_session_after_waiting_for_workspace_mutex(
                     "content": "old session",
                 },
                 acp_session_context,
-                _config(tmp_path),
+                _config(tmp_path, write_lock=write_lock),
             )
         )
         await asyncio.sleep(0)
@@ -316,14 +319,6 @@ async def test_write_rechecks_session_after_waiting_for_workspace_mutex(
     response = await asyncio.wait_for(pending, timeout=5)
     assert "error" in response and "result" not in response
     assert not (tmp_path / "created.txt").exists()
-
-
-def _permission_params(session: JsonValue) -> JsonObject:
-    return {
-        "sessionId": session,
-        "toolCall": {"title": "Edit", "rawInput": {}},
-        "options": list(_PERMISSION_OPTIONS),
-    }
 
 
 def _recording_config(root: Path, asked: list[str]) -> AcpModelConfig:
@@ -348,7 +343,7 @@ async def test_permission_outside_the_session_is_refused_before_any_rung(
     asked: list[str] = []
     response = await on_request_permission(
         1,
-        _permission_params(session),
+        request_permission_params(session),
         acp_session_context,
         _recording_config(tmp_path, asked),
     )
@@ -362,7 +357,7 @@ async def test_permission_requires_an_open_negotiated_session(
     tmp_path: Path, acp_session_context: AcpSessionContext, mode: str
 ) -> None:
     asked: list[str] = []
-    params = _permission_params(acp_session_context.session_id)
+    params = request_permission_params(acp_session_context.session_id)
     if mode == "missing":
         params.pop("sessionId")
     elif mode == "unbound":
@@ -383,7 +378,7 @@ async def test_owner_permission_request_reaches_the_human_rung(
     asked: list[str] = []
     response = await on_request_permission(
         1,
-        _permission_params(acp_session_context.session_id),
+        request_permission_params(acp_session_context.session_id),
         acp_session_context,
         _recording_config(tmp_path, asked),
     )

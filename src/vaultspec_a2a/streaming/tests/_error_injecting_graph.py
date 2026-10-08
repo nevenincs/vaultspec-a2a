@@ -1,10 +1,10 @@
 """One real compiled graph whose single node's behaviour is chosen by input.
 
-Replaces seven hand-written ``StreamableGraph`` stubs this suite used to carry
-(``_SilentGraph``, ``_InterruptingGraph``, ``_RecursingGraph``, ``_FailingGraph``,
-``_ProviderCancelledGraph``, ``_StallingGraph``, ``_LongStepBudgetGraph``):
-forcing a different failure used to mean swapping in a different hand-rolled
-class, so a real protocol change was ten edits instead of one. Every scenario
+One graph covers the scenarios that hand-written ``StreamableGraph`` stubs would
+each need a class for (silent, interrupting, recursing, failing,
+provider-cancelled, stalling, long step budget): forcing a different failure
+changes one input rather than swapping in a hand-rolled class, so a real
+protocol change is one edit instead of ten. Every scenario
 below runs the SAME real ``StateGraph`` through a real ``InMemorySaver`` -
 only the instruction the one node reads off its input changes, and every
 error it raises (``RuntimeError``, ``AcpPromptCancelledError``,
@@ -20,19 +20,14 @@ file already drives a real blocked node. Neither is this fixture's job.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import Any, TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END
 from langgraph.types import interrupt
 
-from ...graph.nodes._config_contract import accepting_runnable_config
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
 from ...providers import AcpPromptCancelledError
-from ..custom_writes import emit_custom_node_write
-
-if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 
 __all__ = [
     "ERROR_INJECTION_NODE",
@@ -81,21 +76,11 @@ class InjectableGraphInput(TypedDict, total=False):
     pairing this with a low ``recursion_limit`` in its run config gets a real
     ``GraphRecursionError`` from LangGraph's own Pregel loop."""
 
-    custom_write: str
-    """Push this text through :func:`emit_custom_node_write`, stamped with
-    this node's own identity, before acting on any other field."""
-
     raise_signal: str
     """Raise :class:`InjectedSignal` carrying this text."""
 
 
-async def _inject(
-    state: InjectableGraphInput,
-    config: RunnableConfig | None = None,
-) -> dict[str, Any]:
-    custom_write = state.get("custom_write")
-    if custom_write:
-        emit_custom_node_write(custom_write, config=config)
+async def _inject(state: InjectableGraphInput) -> dict[str, Any]:
     signal = state.get("raise_signal")
     if signal is not None:
         raise InjectedSignal(signal)
@@ -120,15 +105,6 @@ async def _inject(
     return {"loop": True} if state.get("loop") else {}
 
 
-# ``from __future__ import annotations`` stringizes ``config``'s annotation to
-# "RunnableConfig | None", which LangGraph's injector does not recognise (its
-# own fixed set names only the ``Optional[...]`` spelling) - see
-# ``graph/nodes/_config_contract.py``. Without this, ``config`` silently
-# arrives as ``None`` and a custom write's node stamp would silently be
-# ``None`` too, wrong for exactly the reason this fixture exists to catch.
-_inject = accepting_runnable_config(_inject)
-
-
 def build_error_injecting_graph() -> Any:
     """Compile a fresh instance of the one shared error-injecting graph.
 
@@ -137,9 +113,7 @@ def build_error_injecting_graph() -> Any:
     convention, ``graph/compiler.py``) to reproduce a team preset's declared
     budget must not leak that value onto an unrelated test.
     """
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(
-        cast("Any", InjectableGraphInput)
-    )
+    builder = new_state_graph(InjectableGraphInput)
     add_test_node(builder, ERROR_INJECTION_NODE, _inject)
     builder.set_entry_point(ERROR_INJECTION_NODE)
 

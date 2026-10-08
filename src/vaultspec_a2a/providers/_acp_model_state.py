@@ -4,16 +4,21 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, cast
 
-from ._acp_types import (
-    AcpModelConfig,
-    AcpResponseFutures,
-    NativeCommandDisposition,
-)
+from ._acp_types import AcpModelConfig, AcpResponseFutures
 from ._json_contract import JsonObject
+
+__all__ = [
+    "AcpModelState",
+    "AcpSessionBusyError",
+    "model_state_or_none",
+    "model_state_path",
+    "read_model_state",
+    "write_model_state",
+]
 
 
 @dataclass(slots=True)
-class AcpTransportState:
+class _AcpTransportState:
     """Subprocess handles and the lock serializing writes to its stdin."""
 
     process: asyncio.subprocess.Process | None = None
@@ -22,7 +27,7 @@ class AcpTransportState:
 
 
 @dataclass(slots=True)
-class AcpSessionState:
+class _AcpSessionState:
     """Mutable state for the currently negotiated ACP session."""
 
     active_session_id: str | None = None
@@ -42,8 +47,8 @@ class AcpModelState:
     """Configuration, transport, and session state owned by one model."""
 
     config: AcpModelConfig
-    transport: AcpTransportState = field(default_factory=AcpTransportState)
-    session: AcpSessionState = field(default_factory=AcpSessionState)
+    transport: _AcpTransportState = field(default_factory=_AcpTransportState)
+    session: _AcpSessionState = field(default_factory=_AcpSessionState)
 
     @classmethod
     def from_config(
@@ -56,27 +61,12 @@ class AcpModelState:
         return cls(
             config=config,
             transport=previous.transport,
-            session=AcpSessionState(
+            session=_AcpSessionState(
                 active_session_id=previous.session.active_session_id,
                 response_futures=previous.session.response_futures,
                 session_busy=previous.session.session_busy,
             ),
         )
-
-
-@dataclass(frozen=True, slots=True)
-class NativeCommandRequest:
-    name: str
-    arguments: str | None
-
-
-class NativeCommandUnavailableError(RuntimeError):
-    def __init__(
-        self, name: str, disposition: NativeCommandDisposition, reason: str
-    ) -> None:
-        super().__init__(reason)
-        self.name = name
-        self.disposition = disposition
 
 
 class AcpSessionBusyError(RuntimeError):

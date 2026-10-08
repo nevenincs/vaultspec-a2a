@@ -2,23 +2,22 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from ...control.thread_service import successor_seed_transcript
-from ...database.checkpoints import open_checkpointer
 from ...ipc.schemas import DispatchRequest
-from ...testing.environment import settings_override
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    async_catalog_run_fields,
+    serve_on_loopback,
+)
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...worker.graph_lifecycle import GraphLifecycleManager
-from .conftest import async_catalog_run_fields, make_app
-from .test_gateway_drain import _relay_terminal, _RelayContext
-from .test_gateway_live import _live_server
+from ._relay_events import RelayContext, relay_terminal
+from .conftest import make_app
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +34,7 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
 ) -> None:
     app, _aggregator, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         fields = await async_catalog_run_fields(client)
@@ -43,7 +42,7 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
             "/v1/runs",
             json={
                 "run_id": "lineage-parent",
-                "team_preset": "mock-success-single",
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "first turn",
                 **fields,
             },
@@ -52,19 +51,22 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
         successor = {
             "run_id": "lineage-successor",
             "continues_run_id": "lineage-parent",
-            "team_preset": "mock-success-single",
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "second turn",
             **fields,
         }
         premature = await client.post("/v1/runs", json=successor)
         assert premature.status_code == 409, premature.text
-        await _relay_terminal(
+        await relay_terminal(
             client,
             "lineage-parent",
-            _RelayContext(checkpointer, worker, session_factory),
+            RelayContext(checkpointer, worker, session_factory),
         )
         checkpoint = await real_checkpoint()
-        checkpoint["id"] = "cp-lineage-final"
+        # The saver answers a thread's latest checkpoint by the greatest id, so
+        # the final one must sort after the completion checkpoint the relay
+        # recorded as ``cp-lineage-parent``, as a real run's later id does.
+        checkpoint["id"] = "cp-lineage-parent-final"
         checkpoint["channel_values"] = {
             "messages": [
                 HumanMessage(content=f"history-{index}")
@@ -114,16 +116,16 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
             "/v1/runs",
             json={
                 "run_id": "lineage-other-workspace",
-                "team_preset": "mock-success-single",
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "another project",
                 **await async_catalog_run_fields(client, workspace_root=str(tmp_path)),
             },
         )
         assert other.status_code == 201, other.text
-        await _relay_terminal(
+        await relay_terminal(
             client,
             "lineage-other-workspace",
-            _RelayContext(checkpointer, worker, session_factory),
+            RelayContext(checkpointer, worker, session_factory),
         )
         wrong_workspace = await client.post(
             "/v1/runs",
@@ -134,38 +136,3 @@ async def test_successor_requires_settled_parent_and_discloses_durable_link(
             },
         )
         assert wrong_workspace.status_code == 409, wrong_workspace.text
-
-
-@pytest.mark.asyncio(loop_scope="function")
-@pytest.mark.requires_prerequisites("postgres")
-async def test_postgres_final_checkpoint_seeds_successor_transcript() -> None:
-    with settings_override(
-        checkpoint_backend="postgres",
-        checkpoint_database_url=os.environ["VAULTSPEC_A2A_TEST_POSTGRES_URL"],
-    ):
-        async with open_checkpointer() as checkpointer:
-            predecessor_id = f"lineage-postgres-{uuid4().hex}"
-            checkpoint = await real_checkpoint()
-            checkpoint["id"] = f"cp-{uuid4().hex}"
-            checkpoint["channel_values"] = {
-                "messages": [
-                    HumanMessage(content="question"),
-                    AIMessage(content="answer"),
-                ]
-            }
-            checkpoint["channel_versions"] = {
-                "messages": checkpointer.get_next_version(None, None)
-            }
-            await checkpointer.aput(
-                {"configurable": {"thread_id": predecessor_id, "checkpoint_ns": ""}},
-                checkpoint,
-                {"source": "loop", "step": 1, "parents": {}},
-                checkpoint["channel_versions"],
-            )
-            transcript = await successor_seed_transcript(
-                checkpointer, predecessor_id, 1
-            )
-            assert transcript is not None
-            assert [(turn.role, turn.content) for turn in transcript] == [
-                ("assistant", "answer")
-            ]

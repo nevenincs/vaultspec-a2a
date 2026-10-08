@@ -15,13 +15,20 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ...testing import (
+    LivenessWatch,
+    ProgressDeadline,
+    inherited_environment,
+    wait_until,
+)
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 from ...utils.enums import CodexWebSearchMode
 from .._codex_auth import (
+    _MAX_RETURNED_AUTH_BYTES,
     CODEX_AUTH_FILENAME,
     codex_credential_store_mode,
     forget_run_credential,
@@ -172,7 +179,7 @@ def test_oversized_returned_credential_is_not_published(tmp_path: Path) -> None:
     source = base_home / CODEX_AUTH_FILENAME
     seeded = source.read_bytes()
     run_home = _run_home(base_home)
-    (run_home / CODEX_AUTH_FILENAME).write_bytes(b" " * (1024 * 1024 + 1))
+    (run_home / CODEX_AUTH_FILENAME).write_bytes(b" " * (_MAX_RETURNED_AUTH_BYTES + 1))
     try:
         assert not write_back_refreshed_credential(run_home)
         assert source.read_bytes() == seeded
@@ -349,19 +356,30 @@ with _credential_lock(pathlib.Path({str(source)!r})):
     pathlib.Path({str(ready)!r}).write_text("held")
     time.sleep(3)
 """
-    child = subprocess.Popen(
+    containment = ProcessContainment.create()
+    child = spawn_contained(
         [sys.executable, "-c", holder],
-        env={**os.environ, "PYTHONPATH": str(_SOURCE_ROOT)},
+        containment,
+        env=inherited_environment({"PYTHONPATH": str(_SOURCE_ROOT)}),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
     )
     try:
-        deadline = time.monotonic() + 20.0
-        while not ready.exists():
-            assert child.poll() is None, child.communicate()
-            assert time.monotonic() < deadline, "the holder never took the lock"
-            time.sleep(0.05)
+
+        def _holder_exited() -> str | None:
+            if child.poll() is None:
+                return None
+            return f"exited before taking the lock: {child.communicate()}"
+
+        wait_until(
+            ready.exists,
+            deadline=ProgressDeadline(
+                idle_window_s=20.0,
+                watches=(LivenessWatch(label="lock holder", verdict=_holder_exited),),
+            ),
+            interval_s=0.05,
+            stalled=lambda: "the holder never took the lock",
+        )
 
         with caplog.at_level(logging.ERROR, logger="vaultspec_a2a.providers"):
             assert (
@@ -377,8 +395,7 @@ with _credential_lock(pathlib.Path({str(source)!r})):
             for record in caplog.records
         ), caplog.messages
     finally:
-        child.terminate()
-        child.wait(timeout=20)
+        reap_contained(child, containment)
 
     assert write_back_refreshed_credential(run_home) is True
     assert source.read_bytes() == refreshed

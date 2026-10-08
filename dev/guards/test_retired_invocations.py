@@ -1,4 +1,4 @@
-"""No live source may cite a recipe invocation that no longer exists.
+"""No live source may cite a recipe invocation, or a symbol, that is gone.
 
 The harness has been through three renames: a nested module namespace, a
 verb-plus-argument dispatch, and the flat hyphenated recipes the justfile
@@ -11,19 +11,25 @@ recipe and cannot carry an argument, so a two-token invocation has no shim and
 never will. This sweep is the whole safety net, which is why it walks the tree
 rather than a hand-written file list: the previous cutover swept a list, and
 four citations survived it.
+
+The second sweep below (Q.5b) is the same idea applied to a different kind of
+rename: a class, function or module this remediation deleted outright rather
+than renamed. The risk it guards against is different too - not a reader
+following a stale doc comment, but a WRITER reaching for a shape they remember
+and resurrecting the thing a prior round removed, under the same name, because
+nothing told them it was gone.
 """
 
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.unit
+from dev.paths import REPO_ROOT
 
-#: This repository has no shared `repo_root` fixture, so the sweep derives the
-#: root from this file's own location: `dev/guards/<this file>`.
-REPO_ROOT = Path(__file__).resolve().parents[2]
+pytestmark = pytest.mark.unit
 
 #: Invocation prefixes that no longer exist.
 #:
@@ -193,3 +199,93 @@ def test_the_sweep_can_actually_fail(tmp_path: Path) -> None:
         retired in planted.read_text(encoding="utf-8")
         for retired in RETIRED_INVOCATIONS
     ), "the planted citation must be one the sweep looks for"
+
+
+# --- Retired symbols (Q.5b) -------------------------------------------------
+#
+# Written as literals ON PURPOSE, unlike RETIRED_INVOCATIONS above: each is a
+# class, function or module name this remediation plan deleted outright, not
+# a recipe token this file would otherwise self-cite by assembling. None of
+# them is a word this guard's own prose would ever use in passing.
+
+#: Symbols this plan deleted, built from the deletion inventory in
+#: SCHEDULE.md and RESIDUE.md. A name reappearing - a fresh import, a new
+#: reference, a redefinition - means a deletion this plan already made
+#: regressed. Extend this tuple as further deletions are confirmed; never
+#: shrink it to make a regression pass.
+RETIRED_SYMBOLS: tuple[str, ...] = (
+    "EventAggregator",
+    "MockChatModel",
+    "Provider.MOCK",
+    "mock_api_base",
+    "ThreadStateData",
+    "concurrent_checkpointer",
+    "desktop_record_process_is_live",
+    "process_start_fingerprint",
+)
+
+#: Modules deleted wholesale, checked by PATH rather than by a name inside
+#: them: `database/admin.py` was folded into `vaultspec-a2a migrate
+#: --compact` and removed (S08), so the file itself reappearing is the
+#: regression, independent of what it would contain.
+RETIRED_MODULE_PATHS: tuple[str, ...] = ("src/vaultspec_a2a/database/admin.py",)
+
+#: Migration scripts under `database/migrations/versions/` are immutable
+#: historical records (see the `migration-revision-boilerplate` category in
+#: `dev/audit/duplication-baseline.json`) and may legitimately describe, in
+#: prose, a class that existed when they were written - 0016 names
+#: `EventAggregator` this way, as the thing the column it adds used to live
+#: on only. The retired-INVOCATION sweep above needs no such exclusion today
+#: because none of its citations have ever landed in one; this sweep does.
+_SYMBOL_SWEEP_EXCLUDED_PARTS: frozenset[str] = frozenset({"migrations"})
+
+
+def test_no_retired_symbol_reappears() -> None:
+    """A name this plan deleted must not come back under the same spelling."""
+    repo_root = REPO_ROOT
+    this_file = Path(__file__).resolve()
+    swept = [
+        path
+        for path in _sweepable(repo_root)
+        # This module carries every retired symbol as a literal (the data
+        # list itself), so it would otherwise flag itself as having cited
+        # what it is the one place allowed to name.
+        if path.resolve() != this_file
+        and not _SYMBOL_SWEEP_EXCLUDED_PARTS & set(path.relative_to(repo_root).parts)
+    ]
+    assert len(swept) > 50, (
+        f"the sweep found only {len(swept)} files under {SWEPT_ROOTS}; a corpus "
+        "this small means a renamed tree retired the guard rather than failing it"
+    )
+    offenders: dict[str, list[str]] = defaultdict(list)
+    for path in swept:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for symbol in RETIRED_SYMBOLS:
+            if symbol in text:
+                offenders[str(path.relative_to(repo_root))].append(symbol)
+    assert not offenders, "these cite a symbol this plan deleted:\n  " + "\n  ".join(
+        f"{path}: {', '.join(names)}" for path, names in sorted(offenders.items())
+    )
+
+
+def test_no_retired_module_path_exists() -> None:
+    """A module deleted wholesale must not reappear at its old path."""
+    present = [
+        relative
+        for relative in RETIRED_MODULE_PATHS
+        if (REPO_ROOT / relative).is_file()
+    ]
+    assert not present, f"these retired modules have reappeared: {present}"
+
+
+def test_the_symbol_sweep_can_actually_fail(tmp_path: Path) -> None:
+    """Prove the symbol sweep can fail, the same way the invocation sweep must."""
+    planted = tmp_path / "revived.py"
+    planted.write_text(
+        f"from somewhere import {RETIRED_SYMBOLS[0]}\n", encoding="utf-8"
+    )
+    swept = _sweepable(tmp_path)
+    assert planted in swept, "the planted file must be inside the sweep's scope"
+    assert RETIRED_SYMBOLS[0] in planted.read_text(encoding="utf-8"), (
+        "the planted citation must be one the sweep looks for"
+    )

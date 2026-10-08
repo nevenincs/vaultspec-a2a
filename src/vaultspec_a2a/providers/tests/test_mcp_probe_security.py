@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...testing.children import run_child
+from ...testing import combined_output, run_child
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,7 +72,7 @@ print('trusted MCP contract verified')
         [sys.executable, "-c", script],
         what="MCP probe with workspace-shadowed uvx and Python",
     )
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.returncode == 0, combined_output(completed)
     assert "trusted MCP contract verified" in completed.stdout
     assert not marker.exists()
 
@@ -120,5 +120,5 @@ print('real MCP environment confined')
         [sys.executable, "-c", script],
         what="MCP infrastructure environment confinement",
     )
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.returncode == 0, combined_output(completed)
     assert "real MCP environment confined" in completed.stdout

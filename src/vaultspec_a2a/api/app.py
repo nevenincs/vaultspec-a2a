@@ -1,12 +1,13 @@
 """FastAPI application factory -- the gateway entry point.
 
 Creates the ASGI application with:
-- Lifespan management (init/close DB, EventAggregator, telemetry)
-- REST router from per-resource route modules
+- Lifespan management (init/close DB, the relay hub, telemetry)
+- The versioned ``/v1`` router and the administrative shutdown router from
+  ``routes/``
 - Internal router from ``internal.py`` (worker relay)
 
 The gateway NO LONGER runs agent execution locally.  All graph
-compilation and ``aggregator.ingest()`` calls are dispatched to the
+compilation and ``RunEventProducer.ingest()`` calls are dispatched to the
 worker process via HTTP POST to ``/dispatch`` (service separation).
 """
 
@@ -21,48 +22,51 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
-import uvicorn
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from ..authoring import resolve_engine
 from ..control._verdict_subscriber_config import VerdictSubscriberConfig
-from ..control._worker_health import WorkerLiveness, WorkerState
-from ..control.circuit_breaker import WorkerCircuitBreaker
-from ..control.clarification_service import (
-    ClarificationRuntime,
-    redrive_clarification_actions,
+from ..control._worker_health import (
+    WorkerLiveness,
+    WorkerState,
+    internal_auth_headers,
 )
+from ..control.circuit_breaker import WorkerCircuitBreaker
 from ..control.config import settings
 from ..control.direct_control_recovery import redrive_direct_control_actions
 from ..control.dispatch import redispatch_reconciling_threads
 from ..control.event_handlers import CheckpointPruneRegistry
 from ..control.health import (
-    FullHealthRuntime,
     assemble_health_status,
     build_full_health,
     build_sqlite_fallback_diagnostics,
     probe_desktop_readiness,
 )
+from ..control.leased_dispatch import DispatchTransport
+from ..control.readiness import DesktopReadiness
+from ..control.reconciliation import reconcile_threads_on_startup
+from ..control.settings_base import build_now
 from ..control.verdict_subscriber import VerdictSubscriber
 from ..control.worker_management import LazyWorkerSpawner, WorkerWatchdog
 from ..database import (
+    Checkpointer,
     close_db,
     get_db,
     get_session_factory,
     init_db,
+    open_checkpointer,
     seat_sqlite_posture,
+    sweep_replay_log_periodically,
+    validate_desktop_schema,
 )
-from ..database.checkpoints import Checkpointer, open_checkpointer
-from ..database.reconciliation import reconcile_threads_on_startup
-from ..database.run_event_retention import sweep_replay_log_periodically
 from ..domain_config import domain_config
-from ..ipc.body_limit import BoundedHttpBodyMiddleware, gateway_body_limit
+from ..ipc import BoundedHttpBodyMiddleware, gateway_body_limit
 from ..lifecycle.discovery import (
     HEARTBEAT_REFRESH_SECONDS,
     another_resident_is_live,
@@ -77,17 +81,21 @@ from ..lifecycle.registration import (
     register_serve,
 )
 from ..lifecycle.registry import ProcRecord
-from ..lifecycle.shutdown import ShutdownDeadline, ShutdownServer, finish_before
-from ..streaming.aggregator import EventAggregator
-from ..telemetry import TelemetryMiddleware, configure_telemetry
+from ..lifecycle.shutdown import ShutdownDeadline, build_shutdown_server, finish_before
+from ..providers.lane_registry import registered_lanes
+from ..streaming import RelayHub
+from ..telemetry import TelemetryMiddleware, configure_telemetry, trace_headers
 from ..telemetry.aggregator_hook import OTelAggregatorHook
-from ..utils import configure_logging, package_version, reconfigure_console_utf8
-from ..utils.asyncio_compat import configure_asyncio_runtime
-from ..utils.ipc_auth import BearerVerdict
-from ._utils import trace_headers
+from ..utils import (
+    BearerVerdict,
+    configure_logging,
+    package_version,
+    reconfigure_console_utf8,
+)
 from .auth import verify_attach_bearer
 from .internal import internal_router
 from .routes import register_routes
+from .schemas.gateway import GatewayHealthResponse
 from .schemas.gateway_readiness import LivenessResponse
 
 _RECOVERY_POLL_SECONDS = 2.0
@@ -165,7 +173,7 @@ async def _unarmed_health_aggregate(app: FastAPI, db: AsyncSession) -> dict[str,
         }
     return await build_full_health(
         db=db,
-        runtime=FullHealthRuntime(
+        transport=DispatchTransport(
             worker_client=app.state.worker_client,
             circuit_breaker=app.state.circuit_breaker,
             worker_spawner=app.state.worker_spawner,
@@ -228,9 +236,9 @@ async def _desktop_discovery_heartbeat(
     """Refresh the versioned desktop discovery record every cadence.
 
     The desktop profile publishes the versioned, secret-free record rather than
-    the Compose ``ServiceInfo`` record; this keeps its heartbeat fresh so a
-    contender never reads a live gateway as stale. Non-fatal: a transient write
-    failure is logged and retried on the next tick.
+    the development profile's ``ServiceInfo`` record; this keeps its heartbeat
+    fresh so a contender never reads a live gateway as stale. Non-fatal: a
+    transient write failure is logged and retried on the next tick.
     """
     while True:
         try:
@@ -257,10 +265,11 @@ def _load_desktop_credentials(app: FastAPI) -> None:
 
     The attach-control credential and the receipt-bound ownership capability are
     read from their dashboard-created owner-restricted files; the worker
-    interprocess-communication secret is minted per boot and seated on the shared
-    internal-token setting so gateway-worker traffic authenticates with it. A
-    missing or malformed dashboard file fails the gateway closed rather than
-    booting an unauthenticated desktop surface.
+    interprocess-communication secret is minted per boot and seated on the
+    application state, replacing the configured internal token there, so
+    gateway-worker traffic authenticates with it. A missing or malformed dashboard
+    file fails the gateway closed rather than booting an unauthenticated desktop
+    surface.
     """
     from ..desktop.credentials import (
         create_worker_ipc_credential,
@@ -274,7 +283,7 @@ def _load_desktop_credentials(app: FastAPI) -> None:
     credentials_dir = settings.prepare_state_dir(references.credentials_dir)
     app.state.v1_service_token = load_attach_credential(credentials_dir)
     app.state.lifecycle_capability = load_ownership_capability(credentials_dir)
-    settings.internal_token = create_worker_ipc_credential(credentials_dir)
+    app.state.internal_token = create_worker_ipc_credential(credentials_dir)
 
 
 def _http_attach_authorized(request: Request, app: FastAPI) -> bool:
@@ -292,9 +301,6 @@ def _http_attach_authorized(request: Request, app: FastAPI) -> bool:
     verdict = verify_attach_bearer(
         request.headers.get("authorization"),
         expected=getattr(app.state, "v1_service_token", None),
-        test_bypass=bool(
-            getattr(app.state, "allow_unauthenticated_v1_for_testing", False)
-        ),
     )
     return verdict is BearerVerdict.OK
 
@@ -308,22 +314,14 @@ async def _initialize_gateway_database(app: FastAPI, *, armed: bool) -> AsyncEng
     engine = await init_db(settings.database_url, apply_migrations=not armed)
     if armed:
         # Desktop boot validates the seated stores without migrating them.
-        from ..database.compatibility import validate_desktop_schema
-
         await validate_desktop_schema(
             database_url=settings.database_url,
             checkpoint_path=settings.checkpoint_path,
         )
         await seat_sqlite_posture(engine)
-        logger.info(
-            "Desktop database schema validated (no migration performed, %s)",
-            settings.resolved_database_backend,
-        )
+        logger.info("Desktop database schema validated (no migration performed)")
     else:
-        logger.info(
-            "Database initialised (%s, migrations applied)",
-            settings.resolved_database_backend,
-        )
+        logger.info("Database initialised (migrations applied)")
     app.state.sqlite_fallback_diagnostics = build_sqlite_fallback_diagnostics()
     return engine
 
@@ -451,7 +449,7 @@ async def _shutdown_observability(deadline: ShutdownDeadline) -> None:
         )
 
 
-_WorkerShutdownResources = tuple[httpx.AsyncClient, LazyWorkerSpawner, EventAggregator]
+_WorkerShutdownResources = tuple[httpx.AsyncClient, LazyWorkerSpawner, RelayHub]
 _GatewayShutdownTasks = tuple[
     asyncio.Task[None],
     asyncio.Task[None],
@@ -467,7 +465,7 @@ async def _shutdown_gateway(
     tasks: _GatewayShutdownTasks,
     discovery: _DiscoveryRuntime,
 ) -> None:
-    worker_client, worker_spawner, aggregator = workers
+    worker_client, worker_spawner, relay_hub = workers
     (
         watchdog_task,
         reconcile_task,
@@ -574,7 +572,7 @@ async def _shutdown_gateway(
         phase="owned worker tree",
     )
     await finish_before(worker_client.aclose(), deadline, phase="worker HTTP client")
-    await finish_before(aggregator.shutdown(), deadline, phase="event aggregator")
+    await finish_before(relay_hub.shutdown(), deadline, phase="relay hub")
     await _settle_checkpoint_prunes(app, deadline)
     await finish_before(close_db(), deadline, phase="database")
 
@@ -592,14 +590,11 @@ def _start_worker_runtime(
     WorkerLiveness,
     asyncio.Task[None],
 ]:
+    internal_token = app.state.internal_token
     worker_client = httpx.AsyncClient(
         base_url=settings.worker_url,
         timeout=httpx.Timeout(30.0, connect=5.0),
-        headers=(
-            {"Authorization": f"Bearer {settings.internal_token}"}
-            if settings.internal_token is not None
-            else None
-        ),
+        headers=internal_auth_headers(internal_token),
     )
     app.state.worker_client = worker_client
     logger.info("Worker client configured: %s", settings.worker_url)
@@ -608,6 +603,7 @@ def _start_worker_runtime(
         worker_url=settings.worker_url,
         worker_port=settings.worker_port,
         auto_spawn=settings.auto_spawn_worker,
+        internal_token=internal_token,
     )
     app.state.worker_spawner = worker_spawner
 
@@ -635,23 +631,49 @@ async def _reconcile_gateway_startup(app: FastAPI, checkpointer: Checkpointer) -
         await db.commit()
 
 
-def _start_verdict_subscriber(
+async def _start_verdict_subscriber(
+    app: FastAPI,
+    session_factory: async_sessionmaker[AsyncSession],
     checkpointer: Checkpointer,
     worker_client: httpx.AsyncClient,
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: LazyWorkerSpawner,
 ) -> asyncio.Task[None] | None:
-    if not settings.authoring_subscriber_enabled:
+    """Run the authoring verdict subscriber when an engine record resolves.
+
+    Discovery IS the start condition. The subscriber exists to resume document
+    gates through an engine, so a gateway that can discover none runs none - and
+    run start then refuses a document-authoring topology outright rather than
+    admitting work whose gates nothing would resume. There is no enablement
+    setting, so an operator cannot configure a gateway that parks runs it cannot
+    finish. The boundary is the one every other authoring caller uses, which is
+    why a repository-controlled, linked, public, legacy, stale or unproven
+    record is not an engine here either.
+
+    The resolved endpoint is the gate and nothing more: the loop re-resolves on
+    every pass, so a subscriber that started self-heals across engine restarts.
+    Resolution reads a file and probes a socket, so it runs off the loop.
+
+    The task is seated on the application, because that is where the run-start
+    verb reads whether a subscriber is serving; a finished task answers that
+    question for itself.
+    """
+    endpoint = await asyncio.to_thread(resolve_engine)
+    if endpoint is None:
+        app.state.verdict_subscriber_task = None
+        logger.info(
+            "No authoring engine record is discoverable: no verdict subscriber "
+            "is running, and document-authoring runs are refused at run start"
+        )
         return None
     verdict_subscriber = VerdictSubscriber(
         VerdictSubscriberConfig(
-            session_factory=get_session_factory(),
+            session_factory=session_factory,
             checkpointer=checkpointer,
             worker_client=worker_client,
             circuit_breaker=circuit_breaker,
             worker_spawner=worker_spawner,
             endpoint_provider=resolve_engine,
-            recursion_limit=domain_config.graph_recursion_limit,
             trace_headers_fn=trace_headers,
             poll_interval_seconds=settings.authoring_subscriber_poll_interval_seconds,
             reconnect_base_seconds=settings.authoring_subscriber_reconnect_base_seconds,
@@ -659,7 +681,8 @@ def _start_verdict_subscriber(
         )
     )
     task = asyncio.create_task(verdict_subscriber.run())
-    logger.info("Authoring verdict subscriber enabled")
+    app.state.verdict_subscriber_task = task
+    logger.info("Authoring verdict subscriber started against a discovered engine")
     return task
 
 
@@ -699,14 +722,12 @@ async def _direct_recovery_pass(
     worker_spawner: LazyWorkerSpawner,
 ) -> None:
     try:
-        app.state.direct_control_recovery_summary = (
-            await redrive_direct_control_actions(
-                get_session_factory(),
-                worker_client=worker_client,
-                circuit_breaker=circuit_breaker,
-                worker_spawner=worker_spawner,
-                trace_headers=trace_headers(),
-            )
+        await redrive_direct_control_actions(
+            get_session_factory(),
+            worker_client=worker_client,
+            circuit_breaker=circuit_breaker,
+            worker_spawner=worker_spawner,
+            trace_headers=trace_headers(),
         )
         app.state.direct_control_recovery_error = None
     except asyncio.CancelledError:
@@ -718,7 +739,6 @@ async def _direct_recovery_pass(
 
 def _start_gateway_recovery(
     app: FastAPI,
-    checkpointer: Checkpointer,
     runtime: _GatewayRecoveryRuntime,
 ) -> asyncio.Task[None]:
     worker_client, circuit_breaker, worker_spawner, liveness = runtime
@@ -740,24 +760,6 @@ def _start_gateway_recovery(
             raise
         except Exception:
             logger.exception("Startup reconciliation dispatch failed")
-        try:
-            app.state.clarification_recovery_summary = (
-                await redrive_clarification_actions(
-                    get_session_factory(),
-                    runtime=ClarificationRuntime(
-                        checkpointer,
-                        worker_client,
-                        circuit_breaker,
-                        worker_spawner,
-                        domain_config.graph_recursion_limit,
-                        trace_headers(),
-                    ),
-                )
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Clarification recovery pass failed")
         while True:
             await asyncio.sleep(_RECOVERY_POLL_SECONDS)
             await _direct_recovery_pass(
@@ -769,7 +771,7 @@ def _start_gateway_recovery(
 
 
 @asynccontextmanager
-async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
+async def _gateway_lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: startup and shutdown hooks.
 
     The gateway no longer runs agent execution.  All
@@ -777,12 +779,14 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     process.  The lifespan sets up:
     1. Database (SQLAlchemy)
     2. Read-only checkpointer (for snapshot queries -- safe under WAL mode)
-    3. EventAggregator (lightweight -- for local event relay only)
+    3. RelayHub (the worker event relay, its subscribers and live-state mirror)
     4. Telemetry
     5. httpx.AsyncClient for worker dispatch
     """
     logger.info("Starting gateway lifespan")
-    settings.validate_postgres_requirement()
+    # A lane plugin this process cannot honour refuses the gateway here, at
+    # startup, rather than at the first catalog read that resolves the lanes.
+    registered_lanes()
 
     armed = settings.desktop_profile_armed
     engine = await _initialize_gateway_database(app, armed=armed)
@@ -793,15 +797,12 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # context, so the shutdown below waits for this app's own prunes while
         # the checkpointer they hold is still open.
         app.state.checkpoint_prunes = CheckpointPruneRegistry()
-        logger.info(
-            "LangGraph checkpointer initialised (%s)",
-            settings.resolved_checkpoint_backend,
-        )
+        logger.info("LangGraph checkpointer initialised")
 
         await _reconcile_gateway_startup(app, checkpointer)
 
-        aggregator = EventAggregator(telemetry=OTelAggregatorHook())
-        app.state.aggregator = aggregator
+        relay_hub = RelayHub(telemetry=OTelAggregatorHook())
+        app.state.relay_hub = relay_hub
 
         app.state.db_engine = engine
 
@@ -818,15 +819,19 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         reconcile_task = _start_gateway_recovery(
             app,
-            checkpointer,
             (worker_client, circuit_breaker, worker_spawner, liveness),
         )
         discovery_path, discovery_pid, serve_record, discovery_task = (
             _start_gateway_discovery(app)
         )
 
-        verdict_subscriber_task = _start_verdict_subscriber(
-            checkpointer, worker_client, circuit_breaker, worker_spawner
+        verdict_subscriber_task = await _start_verdict_subscriber(
+            app,
+            get_session_factory(),
+            checkpointer,
+            worker_client,
+            circuit_breaker,
+            worker_spawner,
         )
         replay_retention_task = _start_replay_retention()
 
@@ -836,7 +841,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         await _shutdown_gateway(
             app,
-            (worker_client, worker_spawner, aggregator),
+            (worker_client, worker_spawner, relay_hub),
             (
                 watchdog_task,
                 reconcile_task,
@@ -847,58 +852,31 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
 
 
-def _bind_server_shutdown_owner(app: FastAPI, server: uvicorn.Server) -> None:
-    """Bind the served app to the cooperative transition of its Uvicorn owner."""
-
-    def request_shutdown() -> None:
-        server.should_exit = True
-
-    app.state.request_server_shutdown = request_shutdown
-
-
 def main() -> None:
-    """Launch the vaultspec-a2a server.
+    """Launch the vaultspec-a2a gateway.
 
-    Entry point for the ``vaultspec`` CLI command defined in
-    ``[project.scripts]``.
+    Invoked by the ``serve`` subcommand of the ``vaultspec-a2a`` script
+    (``cli.main:main``) defined in ``[project.scripts]``.
     """
     reconfigure_console_utf8()
-    configure_logging("service", service_name="gateway")
-    configure_asyncio_runtime()
+    configure_logging("service", settings=settings, service_name="gateway")
+    # Built with the infrastructure settings, so a refused domain value is
+    # reported by the process that starts the service, not by the first reader.
+    build_now(domain_config)
     app = create_app()
-    config = uvicorn.Config(
-        app,
-        host=settings.host,
-        port=settings.port,
-        log_level=settings.log_level.value,
-        access_log=settings.access_log,
-        loop="auto",
-        timeout_graceful_shutdown=settings.shutdown_stream_grace_seconds,
-    )
-    server = ShutdownServer(
-        config,
-        app=app,
-        total_seconds=settings.shutdown_total_timeout_seconds,
-    )
-    _bind_server_shutdown_owner(app, server)
-    server.run()
+    build_shutdown_server(app, host=settings.host, port=settings.port).run()
 
 
-def create_app(
-    lifespan: Any | None = None,
-    *,
-    allow_unauthenticated_v1_for_testing: bool = False,
-) -> FastAPI:
+def create_app(lifespan: Any | None = None) -> FastAPI:
     """Create and configure the FastAPI application.
+
+    The application snapshots a configured gateway token or generates a
+    per-process token; corrupted runtime state with no token fails closed on
+    every ``/v1`` request while ``/health`` remains available.
 
     Args:
         lifespan: Optional lifespan override for testing. When ``None``
-            the production ``_lifespan`` is used.
-        allow_unauthenticated_v1_for_testing: Explicit test-only escape hatch
-            for legacy route-behaviour tests. Production callers must leave it
-            false. Production snapshots a configured gateway token or generates
-            a per-process token; corrupted runtime state with no token fails
-            closed on every ``/v1`` request while ``/health`` remains available.
+            the production ``_gateway_lifespan`` is used.
 
     Returns:
         A fully configured ``FastAPI`` instance ready for ``uvicorn.run()``.
@@ -906,32 +884,55 @@ def create_app(
     app = FastAPI(
         title="Vaultspec A2A Orchestrator",
         version=package_version(),
-        lifespan=lifespan or _lifespan,
+        lifespan=lifespan or _gateway_lifespan,
     )
     # The engine-facing credential is distinct from worker IPC by default. It is
     # immutable for this app generation, published only through the owner-restricted
     # handoff file, and never logged.
     app.state.v1_service_token = settings.gateway_service_token or secrets.token_hex(32)
-    app.state.allow_unauthenticated_v1_for_testing = (
-        allow_unauthenticated_v1_for_testing
-    )
+    # The worker-IPC secret every internal request is verified against and every
+    # worker-bound request presents. Seated here, never written onto the settings,
+    # so the one value the gateway holds is the one it authenticates with.
+    app.state.internal_token = settings.internal_token
     app.add_exception_handler(RequestValidationError, _bounded_request_validation_error)
     # The receipt-bound lifecycle ownership capability is only present under the
     # armed desktop profile; unarmed profiles never carry one.
     app.state.lifecycle_capability = None
-    if settings.desktop_profile_armed and not allow_unauthenticated_v1_for_testing:
+    if settings.desktop_profile_armed:
         # Armed desktop: replace the generated attach token with the
         # dashboard-created attach credential, load the ownership capability, and
-        # mint the worker IPC secret. Fails closed if a dashboard file is absent.
+        # replace the configured worker IPC secret with one minted for this boot.
+        # Fails closed if a dashboard file is absent.
         _load_desktop_credentials(app)
 
-    app.add_middleware(cast("Any", BoundedHttpBodyMiddleware), limit=gateway_body_limit)
+    app.add_middleware(
+        cast("Any", BoundedHttpBodyMiddleware), limit=gateway_body_limit(settings)
+    )
     app.add_middleware(cast("Any", TelemetryMiddleware))
 
     register_routes(app)
     app.include_router(internal_router)
 
-    @app.get("/health")
+    @app.get(
+        "/health",
+        # Three bodies on one route, each from a different profile and gate, so
+        # the contract names all three rather than collapsing them into a model
+        # that is wrong for two. Serialization stays with the returns below:
+        # these are already-dumped dicts, and a response model would re-coerce
+        # them through a shape none of them owns.
+        response_model=None,
+        responses={
+            200: {
+                "description": (
+                    "The armed desktop profile serves the readiness projection "
+                    "to an attach-authenticated caller and the minimal liveness "
+                    "fact to everyone else; the unarmed profile serves the "
+                    "probe aggregate."
+                ),
+                "model": (DesktopReadiness | LivenessResponse | GatewayHealthResponse),
+            }
+        },
+    )
     async def health_endpoint(
         request: Request,
         db: AsyncSession = _HEALTH_DB,
@@ -947,7 +948,7 @@ def create_app(
         the gateway's dependencies.
 
         Both profiles PROBE rather than read off app state - the DB here and, on
-        Compose and development, the checkpointer and worker as well - because a
+        the development profile, the checkpointer and worker as well - because a
         healthcheck that only reports what the process believes about itself
         cannot notice a dependency that has gone away.
         """
@@ -984,14 +985,6 @@ def create_app(
             # The ungated health endpoint reports the live pid so a
             # lifecycle caller can confirm the discovery record's owner is alive.
             "pid": os.getpid(),
-            "production_certifying": (
-                settings.resolved_database_backend == "postgres"
-                and settings.resolved_checkpoint_backend == "postgres"
-            ),
         }
 
     return app
-
-
-if __name__ == "__main__":
-    main()

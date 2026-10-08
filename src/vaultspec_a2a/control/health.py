@@ -3,8 +3,8 @@
 The single ``/health`` surface serves both liveness and readiness from a common
 set of worker, circuit breaker, spawner, and infrastructure diagnostics.
 This module provides ``assemble_health_status()`` as the single source of
-truth for that shared data, plus ``build_sqlite_fallback_diagnostics()``
-which was previously inlined in ``api/app.py``.
+truth for that shared data, plus ``build_sqlite_fallback_diagnostics()``, the
+boot-time snapshot of the SQLite stores.
 
 ``build_full_health()`` is the async service function that runs all probes
 (database, worker HTTP, checkpoint, circuit breaker) and returns the
@@ -28,18 +28,36 @@ import asyncio
 import logging
 import shutil
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from ..database import inspect_sqlite_database, verify_wal_mode
+from ..database import (
+    CheckpointReadStatus,
+    inspect_sqlite_database,
+    read_latest_checkpoint,
+    verify_wal_mode,
+)
 from ..utils.coercion import coerce_object_mapping
-from ._worker_health import WorkerState, probe_worker_health, worker_liveness
+from ._worker_health import (
+    WorkerHealthProbe,
+    WorkerState,
+    probe_worker_health,
+    worker_credential_authorized,
+    worker_liveness,
+)
 from .config import settings
 from .provider_execution import native_execution_refusal_reason
+from .readiness import (
+    DesktopReadiness,
+    GatewayReadiness,
+    LivenessState,
+    ProviderEligibility,
+    RunAdmission,
+    WorkerLifecycleState,
+)
 from .worker_management import LazyWorkerSpawner
 from .worker_status import WorkerConnectionStatus
 
@@ -49,19 +67,11 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..api.schemas.gateway_readiness import (
-        DesktopReadiness,
-        GatewayReadiness,
-        ProviderEligibility,
-        RunAdmission,
-        WorkerLifecycleState,
-    )
-    from .circuit_breaker import WorkerCircuitBreaker
+    from .leased_dispatch import DispatchTransport
 
 __all__ = [
     "SERVICE_HEALTH_DEADLINE_SECONDS",
     "SERVICE_WORKER_PROBE_TIMEOUT_SECONDS",
-    "FullHealthRuntime",
     "assemble_desktop_readiness",
     "assemble_health_status",
     "build_full_health",
@@ -128,38 +138,19 @@ def probe_engine_discovery_freshness() -> bool | None:
 
 def build_sqlite_fallback_diagnostics(
     *,
-    database_backend: str | None = None,
-    checkpoint_backend: str | None = None,
     database_path: Path | None = None,
     checkpoint_path: Path | None = None,
     busy_timeout_ms: int | None = None,
-) -> dict[str, object] | None:
-    """Build explicit diagnostics for the SQLite fallback path."""
-    resolved_database_backend = database_backend or settings.resolved_database_backend
-    resolved_checkpoint_backend = (
-        checkpoint_backend or settings.resolved_checkpoint_backend
-    )
-    if (
-        resolved_database_backend != "sqlite"
-        and resolved_checkpoint_backend != "sqlite"
-    ):
-        return None
-
-    diagnostics: dict[str, object] = {
+) -> dict[str, object]:
+    """Build the diagnostics of the SQLite stores: journal posture and timeout."""
+    return {
         "active": True,
         "busy_timeout_ms": busy_timeout_ms or settings.sqlite_busy_timeout_ms,
-        "production_certifying": False,
-        "limitations": ["sqlite_fallback_not_production_certifying"],
-    }
-    if resolved_database_backend == "sqlite":
-        diagnostics["database"] = inspect_sqlite_database(
-            database_path or settings.database_path
-        )
-    if resolved_checkpoint_backend == "sqlite":
-        diagnostics["checkpoint"] = inspect_sqlite_database(
+        "database": inspect_sqlite_database(database_path or settings.database_path),
+        "checkpoint": inspect_sqlite_database(
             checkpoint_path or settings.checkpoint_path
-        )
-    return diagnostics
+        ),
+    }
 
 
 def _file_size(path: Path) -> int | None:
@@ -239,11 +230,9 @@ def _add_sqlite_usage(
 
 def build_storage_diagnostics(
     *,
-    database_backend: str | None = None,
-    checkpoint_backend: str | None = None,
     database_path: Path | None = None,
     checkpoint_path: Path | None = None,
-) -> dict[str, object] | None:
+) -> dict[str, object]:
     """Build live storage-consumption diagnostics for the SQLite stores.
 
     This is the only operator-visible signal that the database is growing toward
@@ -254,31 +243,15 @@ def build_storage_diagnostics(
     Unlike ``build_sqlite_fallback_diagnostics`` - a boot-time snapshot seated on
     app state - these figures are read on every request, because a size that was
     true at boot answers nothing about a store that has been growing since.
-
-    Returns ``None`` when neither store is SQLite; a remote backend's capacity is
-    not this process's file system to measure.
     """
-    resolved_database_backend = database_backend or settings.resolved_database_backend
-    resolved_checkpoint_backend = (
-        checkpoint_backend or settings.resolved_checkpoint_backend
-    )
-    database_is_sqlite = resolved_database_backend == "sqlite"
-    checkpoint_is_sqlite = resolved_checkpoint_backend == "sqlite"
-    if not database_is_sqlite and not checkpoint_is_sqlite:
-        return None
-
     diagnostics: dict[str, object] = {}
-    volume_anchor: Path | None = None
-    if database_is_sqlite:
-        volume_anchor = _add_sqlite_usage(
-            diagnostics, "database", database_path, settings.database_path
-        )
-    if checkpoint_is_sqlite:
-        checkpoint_anchor = _add_sqlite_usage(
-            diagnostics, "checkpoint", checkpoint_path, settings.checkpoint_path
-        )
-        if volume_anchor is None:
-            volume_anchor = checkpoint_anchor
+    database_anchor = _add_sqlite_usage(
+        diagnostics, "database", database_path, settings.database_path
+    )
+    checkpoint_anchor = _add_sqlite_usage(
+        diagnostics, "checkpoint", checkpoint_path, settings.checkpoint_path
+    )
+    volume_anchor = database_anchor or checkpoint_anchor
     if volume_anchor is not None:
         diagnostics["volume"] = _volume_capacity(volume_anchor)
     return diagnostics
@@ -311,12 +284,12 @@ async def probe_journal_mode(app_state: object) -> str | None:
     engine, is what turns that from an unobservable condition into a reported
     one.
 
-    Answers ``None`` when the store is not SQLite, when no engine is seated yet,
-    or when the verification itself could not complete: a diagnostics field is
-    never worth failing a health response over.
+    Answers ``None`` when no engine is seated yet, or when the verification
+    itself could not complete: a diagnostics field is never worth failing a
+    health response over.
     """
     engine = getattr(app_state, "db_engine", None)
-    if not isinstance(engine, AsyncEngine) or engine.dialect.name != "sqlite":
+    if not isinstance(engine, AsyncEngine):
         return None
     try:
         return await asyncio.wait_for(
@@ -394,8 +367,8 @@ def assemble_health_status(
 ) -> dict[str, object]:
     """Assemble the shared health-status payload from app state.
 
-    Reads circuit breaker, spawner, worker state, repair summary, and SQLite
-    fallback diagnostics from ``app_state``.  The returned dict contains all
+    Reads circuit breaker, spawner, worker state, repair summary, and the SQLite
+    store diagnostics from ``app_state``.  The returned dict contains all
     fields the readiness aggregate and the desktop projection share; each caller
     adds its own unique fields on top.
 
@@ -428,15 +401,15 @@ def assemble_health_status(
             "checkpoint_unavailable": 0,
         }
 
-    # --- SQLite fallback ---
+    # --- SQLite stores ---
     sqlite_fallback_diagnostics: object = getattr(
         app_state, "sqlite_fallback_diagnostics", None
     )
 
     # --- Storage consumption ---
-    # Read live rather than off app state: the boot-time fallback diagnostics
-    # above describe how the stores were configured, which says nothing about how
-    # much disk they are consuming now.
+    # Read live rather than off app state: the boot-time store diagnostics above
+    # describe how the stores were configured, which says nothing about how much
+    # disk they are consuming now.
     storage_diagnostics = build_storage_diagnostics()
 
     # A band gateway dispatching outside the worker-dev band with no band worker
@@ -457,9 +430,8 @@ def assemble_health_status(
     return {
         "circuit_breaker": cb_state,
         **worker_fields,
-        "database_backend": settings.resolved_database_backend,
-        "checkpoint_backend": settings.resolved_checkpoint_backend,
-        "postgres_required": settings.postgres_required,
+        "database_backend": settings.database_backend,
+        "checkpoint_backend": settings.checkpoint_backend,
         "repair_backlog": repair_summary.get("repair_backlog", 0),
         "paused_resumable": repair_summary.get("paused_resumable", 0),
         "checkpoint_unavailable": repair_summary.get("checkpoint_unavailable", 0),
@@ -471,32 +443,33 @@ def assemble_health_status(
 
 
 def _eligible_provider_names() -> list[str]:
-    """Return the subprocess providers that can actually run on this host.
+    """Return the subprocess providers this host may actually be served.
 
-    Uses ``probe_provider_readiness`` - the credential-aware seam that gates on
-    the configured credential FIRST and only then on command resolvability. It
-    remains no-instantiation: no model is constructed and no subprocess is
-    spawned. Resolving the launch command alone is not sufficient, because a
-    provider whose binary is installed with its credential absent cannot run;
-    admitting it here reserves execution capacity for a run that the
-    credential-aware gate applied at launch then refuses.
+    The verdict is ``served_lane_eligible``'s and nothing is re-derived here, so
+    the execution surface and the catalog surface cannot come to disagree about
+    which lanes are usable. That predicate requires a recorded completed-turn
+    proof, a resolved launcher the proof admits, AND the lane's own readiness.
+    Readiness alone - a present credential and a resolvable command - is NOT
+    eligibility: a lane with handshake coverage only resolves and configures
+    perfectly, and admitting it here reserves execution capacity for a run no
+    live test has ever completed work on.
 
-    Codex is the one provider the resolver deliberately gates on command
-    resolvability alone - its auth is a file-based persisted session in the
-    Codex home rather than a configured secret, so there is no credential to
-    check. That asymmetry is the resolver's to own; this seam does not restate
-    it, so the two can never disagree. Z.ai is omitted because it launches the
-    same ACP wrapper as Claude; counting it again would double-count one
+    No model is constructed. The launcher version probe behind the predicate is
+    cached per launch identity, so a lane costs at most one bounded
+    ``--version`` call per process, and it runs only for a lane that already
+    carries proof and already answered ready.
+
+    The candidates are the system-CLI lanes, which omit Z.ai because it launches
+    the same ACP wrapper as Claude; counting it again would double-count one
     backend.
     """
-    from ..graph.enums import Provider
-    from ..providers.provider_readiness import probe_provider_readiness
+    from ..providers import SYSTEM_CLI_LANES
+    from ..providers.lane_admission import served_lane_eligible
 
-    candidates = (Provider.CLAUDE, Provider.CODEX, Provider.KIMI)
     return [
         provider.value
-        for provider in candidates
-        if probe_provider_readiness(provider).ready
+        for provider in SYSTEM_CLI_LANES
+        if served_lane_eligible(provider)
     ]
 
 
@@ -513,8 +486,6 @@ def _desktop_worker_state(
     worker_probe_ready: bool | None,
     worker_adoptable: bool | None,
 ) -> tuple[WorkerLifecycleState, str | None]:
-    from ..api.schemas.gateway_readiness import WorkerLifecycleState
-
     worker_spawned = bool(shared["worker_spawned"])
     worker_status = shared["worker_status"]
     if not worker_spawned and worker_probe_ready is True and worker_adoptable is True:
@@ -558,18 +529,12 @@ def _desktop_run_admission(
     worker_state: WorkerLifecycleState,
     provider_eligibility: ProviderEligibility,
     recovery_owner_error: object,
+    native_refusal: str | None,
 ) -> RunAdmission:
-    from ..api.schemas.gateway_readiness import (
-        GatewayReadiness,
-        ProviderEligibility,
-        RunAdmission,
-        WorkerLifecycleState,
-    )
-
     if (
         gateway_readiness is not GatewayReadiness.READY
         or recovery_owner_error is not None
-        or native_execution_refusal_reason() is not None
+        or native_refusal is not None
     ):
         return RunAdmission.BLOCKED
     if (
@@ -605,12 +570,6 @@ def assemble_desktop_readiness(
     """
     import os
 
-    from ..api.schemas.gateway_readiness import (
-        DesktopReadiness,
-        GatewayReadiness,
-        LivenessState,
-        ProviderEligibility,
-    )
     from ..utils import package_version
 
     shared = assemble_health_status(app_state=app_state)
@@ -646,24 +605,31 @@ def assemble_desktop_readiness(
         reasons.append(worker_reason)
 
     # --- Provider eligibility via the credential-aware readiness probe. ---
+    native_refusal = native_execution_refusal_reason()
     eligible_providers = _eligible_provider_names()
     if eligible_providers:
         provider_eligibility = ProviderEligibility.ELIGIBLE
     else:
         provider_eligibility = ProviderEligibility.INELIGIBLE
         reasons.append(
-            native_execution_refusal_reason()
+            native_refusal
             or "no subprocess provider is installed and credentialed here"
         )
 
     # --- Run admission: execution readiness, distinct from gateway readiness. ---
     run_admission = _desktop_run_admission(
-        gateway_readiness, worker_state, provider_eligibility, recovery_owner_error
+        gateway_readiness,
+        worker_state,
+        provider_eligibility,
+        recovery_owner_error,
+        native_refusal,
     )
 
     return DesktopReadiness(
         gateway_pid=os.getpid(),
         generation=package_version(),
+        # The unarmed development profile keeps serving the name "compose": the
+        # value is part of the published readiness payload.
         profile="desktop" if settings.desktop_profile_armed else "compose",
         liveness=LivenessState.ALIVE,
         gateway_readiness=gateway_readiness,
@@ -730,8 +696,7 @@ async def _database_health_check(db: AsyncSession, app_state: object) -> dict[st
     journal_mode = journal_task.result()
     database_check: dict[str, str] = {
         "status": "ok" if database_ready else "error",
-        "backend": settings.resolved_database_backend,
-        "postgres_required": "yes" if settings.postgres_required else "no",
+        "backend": settings.database_backend,
     }
     if database_detail is not None:
         database_check["detail"] = database_detail
@@ -750,46 +715,51 @@ async def _database_health_check(db: AsyncSession, app_state: object) -> dict[st
 
 async def _checkpoint_health_check(app_state: object) -> dict[str, str]:
     checkpointer = getattr(app_state, "checkpointer", None)
-    checkpoint_check: dict[str, str] = {
-        "backend": settings.resolved_checkpoint_backend,
-        "postgres_required": "yes" if settings.postgres_required else "no",
-    }
+    checkpoint_check: dict[str, str] = {"backend": settings.checkpoint_backend}
     if checkpointer is None:
         checkpoint_check["status"] = "error"
         checkpoint_check["detail"] = "checkpointer missing"
     else:
-        try:
-            await asyncio.wait_for(
-                checkpointer.aget_tuple(
-                    {
-                        "configurable": {
-                            "thread_id": "__health_probe__",
-                            "checkpoint_ns": "",
-                        }
-                    }
-                ),
-                timeout=SERVICE_HEALTH_DEADLINE_SECONDS,
-            )
-            checkpoint_check["status"] = "ok"
-        except TimeoutError:
-            logger.warning("Health check: checkpoint probe timed out")
+        probe = await read_latest_checkpoint(
+            checkpointer, "__health_probe__", timeout=SERVICE_HEALTH_DEADLINE_SECONDS
+        )
+        if probe.status is CheckpointReadStatus.TIMEOUT:
             checkpoint_check["status"] = "error"
             checkpoint_check["detail"] = "checkpoint probe timed out"
-        except Exception:
-            logger.exception("Health check: checkpoint probe failed")
+        elif probe.status is CheckpointReadStatus.ERROR:
             checkpoint_check["status"] = "error"
             checkpoint_check["detail"] = "checkpoint probe failed"
+        else:
+            checkpoint_check["status"] = "ok"
     return checkpoint_check
 
 
 async def _worker_health_check(
-    worker_client: httpx.AsyncClient, *, include_pairing: bool
+    worker_client: httpx.AsyncClient, *, include_pairing: bool, owner_pid: int | None
 ) -> tuple[dict[str, str], dict[str, object]]:
-    # The pooled-client probe is the same exact-200 authority used by the watchdog.
-    worker_probe = await probe_worker_health(
-        settings.worker_url,
-        timeout=SERVICE_WORKER_PROBE_TIMEOUT_SECONDS,
-        client=worker_client,
+    # Ownership is settled before the credential, never by it: the app-pooled
+    # client carries the worker IPC bearer on every request it makes, so an
+    # occupant of the worker port that is not *owner_pid* or one of its
+    # descendants must not be probed at all. A withheld probe is reported exactly
+    # as an unreachable worker - this surface has no healthy observation either
+    # way - and the claim that withheld it is named in the gate's own log.
+    #
+    # The pooled-client probe is the same readiness authority the watchdog reads:
+    # an exact 200 whose body names the worker role and reports it ready, so this
+    # surface and a restart decision can never disagree about the same worker.
+    worker_probe = (
+        await probe_worker_health(
+            settings.worker_url,
+            timeout=SERVICE_WORKER_PROBE_TIMEOUT_SECONDS,
+            client=worker_client,
+            internal_token=None,
+        )
+        if await worker_credential_authorized(
+            settings.worker_port,
+            owner_pid=owner_pid,
+            action="the service health worker probe",
+        )
+        else WorkerHealthProbe(healthy=False, body=None)
     )
     if worker_probe.healthy:
         worker_check = {"status": "ok"}
@@ -809,17 +779,10 @@ async def _worker_health_check(
     return worker_check, pairing
 
 
-@dataclass(frozen=True, slots=True)
-class FullHealthRuntime:
-    worker_client: httpx.AsyncClient
-    circuit_breaker: WorkerCircuitBreaker
-    worker_spawner: LazyWorkerSpawner
-
-
 async def build_full_health(
     *,
     db: AsyncSession,
-    runtime: FullHealthRuntime,
+    transport: DispatchTransport,
     app_state: object,
     include_pairing: bool = False,
 ) -> dict[str, object]:
@@ -831,8 +794,8 @@ async def build_full_health(
 
     *include_pairing* adds what the worker reported about which gateway
     incarnation spawned it. It is opt-in and defaults off because this payload
-    is served verbatim on the UNAUTHENTICATED health endpoint under the Compose
-    and development profiles, and the gateway's lifetime identity is exactly the
+    is served verbatim on the UNAUTHENTICATED health endpoint under the unarmed
+    development profile, and the gateway's lifetime identity is exactly the
     value a port squatter must not be able to learn: the armed adoption check
     trusts it precisely because it is unguessable. Only the attach-authenticated
     readiness surface asks for it.
@@ -846,7 +809,11 @@ async def build_full_health(
         database_task = tasks.create_task(_database_health_check(db, app_state))
         checkpoint_task = tasks.create_task(_checkpoint_health_check(app_state))
         worker_task = tasks.create_task(
-            _worker_health_check(runtime.worker_client, include_pairing=include_pairing)
+            _worker_health_check(
+                transport.worker_client,
+                include_pairing=include_pairing,
+                owner_pid=transport.worker_spawner.owner_pid,
+            )
         )
 
     probe_elapsed_ms = round((time.monotonic() - probe_started) * 1000)
@@ -859,9 +826,9 @@ async def build_full_health(
     checks["worker"], pairing = worker_task.result()
 
     # --- Circuit breaker & spawner ---
-    checks["circuit_breaker"] = {"status": runtime.circuit_breaker.state}
+    checks["circuit_breaker"] = {"status": transport.circuit_breaker.state}
     checks["worker_spawned"] = {
-        "status": "yes" if runtime.worker_spawner.spawned else "no"
+        "status": "yes" if transport.worker_spawner.spawned else "no"
     }
     recovery_owner_error = shared["recovery_owner_error"]
     checks["recovery_owner"] = (

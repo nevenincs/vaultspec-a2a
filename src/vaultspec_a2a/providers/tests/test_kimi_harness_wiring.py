@@ -1,4 +1,4 @@
-"""Kimi harness composition rides the existing with_mcp_servers ACP branch (P03.S13).
+"""Kimi harness composition rides the existing with_mcp_servers ACP branch.
 
 Masking-gap lesson (Codex wiring defect): the wiring claim is proven THROUGH the
 real ``compose_harness_mcp_servers`` seam - the exact production call the worker
@@ -10,8 +10,9 @@ NO Codex-style config path.
 
 from __future__ import annotations
 
+from ...graph.enums import Provider
 from .._acp_mcp import compose_harness_mcp_servers, harness_allowed_tool_names
-from .._factory_commands import _build_kimi_env, _classify_kimi_command
+from .._factory_commands import _build_kimi_env, classify_provider_command
 from ..acp_chat_model import AcpChatModel
 
 
@@ -26,9 +27,9 @@ def _kimi_model() -> AcpChatModel:
     depends on it would be asserting composition against a model the factory
     would never actually build.
     """
-    command, _ = _classify_kimi_command()
+    command = classify_provider_command(Provider.KIMI)
     return AcpChatModel(
-        command=command,
+        command=list(command.argv),
         env_vars=_build_kimi_env(
             kimi_api_key="sk-test",
             kimi_base_url="https://api.moonshot.example/v1",

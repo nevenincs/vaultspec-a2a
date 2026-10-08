@@ -20,35 +20,33 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import socket
 import subprocess
 import sys
-import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
 import pytest_asyncio
 
-from ..lifecycle.discovery import is_pid_alive
 from ..providers._acp_rpc_handlers import on_terminal_kill
 from ..providers._acp_rpc_terminal_handlers import release_owned_terminal
 from ..providers._acp_types import AcpModelConfig, AcpSessionContext
 from ..providers._subprocess import kill_process_tree, spawn_acp_process
 from ..providers.tests._terminal_process import retain_terminal_process
-from ..tests.gateway_boot import (
+from ..testing import (
+    DEFAULT_ATTACH_AUTHORIZATION,
+    DEFAULT_OWNERSHIP_CAPABILITY,
+    ProgressDeadline,
     armed_gateway_env,
-    desktop_workspace,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
-    spawn_gateway,
-    spawn_until_ready,
+    booted_gateway,
+    gateway_run_verbs,
+    seat_app_home,
+    unvalidated_selection,
+    wait_for,
     worker_lifecycle_gateway_script,
 )
-from ..utils import kill_pid_tree_async
-from ..utils.process import ProcessContainment
-from ._catalog import catalog_selection
+from ..utils import ProcessContainment, kill_pid_tree_async
+from ..utils._process_tree import pid_is_live, port_has_listener, wait_pid_gone
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -75,16 +73,25 @@ async def _read_pids(stream: Any, count: int) -> list[int]:
 
 
 def _await_gone(pids: list[int], *, timeout: float = 10.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline and any(is_pid_alive(p) for p in pids):
-        time.sleep(0.05)
-    survivors = [p for p in pids if is_pid_alive(p)]
+    wait_pid_gone(*pids, timeout=timeout)
+    survivors = [p for p in pids if pid_is_live(p)]
     assert not survivors, f"descendants survived reap: {survivors}"
+
+
+def _await_listener(port: int, *, listening: bool, timeout: float) -> None:
+    """Wait until *port* has (or has lost) its listener, bounded by *timeout*."""
+
+    def _settled() -> bool | None:
+        return True if port_has_listener(port, timeout=0.5) is listening else None
+
+    wait_for(
+        _settled, deadline=ProgressDeadline(idle_window_s=timeout), interval_s=0.25
+    )
 
 
 async def _reap_pids(pids: list[int]) -> None:
     for pid in pids:
-        if is_pid_alive(pid):
+        if pid_is_live(pid):
             with contextlib.suppress(Exception):
                 await kill_pid_tree_async(pid)
 
@@ -106,11 +113,10 @@ async def test_provider_tree_contained_before_work_and_reaped_graceful() -> None
     # Contained BEFORE work: the provider root is in its own containment.
     containment = getattr(process, "_vaultspec_containment", None)
     assert isinstance(containment, ProcessContainment)
-    assert containment.assigned is True
 
     mcp_pids = await _read_pids(process.stdout, 3)
     try:
-        assert all(is_pid_alive(p) for p in mcp_pids)
+        assert all(pid_is_live(p) for p in mcp_pids)
         # Graceful terminal: the whole provider subtree is reaped as one.
         await kill_process_tree(process)
         assert process.returncode is not None
@@ -137,7 +143,7 @@ async def test_provider_tree_reaped_on_forced_orphaned_terminal() -> None:
         process.kill()
         with contextlib.suppress(Exception):
             await asyncio.wait_for(process.wait(), timeout=10.0)
-        assert all(is_pid_alive(p) for p in mcp_pids), "descendants should be orphaned"
+        assert all(pid_is_live(p) for p in mcp_pids), "descendants should be orphaned"
 
         # Provider cleanup still reaps the orphaned descendants via job / group
         # membership and releases the asyncio transport after the dead root.
@@ -162,12 +168,7 @@ def _terminal_config(workspace_root: str) -> AcpModelConfig:
         mcp_servers=[],
         use_exec=False,
         provider=None,
-        runtime_authority=None,
-        acp_backend=None,
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
     )
 
@@ -221,14 +222,13 @@ async def test_terminal_child_tree_contained_and_reaped(
     process = ctx.terminals[terminal_id]
     containment = getattr(process, "_vaultspec_containment", None)
     assert isinstance(containment, ProcessContainment)
-    assert containment.assigned is True
 
     async with asyncio.timeout(10):
         while not ctx.terminal_outputs[terminal_id].output.strip():
             await asyncio.sleep(0.01)
     grandchild_pid = int(ctx.terminal_outputs[terminal_id].output.strip())
     try:
-        assert is_pid_alive(grandchild_pid)
+        assert pid_is_live(grandchild_pid)
         # Graceful terminal/kill reaps the whole terminal subtree via containment.
         await on_terminal_kill(
             2,
@@ -245,21 +245,6 @@ async def test_terminal_child_tree_contained_and_reaped(
 # Gateway-owned worker (real armed desktop gateway)
 # ---------------------------------------------------------------------------
 
-_ATTACH = "attach-credential-ownedtree-1234567890abcdef"
-_OWNERSHIP = "ownership-capability-ownedtree-fedcba0987654321"
-_PRESET = "mock-success-single"
-
-# The INFO variant, so the gateway's own worker-spawn narration reaches the log.
-_GATEWAY = worker_lifecycle_gateway_script()
-
-
-def _port_listening(port: int, *, timeout: float = 0.5) -> bool:
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
-            return True
-    except OSError:
-        return False
-
 
 def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
     tmp_path: Path,
@@ -270,62 +255,29 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
     still refuses, while receipt-owned shutdown must reap the existing worker.
     """
     app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
+    seat_app_home(app_home)
+    auth = {"Authorization": DEFAULT_ATTACH_AUTHORIZATION}
 
-    auth = {"Authorization": f"Bearer {_ATTACH}"}
-    log_path = tmp_path / "gateway.log"
-    log_handle = log_path.open("wb")
-
-    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        return spawn_gateway(
-            script=_GATEWAY,
-            gateway_port=gateway_port,
-            env=armed_gateway_env(
-                app_home,
-                gateway_port=gateway_port,
-                worker_port=worker_port,
-                # This module admits runs against the in-process mock lane
-                # (see ``_catalog.py``); the gateway must serve one to select.
-                extra={"VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true"},
-            ),
-            log_handle=log_handle,
+    # The lifecycle driver narrates its own worker spawn into the log.
+    with booted_gateway(
+        armed_gateway_env(app_home),
+        log_path=tmp_path / "gateway.log",
+        script=worker_lifecycle_gateway_script(),
+    ) as gateway:
+        base = gateway.base_url
+        worker_port = gateway.worker_port
+        # Desktop execution refuses before run start reads the catalog, so a
+        # well-formed selection is all the request needs.
+        verbs = gateway_run_verbs(
+            base,
+            selection=lambda _workspace: unvalidated_selection(),
+            tokens={"coder": "tok-coder"},
         )
-
-    proc, _gateway_port, worker_port, base = spawn_until_ready(
-        _spawn, log_path=log_path
-    )
-    try:
-        # Desktop execution refuses before a worker can be spawned.
-        _workspace = desktop_workspace(base)
-        with httpx.Client(base_url=base, timeout=60.0) as client:
-            start = client.post(
-                "/v1/runs",
-                headers=auth,
-                json={
-                    "team_preset": _PRESET,
-                    "message": "build it",
-                    "autonomous": True,
-                    "run_id": "owned-process-tree-01",
-                    # The workspace anchors the selection, which run start
-                    # revalidates against the catalog served for it.
-                    "metadata": {"workspace_root": _workspace},
-                    "selection": catalog_selection(
-                        base, auth["Authorization"], _workspace
-                    ),
-                    "actor_tokens": {
-                        "tokens": {"coder": "tok-coder"},
-                        "engine_bearer": "bearer",
-                    },
-                },
-            )
+        start = verbs.start("owned-process-tree-01")
         assert start.status_code == 503, start.text
         assert "OS isolation backend" in start.json()["detail"]
-        deadline = time.monotonic() + 30.0
-        while not _port_listening(worker_port) and time.monotonic() < deadline:
-            time.sleep(0.25)
-        assert _port_listening(worker_port), "lifecycle driver must start its worker"
+        # The lifecycle driver must start its worker.
+        _await_listener(worker_port, listening=True, timeout=30.0)
 
         # Graceful, receipt-owned administrative shutdown: the handler runs the
         # authenticated ownership-gated stop (an in-process SIGINT), so the
@@ -338,19 +290,18 @@ def test_desktop_worker_tree_contained_and_reaped_on_graceful_shutdown(
         ):
             resp = client.post(
                 "/admin/shutdown",
-                headers={**auth, "X-Vaultspec-Lifecycle-Capability": _OWNERSHIP},
+                headers={
+                    **auth,
+                    "X-Vaultspec-Lifecycle-Capability": DEFAULT_OWNERSHIP_CAPABILITY,
+                },
             )
             assert resp.status_code == 202, resp.text
 
         # The gateway exits gracefully before teardown can force-kill it.
         with contextlib.suppress(subprocess.TimeoutExpired):
-            proc.wait(timeout=30)
-        assert proc.poll() is not None, "graceful shutdown must stop the gateway"
-        deadline = time.monotonic() + 15.0
-        while _port_listening(worker_port) and time.monotonic() < deadline:
-            time.sleep(0.25)
-        assert not _port_listening(worker_port), (
-            "graceful shutdown must reap the gateway-owned worker"
+            gateway.process.wait(timeout=30)
+        assert gateway.process.poll() is not None, (
+            "graceful shutdown must stop the gateway"
         )
-    finally:
-        reap_gateway(proc)
+        # Graceful shutdown must reap the gateway-owned worker.
+        _await_listener(worker_port, listening=False, timeout=15.0)

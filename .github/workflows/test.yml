@@ -114,16 +114,6 @@ jobs:
         continue-on-error: true
         run: just check-complexity
 
-      - name: Run cyclomatic sentinel
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        run: just check-cyclomatic
-
-      - name: Run shape sentinel
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        run: just check-shape
-
       - name: Run limits sentinel
         if: ${{ !cancelled() }}
         continue-on-error: true
@@ -134,12 +124,7 @@ jobs:
         continue-on-error: true
         run: just check-size
 
-      - name: Run advisory production JSCPD clone detection
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        run: just audit-duplication
-
-      # The environment synchronized above carries --extra server, which
+      # The environment synchronized above carries --extra otlp, which
       # installs the OTLP exporter, so no step before this one can observe a
       # base-only installation. This gate builds its own isolated default-deps
       # environment for exactly that reason.

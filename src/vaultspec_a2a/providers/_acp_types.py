@@ -5,12 +5,10 @@ from auth logic and session lifecycle RPCs.
 """
 
 import asyncio
-import os
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 
 from langchain_core.messages import UsageMetadata
@@ -22,9 +20,13 @@ from ..control.workspace import (
     require_admitted_workspace_root,
 )
 from ..team.team_config import AgentConfig
+from ..utils import redact_text
 from ._acp_terminal_output import AcpTerminalOutput
+from ._factory_commands import ProviderCommand
 from ._json_contract import JsonObject
-from ._subprocess import STDERR_TAIL_LINES, redact_secrets
+from ._project_scope import RunProjectScope
+from ._subprocess import STDERR_TAIL_LINES
+from ._write_lock import ProviderWriteLock, provider_write_lock
 
 __all__: list[str] = []
 
@@ -35,107 +37,12 @@ type AcpResponseFutures = dict[int, AcpResponseFuture]
 
 PermissionCallback = Callable[[str, JsonObject, list[JsonObject]], Awaitable[str]]
 MAX_ACP_SESSION_ID_LENGTH = 512
-MAX_NATIVE_COMMAND_NAME_LENGTH = 128
-MAX_SESSION_COMMAND_CATALOGS = 16
 
 
 class AcpUsageMetadata(UsageMetadata, total=False):
     """LangChain turn usage with the ACP adapter's per-model breakdown."""
 
     model_usage: dict[str, UsageMetadata]
-
-
-class NativeCommandDisposition(StrEnum):
-    """Whether one command can be invoked in the current provider session."""
-
-    SUPPORTED = "supported"
-    BLOCKED = "blocked"
-    UNSUPPORTED = "unsupported"
-
-
-class NativeCommandOutcome(StrEnum):
-    """Terminal result of one intentional native-command invocation."""
-
-    COMPLETED = "completed"
-    BUSY = "busy"
-    BLOCKED = "blocked"
-    UNSUPPORTED = "unsupported"
-    CANCELLED = "cancelled"
-    FAILED = "failed"
-
-
-@dataclass(frozen=True, slots=True)
-class NativeCommandAvailability:
-    """One exact command's session-scoped availability and input contract."""
-
-    name: str
-    disposition: NativeCommandDisposition
-    description: str | None = None
-    input_hint: str | None = None
-    reason: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class NativeCommandResult:
-    """Bounded observable result returned by the native-command executor."""
-
-    name: str
-    outcome: NativeCommandOutcome
-    output: str = ""
-    reason: str | None = None
-    effects_may_have_occurred: bool = False
-
-
-@dataclass(slots=True)
-class AcpNativeCommandCatalog:
-    """Validated replacement snapshots from ACP available-command updates."""
-
-    commands: dict[str, NativeCommandAvailability] = field(default_factory=dict)
-    received: bool = False
-    blocked_reason: str | None = None
-    updated: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
-
-    def replace(
-        self,
-        commands: dict[str, NativeCommandAvailability],
-        *,
-        blocked_reason: str | None = None,
-    ) -> None:
-        """Replace the session snapshot atomically, including its validity state."""
-        self.commands = dict(commands)
-        self.received = True
-        self.blocked_reason = blocked_reason
-        self.updated.set()
-
-    def resolve(self, name: str) -> NativeCommandAvailability:
-        """Resolve one exact command without inventing aliases or default support."""
-        if (
-            not name
-            or name != name.strip()
-            or not name.isprintable()
-            or len(name) > MAX_NATIVE_COMMAND_NAME_LENGTH
-        ):
-            raise ValueError("native command name must be non-empty, trimmed text")
-        if self.blocked_reason is not None:
-            return NativeCommandAvailability(
-                name=name,
-                disposition=NativeCommandDisposition.BLOCKED,
-                reason=self.blocked_reason,
-            )
-        if not self.received:
-            return NativeCommandAvailability(
-                name=name,
-                disposition=NativeCommandDisposition.BLOCKED,
-                reason="the provider has not advertised commands for this session",
-            )
-        advertised = self.commands.get(name)
-        if advertised is not None:
-            return advertised
-        return NativeCommandAvailability(
-            name=name,
-            disposition=NativeCommandDisposition.UNSUPPORTED,
-            reason="the provider did not advertise this command for the session",
-        )
 
 
 def require_workspace_root(value: str | None, *, surface: str) -> Path:
@@ -165,46 +72,8 @@ def require_workspace_root(value: str | None, *, surface: str) -> Path:
     return Path(value)
 
 
-# Windows extended-length prefix. ``Path.resolve()`` emits it for long paths and
-# for some UNC spellings, and the engine's wire form strips it, so the two
-# authorities would compare unequal for the same directory unless one form wins.
-_EXTENDED_LENGTH_PREFIX = "\\\\?\\"
-
-
-def canonical_project_root(value: str | Path) -> str:
-    """Return one project root in the single form enforcement compares against.
-
-    The research found five spellings of the active project across four
-    authorities - the engine's wire form, the run's stored path, a case-folded
-    discovery digest, a search service's per-call root, and a command-line
-    target - agreeing only because one read seam re-normalised another. A
-    comparison between two of those spellings is a comparison between two
-    conventions, so every value entering a scope decision is reduced here first.
-
-    The reduction is: user expansion, symlink and ``..`` collapse, extended-length
-    prefix removal, and case normalisation for the platforms whose filesystems are
-    case-insensitive. Resolution is non-strict - a root that does not exist still
-    reduces to a stable key, because refusing a call is a decision the permission
-    layer must be able to reach without touching the filesystem's answer.
-    """
-    # A caller's ``~``-relative project root names a path, not a2a state.
-    resolved = Path(value).expanduser()  # storage-anchor-ok
-    try:
-        resolved = resolved.resolve()
-    except OSError:
-        # A path the OS will not even resolve (an unreachable UNC share, a
-        # detached drive) still has to yield a key rather than propagate an
-        # error into a permission decision.
-        resolved = Path(os.path.abspath(str(resolved)))
-    text = str(resolved)
-    if text.startswith(_EXTENDED_LENGTH_PREFIX):
-        text = text[len(_EXTENDED_LENGTH_PREFIX) :]
-    return os.path.normcase(text)
-
-
 @dataclass(frozen=True)
-# Frozen ACP configuration is passed unchanged through provider helpers.
-class AcpModelConfig:  # pylint: disable=too-many-instance-attributes
+class AcpModelConfig:
     """Frozen snapshot of read-only ACP model configuration.
 
     Built once in ``AcpChatModel.model_post_init`` and threaded through
@@ -222,12 +91,7 @@ class AcpModelConfig:  # pylint: disable=too-many-instance-attributes
     mcp_servers: list[JsonObject]
     use_exec: bool
     provider: str | None
-    runtime_authority: str | None
-    acp_backend: str | None
-    command_origin: str | None
-    command_kind: str | None
-    command_executable: str | None
-    command_target: str | None
+    provider_command: ProviderCommand | None
     auth_mode: str | None
     # Exact tool names (mcp__<server>__<tool>) auto-permitted for a headless run
     # so the CLI can invoke the bridged authoring tools without a local prompt.
@@ -247,50 +111,25 @@ class AcpModelConfig:  # pylint: disable=too-many-instance-attributes
     # Exact session-wide provider config values frozen at run admission, keyed
     # by the ACP adapter's advertised configuration option id.
     desired_config_options: dict[str, str] = field(default_factory=dict)
+    # The lock a filesystem write acquires, keyed by the file it replaces.
+    # Carried here rather than reached for at the point of use so every writer
+    # names the lock it waits on, and defaulted to the process-wide registry
+    # because the reach has to cover every writer of one file.
+    write_lock: ProviderWriteLock = field(default_factory=provider_write_lock)
 
-    def bound_project_root(self) -> str | None:
-        """Return the project this run is bound to, or ``None`` if it has none.
+    @property
+    def project_scope(self) -> RunProjectScope:
+        """Return the project scope this run's tool calls are measured against.
 
-        ``workspace_root`` is already the active project the run was created
-        with - the value every directory the lane touches is derived from. This
-        reader is what makes it usable as an AUTHORITY rather than only as a
-        starting directory: it hands back the canonical form, so a caller
-        comparing against it cannot accidentally compare spellings.
-
-        ``None`` is not "unrestricted". It means the run reached this seam
-        without an active project, which run creation refuses, so a caller
-        deciding whether to permit something must read it as "no authority to
-        permit against" - see :meth:`binds_project_path`.
+        ``workspace_root`` is the active project the run was created with - the
+        value every directory the lane touches is derived from - so it is also
+        the authority a permission decision compares a call against.
         """
-        if not self.workspace_root:
-            return None
-        return canonical_project_root(self.workspace_root)
-
-    def binds_project_path(self, candidate: str | Path) -> bool:
-        """Return whether *candidate* lies inside the project the run is bound to.
-
-        Containment rather than equality, because a path UNDER the run's project
-        is still the run's project: refusing a subdirectory would refuse
-        legitimately scoped work while closing nothing. A parent of the bound
-        project is NOT contained - widening the scope upward is exactly the
-        escape this answers.
-
-        Returns ``False`` when the run carries no project. A run with no bound
-        project has no authority to compare against, and a comparison that
-        cannot be made is not a comparison that passed.
-        """
-        bound = self.bound_project_root()
-        if bound is None:
-            return False
-        # Both sides are already reduced to the canonical key, so this is a pure
-        # lexical containment test over normalised text - no second normalisation
-        # convention can creep in here.
-        return Path(canonical_project_root(candidate)).is_relative_to(Path(bound))
+        return RunProjectScope(self.workspace_root)
 
 
 @dataclass
-# Session context mirrors the ACP lifecycle contract consumed by helpers.
-class AcpSessionContext:  # pylint: disable=too-many-instance-attributes
+class AcpSessionContext:
     """Consolidated state for an active ACP session."""
 
     process: asyncio.subprocess.Process
@@ -325,9 +164,6 @@ class AcpSessionContext:  # pylint: disable=too-many-instance-attributes
     # Session-scoped mutables (moved from AcpChatModel PrivateAttrs)
     tool_calls: dict[str, JsonObject] = field(default_factory=dict)
     agent_modes: JsonObject = field(default_factory=dict)
-    native_command_catalogs: dict[str, AcpNativeCommandCatalog] = field(
-        default_factory=dict
-    )
     config_options: list[JsonObject] = field(default_factory=list)
     last_auth_url: str | None = None
     # Monotonic stamp of the last frame read from the subprocess. The turn loop
@@ -342,28 +178,11 @@ class AcpSessionContext:  # pylint: disable=too-many-instance-attributes
 
     def retain_stderr_line(self, text: str) -> None:
         """Keep one redacted line of the child's standard error."""
-        self.stderr_tail.append(redact_secrets(text))
+        self.stderr_tail.append(redact_text(text))
 
     def rendered_stderr_tail(self) -> str:
         """Return the retained, redacted tail, or the empty string when silent."""
         return "\n".join(self.stderr_tail)
-
-    def native_commands_for(self, session_id: str) -> AcpNativeCommandCatalog:
-        """Return the command authority for one exact protocol session."""
-        if (
-            not session_id
-            or session_id != session_id.strip()
-            or not session_id.isprintable()
-            or len(session_id) > MAX_ACP_SESSION_ID_LENGTH
-        ):
-            raise ValueError("ACP session id must be non-empty, trimmed text")
-        catalog = self.native_command_catalogs.get(session_id)
-        if catalog is None:
-            if len(self.native_command_catalogs) >= MAX_SESSION_COMMAND_CATALOGS:
-                raise ValueError("ACP session command catalog limit reached")
-            catalog = AcpNativeCommandCatalog()
-            self.native_command_catalogs[session_id] = catalog
-        return catalog
 
     def seconds_since_activity(self) -> float:
         """Return seconds elapsed since the last observed protocol frame."""

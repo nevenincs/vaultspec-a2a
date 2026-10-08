@@ -21,25 +21,21 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ...control.repositories import (
+from ...control.deletion_saga import (
     CleanupItem,
     create_deletion_saga,
 )
 from ...database import (
-    create_artifact,
-    create_control_action,
-    create_thread,
+    ThreadDeletionSagaModel,
     get_thread,
 )
-from ...database.models import ThreadDeletionSagaModel
+from ...testing import seed_journaled_thread, settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
-from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import CleanupKind
 from .conftest import SessionFactory, make_app
 
@@ -47,33 +43,6 @@ if TYPE_CHECKING:
     import pathlib
 
     from langchain_core.runnables import RunnableConfig
-    from sqlalchemy.ext.asyncio import AsyncSession
-
-
-async def _seed_thread_with_action(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    status: str,
-    metadata: str | None = None,
-) -> None:
-    """Give a test-created thread the durable writer action required by elections."""
-    authority = make_test_write_authority()
-    await create_thread(
-        session,
-        write_authority=authority,
-        thread_id=thread_id,
-        status=status,
-        metadata=metadata,
-    )
-    await create_control_action(
-        session,
-        thread_id=thread_id,
-        action_type=authority.action_type,
-        idempotency_key=f"thread-create:{thread_id}",
-        dispatch_id=authority.action_receipt_id,
-        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-    )
 
 
 def _detached_checkpoint_store(db_file: pathlib.Path) -> AsyncSqliteSaver:
@@ -134,7 +103,7 @@ class TestVersionedDeletionVerb:
         async def _seed() -> None:
             await checkpointer.setup()
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="r-clean",
                     status="completed",
@@ -161,7 +130,7 @@ class TestVersionedDeletionVerb:
         async def _seed() -> None:
             await checkpointer.setup()
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="r-running",
                     status="running",
@@ -191,25 +160,17 @@ class TestVersionedDeletionVerb:
         """Stranded state is reported, named by kind, and never by locator."""
         store = _detached_checkpoint_store(tmp_path / "detached-v1.db")
         workspace = tmp_path / "workspace"
-        (workspace / "outputs").mkdir(parents=True)
-        artifact_file = workspace / "outputs" / "report.md"
-        artifact_file.write_text("body", encoding="utf-8")
+        workspace.mkdir()
 
         app, _agg, _worker, _cp = make_app(session_factory, store)
 
         async def _seed() -> None:
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="r-strand",
                     status="completed",
                     metadata=json.dumps({"workspace_root": workspace.as_posix()}),
-                )
-                await create_artifact(
-                    session,
-                    thread_id="r-strand",
-                    artifact_type="file",
-                    path="outputs/report.md",
                 )
                 await session.commit()
 
@@ -229,12 +190,8 @@ class TestVersionedDeletionVerb:
         assert body["run_id"] == "r-strand"
         assert body["cleanup_abandoned"] is True
         assert CleanupKind.CHECKPOINT.value in body["abandoned_kinds"]
-        # The removable artifact really went, so its kind is not named.
-        assert artifact_file.exists() is False
-        assert CleanupKind.ARTIFACT_FILE.value not in body["abandoned_kinds"]
         # Kinds only - no locator reaches the caller.
         assert workspace.as_posix() not in final.text
-        assert "report.md" not in final.text
 
 
 class TestDeletionSagaEndpoint:
@@ -249,7 +206,7 @@ class TestDeletionSagaEndpoint:
         async def _seed() -> None:
             await checkpointer.setup()
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="t-replay",
                     status="completed",
@@ -290,7 +247,7 @@ class TestDeletionSagaEndpoint:
                 {},
             )
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="t-resume",
                     status="completed",
@@ -346,7 +303,7 @@ class TestDeletionSagaEndpoint:
         async def _seed() -> None:
             await checkpointer.setup()
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="t-running",
                     status="running",
@@ -376,34 +333,21 @@ class TestDeletionSagaEndpoint:
         """An unremovable checkpoint yields retries, then a success naming it.
 
         Nothing here is arranged after the fact: the manifest is captured by the
-        production path from the thread's own artifacts, the artifact file is
-        really unlinked, and the checkpoint item really fails against a detached
-        store on every pass. The first two requests are retryable because a
-        retry can still make progress; the third finalizes over the item the
-        saga has stopped retrying, and reports the kind it left behind. The
-        cleaned artifact kind is absent from that report - only stranded state
-        is named.
+        production path from the thread, and the checkpoint item really fails
+        against a detached store on every pass. The first two requests are
+        retryable because a retry can still make progress; the third finalizes
+        over the item the saga has stopped retrying, and reports the kind it
+        left behind - only stranded state is named.
         """
         store = _detached_checkpoint_store(tmp_path / "detached_checkpoints.db")
         app, _agg, _worker, _cp = make_app(session_factory, store)
-        workspace = tmp_path / "workspace"
-        (workspace / "outputs").mkdir(parents=True)
-        artifact_file = workspace / "outputs" / "report.md"
-        artifact_file.write_text("body", encoding="utf-8")
 
         async def _seed() -> None:
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="t-strand",
                     status="completed",
-                    metadata=json.dumps({"workspace_root": workspace.as_posix()}),
-                )
-                await create_artifact(
-                    session,
-                    thread_id="t-strand",
-                    artifact_type="file",
-                    path="outputs/report.md",
                 )
                 await session.commit()
 
@@ -423,7 +367,6 @@ class TestDeletionSagaEndpoint:
             "cleanup_abandoned": True,
             "abandoned_kinds": [CleanupKind.CHECKPOINT.value],
         }
-        assert artifact_file.exists() is False
         assert replay.status_code == 404
 
     def test_the_abandonment_body_names_every_stranded_kind(
@@ -431,44 +374,33 @@ class TestDeletionSagaEndpoint:
     ) -> None:
         """Both stranded kinds are named, in the cleanup manifest's own order.
 
-        The artifact item here can never be cleaned: it was captured against a
-        workspace root its target does not sit under, so every pass refuses it
-        as an escaping path rather than removing a file the thread does not own.
-        Paired with a detached checkpoint store, the delete finalizes over two
-        different kinds of stranded state and has to name both.
+        The replay item here can never be cleaned: the production manifest
+        captures it against a store root that is a regular file rather than a
+        directory, so every pass refuses to retire it. Paired with a detached
+        checkpoint store, the delete finalizes over two different kinds of
+        stranded state and has to name both.
         """
         store = _detached_checkpoint_store(tmp_path / "detached_checkpoints.db")
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        (workspace / ".vaultspec-authoring-calls").write_text("file", encoding="utf-8")
         app, _agg, _worker, _cp = make_app(session_factory, store)
 
         async def _seed() -> None:
             async with session_factory() as session:
-                await _seed_thread_with_action(
+                await seed_journaled_thread(
                     session,
                     thread_id="t-both",
                     status="completed",
-                )
-                await create_deletion_saga(
-                    session,
-                    thread_id="t-both",
-                    manifest=[
-                        CleanupItem(
-                            kind=CleanupKind.CHECKPOINT,
-                            key="checkpoint",
-                            target="t-both",
-                        ),
-                        CleanupItem(
-                            kind=CleanupKind.ARTIFACT_FILE,
-                            key="artifact:gone",
-                            target="/elsewhere/out/report.md",
-                            root="/workspace",
-                        ),
-                    ],
                 )
                 await session.commit()
 
         asyncio.run(_seed())
 
-        with TestClient(app, raise_server_exceptions=True) as client:
+        with (
+            settings_override(a2a_home=tmp_path / "state", workspace_root=workspace),
+            TestClient(app, raise_server_exceptions=True) as client,
+        ):
             responses = [client.delete("/v1/runs/t-both") for _ in range(3)]
 
         assert [resp.status_code for resp in responses] == [503, 503, 200]
@@ -478,5 +410,5 @@ class TestDeletionSagaEndpoint:
         ]
         # No filesystem path, ledger key, or failure detail reaches the caller.
         serialized = responses[-1].text
-        assert "elsewhere" not in serialized
-        assert "artifact:gone" not in serialized
+        assert workspace.as_posix() not in serialized
+        assert "authoring-replay" not in serialized

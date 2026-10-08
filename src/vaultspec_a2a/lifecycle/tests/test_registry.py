@@ -9,6 +9,7 @@ the real OS, not a stub.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import socket
 import subprocess
@@ -19,9 +20,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from pathlib import Path
 
-from ...testing.ports import free_port
+from ...testing import await_child, free_port
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 from ..procs_config import PortBand, ProcsConfig, RoleConfig
 from ..registry import (
     ProcRecord,
@@ -74,8 +77,33 @@ def _available_band(width: int) -> PortBand:
     raise RuntimeError(f"could not find {width} contiguous free loopback ports")
 
 
+@contextlib.contextmanager
+def _contained_child(
+    argv: list[str],
+) -> Generator[tuple[subprocess.Popen[bytes], ProcessContainment]]:
+    """A child inside OS containment, its whole tree felled on exit.
+
+    Yields the pair the contained-child waiters take, so a wait that stalls and
+    the ordinary exit both reap through the same containment rather than through a
+    pid the host may already have recycled.
+    """
+    containment = ProcessContainment.create()
+    process = spawn_contained(argv, containment)
+    try:
+        yield process, containment
+    finally:
+        reap_contained(process, containment, term_timeout=5.0)
+        containment.close()
+
+
 def _dead_pid() -> int:
-    """Spawn a trivial process, wait for it to exit, and return its now-dead pid."""
+    """Spawn a trivial process, wait for it to exit, and return its now-dead pid.
+
+    Deliberately a bare spawn: the subject is a NUMERIC pid with no process behind
+    it, which is what a stale registry record holds, so there is no tree to
+    contain and nothing to reap - the process is required to be gone before the
+    pid is used at all.
+    """
     proc = subprocess.Popen([sys.executable, "-c", "pass"])
     proc.wait()
     return proc.pid
@@ -431,23 +459,37 @@ def test_concurrent_reservers_in_two_processes_never_share_a_port(
     home = tmp_path / "home"
     band = _available_band(20)
 
-    def _spawn(tag: str, peer: str) -> subprocess.Popen[bytes]:
-        return subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                script,
-                str(home),
-                str(tmp_path / f"{tag}.json"),
-                str(tmp_path / f"{peer}.json"),
-                str(band.start),
-                str(band.end),
-            ]
-        )
+    def _argv(tag: str, peer: str) -> list[str]:
+        return [
+            sys.executable,
+            "-c",
+            script,
+            str(home),
+            str(tmp_path / f"{tag}.json"),
+            str(tmp_path / f"{peer}.json"),
+            str(band.start),
+            str(band.end),
+        ]
 
-    first, second = _spawn("one", "two"), _spawn("two", "one")
-    assert first.wait(timeout=180) == 0
-    assert second.wait(timeout=180) == 0
+    # Each reserver HOLDS its ports until its peer publishes, so a pair that
+    # never agrees sits on the band for the whole budget. Contained, so the
+    # teardown fells each tree through its own containment instead of trusting
+    # both children to have exited, and the wait fails on a stall rather than on
+    # a slow host.
+    with (
+        _contained_child(_argv("one", "two")) as (first, first_containment),
+        _contained_child(_argv("two", "one")) as (second, second_containment),
+    ):
+        assert (
+            await_child(first, first_containment, what="first reserver", ceiling_s=180)
+            == 0
+        )
+        assert (
+            await_child(
+                second, second_containment, what="second reserver", ceiling_s=180
+            )
+            == 0
+        )
     one = set(json.loads((tmp_path / "one.json").read_text()))
     two = set(json.loads((tmp_path / "two.json").read_text()))
     assert len(one) == 10 and len(two) == 10

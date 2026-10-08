@@ -3,34 +3,40 @@
 import asyncio
 import hmac
 import logging
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import (
+    APIRouter,
     Depends,
     HTTPException,
     Request,
 )
 from pydantic import ValidationError
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata
+from ...control._thread_metadata import RunLeaseBinding, stored_run_lease_binding
 from ...control._worker_health import worker_liveness
-from ...control.admission import AdmissionBroker
-from ...control.config import settings
+from ...control.admission import (
+    RESERVATION_UNAVAILABLE,
+    AdmissionBroker,
+    AdmissionReadiness,
+)
+from ...control.execution_authority import read_frozen_team_selection
+from ...control.leased_dispatch import DispatchTransport
 from ...control.provider_execution import native_execution_refusal_reason
 from ...control.run_start_policy import (
-    evaluate_execution_eligibility,
     evaluate_run_start_eligibility,
     required_role_ids,
 )
 from ...control.thread_service import (
     ThreadCreationRequest,
     ThreadCreationResult,
-    ThreadDispatchRuntime,
     create_and_dispatch_thread,
     process_metadata,
     successor_seed_transcript,
@@ -40,21 +46,31 @@ from ...control.workspace import (
     require_admitted_workspace_root,
 )
 from ...database import (
+    Checkpointer,
+    ThreadModel,
+    WriteContentionError,
     get_thread,
+    retry_write_contention,
 )
-from ...database.checkpoints import Checkpointer
-from ...database.models import ThreadModel
 from ...domain_config import domain_config
 from ...ipc.schemas import SeedTranscriptMessage
 from ...providers.team_selection import (
     FrozenTeamSelection,
 )
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
+from ...team import TeamConfig
+from ...telemetry import trace_headers
+from ...thread.dispatch_policy import FailureType
 from ...thread.enums import (
     ThreadStatus,
 )
 from ...thread.errors import NicknameConflictError
-from .._utils import trace_headers
+from ...utils.coercion import decode_json_object
+from .._dispatch_refusals import (
+    DISPATCH_FAILURES,
+    refusal_responses,
+    refused_dispatch,
+)
 from ..dependencies import (
     get_circuit_breaker,
     get_services,
@@ -73,9 +89,8 @@ from ..schemas.gateway import (
     RunStartRequest,
     RunStartResponse,
 )
-from ..schemas.gateway_readiness import WorkerLifecycleState
 from .gateway import (
-    _admission_readiness,
+    _body_against_frozen_selection,
     _body_with_frozen_selection,
     _canonical_replay_body,
     _load_preset_or_refuse,
@@ -83,31 +98,69 @@ from .gateway import (
     _persist_lease,
     _persist_request_digest,
     _persist_team_selection,
-    _persisted_lease_binding,
     _prepare_workspace_root,
     _probe_admission_readiness,
     _probe_harness,
-    _raise_for_dispatch_failure,
-    _read_persisted_team_selection,
     _release_binding_digest,
     _release_ineligible_reservation,
     _replay_identity_or_conflict,
     _validate_and_freeze_selection_or_refuse,
     admission_broker,
     admission_gate,
-    router,
 )
 
-__all__ = ["_RunLeaseBinding"]
+__all__ = ["register"]
 
 logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
 
 
-def _require_profile_execution() -> None:
-    """Refuse unavailable execution before worker startup or run admission."""
+def _load_admitted_preset(body: RunStartRequest) -> tuple[Path | None, TeamConfig]:
+    """Load the request's preset once, after its workspace and profile admit it.
+
+    The workspace is resolved first, so an out-of-authority root is refused as
+    the client error it is. Unavailable native execution then refuses before any
+    preset is read, worker started, reservation assigned or token accepted.
+    """
+    logger.info("commit step: workspace_root")
+    ws_root = _prepare_workspace_root(body)
     reason = native_execution_refusal_reason()
     if reason is not None:
         raise HTTPException(status_code=503, detail=reason)
+    logger.info("commit step: load_preset")
+    return ws_root, _load_preset_or_refuse(body.team_preset, ws_root)
+
+
+def _verdict_subscriber_running(state: Any) -> bool:
+    """Report whether this gateway holds a live authoring verdict subscriber.
+
+    The task itself is the evidence: the lifespan seats it only when an engine
+    record resolved, and a task that has finished - cancelled at shutdown, or
+    ended on an unrecoverable error - is no longer serving. Absence of the seat
+    is the answer for any app whose lifespan never ran.
+    """
+    task = getattr(state, "verdict_subscriber_task", None)
+    return isinstance(task, asyncio.Task) and not task.done()
+
+
+def _log_readiness_refusal(
+    stage: str, reason: str | None, readiness: AdmissionReadiness
+) -> None:
+    # The refusal reason is deliberately one safe sentence, so it cannot say
+    # WHICH readiness leg failed. Those facts are already probed and carried on
+    # the readiness view, and already served on the service-state surface, so
+    # logging them here discloses nothing new - and without them a refusal is
+    # only diagnosable by re-deriving the probe by hand.
+    logger.warning(
+        "%s refused: reason=%s worker_state=%s provider_eligibility=%s "
+        "run_admission=%s eligible_providers=%s readiness_reasons=%s",
+        stage,
+        reason,
+        readiness.worker_state.value,
+        readiness.provider_eligibility.value,
+        readiness.run_admission.value,
+        ",".join(readiness.eligible_providers) or "none",
+        "; ".join(readiness.reasons) or "none",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -115,19 +168,12 @@ def _require_profile_execution() -> None:
 # ---------------------------------------------------------------------------
 
 
-@router.post(
-    "/runs",
-    response_model=(
-        RunStartResponse | RunPrepareResponse | RunCommitResponse | RunReleaseResponse
-    ),
-    status_code=201,
-)
 async def run_start_endpoint(
     request: Request,
     body: RunStartRequest,
-    services: tuple[
-        AsyncSession, EventAggregator, Checkpointer, httpx.AsyncClient
-    ] = Depends(get_services),
+    services: tuple[AsyncSession, RelayHub, Checkpointer, httpx.AsyncClient] = Depends(
+        get_services
+    ),
     circuit_breaker: Any = Depends(get_circuit_breaker),
     worker_spawner: Any = Depends(get_worker_spawner),
 ) -> RunStartResponse | RunPrepareResponse | RunCommitResponse | RunReleaseResponse:
@@ -137,10 +183,18 @@ async def run_start_endpoint(
     verb set: ``prepare`` reserves bounded capacity without tokens or a durable
     run; ``commit`` binds the exact actor-token role set to that reservation;
     ``release`` frees only an uncommitted reservation; and ``start`` (the
-    default) preserves the one-shot engine/Compose path.
+    default) preserves the one-shot engine path.
     """
     db, _aggregator, checkpointer, worker_client = services
-    runtime = _RunRuntime(circuit_breaker, worker_spawner, worker_client, checkpointer)
+    runtime = _RunRuntime(
+        DispatchTransport(
+            worker_client=worker_client,
+            circuit_breaker=circuit_breaker,
+            worker_spawner=worker_spawner,
+            trace_headers=trace_headers(),
+        ),
+        checkpointer,
+    )
     if body.stage == RunStage.PREPARE:
         return await _run_prepare(request, body, worker_spawner, worker_client)
     if body.stage == RunStage.COMMIT:
@@ -157,32 +211,33 @@ class _RunDispatchResult:
     thread_id: str
     status: str
     nickname: str | None
-    frozen: Any | None
+    frozen: FrozenTeamSelection | None
     replayed: bool
 
 
 @dataclass(frozen=True, slots=True)
-class _RunLeaseBinding:
-    lease_id: str
-    reservation_id: str
-    commit_digest: str
-
-
-@dataclass(frozen=True, slots=True)
 class _RunRuntime:
-    circuit_breaker: Any
-    worker_spawner: Any
-    worker_client: httpx.AsyncClient
+    transport: DispatchTransport
     checkpointer: Checkpointer
 
 
 @dataclass(frozen=True, slots=True)
 class _RunAdmission:
+    """One request's admission of a new run, computed once and consumed whole.
+
+    The persisted selection, the canonical body every staged digest binds, and
+    the preset the initial dispatch freezes all come from this one value, so a
+    catalog refresh can never leave a commit's bound digest and its persisted
+    selection describing two different freezes.
+    """
+
     workspace_root: Path
     nickname: str
     metadata: ThreadMetadata | None
     metadata_json: str
+    team_config: TeamConfig
     frozen: FrozenTeamSelection
+    canonical_body: RunStartRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +279,9 @@ async def _require_settled_predecessor(
     }:
         raise HTTPException(status_code=409, detail="predecessor run is not settled")
     try:
-        metadata = ThreadMetadata.model_validate_json(predecessor.thread_metadata or "")
+        metadata = ThreadMetadata.model_validate(
+            decode_json_object(predecessor.thread_metadata)
+        )
         predecessor_root = require_admitted_workspace_root(metadata.workspace_root)
     except ValueError as exc:
         raise HTTPException(
@@ -238,24 +295,97 @@ async def _require_settled_predecessor(
         )
 
 
+async def _existing_run_replay(
+    db: AsyncSession, body: RunStartRequest
+) -> _RunDispatchResult | None:
+    """Answer a request whose run id already owns a durable run, else ``None``.
+
+    Client idempotency: a retry with the same stable run id returns the existing
+    run rather than starting a second one (dispatch-exactly-once), and a
+    different request wearing that id is refused. On ``None`` the read is ended:
+    a snapshot held across admission goes stale under concurrent starts, and
+    creation must open its own write transaction.
+    """
+    existing = await get_thread(db, body.run_id)
+    if existing is None:
+        await db.rollback()
+        return None
+    _replay_identity_or_conflict(existing.id, existing.thread_metadata, body)
+    return _RunDispatchResult(
+        thread_id=existing.id,
+        status=existing.status,
+        nickname=existing.nickname,
+        frozen=read_frozen_team_selection(existing.thread_metadata),
+        replayed=True,
+    )
+
+
+#: Resolves the freeze a prepared reservation holds, or ``None`` when no live
+#: reservation can serve the commit.
+type _ReservedSelection = Callable[[], Awaitable[FrozenTeamSelection | None]]
+
+
+def _reserved_selection_for(
+    reserved: FrozenTeamSelection, team_config: TeamConfig
+) -> FrozenTeamSelection:
+    """Return *reserved*, once it still describes the team being committed.
+
+    A freeze covers an exact role set, and the run is dispatched with one
+    assignment per role taken from it. The preset is read again at commit, so a
+    preset edited between the two calls would otherwise hand the worker a team
+    with a role its frozen selection never assigned. That is the one thing the
+    second freeze used to notice, and it is cheaper to compare here.
+    """
+    if tuple(required_role_ids(team_config)) != reserved.roles:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "the preset's required roles changed after this reservation "
+                "was prepared"
+            ),
+        )
+    return reserved
+
+
 async def _prepare_run_admission(
-    request: Request, body: RunStartRequest, commit_binding: _RunLeaseBinding | None
+    request: Request,
+    body: RunStartRequest,
+    *,
+    reserved_selection: _ReservedSelection | None = None,
 ) -> _RunAdmission:
+    """Admit a new run once, refusing before any durable state is created.
+
+    An unloadable preset, a document-authoring preset with no target feature, an
+    actor-token bundle that does not cover the preset's roles, or a selection the
+    current catalog no longer serves all raise a 4xx here.
+
+    *reserved_selection* resolves the freeze a prepared reservation already
+    holds. Given one, this admission CONSUMES that freeze and reads no catalog:
+    validating the selection and fixing it is what the prepare did, and the
+    reservation's binding digest is the digest of that result, so freezing again
+    would re-answer a settled question against a catalog that may have moved -
+    refusing the exact request the reservation was issued for. The request is
+    still held to that freeze, and to the role set it was frozen for, so a
+    commit cannot quietly adopt a selection or a team its prepare never
+    validated.
+
+    It is a callable rather than a value so the reservation is consulted at THIS
+    point in the sequence: a request naming a workspace outside this gateway's
+    authority, or an unloadable preset, is refused as the client error it is
+    before any reservation is read, exactly as on the unstaged path.
+    """
     run_id = body.run_id
     # Thread the target feature onto the metadata so it reaches dispatch and the
     # vault index; the top-level field is authoritative when both are present.
     metadata = _run_metadata_with_request_fields(body)
+    _, team_config = _load_admitted_preset(body)
     try:
         ws_root, nickname, metadata_json = process_metadata(
-            metadata, run_id, body.team_preset
+            metadata, run_id, team_config
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    _require_profile_execution()
-
-    logger.info("commit step: load_preset")
-    team_config = _load_preset_or_refuse(body.team_preset, ws_root)
     effective_feature = body.feature_tag or (
         metadata.feature_tag if metadata is not None else None
     )
@@ -263,16 +393,34 @@ async def _prepare_run_admission(
         team_config,
         feature_tag=effective_feature or None,
         actor_tokens=body.actor_tokens,
+        verdict_subscriber_running=_verdict_subscriber_running(request.app.state),
         harness=_probe_harness(team_config, ws_root),
     )
     if not eligibility.eligible:
+        if eligibility.failure is not None:
+            # Served by code as well as by sentence: a consumer must be able to
+            # tell a request it should fix from a topology this gateway cannot
+            # run at all.
+            raise refused_dispatch(eligibility.failure, eligibility.reason)
         raise HTTPException(status_code=422, detail=eligibility.reason)
 
-    logger.info("commit step: validate_selection")
-    frozen = await _validate_and_freeze_selection_or_refuse(
-        request.app, body, team_config, ws_root
-    )
-    canonical_body = _body_with_frozen_selection(body, frozen)
+    if reserved_selection is None:
+        logger.info("commit step: validate_selection")
+        frozen = await _validate_and_freeze_selection_or_refuse(
+            request.app, body, team_config, ws_root
+        )
+        canonical_body = _body_with_frozen_selection(body, frozen)
+    else:
+        logger.info("commit step: reserved_selection")
+        reserved = await reserved_selection()
+        if reserved is None:
+            raise HTTPException(status_code=409, detail=RESERVATION_UNAVAILABLE)
+        frozen = _reserved_selection_for(reserved, team_config)
+        canonical_body = _body_against_frozen_selection(
+            frozen,
+            body,
+            mismatch="commit selection does not match the prepared reservation",
+        )
     metadata_json = _persist_team_selection(metadata_json, frozen)
     # Persist what this run was started with, so a later replay is compared
     # against the whole request rather than one field of it. The stamped form
@@ -282,11 +430,15 @@ async def _prepare_run_admission(
     metadata_json = _persist_request_digest(
         metadata_json, stamped_replay_digest(canonical_body)
     )
-    # Bind the committed reservation's non-secret lease identity to the run,
-    # durably, so terminal settlement and post-restart reconciliation recover it.
-    if commit_binding is not None:
-        metadata_json = _persist_lease(metadata_json, commit_binding)
-    return _RunAdmission(ws_root, nickname, metadata, metadata_json, frozen)
+    return _RunAdmission(
+        workspace_root=ws_root,
+        nickname=nickname,
+        metadata=metadata,
+        metadata_json=metadata_json,
+        team_config=team_config,
+        frozen=frozen,
+        canonical_body=canonical_body,
+    )
 
 
 async def _attempt_thread_creation(
@@ -295,38 +447,28 @@ async def _attempt_thread_creation(
     request: ThreadCreationRequest,
     runtime: _RunRuntime,
 ) -> ThreadCreationResult | _RunWinner:
-    for attempt in range(4):
-        try:
-            return await create_and_dispatch_thread(
-                db,
-                request,
-                runtime=ThreadDispatchRuntime(
-                    circuit_breaker=runtime.circuit_breaker,
-                    worker_spawner=runtime.worker_spawner,
-                    worker_client=runtime.worker_client,
-                    recursion_limit=domain_config.graph_recursion_limit,
-                    trace_headers=trace_headers(),
-                ),
-            )
-        except OperationalError as exc:
-            if (
-                db.get_bind().dialect.name != "sqlite"
-                or "database is locked" not in str(exc).lower()
-                or attempt == 3
-            ):
-                raise
+    async def create() -> ThreadCreationResult | _RunWinner:
+        return await create_and_dispatch_thread(
+            db,
+            request,
+            transport=runtime.transport,
+        )
+
+    async def durable_winner() -> _RunWinner | None:
+        # A contended start may have lost to a sibling that committed this run
+        # id; that run is the answer, and starting another would duplicate it.
+        winner = await get_thread(db, body.run_id)
+        if winner is None:
             await db.rollback()
-            winner = await get_thread(db, body.run_id)
-            if winner is not None:
-                return _RunWinner(
-                    winner.id,
-                    winner.status,
-                    winner.nickname,
-                    winner.thread_metadata,
-                )
-            await db.rollback()
-            await asyncio.sleep(0.05 * (attempt + 1))
-    raise RuntimeError("run admission retry exhausted without a result")
+            return None
+        return _RunWinner(
+            winner.id,
+            winner.status,
+            winner.nickname,
+            winner.thread_metadata,
+        )
+
+    return await retry_write_contention(db, create, after_rollback=durable_winner)
 
 
 async def _create_thread_with_retry(
@@ -346,12 +488,19 @@ async def _create_thread_with_retry(
         metadata=prepared.metadata,
         metadata_json=prepared.metadata_json,
         workspace_root=prepared.workspace_root,
+        team_config=prepared.team_config,
         actor_tokens=body.actor_tokens,
         model_assignment=prepared.frozen.compiler_map(),
         seed_transcript=seed_transcript,
     )
     try:
         return await _attempt_thread_creation(db, body, request, runtime)
+    except WriteContentionError as exc:
+        # No run exists: every attempt at the creating write was refused by a
+        # competing writer. The same retryable refusal every run-control verb
+        # serves for the same condition, rather than an internal fault.
+        logger.warning("Run %s found the store contended: %s", body.run_id, exc)
+        raise refused_dispatch(FailureType.STORE_BUSY, str(exc)) from exc
     except NicknameConflictError as exc:
         raise HTTPException(
             status_code=409,
@@ -385,38 +534,19 @@ async def _create_run_core(
     body: RunStartRequest,
     db: AsyncSession,
     runtime: _RunRuntime,
-    *,
-    commit_binding: _RunLeaseBinding | None,
+    prepared: _RunAdmission,
 ) -> _RunDispatchResult:
-    """Create and dispatch one durable run - the shared start/commit core.
+    """Create and dispatch one admitted durable run - the shared start/commit core.
 
-    Refuses before any durable state is created: an unloadable preset, a
-    document-authoring preset with no target feature, or an actor-token bundle
-    that does not cover the preset's roles all raise a 4xx. A client-supplied
-    ``run_id`` makes creation dispatch-exactly-once under retry. When
-    *commit_binding* is supplied, the commit path persists it into the run's
-    metadata so terminal settlement and restart reconciliation can recover the
-    run's non-secret lease and replay identity durably.
+    *prepared* is the request's single admission, used as it is and never
+    recomputed: its metadata (carrying the lease binding on the commit path, so
+    terminal settlement and restart reconciliation recover the run's non-secret
+    lease and replay identity durably), its frozen selection and its preset. The
+    caller has already answered a same-id replay through
+    :func:`_existing_run_replay`, so a client-supplied ``run_id`` keeps creation
+    dispatch-exactly-once under retry.
     """
-    # Client idempotency: a retry with the same stable run id returns the
-    # existing run rather than starting a second one (dispatch-exactly-once).
-    existing = await get_thread(db, body.run_id)
-    if existing is not None:
-        _replay_identity_or_conflict(existing.id, existing.thread_metadata, body)
-        return _RunDispatchResult(
-            thread_id=existing.id,
-            status=existing.status,
-            nickname=existing.nickname,
-            frozen=_read_persisted_team_selection(existing.thread_metadata),
-            replayed=True,
-        )
-    # End the read before the awaits below: a snapshot held across admission
-    # goes stale under concurrent starts, and creation must open its own write
-    # transaction.
-    await db.rollback()
     run_id = body.run_id
-
-    prepared = await _prepare_run_admission(request, body, commit_binding)
     seed_transcript: list[SeedTranscriptMessage] = []
     if body.continues_run_id is not None:
         await _require_settled_predecessor(
@@ -448,8 +578,7 @@ async def _create_run_core(
     # from it by whichever of these ends its execution first: the worker's
     # terminal event (``control.event_handlers._handle_terminal_event``, the
     # primary release for any run that actually executes), a dispatch failure
-    # that settled the run FAILED - the start-path one below, or a follow-up
-    # one in the messages route or the WS dispatch handler - a cancel that
+    # that settled the run FAILED - the start-path one below - a cancel that
     # settles the run terminally (``run_cancel_endpoint``), or here, in the
     # finally, on EVERY path that leaves no durable run. Release is an
     # idempotent discard, so more than one of them firing is harmless.
@@ -478,7 +607,7 @@ async def _create_run_core(
                 thread_id=creation.thread_id,
                 status=creation.status,
                 nickname=creation.nickname,
-                frozen=_read_persisted_team_selection(creation.metadata_json),
+                frozen=read_frozen_team_selection(creation.metadata_json),
                 replayed=True,
             )
         result = creation
@@ -501,7 +630,8 @@ async def _create_run_core(
         ):
             await gate.release(run_id)
 
-        _raise_for_dispatch_failure(result.failure_type, result.error_detail)
+        if result.failure_type is not None:
+            raise refused_dispatch(result.failure_type, result.error_detail)
 
         return _RunDispatchResult(
             thread_id=result.thread_id,
@@ -522,13 +652,10 @@ async def _run_direct_start(
     runtime: _RunRuntime,
 ) -> RunStartResponse:
     """One-shot start: create and dispatch a run in a single call (unchanged path)."""
-    result = await _create_run_core(
-        request,
-        body,
-        db,
-        runtime,
-        commit_binding=None,
-    )
+    result = await _existing_run_replay(db, body)
+    if result is None:
+        prepared = await _prepare_run_admission(request, body)
+        result = await _create_run_core(request, body, db, runtime, prepared)
     return RunStartResponse(
         run_id=result.thread_id,
         status=result.status,
@@ -546,17 +673,16 @@ async def _run_prepare(
 ) -> RunPrepareResponse:
     """Reserve a bounded admission slot and report execution readiness.
 
-    Loads the preset only to derive the bounded required-role set the later
-    commit must cover, then reserves through the process-wide broker. The broker
-    triggers the gateway-owned worker's single-flight startup and probes seated
-    readiness before assigning capacity; no token is accepted and no durable run
-    is created. A capacity-exhausted or role-invalid prepare is refused with a
-    503 carrying the safe reason.
+    Loads the preset to derive the bounded required-role set the later commit
+    must cover, validates the request's selection against the catalog served for
+    its workspace, and reserves through the process-wide broker. This is the ONE
+    catalog validation of a staged run: the reservation keeps the freeze, and the
+    commit consumes it. The broker triggers the gateway-owned worker's
+    single-flight startup and probes seated readiness before assigning capacity;
+    no token is accepted and no durable run is created. A capacity-exhausted or
+    role-invalid prepare is refused with a 503 carrying the safe reason.
     """
-    logger.info("commit step: workspace_root")
-    ws_root = _prepare_workspace_root(body)
-    _require_profile_execution()
-    team_config = _load_preset_or_refuse(body.team_preset, ws_root)
+    ws_root, team_config = _load_admitted_preset(body)
     frozen = await _validate_and_freeze_selection_or_refuse(
         request.app, body, team_config, ws_root
     )
@@ -569,6 +695,9 @@ async def _run_prepare(
             request.app.state, worker_client
         ),
         binding_digest=request_digest(canonical_body, prepared=True),
+        # The reservation keeps this freeze, so its commit consumes the exact
+        # selection validated here instead of validating a second time.
+        frozen_selection=frozen,
         release_digest=_release_binding_digest(body),
     )
     if (
@@ -576,24 +705,7 @@ async def _run_prepare(
         or outcome.reservation_id is None
         or outcome.lease_id is None
     ):
-        # The refusal reason is deliberately one safe sentence, so it cannot say
-        # WHICH of the three readiness legs failed. Those facts are already
-        # probed and carried on the outcome, and already served on the
-        # service-state surface, so logging them here discloses nothing new -
-        # and without them a refusal is only diagnosable by re-deriving the
-        # probe by hand, which is how three admission failures stayed open.
-        refused = outcome.readiness
-        logger.warning(
-            "run admission refused: reason=%s worker_state=%s "
-            "provider_eligibility=%s run_admission=%s eligible_providers=%s "
-            "readiness_reasons=%s",
-            outcome.reason,
-            refused.worker_state.value,
-            refused.provider_eligibility.value,
-            refused.run_admission.value,
-            ",".join(refused.eligible_providers) or "none",
-            "; ".join(refused.reasons) or "none",
-        )
+        _log_readiness_refusal("run admission", outcome.reason, outcome.readiness)
         raise HTTPException(status_code=503, detail=outcome.reason)
     readiness = outcome.readiness
     return RunPrepareResponse(
@@ -616,12 +728,14 @@ async def _run_commit(
 ) -> RunCommitResponse:
     """Bind actor tokens to a stable run under a prepared reservation.
 
-    Re-evaluates execution eligibility and handles an exact durable replay before
-    moving the reservation into its recoverable ``committing`` state. A new
-    commit must match the prepared request and role set before the shared creation
-    core receives its tokens. The reservation is consumed only after the exact
-    run binding is durable; a proven pre-durability failure restores it. The
-    non-secret lease identity is returned and persisted for terminal settlement.
+    Handles an exact durable replay, then admits the run once and re-evaluates
+    execution readiness before moving the reservation into its recoverable
+    ``committing`` state. A new commit must match the prepared request and role
+    set before the shared creation core receives its tokens; the digest that
+    match binds and the selection the run persists come from that one admission.
+    The reservation is consumed only after the exact run binding is durable; a
+    proven pre-durability failure restores it. The non-secret lease identity is
+    returned and persisted for terminal settlement.
     """
     if body.reservation_id is None:  # pragma: no cover - guarded by the schema
         raise HTTPException(status_code=422, detail="commit requires a reservation id")
@@ -644,8 +758,8 @@ async def _commit_replay(
 ) -> RunCommitResponse:
     canonical_body = _canonical_replay_body(existing.thread_metadata, body)
     commit_digest = request_digest(canonical_body, prepared=False)
-    existing_modern = _read_persisted_team_selection(existing.thread_metadata)
-    binding = _persisted_lease_binding(existing.thread_metadata)
+    existing_modern = read_frozen_team_selection(existing.thread_metadata)
+    binding = stored_run_lease_binding(existing.thread_metadata)
     if binding is None:
         raise HTTPException(
             status_code=409,
@@ -668,66 +782,41 @@ async def _commit_replay(
     )
 
 
-async def _prepare_commit_eligibility(
+async def _require_commit_execution_ready(
     request: Request,
-    body: RunStartRequest,
     runtime: _RunRuntime,
     reservation_id: str,
-) -> tuple[RunStartRequest, str]:
-    broker = admission_broker(request.app)
-    ws_root = _prepare_workspace_root(body)
-    _require_profile_execution()
-    team_config = _load_preset_or_refuse(body.team_preset, ws_root)
-    frozen = await _validate_and_freeze_selection_or_refuse(
-        request.app, body, team_config, ws_root
-    )
-    canonical_body = _body_with_frozen_selection(body, frozen)
-    commit_digest = request_digest(canonical_body, prepared=False)
-    # Evaluate worker and provider eligibility BEFORE consuming the reservation,
-    # accepting the actor tokens, or creating a run: run credentials are minted
-    # only after the runtime and provider are eligible. The worker reachability is
-    # probed live so the verdict never lags behind the watchdog's status ladder; a
-    # refusal releases the reservation so a failed commit leaks nothing.
-    from ...control._worker_health import probe_worker_health
+    canonical_body: RunStartRequest,
+) -> None:
+    """Refuse a commit unless run admission is execution-ready right now.
 
+    Evaluated BEFORE consuming the reservation, accepting the actor tokens, or
+    creating a run: run credentials are minted only after execution is ready.
+    The worker is probed live, through the same tri-state probe prepare uses, so
+    the verdict never lags behind the watchdog's status ladder and a worker busy
+    with an in-flight run stays execution-ready. A refusal releases the
+    reservation so a failed commit leaks nothing.
+    """
     logger.info("commit step: probe_worker")
-    probe = await probe_worker_health(settings.worker_url, client=runtime.worker_client)
-    # Same tri-state as prepare: only a probe that OBSERVED absence may report it.
-    # An indeterminate one defers to the watchdog's seated state, so a worker busy
-    # with an in-flight run stays execution-ready for the next commit.
-    readiness = _admission_readiness(
-        request.app.state,
-        worker_probe_ready=None if probe.indeterminate else probe.healthy,
+    readiness = await _probe_admission_readiness(
+        request.app.state, runtime.transport.worker_client
     )
-    worker_reachable = readiness.worker_state is WorkerLifecycleState.READY
-    execution = evaluate_execution_eligibility(
-        worker_reachable=worker_reachable,
-        provider_eligibility=readiness.provider_eligibility,
+    reason = readiness.not_ready_reason
+    if reason is None:
+        return
+    # Same disclosure the prepare refusal carries: a commit 503 otherwise cannot
+    # be told apart from a refusal about the reservation itself.
+    _log_readiness_refusal("run commit", reason, readiness)
+    await _release_ineligible_reservation(
+        admission_broker(request.app), reservation_id, canonical_body
     )
-    if not execution.eligible:
-        # Same disclosure the prepare refusal carries: a commit 503 otherwise
-        # says only that something was ineligible, which cannot be told apart
-        # from a refusal about the reservation itself.
-        logger.warning(
-            "run commit refused as ineligible: reason=%s worker_state=%s "
-            "worker_probe=%s provider_eligibility=%s reservation=%s",
-            execution.reason,
-            readiness.worker_state.value,
-            "indeterminate"
-            if probe.indeterminate
-            else ("healthy" if probe.healthy else "absent"),
-            readiness.provider_eligibility.value,
-            reservation_id,
-        )
-        await _release_ineligible_reservation(broker, reservation_id, canonical_body)
-        raise HTTPException(status_code=503, detail=execution.reason)
-    return canonical_body, commit_digest
+    raise HTTPException(status_code=503, detail=reason)
 
 
 async def _classify_failed_commit(
     db: AsyncSession,
     run_id: str,
-    binding: _RunLeaseBinding,
+    binding: RunLeaseBinding,
     broker: AdmissionBroker,
 ) -> None:
     # A failed response may follow a durable commit. Reopen a reservation only
@@ -743,7 +832,7 @@ async def _classify_failed_commit(
         )
         return
     persisted_binding = (
-        _persisted_lease_binding(persisted.thread_metadata)
+        stored_run_lease_binding(persisted.thread_metadata)
         if persisted is not None
         else None
     )
@@ -791,8 +880,17 @@ async def _run_commit_locked(
         return await _commit_replay(existing, body, broker, reservation_id)
     # Not held across the live worker probe below.
     await db.rollback()
-    canonical_body, commit_digest = await _prepare_commit_eligibility(
-        request, body, runtime, reservation_id
+    # The freeze this commit binds is its own reservation's, read where the
+    # admission needs it. No reservation can serve the commit once it is
+    # unknown, expired, released or consumed, which is the same refusal the
+    # binding check below gives.
+    prepared = await _prepare_run_admission(
+        request,
+        body,
+        reserved_selection=lambda: broker.admitted_selection(reservation_id),
+    )
+    await _require_commit_execution_ready(
+        request, runtime, reservation_id, prepared.canonical_body
     )
 
     presented_roles: set[str] = (
@@ -800,7 +898,7 @@ async def _run_commit_locked(
     )
     outcome = await broker.commit(
         reservation_id,
-        binding_digest=request_digest(canonical_body, prepared=True),
+        binding_digest=request_digest(prepared.canonical_body, prepared=True),
         presented_roles=presented_roles,
     )
     logger.info(
@@ -811,19 +909,24 @@ async def _run_commit_locked(
     )
     if not outcome.committed or outcome.lease_id is None:
         raise HTTPException(status_code=409, detail=outcome.reason)
-    binding = _RunLeaseBinding(
+    binding = RunLeaseBinding(
         lease_id=outcome.lease_id,
         reservation_id=reservation_id,
-        commit_digest=commit_digest,
+        commit_digest=request_digest(prepared.canonical_body, prepared=False),
     )
     try:
-        result = await _create_run_core(
-            request,
-            body,
-            db,
-            runtime,
-            commit_binding=binding,
-        )
+        # A plain start may have claimed this run id while the commit was
+        # admitted; that run is the answer, exactly as for a start retry.
+        result = await _existing_run_replay(db, body)
+        if result is None:
+            # Bind the committed reservation's non-secret lease identity to the
+            # run, durably, so terminal settlement and post-restart
+            # reconciliation recover it.
+            leased = replace(
+                prepared,
+                metadata_json=_persist_lease(prepared.metadata_json, binding),
+            )
+            result = await _create_run_core(request, body, db, runtime, leased)
     except BaseException:
         await _classify_failed_commit(db, run_id, binding, broker)
         raise
@@ -854,3 +957,44 @@ async def _run_release(request: Request, body: RunStartRequest) -> RunReleaseRes
             binding_digest=_release_binding_digest(body),
         )
     return RunReleaseResponse(reservation_id=reservation_id, released=released)
+
+
+def register(router: APIRouter) -> None:
+    """Mount the run-start verb."""
+    router.post(
+        "/runs",
+        response_model=(
+            RunStartResponse
+            | RunPrepareResponse
+            | RunCommitResponse
+            | RunReleaseResponse
+        ),
+        status_code=201,
+        responses=refusal_responses(
+            DISPATCH_FAILURES,
+            {
+                404: {
+                    "description": (
+                        "The run was gone by the time its first dispatch settled."
+                    ),
+                },
+                409: {
+                    "description": (
+                        "The run was not started as asked: its id already belongs to "
+                        "a different request, its nickname is taken, its predecessor "
+                        "cannot be continued, the commit does not match its prepared "
+                        "reservation, or the worker refused the first dispatch with "
+                        "the typed code every run action shares."
+                    ),
+                },
+                503: {
+                    "description": (
+                        "Gateway service token is not configured, the gateway is "
+                        "draining or out of admission capacity, execution or the "
+                        "provider catalog is not ready, or the worker is saturated "
+                        "or shut out by the failure breaker; retry later."
+                    ),
+                },
+            },
+        ),
+    )(run_start_endpoint)

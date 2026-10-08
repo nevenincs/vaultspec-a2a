@@ -6,22 +6,23 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...database.models import (
-    Base,
+from ...conftest import SqlitePosture
+from ...database import (
     ControlActionModel,
     RecoveryAttemptModel,
-    RunWriteAuthority,
+    create_control_action,
+    create_thread,
 )
-from ...database.permission_repository import create_control_action
-from ...database.session import configure_sqlite_transactions
-from ...database.thread_repository import create_thread
+from ...thread import RunWriteAuthority
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import ControlActionType, RecoveryCondition
+from ...thread.enums import (
+    ControlActionResultStatus,
+    ControlActionType,
+    RecoveryCondition,
+)
 from ..action_lease import (
     ControlActionClaim,
     DispatchFailureDisposition,
@@ -36,21 +37,9 @@ from ..recovery import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-
-@pytest_asyncio.fixture
-async def sessions(
-    tmp_path: Path,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'attempts.db'}")
-    configure_sqlite_transactions(engine)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    yield factory
-    await engine.dispose()
+pytestmark = pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS)
 
 
 async def _thread(db: AsyncSession, *, deadline_at: datetime) -> RunWriteAuthority:
@@ -75,11 +64,14 @@ async def _thread(db: AsyncSession, *, deadline_at: datetime) -> RunWriteAuthori
 
 @pytest.mark.asyncio
 async def test_recoverable_action_deadline_is_a_storage_invariant(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     deadline = datetime(2026, 9, 7, 1, tzinfo=UTC)
-    async with sessions() as db:
-        with pytest.raises(ValueError, match="ingest requires a recovery deadline"):
+    async with session_factory() as db:
+        with pytest.raises(
+            ValueError,
+            match="ingest journaled as accepted_not_applied requires a recovery",
+        ):
             await create_control_action(
                 db,
                 thread_id="missing",
@@ -87,13 +79,31 @@ async def test_recoverable_action_deadline_is_a_storage_invariant(
                 idempotency_key="missing-deadline",
             )
         with pytest.raises(
-            ValueError, match="repair_started cannot carry a recovery deadline"
+            ValueError,
+            match="permission_request_created journaled as accepted_not_applied "
+            "cannot carry a recovery deadline",
         ):
             await create_control_action(
                 db,
                 thread_id="unexpected",
-                action_type=ControlActionType.REPAIR_STARTED,
+                action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
                 idempotency_key="unexpected-deadline",
+                recovery_deadline_at=deadline,
+            )
+        # A deadline belongs to a row a dispatcher may still deliver. A row of a
+        # recovery type written already settled will never be dispatched, so it
+        # neither needs nor may invent one.
+        with pytest.raises(
+            ValueError,
+            match="resume journaled as rejected_invalid_state cannot carry a "
+            "recovery deadline",
+        ):
+            await create_control_action(
+                db,
+                thread_id="settled",
+                action_type=ControlActionType.RESUME,
+                idempotency_key="settled-deadline",
+                result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
                 recovery_deadline_at=deadline,
             )
 
@@ -120,8 +130,10 @@ async def test_recoverable_action_deadline_is_a_storage_invariant(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("action_type", ["unknown_action", "repair_started"])
 async def test_control_action_storage_refuses_unknown_action_types(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
+    action_type: str,
 ) -> None:
     authority = RunWriteAuthority(
         0,
@@ -129,7 +141,7 @@ async def test_control_action_storage_refuses_unknown_action_types(
         ControlActionType.INGEST,
         "schema-current-action",
     )
-    async with sessions() as db:
+    async with session_factory() as db:
         await create_thread(
             db,
             thread_id="schema-current-action",
@@ -139,7 +151,7 @@ async def test_control_action_storage_refuses_unknown_action_types(
             ControlActionModel(
                 id="unknown-action-row",
                 thread_id="schema-current-action",
-                action_type="unknown_action",
+                action_type=action_type,
                 idempotency_key="unknown-action-row",
             )
         )
@@ -152,11 +164,11 @@ async def test_control_action_storage_refuses_unknown_action_types(
 
 @pytest.mark.asyncio
 async def test_failure_updates_one_exact_schedule(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     now = datetime(2026, 9, 6, 12, tzinfo=UTC)
     deadline = now + timedelta(minutes=10)
-    async with sessions() as db:
+    async with session_factory() as db:
         authority = await _thread(db, deadline_at=deadline)
         first = await record_recovery_failure(
             db,
@@ -190,7 +202,7 @@ async def test_failure_updates_one_exact_schedule(
 
 @pytest.mark.asyncio
 async def test_live_dispatch_failure_persists_condition_and_releases_known_non_delivery(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     now = datetime(2026, 9, 7, 0, tzinfo=UTC)
     deadline = now + timedelta(minutes=10)
@@ -200,7 +212,7 @@ async def test_live_dispatch_failure_persists_condition_and_releases_known_non_d
         ControlActionType.CANCEL,
         "cancel-current",
     )
-    async with sessions() as db:
+    async with session_factory() as db:
         await create_thread(db, thread_id="cancel-run", write_authority=authority)
         action = await create_control_action(
             db,
@@ -226,7 +238,7 @@ async def test_live_dispatch_failure_persists_condition_and_releases_known_non_d
         result_status=action.result_status,
         claim_token="live-owner",
     )
-    async with sessions() as db:
+    async with session_factory() as db:
         assert (
             await record_dispatch_failure(
                 db,
@@ -239,7 +251,7 @@ async def test_live_dispatch_failure_persists_condition_and_releases_known_non_d
         )
         await db.commit()
 
-    async with sessions() as db:
+    async with session_factory() as db:
         stored_action = await db.get(type(action), action.id)
         attempt = await db.scalar(
             select(RecoveryAttemptModel).where(
@@ -255,13 +267,13 @@ async def test_live_dispatch_failure_persists_condition_and_releases_known_non_d
     assert attempt.detail == "worker capacity reached"
     assert attempt.settled_at is None
 
-    async with sessions() as db:
+    async with session_factory() as db:
         current_action = await db.get(type(action), action.id)
         assert current_action is not None
         current_action.claim_token = "replacement-owner"
         current_action.claim_expires_at = now + timedelta(seconds=90)
         await db.commit()
-    async with sessions() as db:
+    async with session_factory() as db:
         assert (
             await record_dispatch_failure(
                 db,
@@ -273,7 +285,7 @@ async def test_live_dispatch_failure_persists_condition_and_releases_known_non_d
             is DispatchFailureDisposition.AUTHORITY_LOST
         )
         await db.commit()
-    async with sessions() as db:
+    async with session_factory() as db:
         unchanged = await db.scalar(
             select(RecoveryAttemptModel).where(
                 RecoveryAttemptModel.thread_id == "cancel-run"
@@ -287,10 +299,10 @@ async def test_live_dispatch_failure_persists_condition_and_releases_known_non_d
 
 @pytest.mark.asyncio
 async def test_failure_refuses_stale_or_fabricated_writer(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     now = datetime(2026, 9, 6, 12, tzinfo=UTC)
-    async with sessions() as db:
+    async with session_factory() as db:
         authority = await _thread(db, deadline_at=now + timedelta(minutes=1))
         stale = RunWriteAuthority(
             authority.run_revision + 1,
@@ -318,11 +330,11 @@ async def test_failure_refuses_stale_or_fabricated_writer(
 
 @pytest.mark.asyncio
 async def test_claim_is_exclusive_and_reschedule_is_token_guarded(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     now = datetime(2026, 9, 6, 12, tzinfo=UTC)
     deadline = now + timedelta(minutes=10)
-    async with sessions() as db:
+    async with session_factory() as db:
         authority = await _thread(db, deadline_at=deadline)
         await record_recovery_failure(
             db,
@@ -336,7 +348,7 @@ async def test_claim_is_exclusive_and_reschedule_is_token_guarded(
         )
         await db.commit()
 
-    async with sessions() as db:
+    async with session_factory() as db:
         claims = await acquire_due_recovery_attempts(
             db,
             acquired_at=now,
@@ -348,7 +360,7 @@ async def test_claim_is_exclusive_and_reschedule_is_token_guarded(
         claim = claims[0]
         assert claim.authority == authority
 
-    async with sessions() as db:
+    async with session_factory() as db:
         assert not await acquire_due_recovery_attempts(
             db,
             acquired_at=now + timedelta(seconds=1),
@@ -382,7 +394,7 @@ async def test_claim_is_exclusive_and_reschedule_is_token_guarded(
         )
         await db.commit()
 
-    async with sessions() as db:
+    async with session_factory() as db:
         assert not await acquire_due_recovery_attempts(
             db,
             acquired_at=now + timedelta(seconds=19),
@@ -401,7 +413,7 @@ async def test_claim_is_exclusive_and_reschedule_is_token_guarded(
         )
         await db.commit()
 
-    async with sessions() as db:
+    async with session_factory() as db:
         assert not await acquire_due_recovery_attempts(
             db,
             acquired_at=now + timedelta(minutes=1),
@@ -412,20 +424,20 @@ async def test_claim_is_exclusive_and_reschedule_is_token_guarded(
 
 @pytest.mark.asyncio
 async def test_seed_captures_the_post_acceptance_crash_window(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     now = datetime(2026, 9, 6, 12, tzinfo=UTC)
     deadline = now + timedelta(minutes=10)
-    async with sessions() as db:
+    async with session_factory() as db:
         authority = await _thread(db, deadline_at=deadline)
         await db.commit()
 
-    async with sessions() as db:
+    async with session_factory() as db:
         assert await seed_recovery_attempts(db, observed_at=now, limit=10) == 1
         assert await seed_recovery_attempts(db, observed_at=now, limit=10) == 0
         await db.commit()
 
-    async with sessions() as db:
+    async with session_factory() as db:
         [claim] = await acquire_due_recovery_attempts(
             db,
             acquired_at=now,

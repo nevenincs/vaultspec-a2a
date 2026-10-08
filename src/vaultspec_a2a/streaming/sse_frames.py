@@ -35,12 +35,25 @@ while an English one streamed fine. That coupling is enforced here rather than
 asserted: :func:`catalog_worst_case_frame_bytes` derives the true worst case
 from the catalog itself, and a cap that cannot cover it is a design error the
 streaming tests fail on.
+
+The module also owns the read side of the same wire grammar. :class:`SseEvent`
+and the ``decode_sse_*`` / :func:`iter_sse_events` functions are the one
+decoder, so a client and a test read ``id``, ``event`` and ``data`` the same way
+rather than each carrying a parser of its own.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+import re
+from collections.abc import (
+    AsyncIterable,
+    AsyncIterator,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass
 from typing import Final, TypeGuard, cast
 
@@ -49,13 +62,21 @@ from typing import Final, TypeGuard, cast
 # phase mapping is what run-status also reads, and it keeps the owner's spelling
 # here: the qualifier names the ONE topology it maps, and a shorter local name
 # would read as though it applied to any node.
-from ..graph.enums import ServerEventType, research_adr_semantic_phase
+from ..graph.enums import ServerEventType, StreamFrameKind, research_adr_semantic_phase
+from ..thread.constants import (
+    MAX_PERMISSION_DESCRIPTION_CHARS,
+    MAX_PERMISSION_OPTION_ID_CHARS,
+    MAX_REQUEST_ID_CHARS,
+    MAX_ROLE_ID_CHARS,
+    MAX_RUN_ID_CHARS,
+    MAX_TOOL_CALL_CHARS,
+)
 
 # The wire event-type key pair is owned by ``thread.snapshots`` - the one layer
-# every producer and consumer of a relayed payload can import. Reading the frame
-# type through it keeps this catalog and the relay predicates on one rule.
-from ..thread.clarification import MAX_REQUEST_ID_CHARS
-from ..thread.snapshots import wire_event_type
+# every producer and consumer of a relayed payload can import. Reading and
+# stamping the frame type through it keeps this catalog, the frames this module
+# mints, and the relay predicates on one rule.
+from ..thread.snapshots import normalize_wire_event_type, wire_event_type
 
 __all__ = [
     "ALWAYS_SAFE_KEYS",
@@ -63,9 +84,15 @@ __all__ = [
     "MAX_SSE_FRAME_BYTES",
     "PROGRESS_CATALOG",
     "SSE_FRAME_VERSION",
+    "SseEvent",
+    "catalog_json_schema",
     "catalog_worst_case_frame_bytes",
+    "decode_sse_lines",
+    "decode_sse_text",
     "encode_sse_frame",
     "enforce_progress_allowlist",
+    "iter_sse_events",
+    "transport_frame",
 ]
 
 SSE_FRAME_VERSION = "v1"
@@ -250,19 +277,48 @@ def _project_fields(
 # Enum-valued fields are bounded as text rather than checked against their
 # member set: an unrecognised member is a producer that moved ahead of this
 # catalog, and dropping it would be the refusal semantics the channel rejects.
-_ENUM = _Text(64)
+_ENUM_MAX_CHARS: Final = 64
+_ENUM = _Text(_ENUM_MAX_CHARS)
+
+# A graph node's name, which the agent-status and team-status frames both carry.
+_NODE_NAME_MAX_CHARS: Final = 128
+_NODE_NAME = _Text(_NODE_NAME_MAX_CHARS)
 
 # Fields shared verbatim by the two tool-call frame types, declared once.
+_TOOL_CALL_ID_MAX_CHARS: Final = 128
+_TOOL_CALL_TITLE_MAX_CHARS: Final = 256
+_TOOL_CALL_LOCATIONS_MAX_ITEMS: Final = 32
+_TOOL_CALL_LOCATION_PATH_MAX_CHARS: Final = 512
 _TOOL_CALL_FIELDS: dict[str, _FieldSpec] = {
-    "tool_call_id": _Text(128),
-    "title": _Text(256),
+    "tool_call_id": _Text(_TOOL_CALL_ID_MAX_CHARS),
+    "title": _Text(_TOOL_CALL_TITLE_MAX_CHARS),
     "kind": _ENUM,
     "status": _ENUM,
     # ``content`` is deliberately absent: it is the tool-call content block
     # carrying edit diffs and raw provider output, which the progress channel
     # never relays.
-    "locations": _ObjectList(32, {"path": _Text(512), "line": _Integer()}),
+    "locations": _ObjectList(
+        _TOOL_CALL_LOCATIONS_MAX_ITEMS,
+        {"path": _Text(_TOOL_CALL_LOCATION_PATH_MAX_CHARS), "line": _Integer()},
+    ),
 }
+
+# Per-field bounds for the remaining catalog entries below, named once so a
+# value shared by more than one field - and a reviewer comparing two entries -
+# reads the same name rather than two coincidentally equal numbers.
+_ARTIFACT_ID_MAX_CHARS: Final = 256
+_ARTIFACT_FILENAME_MAX_CHARS: Final = 256
+_AGENT_STATUS_DETAIL_MAX_CHARS: Final = 256
+_TEAM_STATUS_ACTIVE_THREADS_MAX_ITEMS: Final = 64
+_TEAM_STATUS_AGENTS_MAX_ITEMS: Final = 64
+_MODEL_NAME_MAX_CHARS: Final = 128
+_DISPLAY_NAME_MAX_CHARS: Final = 128
+_AGENT_DESCRIPTION_MAX_CHARS: Final = 256
+_ERROR_MESSAGE_MAX_CHARS: Final = 512
+_THREAD_TERMINAL_ERROR_DETAIL_MAX_CHARS: Final = 512
+_PERMISSION_OPTIONS_MAX_ITEMS: Final = 16
+_PERMISSION_OPTION_NAME_MAX_CHARS: Final = 128
+_PLAN_ENTRIES_MAX_ITEMS: Final = 64
 
 
 # The closed per-event catalog: every frame type that carries content to a
@@ -283,58 +339,57 @@ _TOOL_CALL_FIELDS: dict[str, _FieldSpec] = {
 # identity keys is the correct outcome.
 #
 # ``graph_registered`` does travel the relay, and does degrade to identity keys.
-# Its payload is consumed server-side by the aggregator BEFORE projection and
+# Its payload is consumed server-side by the relay hub's mirror BEFORE projection and
 # resurfaces through catalogued team-status fields, and no consumer reads the
 # frame itself, so the loss is equivalent rather than a regression. It is left
 # uncatalogued rather than enumerated because nothing on the subscriber side
 # needs it; that judgement should be revisited if a consumer ever does.
 #
-# Keys are ``ServerEventType`` members wherever a member exists, so a value
-# respelled at the enum carries this catalog with it rather than silently
-# stranding an entry that can then never match. The four bare literals below -
-# ``stream_snapshot``, ``thread_terminal``, ``stream_rejected``,
-# ``progress_dropped`` - are transport frame kinds the stream itself mints, which
-# no graph event produces and the enum therefore does not declare. Their spelling
-# here is the mixture reading correctly, not a conversion left half finished.
+# Keys are enum members throughout, so a value respelled at its declaration
+# carries this catalog with it rather than silently stranding an entry that can
+# then never match. Graph event kinds are ``ServerEventType`` members; the
+# transport kinds no graph event produces are ``StreamFrameKind`` members.
 PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     ServerEventType.MESSAGE_CHUNK: {
         "content": _Text(MAX_PROGRESS_CONTENT_CHARS),
-        "finish_reason": _Text(64),
+        "finish_reason": _ENUM,
     },
     ServerEventType.THOUGHT_CHUNK: {"content": _Text(MAX_PROGRESS_CONTENT_CHARS)},
     ServerEventType.TOOL_CALL_START: _TOOL_CALL_FIELDS,
     ServerEventType.TOOL_CALL_UPDATE: _TOOL_CALL_FIELDS,
     ServerEventType.ARTIFACT_UPDATE: {
-        "artifact_id": _Text(256),
-        "filename": _Text(256),
+        "artifact_id": _Text(_ARTIFACT_ID_MAX_CHARS),
+        "filename": _Text(_ARTIFACT_FILENAME_MAX_CHARS),
         "append": _Flag(),
         "last_chunk": _Flag(),
     },
     ServerEventType.AGENT_STATUS: {
         "state": _ENUM,
-        "node_name": _Text(128),
-        "detail": _Text(256),
+        "node_name": _NODE_NAME,
+        "detail": _Text(_AGENT_STATUS_DETAIL_MAX_CHARS),
     },
     ServerEventType.TEAM_STATUS: {
-        "active_thread_ids": _TextList(64, 128),
+        "active_thread_ids": _TextList(
+            _TEAM_STATUS_ACTIVE_THREADS_MAX_ITEMS, MAX_RUN_ID_CHARS
+        ),
         "agents": _ObjectList(
-            64,
+            _TEAM_STATUS_AGENTS_MAX_ITEMS,
             {
-                "thread_id": _Text(128),
-                "agent_id": _Text(63),
+                "thread_id": _Text(MAX_RUN_ID_CHARS),
+                "agent_id": _Text(MAX_ROLE_ID_CHARS),
                 "state": _ENUM,
-                "node_name": _Text(128),
-                "provider": _Text(64),
-                "model_name": _Text(128),
-                "role": _Text(64),
-                "display_name": _Text(128),
-                "description": _Text(256),
+                "node_name": _NODE_NAME,
+                "provider": _ENUM,
+                "model_name": _Text(_MODEL_NAME_MAX_CHARS),
+                "role": _ENUM,
+                "display_name": _Text(_DISPLAY_NAME_MAX_CHARS),
+                "description": _Text(_AGENT_DESCRIPTION_MAX_CHARS),
             },
         ),
     },
     ServerEventType.ERROR: {
-        "code": _Text(64),
-        "message": _Text(512),
+        "code": _ENUM,
+        "message": _Text(_ERROR_MESSAGE_MAX_CHARS),
         "recoverable": _Flag(),
     },
     # The first frame of every stream: the run's durable status as it stood the
@@ -343,17 +398,17 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     # arrived. It carries the status and nothing else, deliberately - it is a
     # relay frame like the rest, so it says where to go for authority rather
     # than trying to be it.
-    "stream_snapshot": {"status": _ENUM},
-    "thread_terminal": {
+    StreamFrameKind.STREAM_SNAPSHOT: {"status": _ENUM},
+    StreamFrameKind.THREAD_TERMINAL: {
         "status": _ENUM,
         "replay": _Flag(),
-        "error_detail": _Text(512),
+        "error_detail": _Text(_THREAD_TERMINAL_ERROR_DETAIL_MAX_CHARS),
     },
     ServerEventType.HEARTBEAT: {"server_uptime_seconds": _Number()},
-    "stream_rejected": {"reason": _Text(64)},
-    "progress_dropped": {
-        "reason": _Text(64),
-        "dropped_type": _Text(64),
+    StreamFrameKind.STREAM_REJECTED: {"reason": _ENUM},
+    StreamFrameKind.PROGRESS_DROPPED: {
+        "reason": _ENUM,
+        "dropped_type": _ENUM,
         "dropped_count": _Integer(),
         # The first sequence a short replay CAN serve. Carried here because a
         # resynchronization notice that cannot say where the stream picks up
@@ -362,13 +417,20 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
         # this entry never reaches the wire however carefully it is set.
         "first_sequence": _Integer(),
     },
+    # The description is cut at the durable row's own bound, so the text a
+    # viewer reads live is the text a reload re-reads from the row.
     ServerEventType.PERMISSION_REQUEST: {
-        "request_id": _Text(128),
-        "tool_call": _Text(128),
+        "request_id": _Text(MAX_REQUEST_ID_CHARS),
+        "tool_call": _Text(MAX_TOOL_CALL_CHARS),
         "tool_kind": _ENUM,
-        "description": _Text(512),
+        "description": _Text(MAX_PERMISSION_DESCRIPTION_CHARS),
         "options": _ObjectList(
-            16, {"option_id": _Text(64), "name": _Text(128), "kind": _ENUM}
+            _PERMISSION_OPTIONS_MAX_ITEMS,
+            {
+                "option_id": _Text(MAX_PERMISSION_OPTION_ID_CHARS),
+                "name": _Text(_PERMISSION_OPTION_NAME_MAX_CHARS),
+                "kind": _ENUM,
+            },
         ),
     },
     # The clarification nudge enumerates ONE field, and the shortness of this
@@ -389,7 +451,9 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     # A plan entry's ``content`` is model-authored plan text - document-body
     # adjacent, and nothing consumes it - so only its classification survives.
     ServerEventType.PLAN_UPDATE: {
-        "entries": _ObjectList(64, {"status": _ENUM, "priority": _ENUM})
+        "entries": _ObjectList(
+            _PLAN_ENTRIES_MAX_ITEMS, {"status": _ENUM, "priority": _ENUM}
+        )
     },
 }
 
@@ -456,6 +520,136 @@ def catalog_worst_case_frame_bytes() -> int:
         )
         for frame_type, fields in PROGRESS_CATALOG.items()
     )
+
+
+#: How the identity keys every frame may carry are published. Spelled here
+#: rather than derived from :data:`ALWAYS_SAFE_KEYS`, because a key's NAME says
+#: nothing about its type; the pair must be read together, which the schema
+#: builder below enforces by refusing to publish a key it has no type for.
+_ALWAYS_SAFE_SCHEMAS: Final[dict[str, dict[str, object]]] = {
+    "api_version": {"const": SSE_FRAME_VERSION},
+    "thread_id": {"type": "string", "maxLength": MAX_RUN_ID_CHARS},
+    "agent_id": {"type": "string", "maxLength": MAX_ROLE_ID_CHARS},
+    # The run's durable event number, present only on a frame whose replay is
+    # served; the same value is the frame's SSE id.
+    "sequence": {"type": "integer", "minimum": 0},
+    "timestamp": {"type": "number", "description": "Epoch seconds."},
+    "message_id": {"type": "string"},
+    "semantic_phase": {"type": "string", "maxLength": 64},
+}
+
+#: The keys whose value is the frame's own kind. Published as a constant per
+#: branch rather than as a shared string type, because the pair is mirrored and
+#: a consumer may switch on either.
+_KIND_KEYS: Final[tuple[str, ...]] = ("type", "event_type")
+
+
+def _nullable(schema: dict[str, object]) -> dict[str, object]:
+    """Admit ``null`` beside *schema*, the way this document spells it.
+
+    Every field spec passes ``None`` through unchanged, so a catalogued field
+    genuinely can arrive null. Spelled as a union rather than the ``nullable``
+    keyword because this is an OpenAPI 3.1 document, where ``nullable`` was
+    withdrawn in favour of the JSON Schema form the rest of the document uses.
+    """
+    return {"anyOf": [schema, {"type": "null"}]}
+
+
+def _field_json_schema(spec: _FieldSpec) -> dict[str, object]:
+    """Publish one catalogued field as the JSON Schema it projects values onto.
+
+    Exhaustive over the spec vocabulary on purpose: a spec kind added later has
+    no published form until it is given one here, which fails this builder
+    rather than silently publishing a field as untyped.
+    """
+    match spec:
+        case _Text(max_chars=limit):
+            return _nullable({"type": "string", "maxLength": limit})
+        case _Flag():
+            return _nullable({"type": "boolean"})
+        case _Number():
+            return _nullable({"type": "number"})
+        case _Integer():
+            return _nullable({"type": "integer"})
+        case _TextList(max_items=items, max_chars=limit):
+            return _nullable(
+                {
+                    "type": "array",
+                    "maxItems": items,
+                    "items": {"type": "string", "maxLength": limit},
+                }
+            )
+        case _ObjectList(max_items=items, fields=fields):
+            return _nullable(
+                {
+                    "type": "array",
+                    "maxItems": items,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            key: _field_json_schema(field)
+                            for key, field in fields.items()
+                        },
+                        "additionalProperties": False,
+                    },
+                }
+            )
+
+
+def _frame_json_schema(
+    kind: str | None, fields: Mapping[str, _FieldSpec]
+) -> dict[str, object]:
+    """Publish one frame kind, or the identity-only shape an unknown kind takes."""
+    properties: dict[str, object] = dict(_ALWAYS_SAFE_SCHEMAS)
+    for key in _KIND_KEYS:
+        properties[key] = (
+            {"const": kind} if kind is not None else {"type": "string", "maxLength": 64}
+        )
+    properties.update({key: _field_json_schema(spec) for key, spec in fields.items()})
+    return {
+        "type": "object",
+        "title": kind if kind is not None else "uncatalogued_frame",
+        "properties": properties,
+        # Projection rebuilds a frame from these keys alone, so a key not
+        # listed here is one the service cannot emit on this kind.
+        "additionalProperties": False,
+        "required": ["api_version", *_KIND_KEYS],
+    }
+
+
+def catalog_json_schema() -> dict[str, object]:
+    """Publish the served progress-frame contract, generated from the catalog.
+
+    One source for the frame shape. The catalog is what the encoder projects
+    every outgoing frame onto, so a schema derived from it cannot describe a
+    frame the service does not serve, nor omit one it does. A hand-written
+    schema beside the catalog would be a second declaration of one contract,
+    free to drift the moment a frame type is added - and the drift would be
+    silent, because a consumer generated from either would still parse.
+
+    The last branch is the catalog's closed default, not a hole in it: a frame
+    kind nobody enumerated is degraded to its identity keys and still
+    delivered, so a schema listing only the catalogued kinds would publish
+    that frame as invalid and make additive producer evolution read as a
+    contract violation.
+    """
+    return {
+        "title": "RunProgressFrame",
+        "description": (
+            "One frame of a run's progress stream, as the body of a "
+            "text/event-stream event. Frames are non-authoritative and "
+            "droppable: reconcile run state from run-status, never from a "
+            "frame. The kind is carried under both 'type' and 'event_type' "
+            "with the same value, and on the SSE 'event' line."
+        ),
+        "anyOf": [
+            *(
+                _frame_json_schema(kind, fields)
+                for kind, fields in PROGRESS_CATALOG.items()
+            ),
+            _frame_json_schema(None, {}),
+        ],
+    }
 
 
 def enforce_progress_allowlist(
@@ -549,6 +743,25 @@ def _resume_event_id(thread_id: str, sequence: int) -> str:
     return f"{thread_id}:{sequence}"
 
 
+def _transport_payload(
+    kind: StreamFrameKind | ServerEventType,
+    thread_id: str | None,
+    fields: Mapping[str, object],
+) -> dict[str, object]:
+    """Build a minted frame's body: its kind under both wire keys, run, fields.
+
+    The key pair is stamped through the relay's own mirroring rule rather than
+    written out, so a frame the stream mints and a frame it relays cannot
+    disagree about which keys carry the kind. Shared with the oversized-frame
+    sentinel, which is encoded below the public builder because it must keep
+    the id of the frame it replaces.
+    """
+    identity: dict[str, object] = {"type": kind}
+    if thread_id is not None:
+        identity["thread_id"] = thread_id
+    return normalize_wire_event_type({**identity, **fields})
+
+
 def encode_sse_frame(
     payload: Mapping[str, object],
     *,
@@ -577,11 +790,11 @@ def encode_sse_frame(
     )
     versioned = _stamp_semantic_phase(versioned)
     # Final, authoritative gate: project every outgoing frame onto the catalog
-    # regardless of how it was produced (in-process wire dump or relayed worker
-    # payload), so a forbidden body cannot cross the encoded boundary even if an
-    # upstream projection call site is bypassed. The catalog itself is one
-    # deliberately shared authority rather than a per-layer copy, so this layer
-    # backstops a missing call, not a gap in the catalog.
+    # regardless of how it was produced (a transport frame minted here or a
+    # relayed worker payload), so a forbidden body cannot cross the encoded
+    # boundary even if an upstream projection call site is bypassed. The catalog
+    # itself is one deliberately shared authority rather than a per-layer copy,
+    # so this layer backstops a missing call, not a gap in the catalog.
     versioned = enforce_progress_allowlist(versioned)
     event_id = (
         _resume_event_id(thread_id, sequence)
@@ -592,13 +805,146 @@ def encode_sse_frame(
     if len(encoded) <= MAX_SSE_FRAME_BYTES:
         return encoded
 
-    sentinel: dict[str, object] = {
-        "api_version": SSE_FRAME_VERSION,
-        "type": "progress_dropped",
-        "event_type": "progress_dropped",
-        "reason": "frame_exceeds_cap",
-        "dropped_type": versioned.get("type"),
-    }
-    if thread_id is not None:
-        sentinel["thread_id"] = thread_id
-    return _encode(sentinel, "progress_dropped", event_id)
+    sentinel = _transport_payload(
+        StreamFrameKind.PROGRESS_DROPPED,
+        thread_id,
+        {"reason": "frame_exceeds_cap", "dropped_type": versioned.get("type")},
+    )
+    return _encode(
+        {"api_version": SSE_FRAME_VERSION, **sentinel},
+        StreamFrameKind.PROGRESS_DROPPED,
+        event_id,
+    )
+
+
+def transport_frame(
+    kind: StreamFrameKind | ServerEventType, thread_id: str, **fields: object
+) -> bytes:
+    """Encode one frame the stream mints itself rather than relays.
+
+    The kind is stated once, here, and stamped three times from that one
+    argument - both wire keys and the SSE ``event`` line - so no producer
+    writes a kind by hand and no frame can name two. A minted frame carries no
+    id: nothing retained it, so it is not a position a reconnect can resume
+    from.
+    """
+    return encode_sse_frame(
+        _transport_payload(kind, thread_id, fields), event=kind, thread_id=thread_id
+    )
+
+
+_DEFAULT_EVENT_TYPE: Final = "message"
+
+# The grammar's three line terminators. ``str.splitlines`` is not a substitute:
+# it also breaks on U+2028, U+2029, U+0085 and the C0 separators, none of which
+# the grammar treats as a line end.
+_LINE_BREAK: Final = re.compile(r"\r\n|\r|\n")
+
+
+@dataclass(frozen=True, slots=True)
+class SseEvent:
+    """One dispatched event, as the wire carried it.
+
+    ``event_id`` is the ``id`` field of this event alone, ``None`` when the
+    event named none. The grammar's persistent last-event-id is deliberately not
+    synthesised: a resuming consumer keeps the last id it saw, and an unnumbered
+    frame must leave that exactly where the last numbered one put it (see
+    :func:`_encode`).
+    """
+
+    data: str
+    event: str = _DEFAULT_EVENT_TYPE
+    event_id: str | None = None
+
+
+class _SseDecoder:
+    """Assemble dispatched events from stream lines, one line at a time.
+
+    A line is ``field:value`` with at most one space after the colon dropped; a
+    line without a colon is a field with an empty value, and a line starting
+    with a colon is a comment. ``data`` lines accumulate and join with a
+    newline, ``event`` names the type (``message`` when absent or empty), ``id``
+    is taken unless it carries a NUL, and every other field, ``retry`` included,
+    is ignored. A blank line dispatches the buffered event, and an event with no
+    ``data`` line is not dispatched at all.
+    """
+
+    def __init__(self) -> None:
+        self._data: list[str] = []
+        self._event = ""
+        self._event_id: str | None = None
+
+    def feed(self, line: str) -> SseEvent | None:
+        """Consume one line, returning the event it dispatches, if any."""
+        line = line.removesuffix("\r")
+        if not line:
+            return self.dispatch()
+        if line.startswith(":"):
+            return None
+        name, _, value = line.partition(":")
+        value = value.removeprefix(" ")
+        if name == "data":
+            self._data.append(value)
+        elif name == "event":
+            self._event = value
+        elif name == "id" and "\0" not in value:
+            self._event_id = value
+        return None
+
+    def dispatch(self) -> SseEvent | None:
+        """Dispatch whatever is buffered and reset for the next event."""
+        data, event, event_id = self._data, self._event, self._event_id
+        self._data = []
+        self._event = ""
+        self._event_id = None
+        if not data:
+            return None
+        return SseEvent(
+            data="\n".join(data),
+            event=event or _DEFAULT_EVENT_TYPE,
+            event_id=event_id,
+        )
+
+
+def decode_sse_lines(lines: Iterable[str]) -> Iterator[SseEvent]:
+    """Decode already-split stream lines into the events they dispatch.
+
+    Lines arrive without their terminator, as ``httpx.Response.iter_lines``
+    yields them. An event still buffered when the lines run out is dispatched
+    rather than discarded, so a stream cut after its last frame's final field
+    does not lose that frame.
+    """
+    decoder = _SseDecoder()
+    for line in lines:
+        event = decoder.feed(line)
+        if event is not None:
+            yield event
+    event = decoder.dispatch()
+    if event is not None:
+        yield event
+
+
+async def iter_sse_events(lines: AsyncIterable[str]) -> AsyncIterator[SseEvent]:
+    """Decode a stream of lines into events as each one completes.
+
+    The asynchronous form of :func:`decode_sse_lines`, over
+    ``httpx.Response.aiter_lines``. Each event is yielded the moment its blank
+    line arrives, so a caller bounding its wait on a live stream is never held
+    behind a later frame.
+    """
+    decoder = _SseDecoder()
+    async for line in lines:
+        event = decoder.feed(line)
+        if event is not None:
+            yield event
+    event = decoder.dispatch()
+    if event is not None:
+        yield event
+
+
+def decode_sse_text(text: str) -> list[SseEvent]:
+    """Decode a complete, already-buffered stream body into its events.
+
+    Lines break on CRLF, LF or a bare CR, the grammar's own terminators.
+    """
+    return list(decode_sse_lines(_LINE_BREAK.split(text)))

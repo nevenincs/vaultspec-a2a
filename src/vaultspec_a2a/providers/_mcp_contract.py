@@ -61,6 +61,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.types import TextContent
 
 from ..thread.errors import HarnessToolContractError
+from ..utils import redact_text
 from ..utils.async_cleanup import complete_cleanup
 from ..workspace.environment import scrub_agent_environment
 from ._config_home_roots import temp_home_root
@@ -72,7 +73,6 @@ from ._harness_mcp_registry import (
     withheld_harness_tools,
 )
 from ._provider_execution import provider_execution_launch
-from ._subprocess import redact_secrets
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -194,7 +194,7 @@ def _stderr_tail(captured: TextIO) -> str:
     # fragment of the value, which nothing downstream can still recognise as one;
     # and the mask is not the same width as what it replaces, so applying it
     # afterwards would move the result off the ceiling enforced just below.
-    text = redact_secrets(text)
+    text = redact_text(text)
     if len(text) > _STDERR_TAIL_CHARS:
         kept = text[-(_STDERR_TAIL_CHARS - len(_STDERR_ELISION)) :]
         text = _STDERR_ELISION + _drop_orphaned_combining_marks(kept)
@@ -449,7 +449,7 @@ async def verify_declared_tool_contract(
         # description for any caller whose output does not leave the process. No
         # bound is applied to this string anywhere, so unlike the stderr tail
         # there is no cut for the mask to have to precede.
-        launch = redact_secrets(stdio_launch.description())
+        launch = redact_text(stdio_launch.description())
         # A real on-disk temporary file, text-wrapped: the stdio client hands the
         # handle to the OS as the child's stderr, so it needs a true file
         # descriptor - an in-memory buffer cannot serve as one.
@@ -470,9 +470,10 @@ async def verify_declared_tool_contract(
                 # rather than a bare cancellation, so every reachable probe failure
                 # - an unresolvable requirement, an absent command, a broken
                 # handshake, the deadline - arrives here as one actionable refusal.
+                reason = redact_text(str(exc))
                 raise HarnessToolContractError(
                     f"harness MCP server {name!r} could not be verified: probing "
-                    f"{launch!r} failed ({type(exc).__name__}: {exc}). The run "
+                    f"{launch!r} failed ({type(exc).__name__}: {reason}). The run "
                     f"declares the tools {', '.join(declared)} and refuses to "
                     f"launch an agent whose grounding tools cannot be confirmed."
                     f"{_stderr_tail(captured_stderr)}"

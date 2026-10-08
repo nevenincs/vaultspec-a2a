@@ -8,13 +8,16 @@ from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-import uvicorn
 from httpx import ASGITransport
 
-from ...api.app import _bind_server_shutdown_owner, create_app
+from ...api.app import create_app
 from ...api.dependencies import LIFECYCLE_CAPABILITY_HEADER
 from ...api.routes.gateway import admission_gate
 from ...control.drain import AdmissionState
+from ...lifecycle.shutdown import bind_shutdown_owner
+from ...testing import loopback_uvicorn, uvicorn_started
+from ...utils import bearer_header
+from ..routes import route_signature
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -35,7 +38,6 @@ def _make_app():
     app = create_app(lifespan=_noop_lifespan)
     app.state.v1_service_token = _ATTACH
     app.state.lifecycle_capability = _CAPABILITY
-    app.state.allow_unauthenticated_v1_for_testing = False
     return app
 
 
@@ -63,7 +65,7 @@ async def test_shutdown_refuses_missing_or_malformed_owner_before_admission_clos
         response = await client.post(
             "/admin/shutdown",
             headers={
-                "Authorization": f"Bearer {_ATTACH}",
+                **bearer_header(_ATTACH),
                 LIFECYCLE_CAPABILITY_HEADER: _CAPABILITY,
             },
         )
@@ -77,28 +79,16 @@ async def test_shutdown_refuses_missing_or_malformed_owner_before_admission_clos
 @pytest.mark.asyncio
 async def test_production_uvicorn_owner_returns_202_before_cooperative_exit() -> None:
     app = _make_app()
-    config = uvicorn.Config(
-        app,
-        host="127.0.0.1",
-        port=0,
-        log_level="error",
-        lifespan="off",
-    )
-    server = uvicorn.Server(config)
-    _bind_server_shutdown_owner(app, server)
+    server = loopback_uvicorn(app, lifespan="off", log_level="error")
+    bind_shutdown_owner(app, server)
     serving = asyncio.create_task(server.serve())
     try:
-        for _ in range(500):
-            if server.started and server.servers:
-                break
-            await asyncio.sleep(0.01)
-        assert server.started and server.servers, "Uvicorn owner did not start"
-        port = server.servers[0].sockets[0].getsockname()[1]
+        base = await uvicorn_started(server, serving)
         async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.post(
-                f"http://127.0.0.1:{port}/admin/shutdown",
+                f"{base}/admin/shutdown",
                 headers={
-                    "Authorization": f"Bearer {_ATTACH}",
+                    **bearer_header(_ATTACH),
                     LIFECYCLE_CAPABILITY_HEADER: _CAPABILITY,
                 },
             )
@@ -123,7 +113,7 @@ async def test_shutdown_requires_attach() -> None:
 @pytest.mark.asyncio
 async def test_shutdown_requires_lifecycle_capability() -> None:
     """Attach alone is insufficient: the lifecycle capability is required (403)."""
-    response = await _post_shutdown({"Authorization": f"Bearer {_ATTACH}"})
+    response = await _post_shutdown(bearer_header(_ATTACH))
     assert response.status_code == 403
     assert _ATTACH not in response.text
     assert _CAPABILITY not in response.text
@@ -134,7 +124,7 @@ async def test_shutdown_rejects_wrong_lifecycle_capability() -> None:
     """A wrong lifecycle capability with a valid attach is still forbidden (403)."""
     response = await _post_shutdown(
         {
-            "Authorization": f"Bearer {_ATTACH}",
+            **bearer_header(_ATTACH),
             LIFECYCLE_CAPABILITY_HEADER: "not-the-capability",
         }
     )
@@ -151,17 +141,23 @@ def test_the_stop_verb_addresses_the_path_the_gateway_actually_serves() -> None:
     invisible because a non-202 is indistinguishable from a refusal there.
 
     Asserting the CLI's own source rather than a copied constant is deliberate:
-    a constant shared by both sides would move together and prove nothing.
+    a constant shared by both sides would move together and prove nothing. The
+    whole module is read, not one function: the drain request has since moved
+    into a helper of its own, and a source read scoped to ``stop_service``
+    reported the binding as gone rather than as broken.
     """
     import inspect
     import re
 
     from ...cli import service as service_verbs
 
-    source = inspect.getsource(service_verbs.stop_service)
+    source = inspect.getsource(service_verbs)
     posted = re.search(r'f"\{base_url\}(/[^"]*shutdown)"', source)
-    assert posted is not None, "stop_service no longer posts a shutdown path"
+    assert posted is not None, "the stop verb no longer posts a shutdown path"
 
-    app = _make_app()
-    served = {path for path in app.openapi()["paths"] if path.endswith("shutdown")}
+    served = {
+        signature.partition(" ")[2]
+        for signature in route_signature(_make_app())
+        if signature.endswith("shutdown")
+    }
     assert posted.group(1) in served, (posted.group(1), served)

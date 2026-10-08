@@ -19,29 +19,40 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from sqlalchemy.dialects import sqlite
+
+from ._write_authority_check_parser import extract_named_check_predicates
 from .checkpoint_schema import (
     CHECKPOINT_SCHEMA_VERSION,
     CheckpointSchemaError,
     open_checkpoint_read_only,
     validate_checkpoint_schema_connection,
 )
-from .control_action_schema import recovery_deadline_checks_match
+from .control_action_schema import RECOVERY_DEADLINE_CHECKS
 from .migrate import build_migration_config
 from .migrations import (
     CheckpointStateMigrationError,
     count_pending_sdd_backfill_connection,
 )
+from .thread_repository import (
+    select_invalid_authority_thread,
+    select_orphaned_writer_thread,
+)
 from .write_authority_schema import (
-    WRITE_ACTION_TYPES,
     WRITE_AUTHORITY_COLUMNS,
-    extract_named_check_predicates,
+    named_checks_match,
     write_authority_checks_match,
     write_authority_receipt_index_matches,
 )
 
+if TYPE_CHECKING:
+    from sqlalchemy.sql import Select
+
 __all__ = [
     "SchemaCompatibilityError",
+    "read_alembic_version",
     "supported_migration_head",
     "validate_desktop_schema",
 ]
@@ -109,11 +120,12 @@ def _known_revisions(database_url: str) -> set[str]:
     return {revision.revision for revision in script.walk_revisions()}
 
 
-def _read_alembic_version(db_path: Path) -> str | None:
+def read_alembic_version(db_path: Path) -> str | None:
     """Return the primary database's recorded Alembic revision, or ``None``.
 
-    ``None`` means the ``alembic_version`` table is absent (an empty or never
-    migrated store) or carries no row.
+    ``None`` means the file or its ``alembic_version`` table is absent (an empty
+    or never migrated store) or the table carries no row. The store is opened
+    read-only, so asking never creates or changes it.
     """
     if not db_path.is_file():
         return None
@@ -167,6 +179,17 @@ def _authority_indexes(conn: sqlite3.Connection) -> list[dict[str, object]]:
     return indexes
 
 
+def _first_thread_id(
+    conn: sqlite3.Connection, statement: Select[tuple[str]]
+) -> object | None:
+    """Run one thread scan on the read-only connection; return its first id."""
+    compiled = statement.compile(
+        dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}
+    )
+    row = conn.execute(str(compiled)).fetchone()
+    return None if row is None else row[0]
+
+
 def _validate_write_authority(db_path: Path) -> None:
     """Reject stamped, malformed, or receipt-incoherent current thread stores."""
     conn = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
@@ -192,42 +215,24 @@ def _validate_write_authority(db_path: Path) -> None:
             "WHERE type = 'table' AND name = 'control_actions'"
         ).fetchone()
         action_sql = "" if action_sql_row is None else str(action_sql_row[0])
-        if not recovery_deadline_checks_match(
-            extract_named_check_predicates(action_sql)
+        if not named_checks_match(
+            extract_named_check_predicates(action_sql), RECOVERY_DEADLINE_CHECKS
         ):
             raise SchemaCompatibilityError(
                 f"desktop primary database at {db_path} lacks the exact current "
                 f"control-action recovery deadline check. {_REMEDY}"
             )
-        placeholders = ", ".join("?" for _ in WRITE_ACTION_TYPES)
-        invalid = conn.execute(
-            f"""SELECT id FROM threads
-                 WHERE run_revision < 0
-                    OR writer_generation < 1
-                    OR writer_action_type NOT IN ({placeholders})
-                    OR length(trim(writer_action_receipt_id)) < 1
-                    OR length(writer_action_receipt_id) > 64
-                 LIMIT 1""",
-            WRITE_ACTION_TYPES,
-        ).fetchone()
+        invalid = _first_thread_id(conn, select_invalid_authority_thread())
         if invalid is not None:
             raise SchemaCompatibilityError(
                 f"desktop primary database at {db_path} contains invalid current "
-                f"write authority for thread {invalid[0]!r}. {_REMEDY}"
+                f"write authority for thread {invalid!r}. {_REMEDY}"
             )
-        incoherent = conn.execute(
-            """SELECT t.id FROM threads AS t
-               LEFT JOIN control_actions AS a
-                 ON a.thread_id = t.id
-                AND a.dispatch_id = t.writer_action_receipt_id
-                AND a.action_type = t.writer_action_type
-               WHERE a.id IS NULL
-               LIMIT 1"""
-        ).fetchone()
+        incoherent = _first_thread_id(conn, select_orphaned_writer_thread())
         if incoherent is not None:
             raise SchemaCompatibilityError(
                 f"desktop primary database at {db_path} has no matching action "
-                f"receipt for thread {incoherent[0]!r}. {_REMEDY}"
+                f"receipt for thread {incoherent!r}. {_REMEDY}"
             )
     finally:
         conn.close()
@@ -238,7 +243,7 @@ def _validate_primary_schema(database_url: str) -> None:
     db_path = _sqlite_path_from_url(database_url)
     head = supported_migration_head(database_url)
     try:
-        current = _read_alembic_version(db_path)
+        current = read_alembic_version(db_path)
     except sqlite3.Error as exc:
         raise SchemaCompatibilityError(
             f"desktop primary database at {db_path} is unreadable or corrupt; "

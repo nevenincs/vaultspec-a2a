@@ -15,11 +15,13 @@ from ...api.run_admission import request_digest
 from ...api.schemas.gateway import RunStartRequest
 from ...context.metadata import ThreadMetadata
 from ...control.admission import AdmissionBroker, _Reservation
+from ...providers.provider_catalog import SELECTION_SCHEMA_VERSION
+from ...testing import DEFAULT_TEAM_PRESET, frozen_deterministic_selection
 
 
 def _selection() -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": SELECTION_SCHEMA_VERSION,
         "provider_id": "codex",
         "execution_mode": "app-server",
         "catalog_revision": "rev-1",
@@ -30,7 +32,7 @@ def _selection() -> dict[str, object]:
 
 def _request(**changes: object) -> RunStartRequest:
     payload: dict[str, object] = {
-        "team_preset": "mock-coder",
+        "team_preset": DEFAULT_TEAM_PRESET,
         "run_id": "run-selection-schema",
         "message": "go",
         "metadata": ThreadMetadata(workspace_root=str(Path.cwd())),
@@ -95,6 +97,7 @@ async def test_eligibility_failure_releases_an_omitted_default_prepare() -> None
         reservation_id="resv-ineligible",
         lease_id="lease-ineligible",
         required_roles=("coder",),
+        frozen_selection=frozen_deterministic_selection(("coder",)),
         binding_digest=request_digest(canonical_commit, prepared=True),
         release_digest=_release_binding_digest(omitted_prepare),
         expires_monotonic=10.0,

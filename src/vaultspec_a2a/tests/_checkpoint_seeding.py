@@ -28,17 +28,17 @@ run's choice of thread and namespace does not narrow what a caller can seed.
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import StateGraph
 
-from ..graph.tests._state_graph_helpers import add_test_node, compile_test_graph
-from ..thread.state import TeamState
+from ..testing import add_test_node, compile_test_graph, new_state_graph
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.base import Checkpoint, CheckpointMetadata
+
+    from ..thread.state import TeamState
 
 __all__ = ["real_checkpoint", "real_input_checkpoint"]
 
@@ -68,7 +68,7 @@ async def real_input_checkpoint(
     the returned pair is a private copy, so the caller writes a checkpoint a
     real graph produced rather than one assembled by hand.
     """
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, "seed", _seed_node)
     builder.add_edge("__start__", "seed")
     builder.add_edge("seed", "__end__")
@@ -93,7 +93,7 @@ async def real_checkpoint() -> Checkpoint:
     whatever fields the scenario needs before writing it back through its own
     saver and the `config` that scenario actually addresses.
     """
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", TeamState))
+    builder = new_state_graph()
     add_test_node(builder, "seed", _seed_node)
     builder.add_edge("__start__", "seed")
     builder.add_edge("seed", "__end__")

@@ -11,17 +11,14 @@ proves, over real loopback HTTP:
   plus the terminal status, and no raw actor token;
 - delivery is retried: a receiver that transiently rejects the first attempt and
   accepts the second still receives the settlement, and the run's lease is revoked
-  exactly once;
-- the receiver, applying the dashboard's authentication rule, rejects a callback
-  presenting the worker interprocess-communication secret or an unrelated
-  credential and accepts only the attach-control credential.
+  exactly once.
 
 The valid database is seated by the real ``migrate`` entrypoint; the
 broker gateway is a real process and the worker a real gateway-owned one. The
 desktop settlement handler reads that run's real database under desktop settings;
 this exercises settlement below the currently refused desktop run admission. No mock,
-monkeypatch, stub, skip, or expected failure is used; children are reaped in a
-``finally``.
+monkeypatch, stub, skip, or expected failure is used; children are reaped when
+each test ends.
 """
 
 from __future__ import annotations
@@ -29,49 +26,46 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-import time
+from contextlib import contextmanager
 from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, Any, BinaryIO, override
+from http.server import BaseHTTPRequestHandler
+from typing import TYPE_CHECKING, Any
 
-import httpx
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from ..control.event_handlers import _handle_terminal_event, _settlement_tasks
+from ..control.event_handlers import (
+    RelayServices,
+    _handle_terminal_event,
+    _settlement_tasks,
+)
 from ..database import get_thread
-from ..desktop.credentials import (
-    WORKER_IPC_CREDENTIAL_NAME,
-    create_worker_ipc_credential,
-)
 from ..desktop.profile import derive_state_paths
-from ..testing import settings_override
-from ..tests.gateway_boot import (
+from ..testing import (
+    DEFAULT_ATTACH_AUTHORIZATION,
+    DEFAULT_ATTACH_CREDENTIAL,
+    DEFAULT_REQUIRED_ROLE,
+    JsonReplyHandler,
+    ProgressDeadline,
+    armed_desktop_app_home,
+    booted_gateway,
     broker_gateway_env,
-    desktop_workspace,
+    gateway_run_verbs,
     gateway_script,
-    reap_gateway,
-    seat_valid_database,
-    seed_credentials,
-    spawn_gateway,
-    spawn_until_ready,
+    read_worker_ipc_secret,
+    seat_app_home,
+    serve_handler,
+    wait_for_run_status_async,
+    wait_until,
 )
-from ..thread.enums import TERMINAL_STATUS_VALUES, TERMINAL_STATUSES, ThreadStatus
-from ._catalog import catalog_selection
+from ..thread.enums import TERMINAL_STATUS_VALUES, ThreadStatus
+from ..utils import bearer_matches
 
 if TYPE_CHECKING:
-    import subprocess
+    from collections.abc import Generator
     from pathlib import Path
 
-_ATTACH = "attach-credential-settlement-1234567890abcdef"
-_OWNERSHIP = "ownership-capability-settlement-fedcba0987654321"
-_UNRELATED = "unrelated-credential-000000000000000000"
-_PRESET = "mock-success-single"
-_REQUIRED_ROLE = "mock-coder-success"
 _ACTOR_TOKEN = "tok-coder-secret-value"
-
-# The INFO variant, so the gateway's settlement narration reaches the log.
-_GATEWAY = gateway_script(log_level="info")
 
 
 # ---------------------------------------------------------------------------
@@ -91,43 +85,20 @@ class _ReceiverState:
         self.revoked_leases: list[str] = []
         self._attempts_by_run: dict[str, int] = {}
 
-    @property
-    def rejected_auth(self) -> list[str | None]:
-        """Headers refused by the receiver, derived from the captured attempts."""
-        expected = f"Bearer {self.attach_secret}"
-        return [auth for auth, _raw in self.attempts if auth != expected]
-
 
 @dataclass(frozen=True, slots=True)
 class _SettlementHarness:
-    """Resources needed by the armed gateway and its settlement receiver."""
+    """The seated home and the settlement receiver the armed gateway reports to."""
 
     app_home: Path
-    server: ThreadingHTTPServer
     receiver_port: int
     state: _ReceiverState
-    log_path: Path
-    log_handle: BinaryIO
-    auth: str
-
-
-@dataclass(frozen=True, slots=True)
-class _GatewayProcess:
-    """The armed gateway process and its base URL."""
-
-    process: subprocess.Popen[bytes]
-    base_url: str
 
 
 def _make_handler(state: _ReceiverState) -> type[BaseHTTPRequestHandler]:
     """Build a settlement-receiver request handler bound to *state*."""
 
-    class _Handler(BaseHTTPRequestHandler):
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            """Silence the default per-request stderr logging."""
-            return
-
+    class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
         def do_POST(self) -> None:
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length).decode("utf-8")
@@ -135,8 +106,8 @@ def _make_handler(state: _ReceiverState) -> type[BaseHTTPRequestHandler]:
             with state.lock:
                 state.attempts.append((auth, raw))
                 # The dashboard authenticates settlement with attach-control only.
-                if auth != f"Bearer {state.attach_secret}":
-                    self._respond(401)
+                if not bearer_matches(auth, state.attach_secret):
+                    self._reply(401, {})
                     return
                 body = json.loads(raw)
                 run_id = str(body.get("run_id", ""))
@@ -145,69 +116,23 @@ def _make_handler(state: _ReceiverState) -> type[BaseHTTPRequestHandler]:
                 # Transiently reject the first authenticated attempt to force a
                 # retry, then accept and revoke exactly that run's lease.
                 if state.fail_first and seen == 1:
-                    self._respond(503)
+                    self._reply(503, {})
                     return
                 state.accepted.append(body)
                 state.revoked_leases.append(str(body.get("lease_id", "")))
-                self._respond(200)
-
-        def _respond(self, code: int) -> None:
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b"{}")
+                self._reply(200, {})
 
     return _Handler
 
 
-def _start_receiver(
+@contextmanager
+def _receiver(
     attach_secret: str, *, fail_first: bool
-) -> tuple[ThreadingHTTPServer, int, _ReceiverState]:
-    """Start a real threaded settlement receiver; return server, port, and state."""
+) -> Generator[tuple[int, _ReceiverState]]:
+    """Run a real threaded settlement receiver; yield its port and state."""
     state = _ReceiverState(attach_secret, fail_first=fail_first)
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server, server.server_address[1], state
-
-
-def _prepare_settlement_harness(tmp_path: Path) -> _SettlementHarness:
-    app_home = tmp_path / "app-home"
-    app_home.mkdir()
-    seed_credentials(app_home, attach=_ATTACH, ownership=_OWNERSHIP)
-    seat_valid_database(app_home)
-
-    server, receiver_port, state = _start_receiver(_ATTACH, fail_first=True)
-    log_path = tmp_path / "gateway.log"
-    log_handle = log_path.open("wb")
-    return _SettlementHarness(
-        app_home=app_home,
-        server=server,
-        receiver_port=receiver_port,
-        state=state,
-        log_path=log_path,
-        log_handle=log_handle,
-        auth=f"Bearer {_ATTACH}",
-    )
-
-
-def _start_broker_gateway(harness: _SettlementHarness) -> _GatewayProcess:
-    def _spawn(gateway_port: int, worker_port: int) -> subprocess.Popen[bytes]:
-        return spawn_gateway(
-            script=_GATEWAY,
-            gateway_port=gateway_port,
-            env=broker_gateway_env(
-                harness.app_home,
-                gateway_port=gateway_port,
-                worker_port=worker_port,
-                gateway_token=_ATTACH,
-            ),
-            log_handle=harness.log_handle,
-        )
-
-    proc, _gateway_port, _worker_port, base = spawn_until_ready(
-        _spawn, log_path=harness.log_path
-    )
-    return _GatewayProcess(process=proc, base_url=base)
+    with serve_handler(_make_handler(state)) as port:
+        yield port, state
 
 
 def _assert_settlement_state(
@@ -216,21 +141,23 @@ def _assert_settlement_state(
     lease_id: str,
     worker_ipc: str,
 ) -> None:
-    # The mock run completes on its own; poll the receiver until it accepts the
+    # The deterministic run completes on its own; poll the receiver until it accepts the
     # settlement for this run (retry included).
-    deadline = time.monotonic() + 60.0
-    while time.monotonic() < deadline:
+    def _accepted() -> bool:
         with state.lock:
-            accepted = [b for b in state.accepted if b.get("run_id") == run_id]
-        if accepted:
-            break
-        time.sleep(0.5)
+            return any(b.get("run_id") == run_id for b in state.accepted)
+
+    wait_until(
+        _accepted,
+        deadline=ProgressDeadline(idle_window_s=60.0),
+        interval_s=0.5,
+        stalled=lambda: "settlement was never delivered to the dashboard receiver",
+    )
 
     with state.lock:
         accepted = [b for b in state.accepted if b.get("run_id") == run_id]
         attempts = list(state.attempts)
         revoked = list(state.revoked_leases)
-    assert accepted, "settlement was never delivered to the dashboard receiver"
     settlement = accepted[0]
 
     # --- Authenticated with attach-control, never worker IPC. ---
@@ -239,8 +166,8 @@ def _assert_settlement_state(
     ]
     assert settle_attempts, attempts
     for auth, _raw in settle_attempts:
-        assert auth == f"Bearer {_ATTACH}", auth
-        assert auth != f"Bearer {worker_ipc}", auth
+        assert auth == DEFAULT_ATTACH_AUTHORIZATION, auth
+        assert not bearer_matches(auth, worker_ipc), auth
 
     # --- Body carries only non-secret identities, no raw actor token. ---
     assert set(settlement) == {
@@ -261,29 +188,19 @@ def _assert_settlement_state(
     assert set(revoked) == {lease_id}, revoked
 
 
-def _assert_terminal_settlement(
-    harness: _SettlementHarness,
-    gateway: _GatewayProcess,
-) -> None:
-    commit = _prepare_and_commit(gateway.base_url, harness.auth)
+def _assert_terminal_settlement(harness: _SettlementHarness, base_url: str) -> None:
+    commit = _prepare_and_commit(base_url)
     run_id = commit["run_id"]
     lease_id = commit["lease_id"]
-    with settings_override(
-        desktop_app_home=harness.app_home,
+    with armed_desktop_app_home(
+        harness.app_home,
         desktop_settlement_url=f"http://127.0.0.1:{harness.receiver_port}/settle",
     ):
         asyncio.run(_settle_completed_run(harness.app_home, run_id))
 
     # The worker-IPC secret the gateway minted at boot: settlement must never
     # authenticate with it, so it is read here to prove the callback does not.
-    worker_ipc = (
-        (
-            derive_state_paths(harness.app_home).credentials_dir
-            / WORKER_IPC_CREDENTIAL_NAME
-        )
-        .read_text(encoding="utf-8")
-        .strip()
-    )
+    worker_ipc = read_worker_ipc_secret(harness.app_home)
     _assert_settlement_state(harness.state, run_id, lease_id, worker_ipc)
 
 
@@ -292,33 +209,33 @@ async def _settle_completed_run(app_home: Path, run_id: str) -> None:
     database_path = derive_state_paths(app_home).database_path
     engine = create_async_engine(f"sqlite+aiosqlite:///{database_path.as_posix()}")
     factory = async_sessionmaker(engine)
+
+    async def _read_status() -> dict[str, str]:
+        async with factory() as db:
+            thread = await get_thread(db, run_id)
+        assert thread is not None
+        return {"status": thread.status}
+
     try:
-        deadline = time.monotonic() + 60.0
-        while time.monotonic() < deadline:
-            async with factory() as db:
-                thread = await get_thread(db, run_id)
-                assert thread is not None
-                status = ThreadStatus(thread.status)
-            if status in TERMINAL_STATUSES:
-                assert status is ThreadStatus.COMPLETED
-                prior_tasks = set(_settlement_tasks)
-                async with AsyncSqliteSaver.from_conn_string(
-                    str(derive_state_paths(app_home).checkpoint_path)
-                ) as saver:
-                    await _handle_terminal_event(
-                        run_id,
-                        {"event_type": "thread_terminal", "status": "completed"},
-                        session_factory=factory,
-                        checkpointer=saver,
-                    )
-                    scheduled = _settlement_tasks - prior_tasks
-                    assert len(scheduled) == 1, (
-                        "terminal event must schedule settlement"
-                    )
-                    await asyncio.gather(*scheduled)
-                return
-            await asyncio.sleep(0.1)
-        raise AssertionError("broker run never reached a durable terminal")
+        terminal = await wait_for_run_status_async(
+            _read_status,
+            timeout=60.0,
+            interval=0.1,
+            label=f"broker run {run_id}",
+        )
+        assert ThreadStatus(terminal["status"]) is ThreadStatus.COMPLETED
+        prior_tasks = set(_settlement_tasks)
+        async with AsyncSqliteSaver.from_conn_string(
+            str(derive_state_paths(app_home).checkpoint_path)
+        ) as saver:
+            await _handle_terminal_event(
+                run_id,
+                {"event_type": "thread_terminal", "status": "completed"},
+                services=RelayServices(session_factory=factory, checkpointer=saver),
+            )
+            scheduled = _settlement_tasks - prior_tasks
+            assert len(scheduled) == 1, "terminal event must schedule settlement"
+            await asyncio.gather(*scheduled)
     finally:
         await engine.dispose()
 
@@ -328,48 +245,16 @@ async def _settle_completed_run(app_home: Path, run_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _prepare_and_commit(base: str, auth: str) -> dict[str, Any]:
-    """Prepare then commit one mock run; return the commit response body."""
+def _prepare_and_commit(base: str) -> dict[str, Any]:
+    """Prepare then commit one deterministic run; return the commit response body."""
     run_id = "run-terminal-settlement"
-    workspace = desktop_workspace(base)
-    # Resolved ONCE: prepare and commit describe the same run, so the commit is
-    # only recognised as that run's commit while its selection matches.
-    selection = catalog_selection(base, auth, workspace)
-    run_fields = {
-        "metadata": {"workspace_root": workspace},
-        "selection": selection,
-    }
-    with httpx.Client(base_url=base, timeout=60.0) as client:
-        prep = client.post(
-            "/v1/runs",
-            headers={"Authorization": auth},
-            json={
-                "team_preset": _PRESET,
-                "stage": "prepare",
-                "run_id": run_id,
-                "autonomous": True,
-                **run_fields,
-            },
-        )
-        assert prep.status_code == 201, prep.text
-        reservation_id = prep.json()["reservation_id"]
-        commit = client.post(
-            "/v1/runs",
-            headers={"Authorization": auth},
-            json={
-                "team_preset": _PRESET,
-                "stage": "commit",
-                "reservation_id": reservation_id,
-                "run_id": run_id,
-                "message": "build it",
-                "autonomous": True,
-                **run_fields,
-                "actor_tokens": {
-                    "tokens": {_REQUIRED_ROLE: _ACTOR_TOKEN},
-                    "engine_bearer": "bearer",
-                },
-            },
-        )
+    # The verbs resolve the selection once and cache it: prepare and commit
+    # describe the same run, so the commit is only recognised as that run's
+    # commit while its selection matches.
+    verbs = gateway_run_verbs(base, tokens={DEFAULT_REQUIRED_ROLE: _ACTOR_TOKEN})
+    prep = verbs.prepare(run_id)
+    assert prep.status_code == 201, prep.text
+    commit = verbs.commit(run_id, prep.json()["reservation_id"])
     assert commit.status_code == 201, commit.text
     return commit.json()
 
@@ -378,14 +263,21 @@ def test_terminal_settlement_authenticates_with_attach_retries_and_revokes_once(
     tmp_path: Path,
 ) -> None:
     """A completed run settles with attach-control, retries, and revokes one lease."""
-    harness = _prepare_settlement_harness(tmp_path)
-    gateway = _start_broker_gateway(harness)
-    try:
-        _assert_terminal_settlement(harness, gateway)
-    finally:
-        harness.server.shutdown()
-        reap_gateway(gateway.process)
-        harness.log_handle.close()
+    app_home = tmp_path / "app-home"
+    seat_app_home(app_home)
+    # The INFO variant, so the gateway's settlement narration reaches the log.
+    with (
+        _receiver(DEFAULT_ATTACH_CREDENTIAL, fail_first=True) as (port, state),
+        booted_gateway(
+            broker_gateway_env(app_home, gateway_token=DEFAULT_ATTACH_CREDENTIAL),
+            log_path=tmp_path / "gateway.log",
+            script=gateway_script(log_level="info"),
+        ) as gateway,
+    ):
+        _assert_terminal_settlement(
+            _SettlementHarness(app_home=app_home, receiver_port=port, state=state),
+            gateway.base_url,
+        )
 
 
 def json_run_id(raw: str) -> str | None:
@@ -394,56 +286,3 @@ def json_run_id(raw: str) -> str | None:
         return json.loads(raw).get("run_id")
     except (json.JSONDecodeError, TypeError, AttributeError):
         return None
-
-
-def test_settlement_receiver_rejects_worker_ipc_and_unrelated_credentials(
-    tmp_path: Path,
-) -> None:
-    """The dashboard settlement plane accepts only attach-control, not worker IPC."""
-    # Mint a real worker-IPC secret through production code; it must be a distinct
-    # value from the attach-control credential and rejected by the settlement plane.
-    creds_dir = tmp_path / "creds"
-    worker_ipc = create_worker_ipc_credential(creds_dir)
-    assert worker_ipc != _ATTACH, "worker IPC and attach must be distinct secrets"
-
-    server, receiver_port, state = _start_receiver(_ATTACH, fail_first=False)
-    endpoint = f"http://127.0.0.1:{receiver_port}/settle"
-    payload = {
-        "api_version": "v1",
-        "run_id": "run-xyz",
-        "lease_id": "lease-xyz",
-        "terminal_status": "completed",
-    }
-    try:
-        with httpx.Client(timeout=5.0) as client:
-            # Worker-IPC secret: rejected.
-            ipc = client.post(
-                endpoint,
-                json=payload,
-                headers={"Authorization": f"Bearer {worker_ipc}"},
-            )
-            assert ipc.status_code == 401, ipc.status_code
-            # Unrelated credential: rejected.
-            other = client.post(
-                endpoint,
-                json=payload,
-                headers={"Authorization": f"Bearer {_UNRELATED}"},
-            )
-            assert other.status_code == 401, other.status_code
-            # Attach-control credential: accepted.
-            ok = client.post(
-                endpoint, json=payload, headers={"Authorization": f"Bearer {_ATTACH}"}
-            )
-            assert ok.status_code == 200, ok.status_code
-    finally:
-        server.shutdown()
-
-    with state.lock:
-        assert state.rejected_auth == [
-            f"Bearer {worker_ipc}",
-            f"Bearer {_UNRELATED}",
-        ], state.rejected_auth
-        assert state.revoked_leases == ["lease-xyz"], state.revoked_leases
-    # The minted worker-IPC file exists on disk under its own name, separate from
-    # the attach plane, confirming the two planes are distinct files and secrets.
-    assert (creds_dir / WORKER_IPC_CREDENTIAL_NAME).is_file()

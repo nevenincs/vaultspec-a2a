@@ -2,7 +2,7 @@
 
 Driven end to end against the real pieces: a real LangGraph run over a real
 ``AsyncSqliteSaver`` produces the completion receipt, a real journal row
-reserved through the production queue repository is the continuation, and the
+reserved through the production continuation queue is the continuation, and the
 real reconciliation authority reads one and promotes the other. Nothing here
 stands in for anything.
 
@@ -15,19 +15,17 @@ the run's admission slot.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
 
-from ...database import get_thread
+from ...database import count_queued_continuations, get_thread
 from ...thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
     ThreadStatus,
 )
 from ..drain import DrainGate
-from ..event_handlers import CheckpointPruneRegistry, relay_event
+from ..event_handlers import CheckpointPruneRegistry, RelayServices, relay_event
 from ..recovery_authority import (
     CONTINUATION_PROMOTED,
     RecoveryObservation,
@@ -35,28 +33,16 @@ from ..recovery_authority import (
     RecoveryTrigger,
     reconcile_run_checkpoint,
 )
-from ..repositories import count_queued_continuations
 from ._continuation import (
     FIRST_RECEIPT,
     RUN,
     BusyRun,
-    busy_run_state,
     checkpoint_count,
     definition,
     finish_turn,
     journal_action,
     queue_continuation,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
-
-
-@pytest_asyncio.fixture
-async def busy_run(tmp_path: Path) -> AsyncIterator[BusyRun]:
-    async with busy_run_state(tmp_path) as state:
-        yield state
 
 
 async def _reconcile(run: BusyRun) -> RecoveryObservation:
@@ -181,10 +167,12 @@ async def test_a_promoted_run_keeps_its_history_and_its_admission_slot(
     await relay_event(
         RUN,
         {"type": "thread_terminal", "status": ThreadStatus.COMPLETED.value},
-        session_factory=busy_run.sessions,
-        checkpointer=busy_run.saver,
-        drain_gate=gate,
-        prune_registry=prunes,
+        services=RelayServices(
+            session_factory=busy_run.sessions,
+            checkpointer=busy_run.saver,
+            drain_gate=gate,
+            prune_registry=prunes,
+        ),
     )
     await prunes.settle()
 
@@ -210,10 +198,12 @@ async def test_relaying_a_terminal_with_no_continuation_still_settles(
     await relay_event(
         RUN,
         {"type": "thread_terminal", "status": ThreadStatus.COMPLETED.value},
-        session_factory=busy_run.sessions,
-        checkpointer=busy_run.saver,
-        drain_gate=gate,
-        prune_registry=prunes,
+        services=RelayServices(
+            session_factory=busy_run.sessions,
+            checkpointer=busy_run.saver,
+            drain_gate=gate,
+            prune_registry=prunes,
+        ),
     )
     await prunes.settle()
 

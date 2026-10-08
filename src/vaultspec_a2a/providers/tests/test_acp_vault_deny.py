@@ -36,12 +36,7 @@ def _make_config(workspace_root: str) -> AcpModelConfig:
         mcp_servers=[],
         use_exec=False,
         provider=None,
-        runtime_authority=None,
-        acp_backend=None,
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
     )
 
@@ -201,7 +196,7 @@ class TestNonVaultAndReadsPermitted:
     async def test_permits_vault_read(
         self, tmp_path: Path, acp_session_context: AcpSessionContext
     ) -> None:
-        """Reads through the ACP fs surface stay permitted (dashboard D4)."""
+        """Reads through the ACP fs surface stay permitted."""
         vault_doc = tmp_path / ".vault" / "research" / "doc.md"
         vault_doc.parent.mkdir(parents=True)
         vault_doc.write_text("corpus context", encoding="utf-8")

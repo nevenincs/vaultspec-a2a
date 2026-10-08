@@ -1,33 +1,35 @@
 """Real-repository tests for safe Vaultspec Core enrollment.
 
-The end-to-end case drives the script exactly as ``just vault-install``
-does - the interpreter against the file path - rather than importing ``main``,
-so a broken invocation shape fails here instead of in a developer's checkout.
+The end-to-end case drives the module exactly as ``just vault-install``
+does - ``python -m dev.vault.enroll`` in a child interpreter - rather than
+importing ``main``, so a broken invocation shape fails here instead of in a
+developer's checkout. ``--root`` points it at the scratch checkout.
 """
 
 from __future__ import annotations
 
-import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-from dev.vault import enroll
+from dev.process import run_captured
 from dev.vault.enroll import (
     _assert_tracked_projection,
     _require_clean_owned_paths,
     _seed_runtime_without_overwrite,
 )
 
-#: The script path the harness recipe invokes.
-ENROLL_SCRIPT = Path(enroll.__file__).resolve()
+if TYPE_CHECKING:
+    import subprocess
+    from pathlib import Path
+
+#: The command the harness recipe invokes.
+ENROLL = (sys.executable, "-m", "dev.vault.enroll")
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ("git", *args), cwd=root, check=True, capture_output=True, text=True
-    )
+    return run_captured(("git", *args), cwd=root, timeout=None, check=True)
 
 
 def _repository(root: Path) -> None:
@@ -105,7 +107,7 @@ dev = ["vaultspec-core>=0.1.48,<0.2"]
     vault_record.write_text("# Acceptance decision\n", encoding="utf-8")
     prek = source / "prek.toml"
     prek.write_text("repos = []\n", encoding="utf-8")
-    subprocess.run(
+    run_captured(
         (
             sys.executable,
             "-m",
@@ -119,17 +121,10 @@ dev = ["vaultspec-core>=0.1.48,<0.2"]
             "--force",
             "--no-hints",
         ),
+        timeout=None,
         check=True,
-        capture_output=True,
-        text=True,
     )
-    subprocess.run(
-        (sys.executable, str(ENROLL_SCRIPT)),
-        cwd=source,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    run_captured((*ENROLL, "--root", str(source)), timeout=None, check=True)
     for relative in (
         ".vaultspec/providers.json",
         ".vaultspec/mcp-ownership.json",
@@ -150,13 +145,7 @@ dev = ["vaultspec-core>=0.1.48,<0.2"]
     expected_prek = (consumer / "prek.toml").read_bytes()
 
     for _ in range(2):
-        subprocess.run(
-            (sys.executable, str(ENROLL_SCRIPT)),
-            cwd=consumer,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        run_captured((*ENROLL, "--root", str(consumer)), timeout=None, check=True)
         assert _git(consumer, "diff", "--exit-code").returncode == 0
         assert (consumer / "prek.toml").read_bytes() == expected_prek
 

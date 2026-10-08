@@ -8,8 +8,8 @@ document's body as a disclosed source. A surfaced tool name, an allowlist entry,
 parsed config, or a model saying it searched are none of them retrievals, and this
 module is deliberately unable to pass on any of them.
 
-Not a second driver. It reuses the standing pw7 acceptance harness exactly as the
-floor and semantic proofs do (``test_tool_cores_floor_live``): ``_reachable_stack``
+Not a second driver. It reuses the shared acceptance harness exactly as the floor
+and semantic proofs do (``vaultspec_a2a.testing.acceptance``): ``reachable_stack``
 for the infra gate, ``AcceptanceHarness`` for token minting and run-start against
 the live ``vaultspec-adr-research`` preset. What it adds is the retrieval evidence
 and a NON-materializing observation - the run is watched only until that evidence
@@ -63,7 +63,6 @@ refused for rate and cannot say which of the two it was.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -73,28 +72,36 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import httpx
 import pytest
-from pydantic import TypeAdapter, ValidationError
 
 from ..control.run_start_policy import required_role_ids
+from ..graph.enums import Provider, ProviderCondition
 from ..graph.nodes.diverge import WEB_LOCATOR_KIND
-from ..providers._json_contract import JsonObject
-from ..providers.conditions import ProviderCondition, condition_from_acp_error
+from ..providers.conditions import condition_from_acp_error
 from ..team.team_config import load_team_config
-from ..testing.tests._support.payloads import json_object, json_object_list
-from .test_pw7_acceptance import (
-    _GATEWAY_AUTH_HEADERS,
-    _MODE_MANUAL,
-    _PRESET_LIVE,
+from ..testing import (
+    GATEWAY_AUTH_HEADERS,
+    MODE_MANUAL,
+    PRESET_LIVE,
     AcceptanceCase,
     AcceptanceHarness,
-    _reachable_stack,
+    ProgressDeadline,
+    ResilientAuthoringClient,
+    json_object,
+    json_object_list,
+    mint_raw_token,
+    reachable_stack,
+    resolve_selection,
+    snapshot_vault,
+    vault_write_delta,
+    wait_for_async,
 )
-from .test_tool_cores_floor_live import _snapshot_vault, _vault_write_delta
+from ..utils.coercion import coerce_object_list, coerce_object_mapping
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from ..conftest import ExternalPrerequisiteRule
+    from ..providers import JsonObject
 
 logger = logging.getLogger(__name__)
 
@@ -153,9 +160,6 @@ _POLL_SECONDS = 15.0
 #: asserting the one it would prefer to report.
 _RATE_REFUSAL_CONDITION = ProviderCondition.THROTTLED
 
-_JSON_OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
-_OBJECT_LIST = TypeAdapter(list[object])
-
 
 @runtime_checkable
 class _WriterMessage(Protocol):
@@ -172,10 +176,10 @@ def _object_list(value: object, *, at: str) -> list[object]:
     """Read an optional heterogeneous checkpoint list without widening its values."""
     if value is None:
         return []
-    try:
-        return _OBJECT_LIST.validate_python(value)
-    except ValidationError as exc:
-        raise AssertionError(f"expected list at {at}: {exc}") from exc
+    items = coerce_object_list(value)
+    if items is None:
+        raise AssertionError(f"expected list at {at}: {value!r}")
+    return items
 
 
 def _fetch_live_commit_shas() -> set[str]:
@@ -219,7 +223,7 @@ def _web_grounding_case(feature: str) -> AcceptanceCase:
     """
     return AcceptanceCase(
         label="tool-cores-web-grounding-live",
-        preset=_PRESET_LIVE,
+        preset=PRESET_LIVE,
         feature=feature,
         prompt=(
             "Research the current release activity of the LangGraph project, and "
@@ -235,8 +239,9 @@ def _web_grounding_case(feature: str) -> AcceptanceCase:
             "URL retrieved as a bare URL with its retrieval date. A claim you did "
             "not retrieve must be presented as recall, never as a retrieved fact."
         ),
-        roles=tuple(required_role_ids(load_team_config(_PRESET_LIVE))),
+        roles=tuple(required_role_ids(load_team_config(PRESET_LIVE))),
         expected_doc_kinds=(),
+        lane_provider=Provider.CLAUDE.value,
         autonomous=True,
     )
 
@@ -254,11 +259,8 @@ def _web_locator_urls(findings: Sequence[Mapping[str, object]]) -> list[str]:
         if locators is None:
             continue
         for locator in _object_list(locators, at="finding locators"):
-            try:
-                fields = _JSON_OBJECT.validate_python(locator)
-            except ValidationError:
-                continue
-            if fields.get("kind") != WEB_LOCATOR_KIND:
+            fields = coerce_object_mapping(locator)
+            if fields is None or fields.get("kind") != WEB_LOCATOR_KIND:
                 continue
             url = fields.get("url")
             if isinstance(url, str) and url and url not in urls:
@@ -310,7 +312,7 @@ async def _read_checkpointed_state(run_id: str) -> JsonObject:
     it. The gateway's wire snapshot deliberately does not carry the finding channel,
     which is why the evidence is read here rather than over HTTP.
     """
-    from ..database.checkpoints import open_checkpointer
+    from ..database import open_checkpointer
 
     async with open_checkpointer() as checkpointer:
         tuple_ = await checkpointer.aget_tuple({"configurable": {"thread_id": run_id}})
@@ -393,36 +395,50 @@ async def _observe_web_grounding_run(
     feature: str,
 ) -> tuple[_Evidence, str, str]:
     evidence = _Evidence(claims="", locator_urls=[], body="")
-    failure_reason = ""
-    failure_condition = ""
 
-    from .test_pw7_acceptance import _ResilientAuthoringClient
-
-    async with _ResilientAuthoringClient(
+    async with ResilientAuthoringClient(
         harness.engine_base_url, harness.engine_bearer
     ) as ec:
-        run_tokens = {
-            role: await harness._mint(ec, f"agent:{harness.run_id}:{role}", "agent")
-            for role in case.roles
-        }
-        reviewer_human = await harness._mint(ec, f"rev-human:{harness.run_id}", "human")
+        run_tokens = await harness.mint_role_tokens(ec, harness.run_id, case.roles)
+        reviewer_human = await mint_raw_token(
+            ec, f"rev-human:{harness.run_id}", "human"
+        )
         # Manual mode is the zero-writes guarantee at its source: a queued proposal
         # waits for a human verdict this test never gives, so nothing can apply even
         # if the observation loop were to overrun its deadline.
-        await harness._set_mode(ec, _MODE_MANUAL, setter_token=reviewer_human)
+        await harness.set_mode(ec, MODE_MANUAL, setter_token=reviewer_human)
 
         # The gateway fails closed on every /v1/ route unless the caller presents
         # the service-discovery bearer the booting shell configured it with; an
         # unauthenticated client degrades to a truthful 401 rather than a run.
-        async with httpx.AsyncClient(headers=_GATEWAY_AUTH_HEADERS) as hc:
-            await harness._run_start(
+        async with httpx.AsyncClient(headers=GATEWAY_AUTH_HEADERS) as hc:
+            await harness.run_start(
                 hc,
                 run_id=harness.run_id,
                 tokens=run_tokens,
                 feature=feature,
                 expect=201,
             )
-            deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
+
+            async def _observed() -> tuple[_Evidence, str, str] | None:
+                nonlocal evidence
+                evidence = await _read_evidence(harness.run_id)
+                if evidence.complete:
+                    return evidence, "", ""
+                status = await harness.run_status(hc)
+                if status.get("status") in {"failed", "cancelled"}:
+                    # Both are read from run-status rather than from the relay:
+                    # the frame carrying the condition is droppable, and this
+                    # response is where the run's terminal state is
+                    # authoritative. The condition decides what happens next;
+                    # the reason only informs whichever message is reported.
+                    return (
+                        evidence,
+                        str(status.get("failure_reason") or ""),
+                        str(status.get("provider_condition") or ""),
+                    )
+                return None
+
             try:
                 # Observe until the EVIDENCE is complete, not until the run is. What
                 # this Step proves is that a retrieval reached both citation channels;
@@ -430,32 +446,32 @@ async def _observe_web_grounding_run(
                 # later phases, the human gates - is governed by other Steps, and
                 # riding the run through it would make this proof hostage to verdicts
                 # about document quality that have nothing to do with web grounding.
-                while time.monotonic() < deadline:
-                    evidence = await _read_evidence(harness.run_id)
-                    if evidence.complete:
-                        break
-                    status = await harness._run_status(hc)
-                    if status.get("status") in {"failed", "cancelled"}:
-                        # Both are read from run-status rather than from the relay:
-                        # the frame carrying the condition is droppable, and this
-                        # response is where the run's terminal state is
-                        # authoritative. The condition decides what happens next;
-                        # the reason only informs whichever message is reported.
-                        failure_reason = str(status.get("failure_reason") or "")
-                        failure_condition = str(status.get("provider_condition") or "")
-                        break
-                    await asyncio.sleep(_POLL_SECONDS)
+                return await wait_for_async(
+                    _observed,
+                    deadline=ProgressDeadline(idle_window_s=_OBSERVE_DEADLINE_SECONDS),
+                    fingerprint=lambda: (
+                        evidence.claims,
+                        tuple(evidence.locator_urls),
+                        evidence.body,
+                    ),
+                    interval_s=_POLL_SECONDS,
+                    stalled=lambda: (
+                        f"run {harness.run_id} landed no complete retrieval evidence "
+                        f"(web locators: {len(evidence.locator_urls)}, writer body: "
+                        f"{'present' if evidence.body else 'absent'})"
+                    ),
+                )
             finally:
                 await hc.post(
                     f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
                     timeout=30.0,
                 )
-    return evidence, failure_reason, failure_condition
 
 
 def _assert_web_grounding_evidence(
     harness: AcceptanceHarness,
     observation: _GroundingObservation,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     # A run that died before the evidence landed proves nothing either way, so the
     # two causes are separated rather than reported as one failure. A provider that
@@ -472,16 +488,16 @@ def _assert_web_grounding_evidence(
         observation.failure_reason or observation.failure_condition
     ):
         if _is_provider_rate_refusal(observation.failure_condition):
-            pytest.skip(
-                f"the {_PRESET_LIVE!r} lane's provider refused the run for rate "
+            external_prerequisite.absent(
+                "provider-capacity",
+                f"the {PRESET_LIVE!r} lane's provider refused the run for rate "
                 "before the evidence landed (condition "
                 f"{observation.failure_condition!r}): "
                 f"{observation.failure_reason}. This lane cannot say whether a "
                 "short-term rate "
                 "limit or an exhausted subscription window caused it - its adapter "
                 "reports both identically - so this names only what the wire "
-                "carried. A truthful skip for an absent external resource, not a "
-                "masked failure; re-run once the provider admits work again"
+                "carried",
             )
         pytest.fail(
             f"run {harness.run_id} went terminal before the retrieval evidence "
@@ -492,8 +508,8 @@ def _assert_web_grounding_evidence(
     shas_after = _fetch_live_commit_shas()
     live_shas = observation.shas_before | shas_after
 
-    after = _snapshot_vault(harness.vault_root)
-    delta = _vault_write_delta(observation.before, after)
+    after = snapshot_vault(harness.vault_root)
+    delta = vault_write_delta(observation.before, after)
 
     locator_urls = observation.evidence.locator_urls
     body = observation.evidence.body
@@ -573,31 +589,36 @@ async def test_claude_lane_completes_a_real_web_retrieval(
     nothing ever applied, and a before / after snapshot of the engine workspace
     asserts no document changed.
     """
-    stack = _reachable_stack()
+    stack = reachable_stack()
     if stack is None:
         external_prerequisite.absent("loopback-stack")
     gateway_url, engine_base_url, engine_bearer, vault_root = stack
 
     shas_before = _fetch_live_commit_shas()
     if not shas_before:
-        pytest.skip(
+        external_prerequisite.absent(
+            "outbound-network",
             f"could not resolve live commit SHAs from {_LIVE_SHA_URL} (network "
             "unreachable or rate-limited); the completed-retrieval proof cannot be "
-            "posed without a live token the prompt never carried. This is a truthful "
-            "skip, not a masked failure"
+            "posed without a live token the prompt never carried",
         )
 
     feature = f"tool-cores-web-{int(time.time())}"
     case = _web_grounding_case(feature)
+    selection, overrides = await resolve_selection(
+        case, gateway_url, str(vault_root.parent), external_prerequisite
+    )
     harness = AcceptanceHarness(
         case=case,
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
         gateway_url=gateway_url,
+        selection=selection,
+        overrides=overrides,
     )
 
-    before = _snapshot_vault(vault_root)
+    before = snapshot_vault(vault_root)
     evidence, failure_reason, failure_condition = await _observe_web_grounding_run(
         harness, case, feature
     )
@@ -610,6 +631,7 @@ async def test_claude_lane_completes_a_real_web_retrieval(
             failure_reason=failure_reason,
             failure_condition=failure_condition,
         ),
+        external_prerequisite,
     )
 
 
@@ -625,7 +647,7 @@ def test_proof_case_pins_the_url_the_token_and_the_sources_obligation() -> None:
     case = _web_grounding_case("tool-cores-web-guard")
     assert PROOF_URL in case.prompt
     assert "Sources" in case.prompt
-    assert case.preset == _PRESET_LIVE
+    assert case.preset == PRESET_LIVE
     assert case.autonomous is True
     assert case.gate_policy == {}
     assert case.expected_doc_kinds == ()

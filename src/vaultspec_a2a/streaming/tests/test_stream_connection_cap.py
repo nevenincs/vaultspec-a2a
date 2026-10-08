@@ -1,13 +1,13 @@
 """The subscriber registry must be globally bounded wherever a caller enters it.
 
-The gateway admits stream subscribers from two places - the SSE progress route
-and the event WebSocket - and both register against one shared registry. A limit
-checked inside one route is therefore not a limit at all: the other path admits
-subscribers that check never observes. The SSE route's own pre-check is weaker
+The gateway admits stream subscribers through the SSE progress route, which
+registers against one shared registry. A limit checked inside the route alone is
+therefore not a limit at all: any other entry into the registry admits
+subscribers that check never observes. The route's own pre-check is weaker
 still, because it runs while building the response and the registration it
 authorises does not happen until the client starts reading the body.
 
-So the bound has to hold at the registry itself. These drive the real aggregator
+So the bound has to hold at the registry itself. These drive the real relay hub
 at its real shipped default rather than a tuned-down cap, so the limit under test
 is the value operators actually run.
 """
@@ -16,20 +16,13 @@ from __future__ import annotations
 
 import pytest
 
-from ...control.config import Settings
 from ...domain_config import domain_config
-from ...telemetry.aggregator_hook import OTelAggregatorHook
-from ...thread.errors import EventAggregatorError
-from ..aggregator import EventAggregator
+from ...thread.errors import StreamSubscriptionError
+from ..subscribers import RelayHub
+from ._metric_reader import counter_total, metered_hook
 
 
-@pytest.fixture
-def aggregator() -> EventAggregator:
-    """Return a fresh EventAggregator for each test."""
-    return EventAggregator()
-
-
-def _fill(aggregator: EventAggregator, count: int, *, prefix: str = "client") -> None:
+def _fill(aggregator: RelayHub, count: int, *, prefix: str = "client") -> None:
     for index in range(count):
         aggregator.add_subscriber(f"{prefix}-{index}")
 
@@ -39,19 +32,8 @@ def test_the_limit_has_a_bounded_positive_default() -> None:
     assert 0 < domain_config.max_stream_connections <= 10_000
 
 
-def test_the_domain_and_infrastructure_views_report_one_limit() -> None:
-    """Both layers must read a single value, not two that can drift apart.
-
-    The registry enforces the bound and the SSE route pre-checks it, so the two
-    reads have to be the same number. Declaring the field twice would satisfy
-    every other test here while letting the enforced limit and the advertised one
-    diverge, which is precisely the failure this guards.
-    """
-    assert Settings().max_stream_connections == domain_config.max_stream_connections
-
-
 def test_the_registry_admits_subscribers_up_to_the_cap(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """The limit admits exactly its configured number, not one fewer."""
     limit = domain_config.max_stream_connections
@@ -61,17 +43,17 @@ def test_the_registry_admits_subscribers_up_to_the_cap(
     assert aggregator.subscriber_count() == limit
 
 
-def test_the_subscriber_past_the_cap_is_refused(aggregator: EventAggregator) -> None:
+def test_the_subscriber_past_the_cap_is_refused(aggregator: RelayHub) -> None:
     """One past the limit raises rather than silently extending the registry."""
     limit = domain_config.max_stream_connections
     _fill(aggregator, limit)
 
-    with pytest.raises(EventAggregatorError, match="global limit"):
+    with pytest.raises(StreamSubscriptionError, match="global limit"):
         aggregator.add_subscriber("one-client-too-many")
 
 
 def test_a_refused_subscriber_leaves_the_registry_unchanged(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """A refusal must not half-register the caller.
 
@@ -81,15 +63,15 @@ def test_a_refused_subscriber_leaves_the_registry_unchanged(
     limit = domain_config.max_stream_connections
     _fill(aggregator, limit)
 
-    with pytest.raises(EventAggregatorError):
+    with pytest.raises(StreamSubscriptionError):
         aggregator.add_subscriber("one-client-too-many")
 
     assert aggregator.subscriber_count() == limit
-    assert aggregator.get_subscriber_queue("one-client-too-many") is None
+    assert "one-client-too-many" not in aggregator._subscribers
 
 
 def test_the_cap_is_global_rather_than_per_client(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """Distinct client identities share one bound.
 
@@ -101,12 +83,12 @@ def test_the_cap_is_global_rather_than_per_client(
     _fill(aggregator, limit // 2, prefix="sse")
     _fill(aggregator, limit - limit // 2, prefix="ws")
 
-    with pytest.raises(EventAggregatorError):
+    with pytest.raises(StreamSubscriptionError):
         aggregator.add_subscriber("a-wholly-unrelated-client")
 
 
 def test_re_registering_a_held_client_at_capacity_is_not_refused(
-    aggregator: EventAggregator,
+    aggregator: RelayHub,
 ) -> None:
     """Replacing a held client's queue must stay possible at capacity.
 
@@ -123,7 +105,7 @@ def test_re_registering_a_held_client_at_capacity_is_not_refused(
     assert aggregator.subscriber_count() == limit
 
 
-def test_removing_a_subscriber_frees_capacity(aggregator: EventAggregator) -> None:
+def test_removing_a_subscriber_frees_capacity(aggregator: RelayHub) -> None:
     """The cap bounds concurrent subscribers, not lifetime total."""
     limit = domain_config.max_stream_connections
     _fill(aggregator, limit)
@@ -137,27 +119,26 @@ def test_removing_a_subscriber_frees_capacity(aggregator: EventAggregator) -> No
 def test_a_refusal_emits_the_operational_counter() -> None:
     """The refusal is observable to operators, not only to the caller.
 
-    Uses the real OTel hook against a real meter rather than a stand-in: it
-    registers each counter lazily on first use, so the counter's presence in the
-    hook's registry is proof the production path actually recorded it. The
-    control below shows the same registry is empty without a refusal, so this
-    cannot pass on a counter some other code path registered.
+    Uses the real OTel hook over a real SDK meter rather than a stand-in, and
+    reads the recorded total back from the SDK's in-memory reader. The control
+    below shows the same reader reports nothing without a refusal, so this
+    cannot pass on a counter some other code path recorded.
     """
-    hook = OTelAggregatorHook()
-    aggregator = EventAggregator(telemetry=hook)
+    hook, reader = metered_hook()
+    aggregator = RelayHub(telemetry=hook)
     _fill(aggregator, domain_config.max_stream_connections)
 
-    with pytest.raises(EventAggregatorError):
+    with pytest.raises(StreamSubscriptionError):
         aggregator.add_subscriber("one-client-too-many")
 
-    assert hook.has_registered_counter("aggregator.subscribers_refused")
+    assert counter_total(reader, "aggregator.subscribers_refused") == 1
 
 
 def test_an_admitted_subscriber_emits_no_refusal_counter() -> None:
     """Control: the counter tracks refusals, not registrations."""
-    hook = OTelAggregatorHook()
-    aggregator = EventAggregator(telemetry=hook)
+    hook, reader = metered_hook()
+    aggregator = RelayHub(telemetry=hook)
 
     aggregator.add_subscriber("client-0")
 
-    assert not hook.has_registered_counter("aggregator.subscribers_refused")
+    assert counter_total(reader, "aggregator.subscribers_refused") == 0

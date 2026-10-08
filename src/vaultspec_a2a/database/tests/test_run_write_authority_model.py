@@ -6,26 +6,14 @@ from dataclasses import fields
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType
 from .. import create_thread
-from ..models import Base, RunWriteAuthority, ThreadModel
+from ..models import ThreadModel
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-
-
-@pytest_asyncio.fixture
-async def session() -> AsyncGenerator[AsyncSession]:
-    """Yield a real SQLite schema materialized from current model metadata."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with AsyncSession(engine, expire_on_commit=False) as db:
-        yield db
-    await engine.dispose()
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def test_run_write_authority_declares_one_complete_action_identity() -> None:
@@ -92,7 +80,7 @@ def test_authority_constructor_has_no_missing_value_defaults() -> None:
 async def test_current_authority_is_required_and_round_trips(
     session: AsyncSession,
 ) -> None:
-    """S77 maps every authority field without a missing-value default."""
+    """The model maps every authority field without a missing-value default."""
     authority = RunWriteAuthority(
         run_revision=0,
         writer_generation=1,

@@ -1,14 +1,14 @@
 """Run status must derive from one snapshot, not several.
 
-Every field used to read the checkpoint for itself. A run advancing between
-those reads produced a response carrying a status from one moment and a position
+No field reads the checkpoint for itself: a run advancing between such reads
+would produce a response carrying a status from one moment and a position
 from another - internally inconsistent, which is worse than a stale but coherent
 answer because a consumer cannot tell the difference.
 
-The derivations are pure functions over an already-read tuple, so this asserts
-what they produce from one snapshot rather than how many times they read. The
-channel names come from the module rather than being spelled here: a rename would
-otherwise turn every assertion into "field absent" and keep passing.
+The derivations are pure functions over an already-made projection, so this
+asserts what they produce from one snapshot rather than how many times they
+read. The channel names come from the module rather than being spelled here: a
+rename would otherwise turn every assertion into "field absent" and keep passing.
 """
 
 from __future__ import annotations
@@ -23,11 +23,12 @@ from ...control.thread_state_service import (
     derive_run_authoring_ids,
     derive_run_semantic_context,
 )
+from ...thread import CheckpointProjection, project_checkpoint_tuple
 
 
-def _snapshot(values: dict[str, object]) -> CheckpointTuple:
-    """Build the concrete LangGraph tuple that production code receives."""
-    return CheckpointTuple(
+def _snapshot(values: dict[str, object]) -> CheckpointProjection:
+    """Project the concrete LangGraph tuple that production code receives."""
+    checkpoint_tuple = CheckpointTuple(
         config={"configurable": {"thread_id": "thread-1"}},
         checkpoint={
             "v": 1,
@@ -41,10 +42,11 @@ def _snapshot(values: dict[str, object]) -> CheckpointTuple:
         metadata={"source": "loop", "step": 0, "parents": {}},
         pending_writes=[],
     )
+    return project_checkpoint_tuple(checkpoint_tuple, thread_id="thread-1")
 
 
 def test_both_derivations_read_the_same_snapshot() -> None:
-    """One tuple in, coherent fields out."""
+    """One projection in, coherent fields out."""
     snapshot = _snapshot(
         {
             PROPOSAL_ID_FIELD: ["p-1", "p-2"],
@@ -95,11 +97,11 @@ def test_missing_individual_fields_degrade_independently() -> None:
 
 
 def test_the_derivations_do_not_mutate_the_snapshot() -> None:
-    """Two derivations share one tuple; neither may disturb it for the other."""
+    """Two derivations share one projection; neither may disturb it for the other."""
     snapshot = _snapshot({PROPOSAL_ID_FIELD: ["p-1"], ACTIVE_FEATURE_FIELD: "f"})
-    before = dict(snapshot.checkpoint["channel_values"])
+    before = dict(snapshot.channel_values)
 
     derive_run_authoring_ids(snapshot)
     derive_run_semantic_context(snapshot)
 
-    assert snapshot.checkpoint["channel_values"] == before
+    assert snapshot.channel_values == before

@@ -9,7 +9,6 @@ implementations at construction time.
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -25,71 +24,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CostPort",
-    "MarkCompleteOutcome",
     "NullTelemetryHook",
     "ProviderFactoryProtocol",
-    "QueueEntryView",
     "RuntimeIdentityPort",
     "RuntimeIdentityRecordArgs",
-    "TaskQueuePort",
     "TelemetryHook",
     "UsageRecordArgs",
 ]
-
-
-@dataclass(frozen=True)
-class QueueEntryView:
-    """A single injectable task-queue row (Layer 1 DTO).
-
-    Plain primitives only, so graph nodes never touch persistence models.
-    """
-
-    task_key: str
-    status: str
-    description: str
-
-
-@dataclass(frozen=True)
-class MarkCompleteOutcome:
-    """Result of a mark-complete transition (Layer 1 DTO).
-
-    ``found`` is False when the addressed row does not exist for the thread.
-    ``did_complete`` is True when the row is now completed — either because it
-    transitioned from ``in_progress`` or because it was already ``completed``
-    (idempotent replay).  ``next_task_key`` is the next pending row by
-    ``position`` after the completed row, or None when the queue is drained.
-    """
-
-    found: bool
-    did_complete: bool
-    next_task_key: str | None
-
-
-@runtime_checkable
-class TaskQueuePort(Protocol):
-    """Protocol for the database-backed worker task queue.
-
-    Decouples the graph layer from the persistence layer: graph nodes depend
-    only on this abstract interface and receive a concrete adapter injected at
-    compile time, exactly as with :class:`ProviderFactoryProtocol`.
-    """
-
-    async def get_queue_view(
-        self,
-        thread_id: str,
-        current_task_id: str | None,
-        horizon: int,
-    ) -> list[QueueEntryView]:
-        """Return the current row plus up to ``horizon`` next pending rows."""
-        ...
-
-    async def mark_complete(
-        self,
-        thread_id: str,
-        task_key: str,
-    ) -> MarkCompleteOutcome:
-        """Idempotently complete ``task_key`` and report the next pending row."""
-        ...
 
 
 class UsageRecordArgs(TypedDict):
@@ -109,9 +50,9 @@ class UsageRecordArgs(TypedDict):
 class CostPort(Protocol):
     """Protocol for durable per-invocation token accounting.
 
-    The sibling of :class:`TaskQueuePort`, and injected the same way: graph
-    nodes depend only on this abstract interface and receive a concrete adapter
-    at compile time, so the persistence layer never leaks into the domain graph.
+    Injected like :class:`ProviderFactoryProtocol`: graph nodes depend only on
+    this abstract interface and receive a concrete adapter at compile time, so
+    the persistence layer never leaks into the domain graph.
 
     Deliberately token-only. No cost argument is accepted because no provider
     lane in this project reports one and no rate table exists to derive one; a
@@ -180,9 +121,9 @@ class ProviderFactoryProtocol(Protocol):
 class TelemetryHook(Protocol):
     """Protocol for pluggable telemetry instrumentation.
 
-    The aggregator and graph compiler accept an optional ``TelemetryHook``
-    at construction time.  Core ships with :class:`NullTelemetryHook` as
-    the default no-op implementation.
+    The worker's ``RunEventProducer`` and the gateway's ``RelayHub`` accept an
+    optional ``TelemetryHook`` at construction time.  Core ships with
+    :class:`NullTelemetryHook` as the default no-op implementation.
     """
 
     def start_span(self, name: str, **attrs: Any) -> AbstractContextManager[Any]: ...

@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-import subprocess
 import sys
 import tomllib
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-ROOT = Path(__file__).resolve().parents[2]
+from dev.paths import PYTHON_PATHS, REPO_ROOT
+from dev.process import run_captured
+
+if TYPE_CHECKING:
+    import subprocess
+    from pathlib import Path
 
 
 def _hooks() -> list[dict[str, object]]:
     """Load every hook from the real repository-owned prek configuration."""
-    config = tomllib.loads((ROOT / "prek.toml").read_text(encoding="utf-8"))
+    config = tomllib.loads((REPO_ROOT / "prek.toml").read_text(encoding="utf-8"))
     return [
         hook for repository in config["repos"] for hook in repository.get("hooks", [])
     ]
@@ -36,7 +40,7 @@ def test_vaultspec_validation_hooks_are_read_only() -> None:
         vaultspec_entries[hook_id] = entry
 
     assert vaultspec_entries["vault-sanitize-annotations"] == (
-        "uv run --no-sync python dev/vault_annotations_gate.py"
+        "uv run --no-sync python -m dev.vault_annotations_gate"
     )
     assert vaultspec_entries["vaultspec-commit-gate"] == (
         "uv run --no-sync vaultspec-core commit-gate"
@@ -47,13 +51,38 @@ def test_vaultspec_validation_hooks_are_read_only() -> None:
         for marker in ("sanitize", "--fix", "spec sync --execute")
     )
 
-    justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
+    justfile = (REPO_ROOT / "Justfile").read_text(encoding="utf-8")
     assert "vault-sanitize:\n    {{core}} vault sanitize annotations" in justfile
+
+
+def test_the_ty_hook_agrees_with_python_paths() -> None:
+    """prek.toml cannot import dev.paths.PYTHON_PATHS; it must restate it exactly.
+
+    `ty` (Q.4) is the one hook in this file that scans a tree rather than one
+    changed file (``pass_filenames = false``), so it names its scope as a
+    literal argument list instead. Every OTHER caller of that scope -
+    `dev/toolchain.py`'s `python` lint target, `dev/quality/types.py`'s own ty
+    invocation - reaches it by importing :data:`PYTHON_PATHS`, which cannot
+    drift from itself; this hand-written TOML copy is the one place that can,
+    silently, the next time a tree is added or removed from the scanned set.
+    """
+    ty_entries = [
+        hook["entry"]
+        for hook in _hooks()
+        if hook.get("id") == "ty" and isinstance(hook.get("entry"), str)
+    ]
+    assert len(ty_entries) == 1, ty_entries
+    entry = ty_entries[0]
+    assert isinstance(entry, str)
+
+    marker = "ty check "
+    start = entry.index(marker) + len(marker)
+    assert tuple(entry[start:].split()) == PYTHON_PATHS
 
 
 def test_the_repository_annotation_gate_survives_a_core_sync() -> None:
     """Core re-renders its managed block on sync and drops anything inside it."""
-    config = (ROOT / "prek.toml").read_text(encoding="utf-8")
+    config = (REPO_ROOT / "prek.toml").read_text(encoding="utf-8")
     managed_start = config.index(">>> vaultspec-managed hooks")
 
     assert config.index('id = "vault-sanitize-annotations"') < managed_start
@@ -94,17 +123,14 @@ def _snapshot_files(root: Path) -> dict[Path, bytes]:
 
 def _run_gate(target: Path) -> subprocess.CompletedProcess[str]:
     """Run the repository hook wrapper against an isolated workspace."""
-    return subprocess.run(
+    return run_captured(
         [
             sys.executable,
-            str(ROOT / "dev" / "vault_annotations_gate.py"),
+            "-m",
+            "dev.vault_annotations_gate",
             "--target",
             str(target),
         ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
         timeout=60,
     )
 

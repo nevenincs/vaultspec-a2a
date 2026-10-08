@@ -34,43 +34,26 @@ A transport symptom is explicitly NOT the trigger: the run is required to comple
 first, so a dispatch failure or an unreachable worker fails as itself rather than
 masquerading as a disagreement.
 
-Absence is loud: the scripted model backend is probed over real loopback, the
-in-process lane is resolved from the gateway's own served catalog, and a
-missing substrate is a skip naming it and what supplies it - because a run
-frozen on any OTHER served lane would execute a real external provider, which
-this deterministic certification must never do.
+Absence is loud: the in-process deterministic lane is resolved from the
+gateway's own served catalog, and a missing lane is a skip naming it and what
+supplies it - because a run frozen on any OTHER served lane would execute a real
+external provider, which this deterministic certification must never do.
 """
 
 from __future__ import annotations
 
-import os
-import time
 import tomllib
 import uuid
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-import pytest
+from typing import Any
 
 from ..acceptance.tests._harness import certified_gateway
-from ..testing.tests._support.catalog_selection import (
-    NoSelectableLaneError,
-    in_process_selection,
-)
-from ._net import tape_server_listening
+from ..testing import role_tokens
 
-if TYPE_CHECKING:
-    from ..acceptance.tests._harness import CertifiedGateway
-
-_TAPE_SERVER_DEFAULT = "http://127.0.0.1:8100"
-_TAPE_SERVER_ENV = "VAULTSPEC_A2A_MOCK_API_BASE"
-_SUPPLY_TAPE_SERVER = (
-    "docker compose -f service/docker-compose.integration.yml up -d vidaimock"
-)
-
-# A multi-role preset, so agreement is asserted across several roles in one run
-# rather than generalised from a single worker.
-_PRESET = "mock-success-multi"
+# A star preset, so the run crosses the supervisor's routing turns as well as its
+# worker's; agreement is asserted for every role the freeze discloses.
+_PRESET = "deterministic-supervisor-routing"
 _PRESET_PATH = (
     Path(__file__).resolve().parents[1]
     / "team"
@@ -80,7 +63,6 @@ _PRESET_PATH = (
 )
 
 _WORKER_READY_BUDGET_SECONDS = "120"
-_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "error"})
 
 
 def _preset_roles() -> list[str]:
@@ -92,101 +74,26 @@ def _preset_roles() -> list[str]:
     return roles
 
 
-def _tape_server_base() -> str:
-    return (os.environ.get(_TAPE_SERVER_ENV) or "").strip() or _TAPE_SERVER_DEFAULT
-
-
-def _served_in_process_selection(
-    gateway: CertifiedGateway, workspace_root: str
-) -> dict[str, Any]:
-    """Resolve the served in-process lane's selection, or skip naming the gap.
-
-    A deterministic certification run must freeze the in-process lane: the
-    freeze wins outright at compilation, so a selection naming any other served
-    lane would hand every role to a real external provider. Keeping a billable
-    lane out is the shared mechanism's own guarantee - it will not hand one back
-    even when it is the only selectable thing this stack serves - so what remains
-    local is the shape of the refusal: a loud skip naming the missing serving,
-    never a run that quietly spends on whichever external lane the host happens
-    to have installed.
-    """
-    with gateway.client(timeout=120.0) as client:
-        response = client.get(
-            "/v1/provider-catalog", params={"workspace_root": workspace_root}
-        )
-    assert response.status_code == 200, response.text
-    try:
-        return in_process_selection(response.json(), prefer_provider_id="mock")
-    except NoSelectableLaneError as exc:
-        pytest.skip(f"a deterministic certification run cannot be selected here: {exc}")
-
-
-def _await_terminal(
-    gateway: CertifiedGateway, run_id: str, *, budget: float
-) -> dict[str, Any]:
-    deadline = time.monotonic() + budget
-    last: dict[str, Any] = {}
-    while time.monotonic() < deadline:
-        response = gateway.status(run_id)
-        if response.status_code == 200:
-            last = response.json()
-            if last.get("status") in _TERMINAL_STATUSES:
-                return last
-        time.sleep(1.0)
-    raise AssertionError(
-        f"run {run_id} never reached a terminal state within {budget:.0f}s; "
-        f"last status snapshot: {last or 'never readable'}"
-    )
-
-
 def test_advertised_assignment_is_the_assignment_the_worker_executes(
     tmp_path: Path,
 ) -> None:
     """Every role executes on the provider and capability admission advertised."""
     roles = _preset_roles()
 
-    tape_server = _tape_server_base()
-    if not tape_server_listening(tape_server):
-        pytest.skip(
-            f"the scripted model backend is unavailable at {tape_server} "
-            f"(set {_TAPE_SERVER_ENV} to an existing one, or supply it: "
-            f"{_SUPPLY_TAPE_SERVER})"
-        )
-
     run_id = f"assignment-agreement-{uuid.uuid4().hex[:12]}"
     with certified_gateway(
         tmp_path,
-        **{
-            _TAPE_SERVER_ENV: tape_server,
-            "VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS": _WORKER_READY_BUDGET_SECONDS,
-        },
+        VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
-        workspace_root = str(tmp_path)
-        selection = _served_in_process_selection(gateway, workspace_root)
-        with gateway.client(timeout=90.0) as client:
-            started = client.post(
-                "/v1/runs",
-                json={
-                    "team_preset": _PRESET,
-                    "stage": "start",
-                    "run_id": run_id,
-                    "message": "Do the task and stop.",
-                    "autonomous": True,
-                    "selection": selection,
-                    "metadata": {"workspace_root": workspace_root},
-                    "actor_tokens": {
-                        "tokens": {role: f"tok-{role}" for role in roles},
-                        "engine_bearer": "bearer",
-                    },
-                },
-            )
+        verbs = replace(gateway.runs, team_preset=_PRESET, tokens=role_tokens(roles))
+        started = verbs.start(run_id, message="Do the task and stop.")
         assert started.status_code == 201, started.text
         frozen = started.json()["frozen_assignment"]
         assert frozen, "run-start must disclose the freeze it dispatched"
 
         # The run must genuinely execute first, so a transport failure fails as
         # itself instead of being read as a disagreement.
-        snapshot = _await_terminal(gateway, run_id, budget=180.0)
+        snapshot = gateway.wait_for_status(run_id, timeout=180.0)
         assert snapshot["status"] == "completed", snapshot
 
         history = gateway.thread_state(run_id)

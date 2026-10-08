@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     from ._codex_app_server_client import _CodexAppServerClient
     from ._json_contract import JsonObject
 
+__all__ = ["verify_authoring_ready"]
+
 
 async def verify_authoring_ready(
     client: _CodexAppServerClient,

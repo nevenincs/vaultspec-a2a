@@ -3,7 +3,7 @@
 Narrowing a served field from a bare string to an enumeration is a breaking
 change for any consumer the moment the service emits a value the enumeration
 does not contain: the response stops serialising and the caller gets a fault
-where it used to get a field. These tests are the evidence that no such value
+where it would get a field. These tests are the evidence that no such value
 exists, and they prove it two independent ways.
 
 The first way is a CAPTURE. Every value in ``LIVE_*`` below was read off a
@@ -31,10 +31,10 @@ import pytest
 from ...control.worker_status import WorkerConnectionStatus
 from ...graph.enums import (
     RESEARCH_ADR_NODE_PHASE,
+    ProviderCondition,
     SemanticPhase,
     research_adr_semantic_phase,
 )
-from ...providers.conditions import ProviderCondition
 from ...team.preset_origin import PresetOrigin
 from ...team.team_config import TopologyType
 from ...thread.enums import (
@@ -66,7 +66,7 @@ LIVE_EXECUTION_READINESS = {"healthy", "needs_reconciliation"}
 LIVE_PROVIDER_CONDITION = {"unknown"}
 LIVE_SEMANTIC_PHASE = {"completed", "failed", "recovery_required"}
 LIVE_TOPOLOGY = {"pipeline", "pipeline_loop", "research_adr", "star"}
-LIVE_ORIGIN = {"bundled", "test_mock"}
+LIVE_ORIGIN = {"bundled"}
 LIVE_WORKER_STATUS = {"up"}
 LIVE_DEGRADED_REASON = {"execution_state_projection_missing"}
 
@@ -112,10 +112,15 @@ def test_narrowed_run_status_accepts_every_captured_combination() -> None:
                 status=ThreadStatus.COMPLETED,
                 semantic_phase=cast("SemanticPhase", phase),
                 topology=TopologyPosition(),
+                # Supplied because the cursor is required, as the read model
+                # declares it: the capture always computes one.
+                last_sequence=0,
                 repair_status=cast("RepairStatus", repair),
                 execution_readiness=cast("RepairStatus", repair),
                 provider_condition=cast("ProviderCondition", "unknown"),
-                degraded_reasons=sorted(LIVE_DEGRADED_REASON),
+                degraded_reasons=cast(
+                    "list[DegradedReason]", sorted(LIVE_DEGRADED_REASON)
+                ),
             )
             assert response.repair_status is RepairStatus(repair)
             assert response.semantic_phase is SemanticPhase(phase)
@@ -220,17 +225,8 @@ def test_node_phase_map_and_prefix_resolution_stay_inside_the_vocabulary() -> No
 
 def test_replay_contract_only_ever_writes_declared_members() -> None:
     """Drive every branch of the replay contract and check what it writes."""
-    from dataclasses import dataclass, field
-
-    from ...thread.snapshots import finalize_snapshot_replay_status
-
-    @dataclass
-    class _Snapshot:
-        replay_status: str = ReplayStatus.UNKNOWN.value
-        snapshot_complete: bool = True
-        degraded_reasons: list[str] = field(default_factory=list)
-        repair_status: str = RepairStatus.HEALTHY.value
-        execution_readiness: str = RepairStatus.HEALTHY.value
+    from ...control.projection import finalize_snapshot_replay_status
+    from ...thread.snapshots import ThreadStateSnapshot
 
     declared_replay = {member.value for member in ReplayStatus}
     declared_reasons = {member.value for member in DegradedReason}
@@ -241,7 +237,11 @@ def test_replay_contract_only_ever_writes_declared_members() -> None:
             for present in (True, False):
                 for status in ThreadStatus:
                     result = finalize_snapshot_replay_status(
-                        _Snapshot(),
+                        ThreadStateSnapshot(
+                            thread_id="replay-contract",
+                            status=status,
+                            last_sequence=0,
+                        ),
                         checkpoint_loaded=loaded,
                         checkpoint_error=error,
                         checkpoint_present=present,
@@ -269,62 +269,64 @@ def test_approval_status_write_gate_admits_only_declared_members() -> None:
     the coercion every writer goes through constructs the enum and raises
     otherwise. Proven against the real coercion, not asserted.
     """
-    from ...database._helpers import _coerce_approval_status
+    from ...database._helpers import _coerce
 
     for member in ApprovalStatus:
-        assert _coerce_approval_status(member.value) is member
-        assert _coerce_approval_status(member) is member
-    with pytest.raises(ValueError):
-        _coerce_approval_status("archived")
+        assert _coerce(ApprovalStatus, member.value, label="approval status") is member
+        assert _coerce(ApprovalStatus, member, label="approval status") is member
+    with pytest.raises(ValueError, match="Invalid approval status"):
+        _coerce(ApprovalStatus, "archived", label="approval status")
 
 
 def test_repair_status_write_gate_admits_only_declared_members() -> None:
     """The same proof for the vocabulary repair_status/execution_readiness share."""
-    from ...database._helpers import _coerce_repair_status
+    from ...database._helpers import _coerce
 
     for member in RepairStatus:
-        assert _coerce_repair_status(member.value) is member
-        assert _coerce_repair_status(member) is member
-    with pytest.raises(ValueError):
-        _coerce_repair_status("reconciling")
+        assert _coerce(RepairStatus, member.value, label="repair status") is member
+        assert _coerce(RepairStatus, member, label="repair status") is member
+    with pytest.raises(ValueError, match="Invalid repair status"):
+        _coerce(RepairStatus, "reconciling", label="repair status")
 
 
-def test_degraded_reason_vocabulary_covers_every_producer_in_the_tree() -> None:
-    """Every reason literal appended anywhere in production is a declared member.
+def test_degraded_reason_producers_hand_over_members_not_literals() -> None:
+    """No production module hands a bare string to a degradation list.
 
-    Sweeps the source rather than trusting a hand-kept list, because the whole
-    hazard this guards is a producer added in a module the reviewer did not
-    open. A literal appended to a snapshot's degradation list that is not a
-    member here is exactly the value that would break the field once narrowed.
+    The served field is narrowed to the enumeration, so a literal that is not a
+    member fails the response rather than the write. Every producer therefore
+    passes a member, and this sweeps the source for any literal path left over,
+    because the whole hazard is a producer added in a module the reviewer did
+    not open.
     """
     import re
     from pathlib import Path
 
     package_root = Path(__file__).resolve().parents[2]
     appended = re.compile(r'degraded_reasons\.append\(\s*"([a-z_]+)"\s*\)')
+    marked = re.compile(r'mark_degraded\([^()]*?"([a-z_]+)"')
     # A payload built with its reasons already in hand never appends: the
     # literal sits in the list handed to the constructor keyword instead.
     constructed = re.compile(r"degraded_reasons=\[([^\]]*)\]")
     quoted = re.compile(r'"([a-z_]+)"')
 
-    declared = {member.value for member in DegradedReason}
     found: dict[str, str] = {}
+    member_references = 0
     for source in package_root.rglob("*.py"):
-        if "tests" in source.parts:
+        if "tests" in source.parts or source.name == "enums.py":
             continue
         text = source.read_text(encoding="utf-8")
-        literals = appended.findall(text)
+        member_references += text.count("DegradedReason.")
+        literals = appended.findall(text) + marked.findall(text)
         for listed in constructed.findall(text):
             literals.extend(quoted.findall(listed))
         for literal in literals:
             found[literal] = str(source.relative_to(package_root))
 
-    undeclared = {
-        value: where for value, where in found.items() if value not in declared
-    }
-    assert not undeclared, f"degraded reasons with no declared member: {undeclared}"
-    # A sweep that found nothing would pass vacuously.
-    assert len(found) >= 8, f"reason sweep found only {len(found)} literals"
+    assert not found, f"degraded reasons handed over as bare strings: {found}"
+    # An absence proves nothing unless the sweep was reading the producers.
+    assert member_references >= 8, (
+        f"reason sweep saw only {member_references} member references"
+    )
 
 
 # --- One declaration per concept -------------------------------------------
@@ -356,7 +358,10 @@ def test_each_served_vocabulary_has_exactly_one_declaration_site() -> None:
         "DocumentCapability": "team/team_config.py",
         "PresetOrigin": "team/preset_origin.py",
         "Provider": "graph/enums.py",
-        "ProviderCondition": "providers/conditions.py",
+        # In Layer 1 beside the lane discriminator, because the run read model
+        # carries it: declared under `providers/`, it could not be named by a
+        # Layer-1 field and run-history published the condition as a bare string.
+        "ProviderCondition": "graph/enums.py",
         "RepairStatus": "thread/enums.py",
         "ReplayStatus": "thread/enums.py",
         "SemanticPhase": "graph/enums.py",
@@ -503,8 +508,8 @@ def test_the_capability_and_mechanism_keyings_disagree_on_exactly_two_presets() 
 
     ``vaultspec-doc-editor`` authors documents (role ``doc-editor``) but submits
     through the model's bridged tool rather than the direct path, so it is
-    document-authoring WITHOUT a submitter. This is the case the re-key existed
-    to fix, and the disagreement here is the fix working.
+    document-authoring WITHOUT a submitter. This is the case the re-key exists
+    for, and the disagreement here is the re-key working.
 
     ``deterministic-failure`` reuses the REAL researcher and synthesist agents to
     script a guaranteed graph-budget failure, so it DECLARES document-authoring

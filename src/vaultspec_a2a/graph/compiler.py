@@ -22,29 +22,27 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
+    from langchain_core.language_models import BaseChatModel
     from langchain_core.runnables import RunnableConfig
     from langchain_core.runnables.graph import Graph as DrawableGraph
     from langgraph.checkpoint.base import BaseCheckpointSaver
+    from langgraph.store.base import BaseStore
     from langgraph.types import Command, RetryPolicy
 
     from ..authoring import FeedbackContextReader
+    from ..providers.team_selection import FrozenLaneAssignment
     from ..worker.authoring_binding import AuthoringBindingProvider
     from .nodes.phase_gate import DocumentProposalSubmitter
     from .protocols import (
         CostPort,
         ProviderFactoryProtocol,
         RuntimeIdentityPort,
-        TaskQueuePort,
     )
 
 from langgraph.graph import END, StateGraph
 from langgraph.types import TimeoutPolicy
 
 from ..domain_config import domain_config
-from ..thread.clarification import (
-    CLARIFICATION_TOPOLOGIES,
-    topology_honours_clarification,
-)
 from ..thread.errors import (
     ConfigError,
 )
@@ -64,7 +62,7 @@ from .nodes.diverge import (
     researcher_node_name,
 )
 from .nodes.vault_reader import create_context_mounter
-from .nodes.worker import WorkerNode, create_worker_node
+from .nodes.worker import WorkerNode, WorkerNodeOptions, create_worker_node
 from .run_context import RunContext
 
 logger = logging.getLogger(__name__)
@@ -74,13 +72,14 @@ __all__ = [
     "STEP_BACKSTOP_GRACE_SECONDS",
     "_ROLE_TO_PHASE",
     "CompiledTeamGraph",
-    "_add_node",
     "_agent_node_metadata",
     "_compile_worker_node",
-    "_loop_route",
     "_route_from_supervisor",
     "_wire_diverge_stage",
+    "add_graph_node",
+    "compile_graph_builder",
     "compile_team_graph",
+    "new_graph_builder",
     "required_recursion_limit_for_finish_blocks",
 ]
 
@@ -131,11 +130,26 @@ class _TypedBuilder(Protocol):
         checkpointer: BaseCheckpointSaver[str] | bool | None = ...,
         *,
         interrupt_before: list[str] | None = ...,
+        store: BaseStore | None = ...,
         name: str | None = ...,
     ) -> object: ...
 
 
-def _add_node(
+def new_graph_builder(
+    state_schema: type[Any],
+    *,
+    context_schema: type[Any] | None = None,
+) -> StateGraph[Any, Any, Any, Any]:
+    """Return a ``StateGraph`` builder over ``state_schema``.
+
+    The schema reaches langgraph as ``Any``, so any ``TypedDict`` state is
+    accepted without each caller repeating the cast. ``context_schema`` declares
+    the per-run context a node receives; unset, the graph carries none.
+    """
+    return StateGraph(cast("Any", state_schema), context_schema=context_schema)
+
+
+def add_graph_node(
     builder: StateGraph[Any, Any, Any, Any],
     name: str,
     node: Callable[..., Any],
@@ -146,10 +160,11 @@ def _add_node(
     langgraph's own ``add_node`` overloads default ``cache_policy`` to a bare
     ``CachePolicy[Unknown]`` in its shipped source (not just a stub gap), so
     the member access itself is permanently partially-typed regardless of the
-    arguments passed at a given call site. Every ``add_node`` call in this
-    module routes through here instead of the library method directly, so
-    that irreducible diagnostic is paid once, at this boundary, rather than at
-    each of the two dozen call sites that would otherwise repeat it.
+    arguments passed at a given call site. Every ``add_node`` call in the
+    compiler, and in the test-side graph builders, routes through here instead
+    of the library method directly, so that irreducible diagnostic is paid
+    once, at this boundary, rather than at each of the call sites that would
+    otherwise repeat it.
 
     Every key is forwarded whether or not the caller set it, so an unset
     option reaches langgraph as the explicit ``None`` this boundary has always
@@ -179,36 +194,41 @@ def _set_node_defaults(
 ) -> None:
     """Apply graph-wide node defaults behind the same typed call boundary.
 
-    Mirrors ``_add_node``: langgraph declares ``cache_policy`` here as a bare
-    ``CachePolicy[Unknown]`` too, so the member read is partially unknown
+    Mirrors ``add_graph_node``: langgraph declares ``cache_policy`` here as a
+    bare ``CachePolicy[Unknown]`` too, so the member read is partially unknown
     whatever this module passes. Going through the protocol is what makes the
     one argument this project actually sets a checked argument.
     """
     cast("_TypedBuilder", builder).set_node_defaults(timeout=timeout)
 
 
-def _compile_graph(
+def compile_graph_builder(
     builder: StateGraph[Any, Any, Any, Any],
     *,
-    checkpointer: BaseCheckpointSaver[str] | None,
-    interrupt_before: list[str] | None,
-    name: str,
+    checkpointer: BaseCheckpointSaver[str] | bool | None = None,
+    interrupt_before: list[str] | None = None,
+    store: BaseStore | None = None,
+    name: str | None = None,
 ) -> CompiledTeamGraph:
     """Compile ``builder`` behind one fully-typed call boundary.
 
-    Mirrors ``_add_node``: langgraph's ``compile`` overloads carry the same
+    Mirrors ``add_graph_node``: langgraph's ``compile`` overloads carry the same
     unresolved ``BaseCheckpointSaver[Unknown]``-shaped defaults in their own
     source, so this is the single place that diagnostic is paid.
 
     ``name`` is the team the graph was compiled from. Unnamed, every compiled
     graph reports itself as ``LangGraph``, so a trace, a stream event or a
     subgraph label could not say which team produced it - and a worker process
-    holds several compiled graphs at once.
+    holds several compiled graphs at once. Only a graph with no team behind it,
+    such as a test fixture, is left unnamed.
     """
     return cast(
         "CompiledTeamGraph",
         cast("_TypedBuilder", builder).compile(
-            checkpointer, interrupt_before=interrupt_before, name=name
+            checkpointer,
+            interrupt_before=interrupt_before,
+            store=store,
+            name=name,
         ),
     )
 
@@ -314,10 +334,8 @@ def _agent_node_metadata(
 
 class _CompileWorkerOptions(TypedDict):
     provider_factory: ProviderFactoryProtocol
-    frozen_assignment: dict[str, dict[str, Any]] | None
+    frozen_assignment: dict[str, FrozenLaneAssignment] | None
     autonomous: bool
-    feature_tag: str | None
-    task_queue_port: TaskQueuePort | None
     cost_port: CostPort | None
     runtime_identity_port: RuntimeIdentityPort | None
     authoring_binding_provider: AuthoringBindingProvider | None
@@ -347,6 +365,11 @@ def _compile_worker_node(
     a worker that never advertised it - a declaration the config layer parsed,
     validated, and then dropped on the floor.
 
+    A worker handed an authoring binding provider is checked for an attachment
+    surface on the model built here, the one the node will invoke, so a preset
+    whose lane cannot mount the bridge is refused at compile time rather than
+    one turn later, inside the run.
+
     Deliberately stops short of ``builder.add_node``. pipeline_loop wraps
     exactly one returned node - its own loop node - in ``_wrap_loop_node``
     before adding it, which needs a seam between "node built" and "node added"
@@ -366,37 +389,67 @@ def _compile_worker_node(
         provider_factory=options["provider_factory"],
         frozen_assignment=options["frozen_assignment"],
     )
-    # Flat and team-level, exactly as the research_adr path reads it: the harness
-    # schema carries no per-role MCP field, so every worker of the team gets the
-    # team's declaration. Empty when no harness is declared, which composes to a
-    # no-op rather than to some inherited default.
-    harness = team_config.effective_harness()
+    if options["authoring_binding_provider"] is not None:
+        _require_authoring_attach_surface(team_config, worker_ref, model)
     worker_node = create_worker_node(
         model,
         composed_worker_prompt(agent_cfg, model),
         name=agent_cfg.id,
-        autonomous=options["autonomous"],
-        workspace_root=workspace_root,
-        feature_tag=options["feature_tag"],
-        task_queue_port=options["task_queue_port"],
-        cost_port=options["cost_port"],
-        runtime_identity_port=options["runtime_identity_port"],
-        authoring_binding_provider=options["authoring_binding_provider"],
-        role=agent_cfg.role,
-        # The same role-to-phase reading the supervisor gates on, so the worker
-        # the completion gate reroutes a blocked FINISH to is the worker whose
-        # return retires the validation errors that blocked it. Reading it here
-        # keeps the mapping in the one place that owns it.
-        phase=_ROLE_TO_PHASE.get(agent_cfg.role),
-        harness_mcp_servers=list(harness.mcp_servers) if harness is not None else [],
-        # Every worker these topologies compile sits behind a mount node that
-        # refreshes the vault index; the worker expands the documents itself.
-        context_mounter=create_context_mounter(
-            workspace_root, options["task_queue_port"]
+        options=WorkerNodeOptions(
+            autonomous=options["autonomous"],
+            workspace_root=workspace_root,
+            cost_port=options["cost_port"],
+            runtime_identity_port=options["runtime_identity_port"],
+            authoring_binding_provider=options["authoring_binding_provider"],
+            role=agent_cfg.role,
+            # The same role-to-phase reading the supervisor gates on, so the worker
+            # the completion gate reroutes a blocked FINISH to is the worker whose
+            # return retires the validation errors that blocked it. Reading it here
+            # keeps the mapping in the one place that owns it.
+            phase=_ROLE_TO_PHASE.get(agent_cfg.role),
+            harness_mcp_servers=team_config.harness_mcp_servers(),
+            # Every worker these topologies compile sits behind a mount node that
+            # refreshes the vault index; the worker expands the documents itself.
+            context_mounter=create_context_mounter(workspace_root),
         ),
     )
     metadata = _agent_node_metadata(agent_cfg, used_provider, model_name)
     return worker_node, metadata
+
+
+def _require_authoring_attach_surface(
+    team_config: Any, worker_ref: Any, model: BaseChatModel
+) -> None:
+    """Refuse a bridged worker whose model has no surface to mount the bridge on.
+
+    ``providers._acp_authoring.attach_authoring_tools`` dispatches the run's
+    authoring binding onto the model's own surface (``with_mcp_servers`` for
+    the ACP lane, ``with_authoring_mcp_server`` for Codex) and raises when a
+    model exposes neither - but per turn, inside the worker node, once the run
+    has already started burning its step timeout. This asks the same question
+    of the model compilation built, so a lane with no attachment surface is
+    refused with a served compile-time reason before the run ever starts.
+
+    Scoped to the authoring binding because harness ``mcp_servers`` composition
+    fails softly: ``compose_harness_mcp_servers`` returns a model with no
+    delivery surface unchanged rather than raising, so there is no per-turn
+    error for a compile-time refusal to pull forward. No credential is checked
+    here: providers authenticate from the environment they inherit and report
+    an unauthenticated lane at run time.
+    """
+    from ..providers._acp_authoring import has_authoring_attach_surface
+
+    if has_authoring_attach_surface(model):
+        return
+    raise ConfigError(
+        f"harness-armed preset {team_config.id!r} declares "
+        "[team.harness] authoring_bridge = true, but the following worker(s) "
+        f"resolved to a provider with no authoring attachment surface: "
+        f"{worker_ref.agent_id!r} ({type(model).__name__}). The declared "
+        "authoring tools cannot mount onto this provider; refusing before the "
+        "run starts rather than spawning an agent whose tools silently never "
+        "attach."
+    )
 
 
 class _DivergeStageArgs(TypedDict):
@@ -451,7 +504,7 @@ def _wire_diverge_stage(
     researcher_names: list[str] = []
     for index, spec in enumerate(specs):
         name = researcher_node_name(dispatch_name, index)
-        _add_node(
+        add_graph_node(
             builder,
             name,
             make_researcher(spec),
@@ -461,7 +514,7 @@ def _wire_diverge_stage(
         builder.add_edge(name, synthesis_name)
         researcher_names.append(name)
 
-    _add_node(
+    add_graph_node(
         builder,
         dispatch_name,
         create_research_dispatch_node(researcher_names),
@@ -561,15 +614,6 @@ def _validate_compiled_topology(
             f"Unknown topology type: {topology.type!r}. "
             f"Expected one of: {[t.value for t in TopologyType]}"
         )
-    if getattr(team_config, "clarification", None) is not None and (
-        not topology_honours_clarification(topology.type)
-    ):
-        raise ConfigError(
-            f"Team {getattr(team_config, 'id', '?')!r} declares a clarification "
-            f"questionnaire on topology {topology.type.value!r}, which compiles no "
-            f"clarification stage; the questions would never be asked. Topologies "
-            f"that ask: {sorted(CLARIFICATION_TOPOLOGIES)}."
-        )
     if topology.type == TopologyType.STAR:
         # Only the star compiles a supervisor, so only the star can spend this
         # budget; every other topology's recursion limit is its own business.
@@ -602,36 +646,18 @@ def _route_from_supervisor(state: TeamState) -> str:
     return next_route
 
 
-def _loop_route(*, revision_requested: bool, loop_count: int, max_loops: int) -> str:
-    """Decide a pipeline-loop node's next hop: ``"revise"`` or ``"FINISH"``.
-
-    The pure routing decision behind the ``_loop_router`` closure, lifted to
-    module scope so it is testable without compiling a graph. The loop goes
-    round again only when the loop node's own verdict asks for revision; the
-    ``max_loops`` guard forces ``"FINISH"`` once the counter reaches the
-    ceiling, whatever the verdict. The early exit used to wait for a literal
-    ``"FINISH"`` in ``next``, which no worker writes, so every loop ran to its
-    ceiling.
-    """
-    if loop_count >= max_loops:
-        return "FINISH"
-    return "revise" if revision_requested else "FINISH"
-
-
 class _CompileTeamOptional(TypedDict, total=False):
     checkpointer: BaseCheckpointSaver[str] | None
     supervisor_agent_config: Any | None
     workspace_root: Path | None
     autonomous: bool
     step_timeout: float | None
-    feature_tag: str | None
-    task_queue_port: TaskQueuePort | None
     cost_port: CostPort | None
     runtime_identity_port: RuntimeIdentityPort | None
     proposal_submitter: DocumentProposalSubmitter | None
     feedback_reader: FeedbackContextReader | None
     authoring_binding_provider: AuthoringBindingProvider | None
-    model_assignment: dict[str, dict[str, Any]] | None
+    model_assignment: dict[str, FrozenLaneAssignment] | None
 
 
 class _CompileTeamOptions(_CompileTeamOptional):
@@ -667,9 +693,6 @@ def compile_team_graph(
                                  ACP models auto-approve tool calls (headless
                                  MCP-launched runs).
         step_timeout:            Positive timeout from accepted graph authority.
-        feature_tag:             Optional feature tag for task-queue scoping.
-        task_queue_port:         Optional database-backed task-queue port
-                                 injected into worker and mount nodes.
         provider_factory:        Provider factory for model creation.
 
     Returns:
@@ -677,9 +700,7 @@ def compile_team_graph(
 
     Raises:
         ConfigError: If a worker agent_id from team_config is not in agent_configs,
-                     if topology configuration is invalid, or if a clarification
-                     questionnaire is declared on a topology that mounts no
-                     clarification stage.
+                     or if topology configuration is invalid.
         ValueError:  If an unknown topology type is encountered.
     """
     from ..team.team_config import TopologyType
@@ -694,8 +715,6 @@ def compile_team_graph(
     workspace_root = options.get("workspace_root")
     autonomous = options.get("autonomous", False)
     step_timeout = options.get("step_timeout")
-    feature_tag = options.get("feature_tag")
-    task_queue_port = options.get("task_queue_port")
     cost_port = options.get("cost_port")
     runtime_identity_port = options.get("runtime_identity_port")
     proposal_submitter = options.get("proposal_submitter")
@@ -713,14 +732,12 @@ def compile_team_graph(
 
     validate_frozen_assignment_inventory(model_assignment)
 
-    builder: StateGraph[Any, RunContext, Any, Any] = StateGraph(
-        cast("Any", TeamState), context_schema=RunContext
-    )
+    builder = new_graph_builder(TeamState, context_schema=RunContext)
     # Every node attempt is capped at the preset's step budget. No idle limit:
     # a provider CLI running a long tool call relays no LangChain callback while
     # it works, so an idle clock would fell agents that are making progress.
     _set_node_defaults(builder, timeout=TimeoutPolicy(run_timeout=step_timeout))
-    _add_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
+    add_graph_node(builder, GRAPH_COMPLETION_NODE, record_graph_completion)
     builder.add_edge(GRAPH_COMPLETION_NODE, END)
     topology = team_config.topology
 
@@ -738,8 +755,6 @@ def compile_team_graph(
             provider_factory=provider_factory,
             workspace_root=workspace_root,
             autonomous=autonomous,
-            feature_tag=feature_tag,
-            task_queue_port=task_queue_port,
             cost_port=cost_port,
             runtime_identity_port=runtime_identity_port,
             authoring_binding_provider=authoring_binding_provider,
@@ -753,8 +768,6 @@ def compile_team_graph(
             provider_factory=provider_factory,
             workspace_root=workspace_root,
             autonomous=autonomous,
-            feature_tag=feature_tag,
-            task_queue_port=task_queue_port,
             cost_port=cost_port,
             runtime_identity_port=runtime_identity_port,
             authoring_binding_provider=authoring_binding_provider,
@@ -769,8 +782,6 @@ def compile_team_graph(
             provider_factory=provider_factory,
             workspace_root=workspace_root,
             autonomous=autonomous,
-            feature_tag=feature_tag,
-            task_queue_port=task_queue_port,
             cost_port=cost_port,
             runtime_identity_port=runtime_identity_port,
             authoring_binding_provider=authoring_binding_provider,
@@ -796,7 +807,7 @@ def compile_team_graph(
             "Expected 'star', 'pipeline', 'pipeline_loop', or 'research_adr'."
         )
 
-    graph = _compile_graph(
+    graph = compile_graph_builder(
         builder,
         checkpointer=options.get("checkpointer"),
         interrupt_before=interrupt_nodes,

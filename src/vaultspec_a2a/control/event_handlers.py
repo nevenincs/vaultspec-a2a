@@ -1,47 +1,42 @@
 """Event handlers for worker → gateway relay.
 
 Business-logic handlers that persist worker events into the database,
-manage permission state machines, and perform aggregator GC on thread
-termination.  Extracted from ``api/internal.py`` to decouple protocol
-translation from domain logic.
+journal permission requests, re-project the run's pause, and release the
+relay hub's run state on thread termination.  They live here, not in
+``api/internal.py``, so the route keeps to protocol translation and the domain
+logic stays out of it.
 
-The :func:`relay_event` orchestrator consolidates the duplicated 4-handler
-call sequence that previously appeared in 3 call sites.
+The :func:`relay_event` orchestrator runs the one handler sequence every
+relayed worker event goes through.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from dataclasses import asdict, dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 
-from ..graph.enums import ServerEventType
+from ..graph.enums import ProviderCondition, ServerEventType
 from ..ipc.schemas import (
     ExecutionStateProjectionPayload,
 )
-from ..providers import ProviderCondition
+from ..thread import named_request_id
 from ..thread.cancellation_evidence import CancellationEvidence
 from ..thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
-from ..thread.enums import ThreadStatus
-from ..thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
-from ..thread.permission_fsm import (
-    compute_permission_request_effects,
-)
+from ..thread.enums import TERMINAL_STATUS_VALUES, InterruptType, ThreadStatus
+from ..thread.failure_evidence import GraphFailureEvidence
+from ..thread.idempotency import permission_request_action_key
 from ..thread.snapshots import (
-    TERMINAL_STATUS_MAP,
     classify_permission_pause_reason,
     is_permission_event,
     is_terminal_event,
+    wire_event_type,
 )
-from ..thread.terminal_effects import compute_terminal_effects
-from ..utils.coercion import coerce_object_mapping
-from ._event_application import (
-    apply_permission_resolution as _apply_permission_resolution,
-)
+from ..utils.coercion import decode_json_object
 from ._event_application import (
     commit_proven_application as _commit_proven_application,
 )
@@ -51,19 +46,27 @@ from ._event_application import (
 from ._event_application import (
     validated_application_receipt as _validated_application_receipt,
 )
+from ._thread_metadata import run_lease_id
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ..database.checkpoints import Checkpointer
-    from ..database.thread_repository import ThreadWriteExpectation
-    from ..streaming.aggregator import EventAggregator
+    from ..database import (
+        Checkpointer,
+        ControlActionModel,
+        ThreadModel,
+        ThreadStatusElectionOutcome,
+    )
+    from ..streaming import RelayHub
+    from ..thread import ProjectedInterrupt
     from .drain import DrainGate
+    from .terminal_settlement import TerminalEvidence
 
 __all__ = [
     "CheckpointPruneRegistry",
+    "RelayServices",
     "_handle_execution_state_event",
     "_handle_permission_event",
     "_handle_progress_event",
@@ -73,25 +76,10 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-_TERMINAL_STATUS_MAP = TERMINAL_STATUS_MAP
-
-
-def _time_now_utc() -> datetime:
-    """Return the current UTC timestamp for durable terminal effects."""
-    from datetime import UTC
-
-    return datetime.now(UTC)
-
-
-# The metadata key binding a run to its non-secret admission lease identity,
-# written by the gateway at commit; restated inline here to read it back, matching
-# the metadata convention the frozen model profile uses.
-_RUN_LEASE_METADATA_KEY = "run_lease"
 
 # Strong references to in-flight settlement callbacks so a fire-and-forget task is
 # not garbage-collected before it completes; each removes itself when done.
 _settlement_tasks: set[asyncio.Task[None]] = set()
-_JSON_OBJECT = TypeAdapter(dict[str, object])
 _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
 
 
@@ -104,18 +92,22 @@ _OPTION_MAPPINGS = TypeAdapter(list[dict[str, object]])
 type _TerminalPublisher = Callable[[], None]
 
 
-class _TerminalEventOptions(TypedDict, total=False):
-    aggregator: EventAggregator | None
-    session_factory: async_sessionmaker[AsyncSession] | None
-    checkpointer: Checkpointer | None
-    drain_gate: DrainGate | None
-    prune_registry: CheckpointPruneRegistry | None
-    publish_terminal: _TerminalPublisher | None
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RelayServices:
+    """The collaborators a relayed worker event is handled against.
 
+    Each is optional because a process may own none of them: without a session
+    factory the durable writes are skipped, without a checkpointer the handlers
+    that need checkpoint proof decline, and without a drain gate, prune registry
+    or relay hub there is nothing to release.
+    """
 
-#: Read off the declaration rather than restated, so a new option cannot be
-#: accepted by one handler and rejected as unknown by the other.
-_RELAY_OPTIONS = frozenset(_TerminalEventOptions.__optional_keys__)
+    relay_hub: RelayHub | None = None
+    session_factory: async_sessionmaker[AsyncSession] | None = None
+    checkpointer: Checkpointer | None = None
+    drain_gate: DrainGate | None = None
+    prune_registry: CheckpointPruneRegistry | None = None
+    publish_terminal: _TerminalPublisher | None = None
 
 
 def _session_factory(
@@ -139,6 +131,63 @@ def _session_factory(
     return configured
 
 
+async def _keep_settlement_if_won(
+    db: AsyncSession, outcome: ThreadStatusElectionOutcome
+) -> bool:
+    """Commit a worker-evidence settlement whose election won; discard any other."""
+    from ..database import ThreadStatusElectionOutcome
+
+    if outcome is not ThreadStatusElectionOutcome.WON:
+        await db.rollback()
+        return False
+    await db.commit()
+    return True
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _ProvenTerminal:
+    """One terminal the worker's own evidence asks the control plane to settle.
+
+    *prove* judges the locked run and the journal action the evidence names,
+    and returns what to settle them with, or ``None`` when the pair does not
+    admit this evidence.
+    """
+
+    thread_id: str
+    dispatch_id: str
+    status: ThreadStatus
+    last_sequence: int | None
+    prove: Callable[[ThreadModel, ControlActionModel], TerminalEvidence | None]
+
+
+async def _settle_proven_terminal(
+    factory: async_sessionmaker[AsyncSession], terminal: _ProvenTerminal
+) -> bool:
+    """Lock the run, find the action its evidence names, and settle if proven."""
+    from ..database import get_control_action_by_dispatch_id
+    from .terminal_settlement import lock_terminal_run, settle_terminal
+
+    async with factory() as db:
+        thread = await lock_terminal_run(db, terminal.thread_id)
+        action = await get_control_action_by_dispatch_id(
+            db, thread_id=terminal.thread_id, dispatch_id=terminal.dispatch_id
+        )
+        proof = (
+            None if thread is None or action is None else terminal.prove(thread, action)
+        )
+        if thread is None or proof is None:
+            await db.rollback()
+            return False
+        outcome = await settle_terminal(
+            db,
+            thread,
+            terminal.status,
+            evidence=proof,
+            last_sequence=terminal.last_sequence,
+        )
+        return await _keep_settlement_if_won(db, outcome)
+
+
 async def _persist_proven_cancellation(
     factory: async_sessionmaker[AsyncSession],
     *,
@@ -147,100 +196,45 @@ async def _persist_proven_cancellation(
     last_sequence: int | None,
 ) -> bool:
     """Elect and settle one exact current cancellation terminal."""
-    from ..database import (
-        ThreadStatusElectionOutcome,
-        begin_write_transaction,
-        elect_thread_status,
-        expire_pending_permission_requests,
-        get_control_action_by_dispatch_id,
-        mark_control_action_applied,
-        set_thread_approval_state,
-        set_thread_repair_state,
-        successor_thread_write_authority,
-        thread_write_expectation,
-    )
+    from ..database import thread_write_expectation
     from ..thread.enums import ControlActionResultStatus, ControlActionType
-    from .repositories.continuation_queue import (
-        lock_run_for_continuation_decision,
-        refuse_queued_continuations,
-    )
+    from .terminal_settlement import TerminalEvidence
 
-    async with factory() as db:
-        await begin_write_transaction(db)
-        # Locked against the same row an admission locks, so a continuation
-        # offered while this settles either lands before it and is refused
-        # below, or reads the cancelled status and is refused there.
-        thread = await lock_run_for_continuation_decision(db, thread_id=thread_id)
-        action = await get_control_action_by_dispatch_id(
-            db, thread_id=thread_id, dispatch_id=evidence.dispatch_id
-        )
-        if thread is None or action is None:
-            await db.rollback()
-            return False
+    def prove(
+        thread: ThreadModel, action: ControlActionModel
+    ) -> TerminalEvidence | None:
+        expectation = thread_write_expectation(thread)
         if (
             action.action_type != ControlActionType.CANCEL.value
             or thread.status
             not in {ThreadStatus.CANCELLING.value, ThreadStatus.RECONCILING.value}
-            or thread.writer_action_type != ControlActionType.CANCEL.value
-            or thread.writer_action_receipt_id != evidence.dispatch_id
+            or not expectation.authority.owned_by(
+                ControlActionType.CANCEL, evidence.dispatch_id
+            )
         ):
-            await db.rollback()
-            return False
-        expectation = thread_write_expectation(thread)
-        election = await elect_thread_status(
-            db,
-            thread_id,
+            return None
+        return TerminalEvidence(
             expectation=expectation,
-            status=ThreadStatus.CANCELLED,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=ControlActionType.CANCEL,
-                action_receipt_id=evidence.dispatch_id,
-            ),
-        )
-        if election.outcome is not ThreadStatusElectionOutcome.WON:
-            await db.rollback()
-            return False
-        if last_sequence is not None:
-            thread.last_sequence = last_sequence
-        await refuse_queued_continuations(
-            db,
-            thread_id=thread_id,
-            refused_at=_time_now_utc(),
-            reason="the run was cancelled",
-        )
-        await expire_pending_permission_requests(db, thread_id=thread_id)
-        await set_thread_approval_state(
-            db,
-            thread_id,
-            approval_status=None,
-            approval_request_id=None,
-            approval_reason=None,
-            approval_response_action_id=None,
-        )
-        await mark_control_action_applied(
-            db,
-            action.id,
-            applied_at=_time_now_utc(),
+            action_id=action.id,
+            action_type=ControlActionType.CANCEL,
+            action_receipt_id=evidence.dispatch_id,
             result_status=(
                 ControlActionResultStatus.CANCELLED_CEASED
                 if evidence.outcome == "ceased"
                 else ControlActionResultStatus.CANCELLED_NO_ACTIVE_WORK
             ),
         )
-        effects = compute_terminal_effects(
-            ThreadStatus.CANCELLED, has_cancel_action=True
-        )
-        await set_thread_repair_state(
-            db,
-            thread_id,
-            repair_status=effects.repair_status,
-            repair_reason=effects.repair_reason,
-            execution_readiness=effects.repair_status.value,
-            last_applied_action=effects.last_applied_action,
-        )
-        await db.commit()
-        return True
+
+    return await _settle_proven_terminal(
+        factory,
+        _ProvenTerminal(
+            thread_id=thread_id,
+            dispatch_id=evidence.dispatch_id,
+            status=ThreadStatus.CANCELLED,
+            last_sequence=last_sequence,
+            prove=prove,
+        ),
+    )
 
 
 async def _persist_proven_failure(
@@ -252,88 +246,38 @@ async def _persist_proven_failure(
     last_sequence: int | None,
 ) -> bool:
     """Elect and settle one failure for the exact current graph action."""
-    from ..database import (
-        ThreadStatusElectionOutcome,
-        begin_write_transaction,
-        elect_thread_status,
-        expire_pending_permission_requests,
-        get_control_action_by_dispatch_id,
-        mark_control_action_applied,
-        set_thread_approval_state,
-        set_thread_repair_state,
-        successor_thread_write_authority,
-        thread_write_expectation,
-    )
+    from ..database import thread_write_expectation
     from ..thread.enums import NON_ACTIVE_STATUSES
     from .dispatch_receipts import validate_current_graph_receipt
-    from .repositories.continuation_queue import (
-        lock_run_for_continuation_decision,
-        refuse_queued_continuations,
-    )
+    from .terminal_settlement import TerminalEvidence
 
-    async with factory() as db:
-        await begin_write_transaction(db)
-        # Locked against the same row an admission locks, so a continuation
-        # offered while this settles either lands before it and is refused
-        # below, or reads the failed status and is refused there.
-        thread = await lock_run_for_continuation_decision(db, thread_id=thread_id)
-        action = await get_control_action_by_dispatch_id(
-            db, thread_id=thread_id, dispatch_id=evidence.action.dispatch_id
-        )
+    def prove(
+        thread: ThreadModel, action: ControlActionModel
+    ) -> TerminalEvidence | None:
         if (
-            thread is None
-            or action is None
-            or ThreadStatus(thread.status) in NON_ACTIVE_STATUSES
+            ThreadStatus(thread.status) in NON_ACTIVE_STATUSES
             or validate_current_graph_receipt(thread, action) != evidence.action
         ):
-            await db.rollback()
-            return False
-        expectation = thread_write_expectation(thread)
-        election = await elect_thread_status(
-            db,
-            thread_id,
-            expectation=expectation,
-            status=ThreadStatus.FAILED,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=evidence.action.action_type,
-                action_receipt_id=evidence.action.dispatch_id,
-            ),
+            return None
+        return TerminalEvidence(
+            expectation=thread_write_expectation(thread),
+            action_id=action.id,
+            action_type=evidence.action.action_type,
+            action_receipt_id=evidence.action.dispatch_id,
             failure_reason=failure_reason,
             provider_condition=evidence.provider_condition,
         )
-        if election.outcome is not ThreadStatusElectionOutcome.WON:
-            await db.rollback()
-            return False
-        if last_sequence is not None:
-            thread.last_sequence = last_sequence
-        await mark_control_action_applied(db, action.id)
-        await refuse_queued_continuations(
-            db,
+
+    return await _settle_proven_terminal(
+        factory,
+        _ProvenTerminal(
             thread_id=thread_id,
-            refused_at=_time_now_utc(),
-            reason="the run's turn failed",
-        )
-        await expire_pending_permission_requests(db, thread_id=thread_id)
-        await set_thread_approval_state(
-            db,
-            thread_id,
-            approval_status=None,
-            approval_request_id=None,
-            approval_reason=None,
-            approval_response_action_id=None,
-        )
-        effects = compute_terminal_effects(ThreadStatus.FAILED, has_cancel_action=False)
-        await set_thread_repair_state(
-            db,
-            thread_id,
-            repair_status=effects.repair_status,
-            repair_reason=effects.repair_reason,
-            execution_readiness=effects.repair_status.value,
-            last_applied_action=effects.last_applied_action,
-        )
-        await db.commit()
-        return True
+            dispatch_id=evidence.action.dispatch_id,
+            status=ThreadStatus.FAILED,
+            last_sequence=last_sequence,
+            prove=prove,
+        ),
+    )
 
 
 def _skip_without_database(what: str, thread_id: str) -> None:
@@ -349,14 +293,6 @@ def _skip_without_database(what: str, thread_id: str) -> None:
         thread_id,
         extra={"thread_id": thread_id, "action": "durable_write_skipped_no_database"},
     )
-
-
-def _json_object(encoded: str) -> dict[str, object] | None:
-    """Decode a JSON object without leaking untyped decoder output."""
-    try:
-        return _JSON_OBJECT.validate_json(encoded)
-    except ValidationError:
-        return None
 
 
 def _option_mappings(value: object) -> list[dict[str, object]]:
@@ -379,7 +315,7 @@ def _schedule_terminal_settlement(
     slow or unreachable dashboard never stalls worker event relay; the emitter is
     itself bounded and never raises.
     """
-    from ..control.config import settings
+    from .config import settings
 
     if not settings.desktop_profile_armed:
         return
@@ -424,16 +360,9 @@ async def _read_run_lease(
 
     async with session_factory() as db:
         thread = await get_thread(db, thread_id)
-    if thread is None or not thread.thread_metadata:
+    if thread is None:
         return None
-    data = _json_object(thread.thread_metadata)
-    if data is None:
-        return None
-    lease = coerce_object_mapping(data.get(_RUN_LEASE_METADATA_KEY))
-    if lease is None:
-        return None
-    lease_id: object = lease.get("lease_id")
-    return lease_id if isinstance(lease_id, str) and lease_id else None
+    return run_lease_id(decode_json_object(thread.thread_metadata))
 
 
 async def _confirm_completed_terminal(
@@ -569,9 +498,10 @@ def _parse_failure_terminal(
         condition = ProviderCondition(raw_condition)
     except (TypeError, ValueError):
         return None
-    if (
-        evidence.detail_fingerprint != failure_detail_fingerprint(error_detail)
-        or evidence.provider_condition != condition.value
+    if not evidence.matches(
+        thread_id=thread_id,
+        error_detail=error_detail,
+        provider_condition=condition.value,
     ):
         logger.warning(
             "Refusing mismatched failure evidence for thread %s",
@@ -616,14 +546,11 @@ def _validated_terminal_status(
 ) -> ThreadStatus | None:
     """Reject evidence attached to a different terminal outcome."""
     payload_status = payload.get("status")
-    status_str = (
-        _TERMINAL_STATUS_MAP.get(payload_status)
-        if isinstance(payload_status, str)
-        else None
-    )
-    if not status_str:
+    if not isinstance(payload_status, str) or payload_status not in (
+        TERMINAL_STATUS_VALUES
+    ):
         return None
-    status = ThreadStatus(status_str)
+    status = ThreadStatus(payload_status)
     if (
         payload.get("cancellation_evidence") is not None
         and status is not ThreadStatus.CANCELLED
@@ -704,12 +631,12 @@ async def _prune_settled_history(
     """
     if checkpointer is None:
         return
-    from ..database.checkpoints import prune_settled_thread
+    from ..database import prune_settled_checkpoints
     from ..domain_config import domain_config
 
     try:
         await asyncio.wait_for(
-            prune_settled_thread(checkpointer, thread_id),
+            prune_settled_checkpoints(checkpointer, thread_id),
             timeout=domain_config.aget_state_timeout_seconds,
         )
     except Exception:
@@ -778,9 +705,9 @@ def _publish_terminal(thread_id: str, publish: _TerminalPublisher | None) -> Non
 async def _handle_terminal_event(
     thread_id: str,
     payload: dict[str, object],
-    **options: Unpack[_TerminalEventOptions],
+    services: RelayServices | None = None,
 ) -> None:
-    """Settle a proven terminal event, then release drain and aggregator state.
+    """Settle a proven terminal event, then release drain and relay hub state.
 
     Also the gate on the client-visible terminal frame. The relay hands the
     frame over as *publish_terminal* rather than fanning it out itself,
@@ -790,40 +717,37 @@ async def _handle_terminal_event(
     cannot take back. A refused terminal also cannot be shown: a delayed
     first-turn event may arrive after recovery already promoted its successor.
     Only a settled run publishes, before the prune, drain release and
-    aggregator purge that would otherwise make the frame undeliverable.
+    relay hub purge that would otherwise make the frame undeliverable.
     """
-    unknown = set(options).difference(_RELAY_OPTIONS)
-    if unknown:
-        unexpected = next(iter(unknown))
-        raise TypeError(
-            "_handle_terminal_event() got an unexpected keyword argument "
-            f"{unexpected!r}"
-        )
-    aggregator = options.get("aggregator")
-    session_factory = options.get("session_factory")
-    checkpointer = options.get("checkpointer")
-    drain_gate = options.get("drain_gate")
-    prune_registry = options.get("prune_registry")
-    publish = options.get("publish_terminal")
+    resolved = services or RelayServices()
+    relay_hub = resolved.relay_hub
+    checkpointer = resolved.checkpointer
+    drain_gate = resolved.drain_gate
+    prune_registry = resolved.prune_registry
     if not is_terminal_event(payload):
         return
-    # Capture before the durable write and before aggregator state is pruned.
+    # Capture before the durable write and before relay hub state is pruned.
+    # The relay has already numbered the terminal frame it is holding, so this
+    # mark IS that frame's own number and the cursor recorded below names the
+    # last frame the client receives. ``None`` - nothing numbers this run -
+    # leaves the settled cursor unwritten.
     last_sequence = (
-        aggregator.get_sequence(thread_id) if aggregator is not None else None
+        relay_hub.issued_sequence(thread_id) if relay_hub is not None else None
     )
     terminal_status = _validated_terminal_status(thread_id, payload)
     if terminal_status is None:
         # An unreadable terminal settled nothing and cannot close a stream.
         return
-    factory = _session_factory(session_factory)
+    factory = _session_factory(resolved.session_factory)
     disposition = await _accept_terminal_event(
         thread_id, payload, terminal_status, (factory, last_sequence, checkpointer)
     )
     if disposition is not _TerminalDisposition.SETTLED:
         # A promoted turn or refused stale event did not end the run. Its
-        # frame takes no number and never enters the replay log.
+        # frame is never published, so it never enters the replay log and the
+        # relay gives its number back to the run.
         return
-    _publish_terminal(thread_id, publish)
+    _publish_terminal(thread_id, resolved.publish_terminal)
     if factory is None:
         return
     _schedule_terminal_settlement(thread_id, terminal_status, factory)
@@ -833,27 +757,102 @@ async def _handle_terminal_event(
         prune_registry.schedule(thread_id, checkpointer)
     if drain_gate is not None:
         await drain_gate.release(thread_id)
-    if aggregator is not None:
-        aggregator.clear_thread_state(thread_id)
+    if relay_hub is not None:
+        relay_hub.clear_thread_state(thread_id)
 
 
-_PERMISSION_REQUEST_EVENT_TYPES = frozenset(
-    {"permission_request", "plan_approval_request", "document_approval_request"}
+#: The approval gates record the pause they relay as the interrupt kind the run
+#: is really parked on; a tool permission classifies its pause from the tool it
+#: asks about. Read off the checkpoint, never off the relayed frame: every
+#: permission frame crosses the wire as ``permission_request``, so keying this on
+#: the frame's own type named a document approval a plan approval and hid it from
+#: the lookup the out-of-run verdict subscriber reaches its run through.
+_APPROVAL_GATE_INTERRUPT_TYPES: frozenset[str] = frozenset(
+    {
+        InterruptType.PLAN_APPROVAL_REQUEST.value,
+        InterruptType.DOCUMENT_APPROVAL_REQUEST.value,
+    }
 )
 
 
-def _permission_request_fields(
-    payload: dict[str, object], event_type: str
-) -> tuple[str, str | None, str, str] | None:
-    """Validate and normalize the fields stored with a permission request."""
-    request_value = payload.get("request_id")
-    if not isinstance(request_value, str) or not request_value:
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _HeldPause:
+    """What one checkpoint read says about the request a frame announces.
+
+    *announced* is the interrupt held under the request id the frame named.
+    *held_request_ids* is every request the same read found the run parked on,
+    carried beside it so the journal's retirement of stale rows is decided from
+    the same checkpoint that admitted this one rather than from a second read.
+    """
+
+    announced: ProjectedInterrupt
+    held_request_ids: frozenset[str]
+
+
+async def _held_request_interrupt(
+    thread_id: str,
+    payload: dict[str, object],
+    checkpointer: Checkpointer | None,
+) -> _HeldPause | None:
+    """The checkpoint pause a relayed permission request announces.
+
+    The checkpoint is the pause authority for every interrupt kind, so the kind
+    a request is journaled under, and whether it is still open at all, are read
+    from the interrupt the run is really parked on rather than from the frame
+    that announced it. ``None`` means nothing may be journaled: the frame named
+    no request, no checkpoint could be read, or the request it names is one the
+    run no longer holds - answered in the window between emission and relay, so
+    a pending row written for it would be a row nobody can answer.
+    """
+    request_id = named_request_id(payload)
+    if request_id is None:
         return None
+    if checkpointer is None:
+        logger.warning(
+            "Skipping the permission journal for %s: no checkpointer is available",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "pause_proof_unavailable"},
+        )
+        return None
+    from ..database import read_latest_checkpoint
+    from ._permission_response_contract import (
+        held_interrupt,
+        held_permission_request_ids,
+    )
+    from .pause import project_checkpoint_read
+
+    projection = project_checkpoint_read(
+        await read_latest_checkpoint(checkpointer, thread_id), thread_id
+    )
+    held = held_interrupt(projection, request_id)
+    if held is None:
+        logger.info(
+            "Not journaling permission request %s on %s: its checkpoint holds "
+            "no such pause",
+            request_id,
+            thread_id,
+            extra={
+                "thread_id": thread_id,
+                "request_id": request_id,
+                "action": "permission_request_not_held",
+            },
+        )
+        return None
+    return _HeldPause(
+        announced=held,
+        held_request_ids=held_permission_request_ids(projection),
+    )
+
+
+def _permission_request_fields(
+    payload: dict[str, object], held: ProjectedInterrupt
+) -> tuple[str | None, str, str]:
+    """Normalize the fields stored with a permission request the run holds."""
     tool_value = payload.get("tool_call")
     tool_call = tool_value if isinstance(tool_value, str) else None
     pause_reason_type = (
-        event_type
-        if event_type in {"plan_approval_request", "document_approval_request"}
+        held.interrupt_type
+        if held.interrupt_type in _APPROVAL_GATE_INTERRUPT_TYPES
         else classify_permission_pause_reason(tool_call)
     )
     description_value = payload.get("description")
@@ -864,25 +863,9 @@ def _permission_request_fields(
         else ""
     )
     return (
-        request_value,
         tool_call,
         pause_reason_type,
         description,
-    )
-
-
-def _permission_receipt_is_current(
-    expectation: ThreadWriteExpectation,
-    status: ThreadStatus,
-    dispatch_id: str,
-) -> bool:
-    from ..thread.enums import ControlActionType
-
-    return (
-        expectation.status is status
-        and expectation.authority.action_type
-        is ControlActionType.PERMISSION_REQUEST_CREATED
-        and expectation.authority.action_receipt_id == dispatch_id
     )
 
 
@@ -891,88 +874,69 @@ async def _persist_permission_request(
     thread_id: str,
     payload: dict[str, object],
     *,
-    event_type: str,
+    pause: _HeldPause,
 ) -> None:
-    """Persist a fresh permission/approval request into the durable journal.
+    """Record a fresh permission or approval request in the durable journal.
 
-    Supersedes any competing pending requests, records the request row and its
-    creation control action, and projects the resulting pause onto thread status,
-    repair state, and - for a plan approval - approval state. A payload with no
-    request id is ignored, matching the prior inline guard.
+    The request row and its creation action are the journal: they hold the
+    request's lifecycle and cache its description and offered options for
+    disclosure. Whether the run is parked on it is the checkpoint's to say, so
+    the pause recorder projects the pause and this writes no run state, and
+    *pause* - what that checkpoint holds - names both the pause kind the row
+    records and which other rows this ask retires.
+
+    A request whose creation action is already reserved has been journaled
+    before, so this is either a replayed event or a RE-ASK: a run holding the
+    request again after answering it is asking the same question a second time.
+    :func:`reopen_reasked_permission_request` tells the two apart from the row's
+    settled state, which reads the same whichever of the re-ask's park frame and
+    the previous answer's receipt the relay handled first.
     """
     from ..database import (
-        ThreadStatusElectionOutcome,
-        elect_thread_status,
         get_thread,
+        mark_control_action_applied,
         record_permission_request,
+        reopen_reasked_permission_request,
         reserve_control_action,
-        set_thread_approval_state,
-        set_thread_repair_state,
-        successor_thread_write_authority,
         supersede_permission_requests,
-        thread_write_expectation,
     )
-    from ..thread.enums import (
-        ApprovalStatus,
-        ControlActionResultStatus,
-        ControlActionType,
-    )
+    from ..thread.enums import ControlActionType
 
-    fields = _permission_request_fields(payload, event_type)
-    if fields is None:
+    request_id = pause.announced.interrupt_id
+    tool_call, pause_reason_type, description = _permission_request_fields(
+        payload, pause.announced
+    )
+    if await get_thread(db, thread_id) is None:
         return
-    request_id, tool_call, pause_reason_type, description = fields
-    fx = compute_permission_request_effects(pause_reason_type)
-    thread = await get_thread(db, thread_id)
-    if thread is None:
-        return
-    expectation = thread_write_expectation(thread)
-    allowed_options = _option_mappings(payload.get("options"))
     reservation = await reserve_control_action(
         db,
         thread_id=thread_id,
         action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
         request_id=request_id,
-        idempotency_key=f"permission-request:{request_id}",
+        idempotency_key=permission_request_action_key(request_id),
         payload={"description": description},
     )
     if not reservation.payload_matches:
         await db.rollback()
         return
-    action = reservation.action
-    action.result_status = ControlActionResultStatus.APPLIED.value
-    if action.dispatch_id is None:
-        await db.rollback()
-        raise RuntimeError("permission-request action has no durable receipt")
-    if _permission_receipt_is_current(
-        expectation, fx.thread_status, action.dispatch_id
-    ):
-        await db.rollback()
-        return
     if not reservation.created:
-        # A persisted creation receipt proves only that this event was handled
-        # before. Once a newer action owns the run, replaying the old event must
-        # never reinstall its receipt or reopen the old permission pause.
-        await db.rollback()
+        await reopen_reasked_permission_request(
+            db,
+            request_id=request_id,
+            allowed_options=_option_mappings(payload.get("options")),
+        )
         return
-    election = await elect_thread_status(
-        db,
-        thread_id,
-        expectation=expectation,
-        status=fx.thread_status,
-        successor=successor_thread_write_authority(
-            expectation,
-            action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
-            action_receipt_id=action.dispatch_id,
-        ),
-    )
-    if election.outcome is not ThreadStatusElectionOutcome.WON:
-        await db.rollback()
-        return
+    # Nothing dispatches a request-creation action: writing it IS applying it.
+    # It is settled through the journal's one settler, which stamps the instant
+    # beside the status. Assigning the status alone left every such row applied
+    # with no ``applied_at``, so a settled action was indistinguishable from one
+    # still owed a delivery - and the recovery reads that tell them apart match
+    # on the timestamp, not on the status.
+    await mark_control_action_applied(db, reservation.action.id)
     await supersede_permission_requests(
         db,
         thread_id=thread_id,
-        except_request_id=request_id,
+        held_request_ids=pause.held_request_ids,
     )
     await record_permission_request(
         db,
@@ -980,26 +944,9 @@ async def _persist_permission_request(
         thread_id=thread_id,
         pause_reason_type=pause_reason_type,
         description=description,
-        allowed_options=allowed_options,
+        allowed_options=_option_mappings(payload.get("options")),
         tool_call=tool_call,
     )
-    await set_thread_repair_state(
-        db,
-        thread_id,
-        repair_status=fx.repair_status,
-        repair_reason=fx.repair_reason,
-        execution_readiness=fx.repair_status.value,
-        last_applied_action=fx.last_applied_action,
-    )
-    if fx.is_plan_approval:
-        await set_thread_approval_state(
-            db,
-            thread_id,
-            approval_status=ApprovalStatus.PENDING,
-            approval_request_id=request_id,
-            approval_reason=description,
-            approval_response_action_id=None,
-        )
 
 
 async def _handle_permission_event(
@@ -1007,30 +954,122 @@ async def _handle_permission_event(
     payload: dict[str, object],
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
+    checkpointer: Checkpointer | None = None,
 ) -> None:
-    """Persist worker permission events into the durable journal.
+    """Journal the permission or approval request a worker event announces.
 
-    Validates the payload as a permission event, then dispatches to the request
-    persistence stage or the resolution stage under one committed transaction.
+    A request is journaled only against the interrupt its run's checkpoint
+    holds, so the checkpoint read happens before the write transaction opens
+    rather than while it holds the store's write lock.
+
+    Requests are the only permission events there are. An ANSWER is settled from
+    the application receipt that proved its resume landed - see
+    :func:`_handle_progress_event` - which is the receipt the checkpoint
+    incorporated, so no event announcing a resolution is believed or needed.
     """
     if not is_permission_event(payload):
         return
-    event_value = payload.get("type")
-    event_type = event_value if isinstance(event_value, str) else ""
     from ..database import begin_write_transaction
 
     factory = _session_factory(session_factory)
     if factory is None:
         _skip_without_database("the durable permission journal", thread_id)
         return
+    pause = await _held_request_interrupt(thread_id, payload, checkpointer)
+    if pause is None:
+        return
     async with factory() as db:
         await begin_write_transaction(db)
-        if event_type in _PERMISSION_REQUEST_EVENT_TYPES:
-            await _persist_permission_request(
-                db, thread_id, payload, event_type=event_type
-            )
-        else:
-            await _apply_permission_resolution(db, thread_id, payload)
+        await _persist_permission_request(db, thread_id, payload, pause=pause)
+        await db.commit()
+
+
+def _is_resume_receipt(payload: dict[str, object]) -> bool:
+    """Whether a relayed event is the application receipt of a resume."""
+    return (
+        wire_event_type(payload) == "dispatch_applied"
+        and payload.get("action") == "resume"
+    )
+
+
+async def _answered_request_id(
+    db: AsyncSession, thread_id: str, payload: dict[str, object]
+) -> str | None:
+    """The request the resume a receipt proves applied was an answer to.
+
+    The accepted action the receipt names is the answer that landed, and the
+    request it answered is the only one this receipt says anything about.
+    ``None`` for a resume that answered no permission request.
+    """
+    from ..database import get_control_action_by_dispatch_id
+    from ..thread.enums import ControlActionType
+
+    dispatch_id = payload.get("dispatch_id")
+    if not isinstance(dispatch_id, str) or not dispatch_id:
+        return None
+    action = await get_control_action_by_dispatch_id(
+        db, thread_id=thread_id, dispatch_id=dispatch_id
+    )
+    if (
+        action is None
+        or action.action_type != ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
+    ):
+        return None
+    return action.request_id
+
+
+async def _handle_reasked_permission_event(
+    thread_id: str,
+    payload: dict[str, object],
+    *,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    checkpointer: Checkpointer | None = None,
+) -> None:
+    """Reopen a permission request its run is holding again after answering it.
+
+    The second prompt for the permission journal, beside the re-ask's own park
+    frame. The worker emits that frame from inside the graph run while the
+    application receipt waits for the checkpoint that proves the resume landed,
+    so one relay batch can carry them in either order and the frame that arrives
+    before the answer settles finds the row still being settled. This runs AFTER
+    the settlement its own receipt proved, which is the moment the journal can
+    tell a re-ask from an answer still in flight.
+
+    Both prompts reopen through the one repository verb, whose precondition -
+    the row has settled - is the single rule. Neither trusts the frame for
+    whether the run is parked: the checkpoint says that, as it does for every
+    interrupt kind.
+    """
+    if not _is_resume_receipt(payload):
+        return
+    factory = _session_factory(session_factory)
+    if factory is None or checkpointer is None:
+        return
+    from ..database import (
+        begin_write_transaction,
+        read_latest_checkpoint,
+        reopen_reasked_permission_request,
+    )
+    from ._permission_response_contract import held_interrupt
+    from .pause import project_checkpoint_read
+
+    async with factory() as db:
+        request_id = await _answered_request_id(db, thread_id, payload)
+        await db.rollback()
+        if request_id is None:
+            return
+        projection = project_checkpoint_read(
+            await read_latest_checkpoint(checkpointer, thread_id), thread_id
+        )
+        held = held_interrupt(projection, request_id)
+        if held is None:
+            return
+        await begin_write_transaction(db)
+        await reopen_reasked_permission_request(
+            db,
+            request_id=request_id,
+            allowed_options=_option_mappings(held.payload.get("options")),
+        )
         await db.commit()
 
 
@@ -1040,31 +1079,29 @@ async def _handle_progress_event(
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     checkpointer: Checkpointer | None = None,
-) -> str | None:
+) -> None:
     """Settle one exact control action from a private worker receipt."""
     application = _validated_application_receipt(thread_id, payload)
     if application is None:
-        return None
+        return
     factory = _session_factory(session_factory)
     if factory is None:
         _skip_without_database("the control-action settlement", thread_id)
-        return None
+        return
     if checkpointer is None:
         logger.warning(
             "Skipping application receipt for %s: no checkpointer is available",
             thread_id,
             extra={"thread_id": thread_id, "action": "checkpoint_proof_unavailable"},
         )
-        return None
+        return
     async with factory() as db:
         stored_receipt = await _proven_application_receipt(
             db, thread_id, application, checkpointer
         )
         if stored_receipt is None:
-            return None
-        return await _commit_proven_application(
-            db, thread_id, application, stored_receipt
-        )
+            return
+        await _commit_proven_application(db, thread_id, application, stored_receipt)
 
 
 async def _handle_execution_state_event(
@@ -1080,13 +1117,6 @@ async def _handle_execution_state_event(
     from ..database import begin_write_transaction, record_thread_execution_state
 
     projection = ExecutionStateProjectionPayload.model_validate(payload)
-    snapshot_created_at: datetime | None = None
-    if projection.snapshot_created_at is not None:
-        try:
-            snapshot_created_at = datetime.fromisoformat(projection.snapshot_created_at)
-        except ValueError:
-            snapshot_created_at = None
-
     factory = _session_factory(session_factory)
     if factory is None:
         _skip_without_database("the execution-state projection", thread_id)
@@ -1098,114 +1128,105 @@ async def _handle_execution_state_event(
             thread_id=thread_id,
             checkpoint_id=projection.checkpoint_id,
             parent_checkpoint_id=projection.parent_checkpoint_id,
-            snapshot_created_at=snapshot_created_at,
             task_count=projection.task_count,
             interrupt_count=projection.interrupt_count,
             next_nodes=list(projection.next_nodes),
-            interrupt_types=list(projection.interrupt_types),
-            tasks=[task.model_dump(mode="json") for task in projection.tasks],
+            tasks=[asdict(task) for task in projection.tasks],
             degraded_reasons=list(projection.degraded_reasons),
         )
         await db.commit()
 
 
-async def _handle_clarification_pause_event(
+def _prompts_pause_read(payload: dict[str, object]) -> bool:
+    """Whether a relayed event says the run's pause may have moved.
+
+    A clarification nudge or a permission request says the run may have
+    parked; a permission resolution or a resume's application receipt says it
+    may have left the pause. None of them is trusted for the answer: each only
+    prompts the checkpoint read that decides.
+    """
+    event_type = wire_event_type(payload)
+    if event_type == ServerEventType.CLARIFICATION_PENDING or is_permission_event(
+        payload
+    ):
+        return True
+    return event_type == "dispatch_applied" and payload.get("action") == "resume"
+
+
+async def _handle_pause_event(
     thread_id: str,
     payload: dict[str, object],
     *,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     checkpointer: Checkpointer | None = None,
 ) -> None:
-    """Re-project a clarification pause when the worker reports one may have moved.
-
-    A clarification nudge says the run may have parked, and a resume's
-    application receipt says it may have left the pause. Neither frame is
-    trusted for the answer: both only prompt the checkpoint read that decides.
-    """
-    event_type = payload.get("type")
-    if event_type != ServerEventType.CLARIFICATION_PENDING and not (
-        event_type == "dispatch_applied" and payload.get("action") == "resume"
-    ):
+    """Re-project the run's pause when a relayed event says it may have moved."""
+    if not _prompts_pause_read(payload):
         return
     factory = _session_factory(session_factory)
-    if factory is None or checkpointer is None:
+    if factory is None:
+        _skip_without_database("the pause projection", thread_id)
         return
-    from .clarification_service import reconcile_clarification_pause
+    if checkpointer is None:
+        logger.warning(
+            "Skipping the pause projection for %s: no checkpointer is available",
+            thread_id,
+            extra={"thread_id": thread_id, "action": "pause_proof_unavailable"},
+        )
+        return
+    from .pause import reconcile_run_pause
 
     async with factory() as db:
-        await reconcile_clarification_pause(
-            db, thread_id=thread_id, checkpointer=checkpointer
-        )
+        await reconcile_run_pause(db, thread_id=thread_id, checkpointer=checkpointer)
 
 
 async def relay_event(
     thread_id: str,
     payload: dict[str, object],
-    **options: Unpack[_TerminalEventOptions],
+    services: RelayServices | None = None,
 ) -> None:
-    """Consolidated relay: run every event handler in sequence.
-
-    This replaces the 3x duplicated handler call sequence that previously
-    appeared in ``_relay_worker_event``, ``receive_worker_event``, and
-    ``receive_worker_event_batch``.
+    """Run every event handler in sequence for one relayed worker event.
 
     Callers are responsible for routing execution-state projections before this
-    general relay, broadcasting to WS clients via ConnectionManager, and syncing
-    non-projection events into the aggregator.
+    general relay, fanning the frame out through the relay hub, and mirroring
+    non-projection events into the hub's live run state.
 
     This function handles the DB-side event processing:
-    permission journal, progress inference, execution state persistence,
-    the clarification pause projection, and terminal status updates with
-    aggregator GC.
+    permission journal, progress inference, the re-ask reopen, execution state
+    persistence, the pause projection, and terminal status updates with relay
+    hub GC.
 
     A terminal frame is the one exception to the caller owning the fan-out.
     Whether it may be shown at all is this plane's answer, so the caller hands
-    it over as *publish_terminal* and :func:`_handle_terminal_event` releases
-    it; see that function for why.
+    it over as the services' *publish_terminal* and :func:`_handle_terminal_event`
+    releases it; see that function for why.
     """
-    unknown = set(options).difference(_RELAY_OPTIONS)
-    if unknown:
-        unexpected = next(iter(unknown))
-        raise TypeError(
-            f"relay_event() got an unexpected keyword argument {unexpected!r}"
-        )
-    aggregator = options.get("aggregator")
-    session_factory = options.get("session_factory")
-    checkpointer = options.get("checkpointer")
-    drain_gate = options.get("drain_gate")
-    prune_registry = options.get("prune_registry")
+    resolved = services or RelayServices()
     await _handle_permission_event(
         thread_id,
         payload,
-        session_factory=session_factory,
+        session_factory=resolved.session_factory,
+        checkpointer=resolved.checkpointer,
     )
-    await _handle_execution_state_event(
+    await _handle_progress_event(
         thread_id,
         payload,
-        session_factory=session_factory,
+        session_factory=resolved.session_factory,
+        checkpointer=resolved.checkpointer,
     )
-    applied_permission_id = await _handle_progress_event(
+    # After the settlement above, never before it: a request its run is holding
+    # again reads as re-asked only once the answer before it has settled.
+    await _handle_reasked_permission_event(
         thread_id,
         payload,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
+        session_factory=resolved.session_factory,
+        checkpointer=resolved.checkpointer,
     )
-    if applied_permission_id is not None and aggregator is not None:
-        aggregator.resolve_permission(applied_permission_id)
-    await _handle_clarification_pause_event(
+    await _handle_pause_event(
         thread_id,
         payload,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
+        session_factory=resolved.session_factory,
+        checkpointer=resolved.checkpointer,
     )
-    # Terminal status update + aggregator GC + drain-gate release.
-    await _handle_terminal_event(
-        thread_id,
-        payload,
-        aggregator=aggregator,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-        drain_gate=drain_gate,
-        prune_registry=prune_registry,
-        publish_terminal=options.get("publish_terminal"),
-    )
+    # Terminal status update + relay hub GC + drain-gate release.
+    await _handle_terminal_event(thread_id, payload, resolved)

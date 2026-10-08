@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import operator
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any, TypedDict, cast
 
 import httpx
@@ -12,12 +11,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import Command, Interrupt, PregelTask, interrupt
 from pydantic import BaseModel, ConfigDict
 
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
-from ...providers import ProviderCondition
+from ...graph.enums import ProviderCondition
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ...thread.action_receipts import GraphActionReceipt
 from ...thread.cancellation_evidence import CancellationEvidence
 from ...thread.enums import ControlActionType, ThreadStatus
@@ -46,7 +45,6 @@ class _StateNormalizationFixture(BaseModel):
     next: tuple[str, ...]
     interrupts: tuple[Interrupt, ...]
     tasks: tuple[PregelTask, ...]
-    created_at: datetime
     config: dict[str, object]
     parent_config: dict[str, object] | None
 
@@ -68,7 +66,6 @@ def test_normalize_execution_state_projects_interrupt_contract() -> None:
                 interrupts=(approval_interrupt,),
             ),
         ),
-        created_at=datetime(2026, 8, 2, tzinfo=UTC),
         config={"configurable": {"checkpoint_id": "checkpoint-7"}},
         parent_config={"configurable": {"checkpoint_id": "checkpoint-6"}},
     )
@@ -77,9 +74,7 @@ def test_normalize_execution_state_projects_interrupt_contract() -> None:
 
     assert payload.checkpoint_id == "checkpoint-7"
     assert payload.parent_checkpoint_id == "checkpoint-6"
-    assert payload.snapshot_created_at == "2026-08-02T00:00:00+00:00"
     assert payload.next_nodes == ["await_approval"]
-    assert payload.interrupt_types == ["approval"]
     assert payload.interrupt_count == 1
     assert payload.task_count == 1
     task = payload.tasks[0]
@@ -131,7 +126,7 @@ async def test_a_node_that_asks_again_is_still_the_next_node() -> None:
             answer = interrupt({"type": "approval", "request_id": "request-9"})
         return {"answer": answer}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _AskState))
+    builder = new_state_graph(_AskState)
     add_test_node(builder, "ask_until_settled", ask_until_settled)
     builder.add_edge(START, "ask_until_settled")
     builder.add_edge("ask_until_settled", END)
@@ -149,7 +144,6 @@ async def test_a_node_that_asks_again_is_still_the_next_node() -> None:
     )
 
     assert payload.next_nodes == ["ask_until_settled"]
-    assert payload.interrupt_types == ["approval"]
     assert payload.interrupt_count == 1
 
     await graph.ainvoke(Command(resume="settled"), config=config)
@@ -174,7 +168,7 @@ def _fan_out_graph(saver: InMemorySaver) -> Any:
 
         return node
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _FanOutState))
+    builder = new_state_graph(_FanOutState)
     add_test_node(builder, "alpha", gate("request-alpha"))
     add_test_node(builder, "beta", gate("request-beta"))
     builder.add_edge(START, "alpha")
@@ -216,7 +210,7 @@ async def test_only_the_branch_still_asking_is_disclosed() -> None:
 
     await _answer(graph, config, "request-alpha")
     state = await graph.aget_state(config)
-    # The snapshot has not changed its mind: this is what the fix reads past.
+    # The snapshot has not changed its mind: this is what the projection reads past.
     assert len(state.interrupts) == 2
 
     remaining = StateProjector.normalize_execution_state(
@@ -291,7 +285,6 @@ def test_normalize_state_keeps_missing_configurable_metadata_optional() -> None:
         next=(),
         interrupts=(),
         tasks=(),
-        created_at=datetime(2026, 8, 2, tzinfo=UTC),
         config={},
         parent_config=None,
     )
@@ -308,7 +301,6 @@ def test_normalize_state_raises_for_malformed_configurable_metadata() -> None:
         next=(),
         interrupts=(),
         tasks=(),
-        created_at=datetime(2026, 8, 2, tzinfo=UTC),
         config={"configurable": []},
         parent_config=None,
     )

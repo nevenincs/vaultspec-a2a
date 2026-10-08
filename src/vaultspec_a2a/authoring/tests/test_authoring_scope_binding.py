@@ -18,16 +18,15 @@ run's project is what gives it something to validate against.
 from __future__ import annotations
 
 import json
-import threading
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from ...graph.enums import PipelinePhase
-from ...testing.tests._support.http_handlers import JsonReplyHandler
+from ...testing import JsonReplyHandler, serve_handler
 from ...thread.actor_tokens import ActorTokenBundle
 from ...worker.token_store import RunTokenStore
 from ..client import AuthoringClient
@@ -86,7 +85,7 @@ class _RecordedEngine:
 
 def _make_handler(state: _RecordedEngine) -> type[JsonReplyHandler]:
     # BaseHTTPRequestHandler is listed again, redundantly - see
-    # testing/http_handlers.py's docstring for why.
+    # testing/http.py's docstring for why.
     class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -112,19 +111,11 @@ def _make_handler(state: _RecordedEngine) -> type[JsonReplyHandler]:
 
 
 @pytest.fixture
-def engine() -> Iterator[tuple[str, _RecordedEngine]]:
+def loopback_engine() -> Iterator[tuple[str, _RecordedEngine]]:
     """Run a real loopback authoring endpoint and yield its origin and record."""
     state = _RecordedEngine()
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        host, port = server.server_address[0], server.server_address[1]
-        yield f"http://{host}:{port}", state
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    with serve_handler(_make_handler(state)) as port:
+        yield f"http://127.0.0.1:{port}", state
 
 
 def _token_store(thread_id: str = _THREAD_ID) -> RunTokenStore:
@@ -196,10 +187,10 @@ class TestScopeToken:
 
 @pytest.mark.asyncio
 async def test_session_is_opened_under_the_runs_project(
-    engine: tuple[str, _RecordedEngine], tmp_path: Path
+    loopback_engine: tuple[str, _RecordedEngine], tmp_path: Path
 ) -> None:
     """The session's scope is the run's project, never a literal constant."""
-    origin, recorded = engine
+    origin, recorded = loopback_engine
     workspace = tmp_path / "bound-project"
     workspace.mkdir()
 
@@ -213,7 +204,7 @@ async def test_session_is_opened_under_the_runs_project(
 
 @pytest.mark.asyncio
 async def test_every_proposal_command_rides_the_bound_session(
-    engine: tuple[str, _RecordedEngine], tmp_path: Path
+    loopback_engine: tuple[str, _RecordedEngine], tmp_path: Path
 ) -> None:
     """A proposal's binding is the session it names, so it must name the bound one.
 
@@ -222,7 +213,7 @@ async def test_every_proposal_command_rides_the_bound_session(
     the session it was created under. Every mutating command in the walk must
     therefore run on the session opened above, and the create must name it.
     """
-    origin, recorded = engine
+    origin, recorded = loopback_engine
     workspace = tmp_path / "bound-project"
     workspace.mkdir()
 
@@ -234,7 +225,7 @@ async def test_every_proposal_command_rides_the_bound_session(
 
 
 def test_a_blank_project_authors_nothing(
-    engine: tuple[str, _RecordedEngine],
+    loopback_engine: tuple[str, _RecordedEngine],
 ) -> None:
     """No project means no proposal - not a proposal under an implied one.
 
@@ -242,7 +233,7 @@ def test_a_blank_project_authors_nothing(
     fenced at apply against whichever workspace the operator last selected, which
     is precisely the mid-run switch the run cannot see.
     """
-    origin, recorded = engine
+    origin, recorded = loopback_engine
 
     with pytest.raises(EngineUnavailableError, match="no usable active project"):
         _submitter(origin, "")
@@ -251,7 +242,7 @@ def test_a_blank_project_authors_nothing(
 
 
 def test_a_relative_project_refuses_rather_than_defaults(
-    engine: tuple[str, _RecordedEngine],
+    loopback_engine: tuple[str, _RecordedEngine],
 ) -> None:
     """A relative project cannot be minted, so it is an absent one.
 
@@ -259,7 +250,7 @@ def test_a_relative_project_refuses_rather_than_defaults(
     ambient inheritance the bound project replaces, so it is refused at the mint
     rather than quietly made absolute.
     """
-    origin, recorded = engine
+    origin, recorded = loopback_engine
 
     with pytest.raises(EngineUnavailableError, match="no usable active project"):
         _submitter(origin, "relative/project")

@@ -1,31 +1,27 @@
 """Domain enums for the graph orchestration layer.
 
 These enums define domain-level discriminators and status types used by the
-graph compiler, event aggregator, and domain event dataclasses.
+graph compiler, event producer, and domain event dataclasses.
 
 ``Provider`` is the canonical Layer 1 lane discriminator. Concrete model
 values come only from served provider catalogs.
 """
 
 from enum import StrEnum
-from typing import cast
-
-from .acp_options import option_id_of
 
 __all__ = [
-    "REJECT_OPTION_IDS",
-    "REJECT_OPTION_KINDS",
     "RESEARCH_ADR_NODE_PHASE",
     "AgentLifecycleState",
     "PermissionOptionKind",
     "PermissionType",
     "PipelinePhase",
     "Provider",
+    "ProviderCondition",
     "SemanticPhase",
     "ServerEventType",
+    "StreamFrameKind",
     "ToolCallStatus",
     "ToolKind",
-    "is_rejection_response",
     "research_adr_semantic_phase",
 ]
 
@@ -67,6 +63,24 @@ class ServerEventType(StrEnum):
     # serializer's dispatch, and a reader comparing the two must not treat the
     # difference as a missing case.
     HEARTBEAT = "heartbeat"
+
+
+class StreamFrameKind(StrEnum):
+    """Discriminator for the progress-stream frames no graph event produces.
+
+    The stream mints these about itself - where the run stood at attachment,
+    why a stream was refused, what a viewer lost - and the worker's terminal
+    relay names the run's outcome with one. They sit beside
+    :class:`ServerEventType` rather than inside it because the interprocess
+    serializer dispatches on that vocabulary, and a member here has no domain
+    event to dispatch from. The keepalive stays there: the worker's own
+    heartbeat posts already share that member.
+    """
+
+    STREAM_SNAPSHOT = "stream_snapshot"
+    THREAD_TERMINAL = "thread_terminal"
+    STREAM_REJECTED = "stream_rejected"
+    PROGRESS_DROPPED = "progress_dropped"
 
 
 class PipelinePhase(StrEnum):
@@ -136,82 +150,6 @@ class PermissionOptionKind(StrEnum):
     REJECT_ALWAYS = "reject_always"
 
 
-REJECT_OPTION_KINDS: frozenset[str] = frozenset(
-    member.value for member in PermissionOptionKind if member.value.startswith("reject")
-)
-"""The closed set of ``PermissionOptionKind`` values that deny a request.
-
-A *kind* is drawn from the ACP schema enum, so this set is total over it. It is
-matched against an option's ``kind`` field — never against an option *id*, which
-is a different, provider-defined namespace (see :data:`REJECT_OPTION_IDS`).
-"""
-
-
-REJECT_OPTION_IDS: frozenset[str] = REJECT_OPTION_KINDS | frozenset(
-    {"reject", "deny", "deny_once", "deny_always"}
-)
-"""The rejecting option *ids* this system is known to mint or receive.
-
-Unlike a kind, an option id is free-form and provider-defined: Kimi offers a bare
-``"reject"`` whose kind is ``reject_once``, the plan and document approval gates
-mint ``"reject"``, the no-options fallback mints ``"deny_once"``, the ACP handlers
-fall back to the bare literals ``"deny"`` and ``"reject"``, and providers that
-spell an id with its kind offer ``"reject_once"``/``"reject_always"`` — hence the
-union with :data:`REJECT_OPTION_KINDS`.
-
-This set is therefore a *best-effort* recogniser and can never be complete, which
-is precisely why :func:`is_rejection_response` consults the declared kind first
-and reaches for this only when no kind is available.
-"""
-
-
-def is_rejection_response(options: object, option_id: str | None) -> bool:
-    """Report whether the chosen option denies the request it answered.
-
-    This is the single rejection verdict for the whole system. Every settlement
-    site — the submission stamp, the ``permission_resolved`` projection, and the
-    progress-inferred fallback — asks this one question, so a denial cannot be
-    recorded as an approval by one path and a rejection by another.
-
-    The verdict prefers the option's declared ``kind`` because a kind is a closed
-    vocabulary: it is total over :class:`PermissionOptionKind` and so classifies a
-    provider id this module has never seen. Only when the chosen option cannot be
-    found among ``options``, or carries no usable kind, does it fall back to the
-    id spellings in :data:`REJECT_OPTION_IDS` — a legacy or malformed durable row
-    still gets the best answer available rather than silently reading as approved.
-
-    Args:
-        options:   The options that were offered, as decoded from the durable
-                   ``allowed_options_json`` column or an in-flight payload. Both
-                   the ACP ``optionId`` and snake_case ``option_id`` spellings are
-                   accepted. Anything that is not a list of dicts simply offers
-                   no kind, which routes the verdict to the id fallback.
-        option_id: The id the responder chose. ``None`` or empty means nothing was
-                   chosen, which is not a rejection.
-
-    Returns:
-        True when the response denied the request.
-    """
-    if not option_id:
-        return False
-    if isinstance(options, list):
-        for option in cast("list[object]", options):
-            if option_id_of(option) != option_id:
-                continue
-            kind = (
-                cast("dict[str, object]", option).get("kind")
-                if isinstance(option, dict)
-                else None
-            )
-            # ``kind`` may arrive as a PermissionOptionKind or its bare value; a
-            # StrEnum compares equal to its value, so normalising to str covers
-            # both without narrowing to one transport's spelling.
-            if isinstance(kind, str) and kind:
-                return kind in REJECT_OPTION_KINDS
-            break
-    return option_id in REJECT_OPTION_IDS
-
-
 class PermissionType(StrEnum):
     """Discriminator for permission request categories.
 
@@ -238,10 +176,128 @@ class Provider(StrEnum):
     CODEX = "codex"
     DETERMINISTIC = "deterministic"
     KIMI = "kimi"
-    MOCK = "mock"
     OPENAI = "openai"
     ZAI = "zai"
     ZHIPU = "zhipu"
+
+
+# A failed run has to tell a client something it can act on, and the actions are
+# genuinely different: wait, re-authenticate, top up, raise a spend limit, shorten
+# the request, or report a bug. The vocabulary below names those outcomes once, so
+# every served lane maps its own wire discriminator into the same set and no
+# consumer has to pattern-match vendor prose to work out which one happened.
+#
+# It sits here, beside the lane discriminator and importing nothing but StrEnum,
+# because the run read model carries it: a vocabulary declared under `providers/`
+# could not be named by a Layer-1 field, so run-history published the condition as
+# an unconstrained string while run-status published the enumeration.
+#
+# The vocabulary is deliberately SMALLER than the set of distinctions the providers
+# collectively make, because it admits only distinctions at least one served lane
+# can actually carry. Where a lane's wire cannot separate two members, that lane
+# maps to the coarser one rather than guessing; the finer member is emitted only by
+# a lane whose wire names it. Two members are asymmetric in exactly this way and
+# are documented on the members themselves.
+#
+# Mapping into this vocabulary is TOTAL by contract: every lane mapper in
+# `providers/conditions.py` accepts any input and returns a member, with UNKNOWN as
+# the floor. A mapper may not raise and may not return nothing, because it runs on
+# a path that is already failing and a second failure there costs the client the
+# only diagnosis it was going to get.
+#
+# This is a wire contract consumed by a second repository, so it is additive-only:
+# a member may be added, but no member's spelling or meaning may change.
+
+
+class ProviderCondition(StrEnum):
+    """Why a provider failed, in terms a client can act on.
+
+    The value is the wire form: lowercase, underscore-separated, and stable.
+    """
+
+    NETWORK_UNREACHABLE = "network_unreachable"
+    """The provider could not be reached at all.
+
+    A transport-level failure before any model was engaged. Distinct from
+    :attr:`PROVIDER_OVERLOADED`, which is the provider answering to refuse.
+    """
+
+    PROVIDER_OVERLOADED = "provider_overloaded"
+    """The provider answered that it is temporarily over capacity.
+
+    Retryable and not the caller's fault. Reserved for a wire discriminator
+    that names overload specifically; a generic server-side fault is NOT this
+    member, because reporting one as overload asserts a cause and a remedy
+    (wait) that the wire never stated.
+    """
+
+    UNAUTHENTICATED = "unauthenticated"
+    """The credential was missing, rejected, or not permitted for this account.
+
+    The remedy is a credential action - log in again, supply a key, or switch
+    account - as opposed to waiting or paying.
+    """
+
+    THROTTLED = "throttled"
+    """The request was refused for rate, and retrying later is the remedy.
+
+    On lanes whose wire cannot separate a short-term rate refusal from an
+    exhausted usage window, this is the member both collapse to. That is a hard
+    information limit on those lanes rather than an implementation gap: their
+    adapter assigns one kind to both cases and consumes the distinguishing
+    signal internally, so emitting :attr:`USAGE_EXHAUSTED` there would assert a
+    distinction the wire does not carry.
+    """
+
+    USAGE_EXHAUSTED = "usage_exhausted"
+    """A usage allowance for the plan or period is spent.
+
+    Waiting helps only when the window rolls over, so the remedy is usually a
+    plan change rather than a retry. Emitted ONLY by a lane whose wire names
+    usage-limit exhaustion in its own right; a lane that reports rate refusals
+    and window exhaustion identically emits :attr:`THROTTLED` instead.
+    """
+
+    CREDITS_EXHAUSTED = "credits_exhausted"
+    """The account's billable balance cannot fund the request.
+
+    The remedy is a billing action. Distinct from :attr:`BUDGET_EXHAUSTED`,
+    which is a self-imposed ceiling the operator can lift without paying.
+    """
+
+    BUDGET_EXHAUSTED = "budget_exhausted"
+    """A configured spend or session budget stopped the request.
+
+    The ceiling is the caller's own, so the remedy is to raise or reset it.
+    Emitted only by a lane whose wire names a budget control specifically.
+    """
+
+    INVALID_REQUEST = "invalid_request"
+    """The request cannot succeed as sent; changing it is the remedy.
+
+    The operative property is that retrying the SAME request cannot help - the
+    request itself has to change. That is what a consumer should act on, and it
+    is the only claim every mapped discriminator supports.
+
+    Deliberately wider than "the provider rejected it as malformed". Three
+    distinct shapes land here, and only the first is a malformed-input refusal:
+    a bad shape or unknown model; a policy refusal the provider understood and
+    declined on its own terms; and an output or context ceiling reached, which
+    may be a CLIENT-configured cap rather than a provider limit and may mean a
+    response was truncated rather than refused. Copy written for this member
+    must not tell a user their request was invalid, because for the ceiling case
+    nothing was wrong with it.
+    """
+
+    UNKNOWN = "unknown"
+    """The failure carried no discriminator this lane can resolve.
+
+    The floor of every mapping, and a normal outcome rather than a defect: a
+    lane may fail in ways its wire does not classify, and saying so plainly is
+    more useful than promising a condition that was never observed. It is what
+    an unrecognised or absent discriminator resolves to, which is what keeps a
+    mapper total when a provider adds a discriminator this vocabulary predates.
+    """
 
 
 # ---------------------------------------------------------------------------

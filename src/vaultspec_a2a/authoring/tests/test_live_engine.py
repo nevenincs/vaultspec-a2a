@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 import pytest_asyncio
 
+from ...testing import mint_raw_token
 from .. import AuthoringClient, AuthoringSession, mint_actor_token
 from .._envelope import AuthoringResponse
 from .._errors import AuthoringError, AuthoringTransportError
@@ -63,11 +64,7 @@ async def _authenticated_session(
     client: AuthoringClient, run_id: str
 ) -> AuthoringSession:
     """Mint an actor token, bind it, open a session, and return it."""
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    raw_token = _data(minted).get("raw_token")
-    assert isinstance(raw_token, str) and raw_token
-    client._actor_token = raw_token
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
     session = AuthoringSession(client, run_id)
     created = await session.create_session(scope="repo", title=f"s17 {run_id}")
     assert isinstance(created, AuthoringResponse)
@@ -244,7 +241,7 @@ async def test_run_scoped_execute_of_read_tool(client: AuthoringClient) -> None:
 async def test_get_feedback_batch_reads_back_a_created_batch(
     client: AuthoringClient,
 ) -> None:
-    """The a2a read path retrieves a feedback batch by id, verbatim (S11).
+    """The a2a read path retrieves a feedback batch by id, verbatim.
 
     The dashboard creates the batch; the a2a worker consumes it read-path-only via
     ``AuthoringClient.get_feedback_batch``. This drives the real
@@ -323,7 +320,7 @@ async def test_get_feedback_batch_unknown_id_faults(client: AuthoringClient) -> 
 async def test_close_session_transitions_active_to_closed(
     client: AuthoringClient,
 ) -> None:
-    """The a2a submit-success caller closes its authoring session benignly (S13).
+    """The a2a submit-success caller closes its authoring session benignly.
 
     a2a-driven work leaves an Active session with no run (it proposes directly,
     never starts a run). At run-settle SUCCESS the worker closes it via

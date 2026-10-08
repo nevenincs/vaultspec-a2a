@@ -43,13 +43,10 @@ def test_storage_diagnostics_measure_real_database_and_volume(tmp_path: Path) ->
     _seed_wal_database(checkpoint, rows=8)
 
     diagnostics = build_storage_diagnostics(
-        database_backend="sqlite",
-        checkpoint_backend="sqlite",
         database_path=database,
         checkpoint_path=checkpoint,
     )
 
-    assert diagnostics is not None
     db_usage = cast("dict[str, object]", diagnostics["database"])
     assert db_usage["exists"] is True
     assert db_usage["size_bytes"] == database.stat().st_size
@@ -70,12 +67,11 @@ def test_storage_diagnostics_track_growth(tmp_path: Path) -> None:
     store = tmp_path / "storage-growth"
     store.mkdir()
     database = store / "gateway.db"
+    checkpoint = store / "checkpoints.db"
     _seed_wal_database(database, rows=4)
 
     before = build_storage_diagnostics(
-        database_backend="sqlite",
-        checkpoint_backend="postgres",
-        database_path=database,
+        database_path=database, checkpoint_path=checkpoint
     )
 
     conn = sqlite3.connect(str(database))
@@ -89,14 +85,9 @@ def test_storage_diagnostics_track_growth(tmp_path: Path) -> None:
         conn.close()
 
     after = build_storage_diagnostics(
-        database_backend="sqlite",
-        checkpoint_backend="postgres",
-        database_path=database,
+        database_path=database, checkpoint_path=checkpoint
     )
 
-    assert before is not None
-    assert after is not None
-    assert "checkpoint" not in after
     grew_from = cast("dict[str, object]", before["database"])
     grew_to = cast("dict[str, object]", after["database"])
     assert cast("int", grew_to["total_bytes"]) > cast("int", grew_from["total_bytes"])
@@ -107,13 +98,9 @@ def test_storage_diagnostics_survive_a_missing_store(tmp_path: Path) -> None:
     absent = tmp_path / "storage-absent" / "nested" / "gateway.db"
 
     diagnostics = build_storage_diagnostics(
-        database_backend="sqlite",
-        checkpoint_backend="sqlite",
-        database_path=absent,
-        checkpoint_path=absent,
+        database_path=absent, checkpoint_path=absent
     )
 
-    assert diagnostics is not None
     usage = cast("dict[str, object]", diagnostics["database"])
     assert usage["exists"] is False
     assert usage["size_bytes"] is None
@@ -124,14 +111,3 @@ def test_storage_diagnostics_survive_a_missing_store(tmp_path: Path) -> None:
     # store that has not been created yet still reports the space it would use.
     volume = cast("dict[str, object]", diagnostics["volume"])
     assert cast("int", volume["free_bytes"]) > 0
-
-
-def test_storage_diagnostics_absent_for_remote_backends() -> None:
-    """A non-SQLite deployment has no local file footprint to report."""
-    assert (
-        build_storage_diagnostics(
-            database_backend="postgres",
-            checkpoint_backend="postgres",
-        )
-        is None
-    )

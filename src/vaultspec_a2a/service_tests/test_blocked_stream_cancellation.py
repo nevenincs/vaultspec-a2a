@@ -3,50 +3,30 @@
 from __future__ import annotations
 
 import sqlite3
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
 
-from ..control.action_lease import CONTROL_ACTION_LEASE_TTL
-from ..testing.tests._support.catalog_selection import in_process_selection
-from ..testing.tests._support.payloads import json_object, required_bool, required_text
-from ._state import wait_for_state
-from .harness import _spawn_process, _wait_for, build_service_stack
+from ..database import CONTROL_ACTION_LEASE_TTL
+from ..testing import (
+    fetch_in_process_selection,
+    json_object,
+    reap_process,
+    required_bool,
+    required_text,
+    wait_for_run_status,
+)
+from ._state import thread_state
+from .harness import build_service_stack
 
 if TYPE_CHECKING:
     from ..conftest import ExternalPrerequisiteRule
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
     from .harness import ServiceStack
 
-
-def _start_lazy_gateway(stack: ServiceStack) -> None:
-    env = stack._local_env()
-    env["VAULTSPEC_A2A_AUTO_SPAWN_WORKER"] = "true"
-    process, log = _spawn_process(
-        sys.executable,
-        "-m",
-        "uvicorn",
-        "vaultspec_a2a.api.app:create_app",
-        "--factory",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(stack.ports["gateway"]),
-        env=env,
-        log_path=stack.runtime_dir / "lazy-gateway.log",
-    )
-    stack._gateway_proc = process
-    stack._gateway_log = log
-    _wait_for(
-        "lazy gateway readiness",
-        stack._gateway_http_ready,
-        timeout=120.0,
-        interval=0.2,
-        watch=[("gateway", process, stack.runtime_dir / "lazy-gateway.log")],
-    )
+_LAZY_GATEWAY_LOG = "lazy-gateway.log"
 
 
 def _cancel_receipt(stack: ServiceStack, run_id: str) -> tuple[str, str, str | None]:
@@ -76,7 +56,7 @@ def test_cancellation_survives_fresh_worker(
         else:
             stack._ensure_runtime_dir()
             stack._start_infra()
-            _start_lazy_gateway(stack)
+            stack.start_gateway(auto_spawn_worker=True, log_name=_LAZY_GATEWAY_LOG)
         workspace = stack.runtime_dir / "fresh-worker-cancel"
         workspace.mkdir()
         run_id = f"fresh-worker-{uuid4().hex}"
@@ -87,23 +67,22 @@ def test_cancellation_survives_fresh_worker(
                     "run_id": run_id,
                     "message": "Wait for cancellation.",
                     "team_preset": "deterministic-cancel-window",
-                    "selection": _deterministic_selection(stack, str(workspace)),
+                    "selection": fetch_in_process_selection(client, str(workspace)),
                     "metadata": {"workspace_root": str(workspace)},
                     "autonomous": True,
                 },
             )
             assert response.status_code == 201, response.text
-            running = wait_for_state(stack, run_id, _is_running, timeout=30.0)
+            running = wait_for_run_status(
+                lambda: thread_state(stack, run_id), _is_running, timeout=30.0
+            )
             health = stack.health()
             assert health["checks"]["worker"]["status"] == "ok", health
             stack.record("fresh-worker-running", running)
             if restart:
                 assert stack._worker_proc is not None
-                stack._stop_process(stack._worker_proc)
+                reap_process(stack._worker_proc)
                 stack._worker_proc = None
-                if stack._worker_log is not None:
-                    stack._worker_log.close()
-                    stack._worker_log = None
             cancelled = client.post(f"/v1/runs/{run_id}/cancel")
             assert cancelled.status_code == 200, cancelled.text
             assert cancelled.json()["accepted"] is True
@@ -111,15 +90,10 @@ def test_cancellation_survives_fresh_worker(
         stack.record("accepted-cancel-receipt", receipt)
         if restart:
             assert receipt[2] is None
-            stack._stop_process(stack._gateway_proc)
-            stack._gateway_proc = None
-            if stack._gateway_log is not None:
-                stack._gateway_log.close()
-                stack._gateway_log = None
-            _start_lazy_gateway(stack)
-        terminal = wait_for_state(
-            stack,
-            run_id,
+            stack.crash_gateway()
+            stack.start_gateway(auto_spawn_worker=True, log_name=_LAZY_GATEWAY_LOG)
+        terminal = wait_for_run_status(
+            lambda: thread_state(stack, run_id),
             _is_cancelled,
             timeout=(
                 CONTROL_ACTION_LEASE_TTL.total_seconds() + 60.0 if restart else 30.0
@@ -143,18 +117,6 @@ def _is_cancelled(state: JsonObject) -> bool:
     return state.get("status") == "cancelled"
 
 
-def _deterministic_selection(
-    service_stack: ServiceStack, workspace_root: str
-) -> dict[str, object]:
-    """Read the served catalog and choose only the real deterministic lane."""
-    with service_stack.gateway_client(timeout=240.0) as client:
-        response = client.get(
-            "/v1/provider-catalog", params={"workspace_root": workspace_root}
-        )
-        response.raise_for_status()
-        return in_process_selection(response.json(), prefer_provider_id="deterministic")
-
-
 def test_blocked_deterministic_stream_cancellation_settles_terminally(
     service_stack: ServiceStack,
 ) -> None:
@@ -170,7 +132,7 @@ def test_blocked_deterministic_stream_cancellation_settles_terminally(
                 "run_id": run_id,
                 "message": "Block in the deterministic cancellation window.",
                 "team_preset": "deterministic-cancel-window",
-                "selection": _deterministic_selection(service_stack, workspace_root),
+                "selection": fetch_in_process_selection(client, workspace_root),
                 "metadata": {"workspace_root": workspace_root},
                 "autonomous": True,
             },
@@ -181,7 +143,9 @@ def test_blocked_deterministic_stream_cancellation_settles_terminally(
         required_text(created, "run_id", at="blocked cancellation run start") == run_id
     )
 
-    running = wait_for_state(service_stack, run_id, _is_running, timeout=30.0)
+    running = wait_for_run_status(
+        lambda: thread_state(service_stack, run_id), _is_running, timeout=30.0
+    )
     service_stack.record(f"blocked-cancel-running:{run_id}", running)
 
     cancelling = json_object(
@@ -193,7 +157,9 @@ def test_blocked_deterministic_stream_cancellation_settles_terminally(
         == "cancelling"
     )
 
-    cancelled = wait_for_state(service_stack, run_id, _is_cancelled, timeout=30.0)
+    cancelled = wait_for_run_status(
+        lambda: thread_state(service_stack, run_id), _is_cancelled, timeout=30.0
+    )
     service_stack.record(f"blocked-cancelled:{run_id}", cancelled)
     assert (
         required_text(cancelled, "status", at="blocked cancellation state")
@@ -216,7 +182,7 @@ def test_pre_ingest_deterministic_cancellation_settles_terminally(
                 "run_id": run_id,
                 "message": "Cancel before the deterministic ingest begins.",
                 "team_preset": "deterministic-cancel-window",
-                "selection": _deterministic_selection(service_stack, workspace_root),
+                "selection": fetch_in_process_selection(client, workspace_root),
                 "metadata": {"workspace_root": workspace_root},
                 "autonomous": True,
             },
@@ -237,7 +203,9 @@ def test_pre_ingest_deterministic_cancellation_settles_terminally(
         == "cancelling"
     )
 
-    cancelled = wait_for_state(service_stack, run_id, _is_cancelled, timeout=30.0)
+    cancelled = wait_for_run_status(
+        lambda: thread_state(service_stack, run_id), _is_cancelled, timeout=30.0
+    )
     service_stack.record(f"pre-ingest-cancelled:{run_id}", cancelled)
     assert (
         required_text(cancelled, "status", at="pre-ingest cancellation state")

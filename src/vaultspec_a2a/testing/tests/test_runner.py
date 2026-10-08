@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import os
 import socket
-import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 from ..children import (
     await_child,
     file_size_fingerprint,
     measured_child_startup_s,
     run_child,
 )
+from ..cli import combined_output, inherited_environment
 from ..completion import send_completion_receipt
 from ..harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
 from ..runner import (
@@ -105,7 +106,8 @@ def _run_runner(
         stdout_path.open("w", encoding="utf-8") as stdout,
         stderr_path.open("w", encoding="utf-8") as stderr,
     ):
-        process = subprocess.Popen(
+        containment = ProcessContainment.create()
+        process = spawn_contained(
             [
                 sys.executable,
                 "-m",
@@ -119,15 +121,20 @@ def _run_runner(
                 str(probe),
                 "-q",
             ],
+            containment,
             stdout=stdout,
             stderr=stderr,
         )
-        returncode = await_child(
-            process,
-            what=f"the pytest owner over {probe.name}",
-            fingerprint=file_size_fingerprint(stdout_path, stderr_path),
-            diagnostic=lambda: _readable(stderr_path),
-        )
+        try:
+            returncode = await_child(
+                process,
+                containment,
+                what=f"the pytest owner over {probe.name}",
+                fingerprint=file_size_fingerprint(stdout_path, stderr_path),
+                diagnostic=lambda: _readable(stderr_path),
+            )
+        finally:
+            reap_contained(process, containment)
     return _RunnerResult(
         returncode,
         stdout_path.read_text(encoding="utf-8"),
@@ -158,9 +165,9 @@ def test_runner_child_declares_test_environment_before_settings_import(
         encoding="utf-8",
     )
 
-    child_environment = os.environ.copy()
-    child_environment.pop("VAULTSPEC_A2A_ENVIRONMENT", None)
-    child_environment.pop("VAULTSPEC_A2A_INTERNAL_TOKEN", None)
+    child_environment = inherited_environment(
+        {"VAULTSPEC_A2A_ENVIRONMENT": None, "VAULTSPEC_A2A_INTERNAL_TOKEN": None}
+    )
     child = run_child(
         [
             sys.executable,
@@ -174,7 +181,7 @@ def test_runner_child_declares_test_environment_before_settings_import(
         cwd=Path.cwd(),
         env=child_environment,
     )
-    assert child.returncode == 0, child.stdout + child.stderr
+    assert child.returncode == 0, combined_output(child)
     assert "1 passed" in child.stdout
 
     # `just init` provisions the checkout `.env` from `.env.example`, which
@@ -197,7 +204,7 @@ def test_runner_child_declares_test_environment_before_settings_import(
         cwd=Path.cwd(),
         env=child_environment,
     )
-    assert production.returncode == 0, production.stdout + production.stderr
+    assert production.returncode == 0, combined_output(production)
     assert production.stdout.strip() == "production-fail-closed"
 
 
@@ -245,7 +252,7 @@ def test_pytest_is_the_first_to_import_the_harness_plugin(tmp_path: Path) -> Non
     completed = _run_runner(probe, tmp_path, confine=False)
 
     assert completed.returncode == 0, completed.stderr
-    assert "PytestAssertRewriteWarning" not in completed.stdout + completed.stderr
+    assert "PytestAssertRewriteWarning" not in combined_output(completed)
 
 
 def test_nested_pytest_process_cannot_complete_its_parent_receipt() -> None:
@@ -337,6 +344,9 @@ def test_runner_rejects_a_rebound_nested_xdist_receipt(tmp_path: Path) -> None:
         "import time\n"
         "from vaultspec_a2a.testing.children import await_child\n"
         "from vaultspec_a2a.testing.harness_names import COMPLETION_ENDPOINT_ENV\n"
+        "from vaultspec_a2a.utils import (\n"
+        "    ProcessContainment, reap_contained, spawn_contained\n"
+        ")\n"
         "\n"
         "def test_nested_xdist_cannot_finish_outer(tmp_path):\n"
         "    assert COMPLETION_ENDPOINT_ENV not in os.environ\n"
@@ -353,14 +363,20 @@ def test_runner_rejects_a_rebound_nested_xdist_receipt(tmp_path: Path) -> None:
         "    )\n"
         "    log = tmp_path / 'nested.log'\n"
         "    with log.open('wb') as handle:\n"
-        "        nested_run = subprocess.Popen(\n"
+        "        containment = ProcessContainment.create()\n"
+        "        nested_run = spawn_contained(\n"
         "            [sys.executable, '-m', 'pytest', str(nested), '-p',\n"
         "             'vaultspec_a2a.testing.plugin', '-p', 'no:cacheprovider',\n"
         "             '-n', '2', '--dist=loadgroup', '-q'],\n"
-        "            cwd=nested, env=dict(os.environ),\n"
+        "            containment, cwd=nested, env=dict(os.environ),\n"
         "            stdout=handle, stderr=subprocess.STDOUT,\n"
         "        )\n"
-        "        returncode = await_child(nested_run, what='the nested xdist run')\n"
+        "        try:\n"
+        "            returncode = await_child(\n"
+        "                nested_run, containment, what='the nested xdist run'\n"
+        "            )\n"
+        "        finally:\n"
+        "            reap_contained(nested_run, containment)\n"
         "    output = log.read_text(encoding='utf-8', errors='replace')\n"
         "    assert returncode == 0, output\n"
         f"    time.sleep({2 * exit_timeout:g})\n",
@@ -369,7 +385,7 @@ def test_runner_rejects_a_rebound_nested_xdist_receipt(tmp_path: Path) -> None:
 
     completed = _run_runner(outer, tmp_path)
 
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.returncode == 0, combined_output(completed)
     assert (
         "pytest completion hello accepted: designated_runner_child_pid="
         in completed.stderr

@@ -36,10 +36,11 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from ...control.config import settings
 from ...graph.enums import Provider
-from ...service_tests._provider_catalog_live import declared_lane_model_value
-from .._factory_commands import _classify_acp_command, claude_acp_entry
+from ...testing import declared_lane_model_value
+from .._factory_commands import _classify_acp_command, acp_launch_options
 from .._subprocess import kill_process_tree
 from ..acp_chat_model import AcpChatModel
+from ..execution_modes import external_execution_mode
 from ..factory import ProviderFactory, claude_auth_env
 
 if TYPE_CHECKING:
@@ -58,16 +59,17 @@ async def test_claude_candidate_live_turn_completes_before_admission(
     served, reason = await declared_lane_model_value(Provider.CLAUDE.value, tmp_path)
     if served is None:
         external_prerequisite.absent("provider-catalog-live-selection", reason)
-    command, meta = _classify_acp_command(settings.acp_backend)
+    command = _classify_acp_command(settings.acp_backend)
     env_vars, auth_mode = claude_auth_env()
+    use_exec, launch_env = acp_launch_options(settings.acp_backend)
     model = AcpChatModel(
-        command=command,
-        env_vars=env_vars,
+        command=list(command.argv),
+        env_vars={**env_vars, **launch_env},
         desired_model=served,
         workspace_root=str(tmp_path),
-        use_exec=(meta["acp_backend"] == "binary"),
+        use_exec=use_exec,
         provider=Provider.CLAUDE.value,
-        execution_mode=f"claude-agent-acp:{meta['acp_backend']}",
+        execution_mode=external_execution_mode(Provider.CLAUDE, settings.acp_backend),
         auth_mode=auth_mode,
     )
     result = await model.ainvoke(
@@ -95,11 +97,7 @@ async def test_claude_live_turn_completes_and_returns_content(
     aggregated result carries the same completed content. An unauthenticated
     host fails with the provider's own auth error, which is the contract.
     """
-    if settings.acp_backend != "binary" and not claude_acp_entry().exists():
-        pytest.skip(
-            "Claude ACP node entry not installed; run 'npm install' "
-            "(@agentclientprotocol/claude-agent-acp) per the ACP runbook"
-        )
+    external_prerequisite("claude-acp-adapter")
 
     # The lane's turn PROOF runs on the model the operator declared. A
     # capability tier stood here until production stopped accepting one for an
@@ -125,7 +123,7 @@ async def test_claude_live_turn_completes_and_returns_content(
         HumanMessage(content="Reply with exactly the single word: pong"),
     ]
 
-    _, meta = _classify_acp_command(settings.acp_backend)
+    meta = _classify_acp_command(settings.acp_backend).metadata()
     try:
         streamed = "".join(
             [str(chunk.content) async for chunk in model.astream(messages)]

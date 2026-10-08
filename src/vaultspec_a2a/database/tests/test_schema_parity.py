@@ -22,8 +22,6 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from alembic import command
-from alembic.config import Config
 from sqlalchemy import (
     ForeignKeyConstraint,
     Inspector,
@@ -35,10 +33,6 @@ from sqlalchemy import (
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 
 from ..models import Base
-
-_ALEMBIC_INI = (
-    Path(__file__).resolve().parent.parent.parent.parent.parent / "alembic.ini"
-)
 
 # Alembic's own revision-tracking table. It is owned by the migration
 # framework, is deliberately absent from ``Base.metadata``, and is created by
@@ -57,22 +51,15 @@ _MODEL_TABLES = sorted(Base.metadata.tables)
 
 
 @pytest.fixture(scope="module")
-def migrated_inspector(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> Iterator[Inspector]:
-    """Reflect a real file-backed SQLite database migrated to head.
+def migrated_inspector(migrated_template: Path) -> Iterator[Inspector]:
+    """Reflect the session's real file-backed SQLite database migrated to head.
 
     File-backed, not ``:memory:``, because the file path is exactly what
     production uses and what forces the Alembic chain rather than
-    ``create_all``. Module-scoped because the 13-step chain is deterministic:
-    every test in this file reads the same migrated schema.
+    ``create_all``. Shared because the chain is deterministic: every test in
+    this file reads the same migrated schema, and none of them writes to it.
     """
-    database = tmp_path_factory.mktemp("schema-parity") / "migrated.db"
-    config = Config(str(_ALEMBIC_INI))
-    config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{database}")
-    command.upgrade(config, "head")
-
-    engine = create_engine(f"sqlite:///{database}")
+    engine = create_engine(f"sqlite:///{migrated_template}")
     try:
         yield inspect(engine)
     finally:

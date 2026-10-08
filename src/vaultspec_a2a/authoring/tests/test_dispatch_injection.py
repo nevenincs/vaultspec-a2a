@@ -1,4 +1,4 @@
-"""Dispatch-side injection of the proposal lifecycle ids (S20 surfacing fix).
+"""Dispatch-side injection of the proposal lifecycle ids.
 
 The bridge dispatcher owns session_id / changeset_id / expected_revision and
 injects them run-scoped so the model never supplies them. These drive
@@ -12,21 +12,21 @@ import asyncio
 import json
 import socket
 import sys
-import threading
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING, Literal, cast
 
 import httpx
 import pytest
 
-from ...testing.tests._support.http_handlers import JsonReplyHandler
+from ...testing import JsonReplyHandler, serve_handler
 from .. import AuthoringClient
 from .._errors import AuthoringTransportError
 from ..catalog import make_tool_dispatch, parse_catalog
 from ._engine_peer import reply_health_proof
 
 if TYPE_CHECKING:
+    import threading
     from collections.abc import Iterator
     from pathlib import Path
 
@@ -79,7 +79,7 @@ class _EngineState:
 
 def _make_handler(state: _EngineState, bearer: str = _BEARER) -> type[JsonReplyHandler]:
     # BaseHTTPRequestHandler is listed again, redundantly - see
-    # testing/http_handlers.py's docstring for why.
+    # testing/http.py's docstring for why.
     class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -125,18 +125,10 @@ def _make_handler(state: _EngineState, bearer: str = _BEARER) -> type[JsonReplyH
 
 
 @pytest.fixture
-def engine() -> Iterator[tuple[str, _EngineState]]:
+def loopback_engine() -> Iterator[tuple[str, _EngineState]]:
     state = _EngineState()
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
-    port = server.server_address[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with serve_handler(_make_handler(state)) as port:
         yield f"http://127.0.0.1:{port}", state
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5.0)
 
 
 def _str(value: object) -> str:
@@ -162,10 +154,10 @@ def _execute_inputs(state: _EngineState) -> list[dict[str, object]]:
 
 @pytest.mark.asyncio
 async def test_dispatch_injects_and_sanitizes_the_proposal_lifecycle(
-    engine: tuple[str, _EngineState],
+    loopback_engine: tuple[str, _EngineState],
     tmp_path: Path,
 ) -> None:
-    base_url, state = engine
+    base_url, state = loopback_engine
     snapshot = parse_catalog(_CATALOG)
     async with AuthoringClient(base_url, _BEARER, actor_token="actor-tok") as client:
         dispatch = make_tool_dispatch(
@@ -245,10 +237,10 @@ def _execute_bodies(state: _EngineState) -> list[dict[str, object]]:
 
 @pytest.mark.asyncio
 async def test_lost_response_replays_original_envelope_after_restart(
-    engine: tuple[str, _EngineState],
+    loopback_engine: tuple[str, _EngineState],
     tmp_path: Path,
 ) -> None:
-    base_url, state = engine
+    base_url, state = loopback_engine
     state.advance_revisions = True
     journal_path = tmp_path / "calls.db"
     create: dict[str, object] = {
@@ -315,10 +307,10 @@ async def test_lost_response_replays_original_envelope_after_restart(
 
 @pytest.mark.asyncio
 async def test_concurrent_retries_share_one_envelope(
-    engine: tuple[str, _EngineState],
+    loopback_engine: tuple[str, _EngineState],
     tmp_path: Path,
 ) -> None:
-    base_url, state = engine
+    base_url, state = loopback_engine
     snapshot = parse_catalog(_CATALOG)
     async with AuthoringClient(base_url, _BEARER, actor_token="actor-tok") as client:
         dispatchers = [
@@ -349,7 +341,7 @@ async def test_concurrent_retries_share_one_envelope(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_codex_native_turn_supplies_logical_call_identity(
-    engine: tuple[str, _EngineState],
+    loopback_engine: tuple[str, _EngineState],
     tmp_path: Path,
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
@@ -357,7 +349,7 @@ async def test_codex_native_turn_supplies_logical_call_identity(
     from langchain_core.messages import HumanMessage
 
     from ...control.config import settings
-    from ...graph.enums import Provider
+    from ...graph.enums import Provider, ProviderCondition
     from ...providers._acp_authoring import (
         AuthoringToolBinding,
         codex_authoring_mcp_server_spec,
@@ -366,15 +358,14 @@ async def test_codex_native_turn_supplies_logical_call_identity(
     from ...providers.acp_exceptions import AcpError
     from ...providers.cli_resolution import resolve_provider_cli_executable
     from ...providers.codex_chat_model import CodexChatModel
-    from ...providers.conditions import ProviderCondition
-    from ...service_tests._provider_catalog_live import declared_lane_model_value
+    from ...testing import declared_lane_model_value
 
     external_prerequisite("codex-cli")
     external_prerequisite("codex-credential")
     served, reason = await declared_lane_model_value(Provider.CODEX.value, tmp_path)
     if served is None:
         external_prerequisite.absent("provider-catalog-live-selection", reason)
-    base_url, state = engine
+    base_url, state = loopback_engine
     command = resolve_provider_cli_executable(Provider.CODEX)
     assert command is not None
     # Certification must exercise the actual binary before serving can admit it.
@@ -424,7 +415,7 @@ async def test_codex_native_turn_supplies_logical_call_identity(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_claude_native_turn_supplies_logical_call_identity(
-    engine: tuple[str, _EngineState],
+    loopback_engine: tuple[str, _EngineState],
     tmp_path: Path,
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
@@ -432,32 +423,35 @@ async def test_claude_native_turn_supplies_logical_call_identity(
     from langchain_core.messages import HumanMessage
 
     from ...control.config import settings
-    from ...graph.enums import Provider
+    from ...graph.enums import Provider, ProviderCondition
     from ...providers._acp_authoring import AuthoringToolBinding, attach_authoring_tools
-    from ...providers._factory_commands import _classify_acp_command
+    from ...providers._factory_commands import (
+        _classify_acp_command,
+        acp_launch_options,
+    )
     from ...providers.acp_chat_model import AcpChatModel
     from ...providers.acp_exceptions import AcpError
-    from ...providers.conditions import ProviderCondition
     from ...providers.factory import claude_auth_env
-    from ...service_tests._provider_catalog_live import declared_lane_model_value
+    from ...testing import declared_lane_model_value
 
     external_prerequisite("claude-cli")
     external_prerequisite("claude-credential")
     served, reason = await declared_lane_model_value(Provider.CLAUDE.value, tmp_path)
     if served is None:
         external_prerequisite.absent("provider-catalog-live-selection", reason)
-    command, metadata = _classify_acp_command(settings.acp_backend)
+    command = _classify_acp_command(settings.acp_backend)
     environment, auth_mode = claude_auth_env()
+    use_exec, launch_env = acp_launch_options(command.acp_backend)
     model = AcpChatModel(
-        command=command,
-        env_vars=environment,
+        command=list(command.argv),
+        env_vars={**environment, **launch_env},
         desired_model=served,
         workspace_root=str(tmp_path),
-        use_exec=metadata["acp_backend"] == "binary",
+        use_exec=use_exec,
         provider=Provider.CLAUDE.value,
         auth_mode=auth_mode,
     )
-    base_url, state = engine
+    base_url, state = loopback_engine
     binding = AuthoringToolBinding(
         snapshot=parse_catalog(_CATALOG),
         bearer_token=_BEARER,
@@ -533,11 +527,11 @@ async def _replay_native_bridge(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("call_id", [None, "", " ", "call\n", "x" * 161])
 async def test_mutation_without_valid_identity_has_no_engine_side_effect(
-    engine: tuple[str, _EngineState],
+    loopback_engine: tuple[str, _EngineState],
     tmp_path: Path,
     call_id: str | None,
 ) -> None:
-    base_url, state = engine
+    base_url, state = loopback_engine
     async with AuthoringClient(base_url, _BEARER, actor_token="actor-tok") as client:
         dispatch = make_tool_dispatch(
             client,
@@ -555,10 +549,10 @@ async def test_mutation_without_valid_identity_has_no_engine_side_effect(
 
 @pytest.mark.asyncio
 async def test_call_identity_cannot_be_rebound_to_new_input(
-    engine: tuple[str, _EngineState],
+    loopback_engine: tuple[str, _EngineState],
     tmp_path: Path,
 ) -> None:
-    base_url, state = engine
+    base_url, state = loopback_engine
     async with AuthoringClient(base_url, _BEARER, actor_token="actor-tok") as client:
         dispatch = make_tool_dispatch(
             client,
@@ -581,7 +575,7 @@ async def test_call_identity_cannot_be_rebound_to_new_input(
 
 @pytest.mark.asyncio
 async def test_logical_identity_is_forwarded_over_real_mcp(
-    engine: tuple[str, _EngineState],
+    loopback_engine: tuple[str, _EngineState],
     tmp_path: Path,
 ) -> None:
     from mcp.client import Client
@@ -591,7 +585,7 @@ async def test_logical_identity_is_forwarded_over_real_mcp(
         build_authoring_mcp_server,
     )
 
-    base_url, state = engine
+    base_url, state = loopback_engine
     snapshot = parse_catalog(_CATALOG)
     async with AuthoringClient(base_url, _BEARER, actor_token="actor-tok") as authoring:
         dispatch = make_tool_dispatch(
@@ -631,11 +625,11 @@ async def test_logical_identity_is_forwarded_over_real_mcp(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
 async def test_definite_rejection_allows_corrected_call_after_restart(
-    engine: tuple[str, _EngineState],
+    loopback_engine: tuple[str, _EngineState],
     tmp_path: Path,
     status: int,
 ) -> None:
-    base_url, state = engine
+    base_url, state = loopback_engine
     journal_path = tmp_path / "calls.db"
     snapshot = parse_catalog(_CATALOG)
     async with AuthoringClient(base_url, _BEARER, actor_token="actor-tok") as client:
@@ -680,10 +674,10 @@ async def test_definite_rejection_allows_corrected_call_after_restart(
 
 @pytest.mark.asyncio
 async def test_server_failure_keeps_original_call_pending(
-    engine: tuple[str, _EngineState],
+    loopback_engine: tuple[str, _EngineState],
     tmp_path: Path,
 ) -> None:
-    base_url, state = engine
+    base_url, state = loopback_engine
     async with AuthoringClient(base_url, _BEARER, actor_token="actor-tok") as client:
         dispatch = make_tool_dispatch(
             client,
@@ -717,12 +711,12 @@ async def test_server_failure_keeps_original_call_pending(
     "other_run, other_scope", [("other-run", "bridge"), ("owner-run", "other-role")]
 )
 async def test_journal_cannot_be_reused_by_another_owner(
-    engine: tuple[str, _EngineState],
+    loopback_engine: tuple[str, _EngineState],
     tmp_path: Path,
     other_run: str,
     other_scope: str,
 ) -> None:
-    base_url, state = engine
+    base_url, state = loopback_engine
     snapshot = parse_catalog(_CATALOG)
     async with AuthoringClient(base_url, _BEARER, actor_token="actor-tok") as client:
         dispatch = make_tool_dispatch(
@@ -753,7 +747,7 @@ async def test_journal_cannot_be_reused_by_another_owner(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("call_id_source", ["explicit", "codex", "claude"])
 async def test_stdio_process_restart_replays_lost_response(
-    engine: tuple[str, _EngineState],
+    loopback_engine: tuple[str, _EngineState],
     tmp_path: Path,
     call_id_source: str,
 ) -> None:
@@ -772,7 +766,7 @@ async def test_stdio_process_restart_replays_lost_response(
     )
     from ...protocols.mcp.tools.authoring_bridge import LOGICAL_CALL_ID_META_KEY
 
-    base_url, state = engine
+    base_url, state = loopback_engine
     parameters = StdioServerParameters(
         command=sys.executable,
         args=["-m", "vaultspec_a2a.protocols.mcp.authoring_stdio"],

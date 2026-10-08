@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import SplitResult, urlsplit
 
 from .control.config import settings
+from .utils import bearer_header
 
 if TYPE_CHECKING:
     from .desktop.credentials import DesktopCredentialPaths
@@ -55,18 +56,18 @@ def _validated_desktop_attach_credential(parsed: SplitResult) -> str | None:
         return None
     from .lifecycle.discovery import (
         DESKTOP_PROTOCOL_MAX,
-        DesktopDiscoveryState,
+        DiscoveryState,
         classify_desktop_discovery,
-        desktop_record_process_is_live,
         service_json_path,
     )
+    from .lifecycle.singleton import recorded_process_is_live
 
     state, record = classify_desktop_discovery(service_json_path(settings.a2a_home))
-    if state is not DesktopDiscoveryState.FRESH or record is None:
+    if state is not DiscoveryState.FRESH or record is None:
         return None
     if not record.supports_protocol(
         DESKTOP_PROTOCOL_MAX
-    ) or not desktop_record_process_is_live(record):
+    ) or not recorded_process_is_live(record):
         return None
     if not _matches_desktop_discovery_origin(parsed, record) or not (
         _matches_desktop_credential_reference(record.credential_reference, references)
@@ -102,4 +103,4 @@ def gateway_auth_headers(url: str) -> dict[str, str]:
 
     if token is None:
         return {}
-    return {"Authorization": f"Bearer {token}"}
+    return bearer_header(token)

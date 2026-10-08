@@ -8,18 +8,16 @@ actually receives, not the one the code is expected to assemble.
 
 from __future__ import annotations
 
-import json
 import logging
-import sys
 from typing import TYPE_CHECKING
 
 import pytest
 from langchain_core.messages import HumanMessage
 
+from ...testing import simulator_command
 from .._subprocess import STDERR_TAIL_LINES
 from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpError
-from ._acp_frames import SESSION_MODES
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,46 +30,18 @@ _FATAL_LINE = "fatal: no credentials available"
 _SESSION_ID = "sess-dying"
 
 
-def _dying_agent(stderr_lines: list[str]) -> str:
-    """An ACP responder that opens a session, then dies with *stderr_lines*."""
-    return f"""
-import json, sys
-
-def reply(msg_id, result):
-    sys.stdout.write(json.dumps({{"jsonrpc": "2.0", "id": msg_id, "result": result}}))
-    sys.stdout.write("\\n")
-    sys.stdout.flush()
-
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    message = json.loads(line)
-    method = message.get("method")
-    if method == "initialize":
-        reply(message["id"], {{
-            "protocolVersion": 1,
-            "agentCapabilities": {{}},
-            "authMethods": [],
-        }})
-    elif method == "session/new":
-        reply(message["id"], {{
-            "sessionId": {json.dumps(_SESSION_ID)},
-            "modes": {json.dumps(SESSION_MODES)},
-        }})
-    elif method == "session/prompt":
-        for text in {json.dumps(stderr_lines)}:
-            print(text, file=sys.stderr)
-        sys.stderr.flush()
-        break
-"""
-
-
 def _model(tmp_path: Path, stderr_lines: list[str]) -> AcpChatModel:
-    script = tmp_path / "dying_agent.py"
-    script.write_text(_dying_agent(stderr_lines), encoding="utf-8")
+    """A model over a simulated agent that opens a session, then dies saying so."""
+    stderr_file = tmp_path / "dying_agent_stderr.txt"
+    stderr_file.write_text("\n".join(stderr_lines) + "\n", encoding="utf-8")
     return AcpChatModel(
-        command=[sys.executable, str(script)],
+        command=simulator_command(
+            "--session-id",
+            _SESSION_ID,
+            "--die-after-session",
+            "--stderr-file",
+            str(stderr_file),
+        ),
         env_vars={},
         workspace_root=str(tmp_path),
     )
@@ -100,9 +70,10 @@ async def test_the_tail_is_reported_at_warning_with_the_session_it_belonged_to(
 ) -> None:
     """A run at the default level sees the diagnostic and the provider session.
 
-    Both were previously invisible: the lines went to DEBUG under an INFO default
-    and the session id was read off the wire and dropped, so a failed turn left
-    nothing to correlate with the transcript the CLI wrote.
+    Both must be visible: the lines would otherwise sit at DEBUG under an INFO
+    default and the session id would be read off the wire and dropped, so a
+    failed turn would leave nothing to correlate with the transcript the CLI
+    wrote.
     """
     model = _model(tmp_path, [_SECRET_LINE, _FATAL_LINE])
 

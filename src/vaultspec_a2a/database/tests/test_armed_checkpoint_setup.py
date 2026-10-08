@@ -66,12 +66,10 @@ async def test_an_armed_boot_never_creates_the_checkpoint_tables(
     db_file = tmp_path / "checkpoints.sqlite"
     db_file.touch()
 
-    with (
-        armed_desktop_app_home(tmp_path / "app-home"),
-        settings_override(
-            checkpoint_backend="sqlite",
-            checkpoint_database_url=f"sqlite+aiosqlite:///{db_file}",
-        ),
+    with armed_desktop_app_home(
+        tmp_path / "app-home",
+        checkpoint_backend="sqlite",
+        checkpoint_database_url=f"sqlite+aiosqlite:///{db_file}",
     ):
         async with open_checkpointer() as checkpointer:
             assert isinstance(checkpointer, AsyncSqliteSaver)

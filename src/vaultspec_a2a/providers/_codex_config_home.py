@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..control.config import settings
+from ..desktop._platform_acl import harden_credential_path
 from ..thread.errors import ConfigError
 from ..utils.enums import CodexWebSearchMode
 from ..utils.runtime_exec import is_module_invocation
@@ -190,16 +191,6 @@ def resolve_codex_web_search_mode(
     if not web_proven:
         return CodexWebSearchMode.DISABLED
     return configured if configured is not None else SERVED_WEB_SEARCH_MODE
-
-
-def _restrict(path: Path) -> None:
-    """Best-effort owner-only permissions on a path; never raises.
-
-    POSIX-effective (0o700 for the dir, applied to the credential copy too);
-    a no-op on Windows, where the per-user temp tree is already ACL-scoped.
-    """
-    with suppress(OSError):
-        path.chmod(0o700 if path.is_dir() else 0o600)
 
 
 def registry_tools_divergence(spec: JsonObject, *, name: str) -> str | None:
@@ -417,7 +408,7 @@ def build_codex_config_home(
     with suppress(OSError):
         sweep_orphan_codex_homes(keep=home)
     try:
-        _restrict(home)
+        harden_credential_path(home)
         if base_home is not None:
             # The worker keeps the source; the child owns only the copied login.
             seed_run_credential(base_home, home)

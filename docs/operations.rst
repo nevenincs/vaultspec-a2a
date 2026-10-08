@@ -196,9 +196,31 @@ implemented by :mod:`vaultspec_a2a.lifecycle.discovery`.
 
 Authentication is implemented by
 :func:`vaultspec_a2a.api.auth.authenticate_request` and wired by
-:func:`vaultspec_a2a.api.app.create_app`. The
-``allow_unauthenticated_v1_for_testing`` application option is test-only and
-must never be enabled by an operator deployment.
+:func:`vaultspec_a2a.api.app.create_app`, which takes no option that disables
+the requirement.
+
+Document-authoring runs and the verdict subscriber
+--------------------------------------------------
+
+A document-authoring preset (the ``research_adr`` topology and its kin) submits
+every document to the vaultspec engine as a proposal and parks at a gate until a
+reviewer decides it. Only the authoring verdict subscriber resumes a parked
+gate, and it can run only against an engine.
+
+So the subscriber is not a switch. The gateway starts it at startup whenever an
+engine discovery record resolves - the same record, with the same provenance and
+proof-of-possession rules, that every other authoring call attaches through -
+and runs none when no record resolves. ``VAULTSPEC_A2A_ENGINE_SERVICE_JSON``
+names that record; unset, the default per-project location applies. A record
+that is repository-controlled, a link, world-readable, of an older version,
+stale, or unproven is not an engine, so it starts no subscriber.
+
+A gateway running no subscriber REFUSES a document-authoring run instead of
+accepting it: ``POST /v1/runs`` answers ``422`` with the typed code
+``authoring_subscriber_unavailable`` and creates nothing. Coding presets are
+unaffected. Two consequences for an operator: start the engine before the
+gateway, or restart the gateway after it, and read that refusal as "this gateway
+has no engine", never as a fault in the request.
 
 Semantic search server
 ----------------------
@@ -227,6 +249,18 @@ store locking, schema migration, checkpointer setup, or the state backfill
 fails. The ``setup`` verb initialises fresh stores for a new install through the
 same authority via
 :func:`vaultspec_a2a.desktop.migration.initialize_fresh_stores`.
+
+``vaultspec-a2a migrate --compact`` is the operator's way to return disk space.
+After the schema work it truncates the primary store's write-ahead log and runs
+``VACUUM``, the only path that hands freed pages back to the operating system.
+Stop the service first: the verb refuses at the ``lock`` stage, before touching
+any store, while anything listens on the configured gateway or worker port,
+whether or not that listener would answer an unauthenticated request. A
+checkpoint that an open read transaction blocks fails the ``compact`` stage,
+leaves the log as it was, and skips ``VACUUM``; the result's ``detail`` says how
+much of the log was written back. The verb works on the application home's own
+stores under ``state/``, so a development store that
+``VAULTSPEC_A2A_DATABASE_URL`` places elsewhere cannot be compacted with it.
 
 Active-run discovery
 --------------------
@@ -288,7 +322,7 @@ lifecycle, caller-owned foreground execution, and Compose-owned stacks.
 Compose-owned development fixtures
 ----------------------------------
 
-Docker Compose owns the Jaeger and VidaiMock development/test fixtures.
+Docker Compose owns the Jaeger development/test fixture.
 Gateway and worker run natively through the process registry or test harness;
 there is no production application Compose stack.
 
@@ -303,29 +337,20 @@ there is no production application Compose stack.
 
 .. list-table::
    :header-rows: 1
-   :widths: 18 22 18 20 22
+   :widths: 25 25 25 25
 
-   * - Family
-     - Inspect
+   * - Inspect
      - Start
      - Status
      - Stop
-   * - Integration
-     - ``stack-integration-config``
+   * - ``stack-integration-config``
      - ``stack-integration-up``
      - ``stack-integration-status``
      - ``stack-integration-down``
-   * - Infrastructure
-     - ``stack-infrastructure-config``
-     - ``stack-infrastructure-up``
-     - ``stack-infrastructure-status``
-     - ``stack-infrastructure-down``
 
-Prefix the table's recipe names with ``just``. The integration family starts
-Jaeger and VidaiMock; the infrastructure family starts only Jaeger in a separate
-project. Both use ``service/docker-compose.integration.yml``. Their published
-ports bind to loopback. With default ports, run only one fixture project at a
-time. Don't register fixture containers as named host processes.
+Prefix the table's recipe names with ``just``. The project starts only Jaeger,
+from ``service/docker-compose.integration.yml``, and its published ports bind to
+loopback. Don't register fixture containers as named host processes.
 
 Scratchpad convention
 ---------------------

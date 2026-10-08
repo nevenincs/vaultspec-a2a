@@ -23,7 +23,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 4096
                 },
                 {
                   "type": "null"
@@ -73,7 +74,7 @@
     "/v1/runs": {
       "post": {
         "summary": "Run Start Endpoint",
-        "description": "Start, prepare, commit, or release through the single run-start verb.\n\nThe ``stage`` selector splits one verb into four shapes without growing the\nverb set: ``prepare`` reserves bounded capacity without tokens or a durable\nrun; ``commit`` binds the exact actor-token role set to that reservation;\n``release`` frees only an uncommitted reservation; and ``start`` (the\ndefault) preserves the one-shot engine/Compose path.",
+        "description": "Start, prepare, commit, or release through the single run-start verb.\n\nThe ``stage`` selector splits one verb into four shapes without growing the\nverb set: ``prepare`` reserves bounded capacity without tokens or a durable\nrun; ``commit`` binds the exact actor-token role set to that reservation;\n``release`` frees only an uncommitted reservation; and ``start`` (the\ndefault) preserves the one-shot engine path.",
         "operationId": "run_start_endpoint_v1_runs_post",
         "security": [
           {
@@ -119,7 +120,19 @@
             "description": "Missing or invalid gateway service token."
           },
           "503": {
-            "description": "Gateway service token is not configured."
+            "description": "Gateway service token is not configured, the gateway is draining or out of admission capacity, execution or the provider catalog is not ready, or the worker is saturated or shut out by the failure breaker; retry later."
+          },
+          "404": {
+            "description": "The run was gone by the time its first dispatch settled."
+          },
+          "409": {
+            "description": "The run was not started as asked: its id already belongs to a different request, its nickname is taken, its predecessor cannot be continued, the commit does not match its prepared reservation, or the worker refused the first dispatch with the typed code every run action shares."
+          },
+          "413": {
+            "description": "The dispatch this action would deliver is larger than the worker admits. Nothing was delivered, and a retry sends the same bytes."
+          },
+          "502": {
+            "description": "The worker could not be reached, refused the dispatch outright, or failed inside itself. Reconcile from run-status."
           },
           "422": {
             "description": "Validation Error",
@@ -450,10 +463,1450 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "The run's progress stream. Each event's data is one progress frame; the frame kind is on the SSE 'event' line and in the body under both kind keys. A frame whose replay is retained carries an 'id' a reconnect may offer back as Last-Event-ID. Frames are non-authoritative: reconcile run state from run-status.",
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/event-stream": {
+                "schema": {
+                  "title": "RunProgressFrame",
+                  "description": "One frame of a run's progress stream, as the body of a text/event-stream event. Frames are non-authoritative and droppable: reconcile run state from run-status, never from a frame. The kind is carried under both 'type' and 'event_type' with the same value, and on the SSE 'event' line.",
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "title": "message_chunk",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "message_chunk"
+                        },
+                        "event_type": {
+                          "const": "message_chunk"
+                        },
+                        "content": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 16384
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "finish_reason": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "thought_chunk",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "thought_chunk"
+                        },
+                        "event_type": {
+                          "const": "thought_chunk"
+                        },
+                        "content": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 16384
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "tool_call_start",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "tool_call_start"
+                        },
+                        "event_type": {
+                          "const": "tool_call_start"
+                        },
+                        "tool_call_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "title": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 256
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "kind": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "locations": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 32,
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 512
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "line": {
+                                    "anyOf": [
+                                      {
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "tool_call_update",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "tool_call_update"
+                        },
+                        "event_type": {
+                          "const": "tool_call_update"
+                        },
+                        "tool_call_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "title": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 256
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "kind": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "locations": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 32,
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "path": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 512
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "line": {
+                                    "anyOf": [
+                                      {
+                                        "type": "integer"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "artifact_update",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "artifact_update"
+                        },
+                        "event_type": {
+                          "const": "artifact_update"
+                        },
+                        "artifact_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 256
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "filename": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 256
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "append": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "last_chunk": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "agent_status",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "agent_status"
+                        },
+                        "event_type": {
+                          "const": "agent_status"
+                        },
+                        "state": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "node_name": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "detail": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 256
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "team_status",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "team_status"
+                        },
+                        "event_type": {
+                          "const": "team_status"
+                        },
+                        "active_thread_ids": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 64,
+                              "items": {
+                                "type": "string",
+                                "maxLength": 128
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "agents": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 64,
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "thread_id": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 128
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "agent_id": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 63
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "state": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "node_name": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 128
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "provider": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "model_name": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 128
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "role": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "display_name": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 128
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "description": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 256
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "error",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "error"
+                        },
+                        "event_type": {
+                          "const": "error"
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "message": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 512
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "recoverable": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "stream_snapshot",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "stream_snapshot"
+                        },
+                        "event_type": {
+                          "const": "stream_snapshot"
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "thread_terminal",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "thread_terminal"
+                        },
+                        "event_type": {
+                          "const": "thread_terminal"
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "replay": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "error_detail": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 512
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "heartbeat",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "heartbeat"
+                        },
+                        "event_type": {
+                          "const": "heartbeat"
+                        },
+                        "server_uptime_seconds": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "stream_rejected",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "stream_rejected"
+                        },
+                        "event_type": {
+                          "const": "stream_rejected"
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "progress_dropped",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "progress_dropped"
+                        },
+                        "event_type": {
+                          "const": "progress_dropped"
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "dropped_type": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "dropped_count": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "first_sequence": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "permission_request",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "permission_request"
+                        },
+                        "event_type": {
+                          "const": "permission_request"
+                        },
+                        "request_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "tool_call": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "tool_kind": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 64
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 4096
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "options": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 16,
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "option_id": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "name": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 128
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "kind": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "clarification_pending",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "clarification_pending"
+                        },
+                        "event_type": {
+                          "const": "clarification_pending"
+                        },
+                        "request_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 128
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "plan_update",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "const": "plan_update"
+                        },
+                        "event_type": {
+                          "const": "plan_update"
+                        },
+                        "entries": {
+                          "anyOf": [
+                            {
+                              "type": "array",
+                              "maxItems": 64,
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "status": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "priority": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "maxLength": 64
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "title": "uncatalogued_frame",
+                      "properties": {
+                        "api_version": {
+                          "const": "v1"
+                        },
+                        "thread_id": {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        "agent_id": {
+                          "type": "string",
+                          "maxLength": 63
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "timestamp": {
+                          "type": "number",
+                          "description": "Epoch seconds."
+                        },
+                        "message_id": {
+                          "type": "string"
+                        },
+                        "semantic_phase": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "type": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "event_type": {
+                          "type": "string",
+                          "maxLength": 64
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "api_version",
+                        "type",
+                        "event_type"
+                      ]
+                    }
+                  ]
+                }
               }
             }
           },
@@ -461,77 +1914,10 @@
             "description": "Missing or invalid gateway service token."
           },
           "503": {
-            "description": "Gateway service token is not configured."
+            "description": "Gateway service token is not configured, or the gateway is at its progress-stream connection limit; retry later."
           },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/runs/{run_id}/cancel": {
-      "post": {
-        "summary": "Run Cancel Endpoint",
-        "description": "Cancel a run idempotently.",
-        "operationId": "run_cancel_endpoint_v1_runs__run_id__cancel_post",
-        "security": [
-          {
-            "GatewayServiceToken": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "run_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
-              "title": "Run Id"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunCancelResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid gateway service token."
-          },
-          "503": {
-            "description": "Gateway service token is not configured."
+          "404": {
+            "description": "No such run."
           },
           "422": {
             "description": "Validation Error",
@@ -549,7 +1935,7 @@
     "/v1/runs/{run_id}/history": {
       "get": {
         "summary": "Run History Endpoint",
-        "description": "Read one run whole, including a terminal or archived one.\n\nDistinct from run-status by design. Run-status is the BOUNDED recovery\nsnapshot an engine reconciles authority from, and widening it would have\nmade every reconciliation pay for a transcript it does not read. This is the\nwide read for a consumer that wants the record: transcript, agents, plan,\npending answers, and the run's metadata.\n\n\"Whole\" is a promise about honesty, not about always having everything. The\ntranscript lives only in the checkpoint, and a checkpoint can be gone or\nunreachable; when it is, this answers 200 with the durable half of the\nrecord it CAN read - status, agents, plan, permissions, metadata - and says\nplainly that the transcript is not part of it. Refusing the whole read over\nan absent transcript would cost the caller the half that survived, and\nanswering an unqualified empty message list would be worse still: silent\nloss dressed as a run that never spoke.\n\nThe state snapshot is embedded rather than restated, so this response cannot\ndrift from the snapshot it reports.",
+        "description": "Read one run whole, including a terminal or archived one.\n\nDistinct from run-status by design. Run-status is the BOUNDED recovery\nsnapshot an engine reconciles authority from, and widening it would have\nmade every reconciliation pay for a transcript it does not read. This is the\nwide read for a consumer that wants the record: transcript, agents, plan,\npending answers, and the run's metadata.\n\n\"Whole\" is a promise about honesty, not about always having everything. The\ntranscript lives only in the checkpoint, and a checkpoint can be gone or\nunreachable; when it is, this answers 200 with the durable half of the\nrecord it CAN read - status, agents, plan, permissions, metadata - and says\nplainly that the transcript is not part of it. Refusing the whole read over\nan absent transcript would cost the caller the half that survived, and\nanswering an unqualified empty message list would be worse still: silent\nloss dressed as a run that never spoke.\n\nThe state snapshot is embedded rather than restated, so this response cannot\ndrift from the snapshot it reports.\n\nThe two durable artifacts this verb discloses that no other surface serves -\nthe settled permission decisions and the token accounting - are here for the\nsame reason: both were recorded on every run and readable nowhere, and\nreporting the record is this verb's whole job.",
         "operationId": "run_history_endpoint_v1_runs__run_id__history_get",
         "security": [
           {
@@ -758,6 +2144,9 @@
           "503": {
             "description": "Gateway service token is not configured."
           },
+          "404": {
+            "description": "No such run."
+          },
           "409": {
             "description": "The run cannot accept a follow-up turn. Nothing was reserved and nothing was dispatched; the typed code names which condition refused it.",
             "content": {
@@ -784,7 +2173,7 @@
     "/v1/runs/{run_id}/permissions/{request_id}/respond": {
       "post": {
         "summary": "Run Permission Respond Endpoint",
-        "description": "Answer a permission request the run raised on its progress stream.\n\nThe versioned surface already POSES this question - ``permission_request``\nis an enumerated frame on run-stream - and this is where the answer returns.\nWithout it the only answering channel is the transition surface, so retiring\nthat surface would strand every paused run.\n\nThe verb adds no state machine of its own: it is a versioned projection of\nthe same answer path, so at-most-once behaviour comes from there. Answering\ntwice replays the stored outcome rather than acting again, an answer arriving\nafter the request was applied reports the duplicate without re-dispatching,\nand a superseded or expired request is refused with a journaled rejection\nthat replays identically.\n\nScoping matters as much as the answer. The request is resolved and checked\nagainst the run in the path BEFORE anything acts on it, so a guessed request\nid cannot be used to answer another run's question - and because that check\nprecedes the service call, a mismatch has no effect at all rather than being\ndetected after the fact.",
+        "description": "Answer a permission request the run raised on its progress stream.\n\nThe versioned surface already POSES this question - ``permission_request``\nis an enumerated frame on run-stream - and this is where the answer returns.\nWithout it the only answering channel is the transition surface, so retiring\nthat surface would strand every paused run.\n\nThe verb adds no state machine of its own: it is a versioned projection of\nthe same answer path, so at-most-once behaviour comes from there. Answering\ntwice replays the stored outcome rather than acting again, an answer arriving\nafter the request was applied reports the duplicate without re-dispatching,\nand a superseded or expired request is refused with a journaled rejection\nthat replays identically.\n\nScoping matters as much as the answer. The service resolves the request\nagainst the run in the path, from that run's live checkpoint, BEFORE anything\nacts on it, so a guessed request id cannot be used to answer another run's\nquestion - and a mismatch has no effect at all rather than being detected\nafter the fact.",
         "operationId": "run_permission_respond_endpoint_v1_runs__run_id__permissions__request_id__respond_post",
         "security": [
           {
@@ -810,6 +2199,8 @@
             "required": true,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
               "title": "Request Id"
             }
           },
@@ -820,7 +2211,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 255
                 },
                 {
                   "type": "null"
@@ -857,6 +2249,9 @@
           "503": {
             "description": "Gateway service token is not configured, or the worker is saturated or shut out by the failure breaker and the answer was retained for retry."
           },
+          "404": {
+            "description": "No such run, or no such permission request on it."
+          },
           "409": {
             "description": "The answer was not taken. A worker that refused the dispatch is reported with the typed refusal code every run action shares; a request-state conflict carries a plain sentence. Nothing was applied either way.",
             "content": {
@@ -867,8 +2262,14 @@
               }
             }
           },
+          "413": {
+            "description": "The dispatch this action would deliver is larger than the worker admits. Nothing was delivered, and a retry sends the same bytes."
+          },
           "502": {
             "description": "The answer was accepted and retained but the worker could not be reached or failed inside itself. Reconcile from run-status."
+          },
+          "403": {
+            "description": "The run is parked on a DOCUMENT approval, which the engine's review surface decides. Answering it here would resume a run whose verdict nothing recorded, so the route refuses and the run resumes only through the verdict subscriber. Reachable on the same request shape as an ordinary permission answer, which is why a client needs a branch for it."
           },
           "422": {
             "description": "Validation Error",
@@ -912,6 +2313,9 @@
             "required": true,
             "schema": {
               "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.\\-]*$",
               "title": "Request Id"
             }
           }
@@ -941,7 +2345,102 @@
             "description": "Missing or invalid gateway service token."
           },
           "503": {
-            "description": "Gateway service token is not configured."
+            "description": "Gateway service token is not configured, the worker is saturated or shut out by the failure breaker, or another writer held the store's write lock for the whole of this write; nothing was applied, so retry later."
+          },
+          "404": {
+            "description": "No such run, or the run is not parked on this questionnaire."
+          },
+          "409": {
+            "description": "The resolution was not taken: a different one is already accepted, the run is not active or cannot be confirmed to have applied it, or the worker refused the dispatch with the typed code every run action shares."
+          },
+          "413": {
+            "description": "The dispatch this action would deliver is larger than the worker admits. Nothing was delivered, and a retry sends the same bytes."
+          },
+          "502": {
+            "description": "The worker could not be reached, refused the dispatch outright, or failed inside itself. Reconcile from run-status."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/{run_id}/cancel": {
+      "post": {
+        "summary": "Run Cancel Endpoint",
+        "description": "Cancel a run idempotently.",
+        "operationId": "run_cancel_endpoint_v1_runs__run_id__cancel_post",
+        "security": [
+          {
+            "GatewayServiceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCancelResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid gateway service token."
+          },
+          "503": {
+            "description": "Gateway service token is not configured, the worker is saturated or shut out by the failure breaker, or another writer held the store's write lock for the whole of this write; nothing was applied, so retry later."
+          },
+          "404": {
+            "description": "No such run."
+          },
+          "409": {
+            "description": "The run's state refuses cancellation - it settled some other way, its accepted deadline expired, or its authority changed - and no retry will change that; re-read run-status. Cancelling a run that is already cancelled is not refused."
+          },
+          "413": {
+            "description": "The dispatch this action would deliver is larger than the worker admits. Nothing was delivered, and a retry sends the same bytes."
+          },
+          "502": {
+            "description": "The worker could not be reached, refused the dispatch outright, or failed inside itself. Reconcile from run-status."
           },
           "422": {
             "description": "Validation Error",
@@ -1108,208 +2607,29 @@
         ]
       }
     },
-    "/internal/health": {
-      "get": {
-        "tags": [
-          "internal"
-        ],
-        "summary": "Internal Health",
-        "description": "Readiness probe -- confirms the internal API is accepting connections.",
-        "operationId": "internal_health_internal_health_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Internal Health Internal Health Get"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid internal IPC token."
-          },
-          "500": {
-            "description": "Internal IPC token is not configured."
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "InternalIpcToken": []
-          }
-        ]
-      }
-    },
-    "/internal/events": {
-      "post": {
-        "tags": [
-          "internal"
-        ],
-        "summary": "Receive Worker Event",
-        "description": "Receive a single event from the worker and relay to browser clients.\n\nThe ``WorkerBridge`` in the worker process POSTs here instead of\nsending a WebSocket frame.  The payload format matches\n``WorkerEventEnvelope``.",
-        "operationId": "receive_worker_event_internal_events_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Receive Worker Event Internal Events Post"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid internal IPC token."
-          },
-          "500": {
-            "description": "Internal IPC token is not configured."
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "InternalIpcToken": []
-          }
-        ]
-      }
-    },
-    "/internal/events/batch": {
-      "post": {
-        "tags": [
-          "internal"
-        ],
-        "summary": "Receive Worker Event Batch",
-        "description": "Receive a batch of events from the worker.\n\nThe ``WorkerBridge`` accumulates events for a short interval then\nPOSTs them as a single ``{\"events\": [...]}`` payload.  Each entry\nhas the same shape as a single-event envelope (``thread_id`` +\n``payload``).",
-        "operationId": "receive_worker_event_batch_internal_events_batch_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Receive Worker Event Batch Internal Events Batch Post"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid internal IPC token."
-          },
-          "500": {
-            "description": "Internal IPC token is not configured."
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "InternalIpcToken": []
-          }
-        ]
-      }
-    },
-    "/internal/heartbeat": {
-      "post": {
-        "tags": [
-          "internal"
-        ],
-        "summary": "Receive Worker Heartbeat",
-        "description": "Receive a heartbeat from the worker.\n\nUpdates ``app.state`` so the gateway can monitor worker\nliveness without a persistent WebSocket connection.",
-        "operationId": "receive_worker_heartbeat_internal_heartbeat_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Receive Worker Heartbeat Internal Heartbeat Post"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid internal IPC token."
-          },
-          "500": {
-            "description": "Internal IPC token is not configured."
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "InternalIpcToken": []
-          }
-        ]
-      }
-    },
     "/health": {
       "get": {
         "summary": "Health Endpoint",
-        "description": "Top-level health check: the one probe surface for external callers.\n\nUnder the armed desktop profile the unauthenticated boundary discloses\nonly the minimal liveness fact - no process identity, product identity, or\nproduct state - while an attach-authenticated caller additionally receives\nthe readiness projection from the single readiness authority, computed\nover a live database probe. Only the authenticated branch probes: the\nunauthenticated answer stays a constant so it cannot be used to measure\nthe gateway's dependencies.\n\nBoth profiles PROBE rather than read off app state - the DB here and, on\nCompose and development, the checkpointer and worker as well - because a\nhealthcheck that only reports what the process believes about itself\ncannot notice a dependency that has gone away.",
+        "description": "Top-level health check: the one probe surface for external callers.\n\nUnder the armed desktop profile the unauthenticated boundary discloses\nonly the minimal liveness fact - no process identity, product identity, or\nproduct state - while an attach-authenticated caller additionally receives\nthe readiness projection from the single readiness authority, computed\nover a live database probe. Only the authenticated branch probes: the\nunauthenticated answer stays a constant so it cannot be used to measure\nthe gateway's dependencies.\n\nBoth profiles PROBE rather than read off app state - the DB here and, on\nthe development profile, the checkpointer and worker as well - because a\nhealthcheck that only reports what the process believes about itself\ncannot notice a dependency that has gone away.",
         "operationId": "health_endpoint_health_get",
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "The armed desktop profile serves the readiness projection to an attach-authenticated caller and the minimal liveness fact to everyone else; the unarmed profile serves the probe aggregate.",
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Health Endpoint Health Get"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DesktopReadiness"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LivenessResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GatewayHealthResponse"
+                    }
+                  ],
+                  "title": "Response 200 Health Endpoint Health Get"
                 }
               }
             }
@@ -1406,6 +2726,7 @@
               "type": "string"
             },
             "type": "object",
+            "maxProperties": 64,
             "title": "Tokens"
           },
           "engine_bearer": {
@@ -1512,7 +2833,7 @@
           "state"
         ],
         "title": "AgentSnapshot",
-        "description": "Wire projection of the canonical agent descriptor within a snapshot.\n\nMirrors ``thread.snapshots.AgentData``."
+        "description": "One agent of a run, and what it is doing.\n\n``state`` and ``provider`` are served as their enumerations, so an\nunrecognised value never reaches the wire as an arbitrary string.\n\n``model_name`` is free-form by contrast, and deliberately so: it is the exact\nprovider-issued catalog identifier the run executed, and a served catalog\nnames its own models, so no closed vocabulary could cover them. ``None`` for\nan agent whose model was never resolved."
       },
       "ApprovalStatus": {
         "type": "string",
@@ -1645,42 +2966,6 @@
         "title": "ClarificationQuestion",
         "description": "One bounded question inside a clarification request.\n\n``options`` belongs to ``choice`` and only to ``choice``: a text question\ncarrying options would advertise a constraint the answer path does not\nenforce, and a choice without options would offer nothing to choose. Both are\nrefused at construction rather than tolerated and interpreted downstream."
       },
-      "ClarificationQuestionSnapshot": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "prompt": {
-            "type": "string",
-            "title": "Prompt"
-          },
-          "kind": {
-            "type": "string",
-            "title": "Kind"
-          },
-          "required": {
-            "type": "boolean",
-            "title": "Required",
-            "default": false
-          },
-          "options": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Options"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "prompt",
-          "kind"
-        ],
-        "title": "ClarificationQuestionSnapshot",
-        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationQuestionData``."
-      },
       "ClarificationRequest": {
         "properties": {
           "type": {
@@ -1714,27 +2999,6 @@
         ],
         "title": "ClarificationRequest",
         "description": "The bounded question set a parked run is waiting on.\n\nThis is the interrupt payload verbatim: what the node raises, what the\ncheckpoint holds while the run is parked, and what the recovery snapshot\ndiscloses. ``type`` is carried rather than implied because the checkpoint\nholds interrupts of several kinds side by side and the discriminator is how a\nreader tells a clarification from an approval."
-      },
-      "ClarificationRequestSnapshot": {
-        "properties": {
-          "request_id": {
-            "type": "string",
-            "title": "Request Id"
-          },
-          "questions": {
-            "items": {
-              "$ref": "#/components/schemas/ClarificationQuestionSnapshot"
-            },
-            "type": "array",
-            "title": "Questions"
-          }
-        },
-        "type": "object",
-        "required": [
-          "request_id"
-        ],
-        "title": "ClarificationRequestSnapshot",
-        "description": "Layer 1 equivalent of ``thread.snapshots.ClarificationRequestData``.\n\nA pending mid-run clarification, disclosed on ``run-status`` so a reload\nre-renders the questionnaire from authoritative state alone, never from a\nrelay frame."
       },
       "CleanupKind": {
         "type": "string",
@@ -1779,6 +3043,36 @@
         ],
         "title": "ControlKind",
         "description": "Provider-native control category without cross-provider semantics."
+      },
+      "DegradedReason": {
+        "type": "string",
+        "enum": [
+          "authoring_run_produced_no_proposal",
+          "checkpoint_history_unknown",
+          "checkpoint_missing",
+          "checkpoint_permission_without_durable_row",
+          "checkpoint_timeout",
+          "checkpoint_unavailable",
+          "execution_state_projection_missing",
+          "execution_state_projection_stale",
+          "execution_state_projection_timeout",
+          "execution_state_projection_unavailable",
+          "execution_state_projection_unreadable",
+          "incompatible_execution_authority",
+          "invalid_agent_descriptors",
+          "invalid_assignment_digest",
+          "interrupt_payload_unreadable",
+          "interrupt_payload_untyped",
+          "missing_assignment_digest",
+          "pending_permission_without_checkpoint_truth",
+          "permission_offers_no_usable_option",
+          "permission_projection_unreadable",
+          "repair_status_unreadable",
+          "settlement_store_contended",
+          "terminal_thread_pending_permission_residue"
+        ],
+        "title": "DegradedReason",
+        "description": "Why a run snapshot is less than complete, in terms a program can match.\n\nThese are the machine-readable members of a run snapshot's degradation list.\nThey are deliberately NOT the same vocabulary as the service-state\ndegradation list, which carries human-readable prose (\"worker is down\") for\nan operator to read rather than tokens for a client to branch on. The two\nshare a field name and nothing else, so they stay separate declarations.\n\nMembership follows the reader's fault lines: what could not be read\n(``*_UNAVAILABLE``, ``*_UNREADABLE``, ``*_TIMEOUT``), what was read but is\nnot current (``*_STALE``), what should have been present and was not\n(``*_MISSING``), what was present but contradicts another store (the\npermission residue and cross-store mismatch members), and what the read\nPROVED but could not write (``*_CONTENDED``)."
       },
       "DesktopReadiness": {
         "properties": {
@@ -1920,7 +3214,7 @@
           "name"
         ],
         "title": "ExecutionTaskSnapshot",
-        "description": "Normalized execution task used in reconnect snapshots."
+        "description": "Normalized execution task used in reconnect snapshots.\n\nThe one declaration of an execution task: the worker emits it across the\ngateway-worker wire, the gateway persists it, and the snapshot serves it."
       },
       "FrozenExecutionSnapshotSummary": {
         "properties": {
@@ -2210,6 +3504,38 @@
         "title": "FrozenTeamAssignmentSummary",
         "description": "Complete immutable schema-v1 execution authority for a modern run."
       },
+      "GatewayHealthResponse": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "const": "gateway",
+            "title": "Service",
+            "default": "gateway"
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Status"
+          },
+          "ready": {
+            "type": "boolean",
+            "title": "Ready"
+          },
+          "pid": {
+            "type": "integer",
+            "title": "Pid"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "status",
+          "ready",
+          "pid"
+        ],
+        "title": "GatewayHealthResponse",
+        "description": "The unarmed profile's probe body on ``GET /health``.\n\nDeclared because this is the one surface an external prober has, and it\nwas published as an untyped object: a reader of the contract learned no\nfield name, no status vocabulary, and no way to tell this body from the\narmed profile's minimal liveness one.\n\nOpen on purpose. The fields below are the ones the endpoint itself\nguarantees on every answer, including the degraded answer it gives when a\nruntime singleton is missing; the probe aggregate carries further\ndependency checks whose set depends on what this build probes, and\npublishing them as a closed shape would promise a client a stability the\naggregate does not have. ``additionalProperties`` says so rather than\nleaving the whole body unnamed."
+      },
       "GatewayReadiness": {
         "type": "string",
         "enum": [
@@ -2241,6 +3567,17 @@
         ],
         "title": "HealthState",
         "description": "A factual binary health axis whose evidence may still be unknown."
+      },
+      "LivenessResponse": {
+        "properties": {
+          "liveness": {
+            "$ref": "#/components/schemas/LivenessState",
+            "default": "alive"
+          }
+        },
+        "type": "object",
+        "title": "LivenessResponse",
+        "description": "The unauthenticated liveness body.\n\nDeliberately minimal: it carries only the liveness fact and discloses no\nprocess identity, product identity, or product state. An unauthenticated\ncaller of the desktop gateway observes this and nothing more."
       },
       "LivenessState": {
         "type": "string",
@@ -2403,17 +3740,16 @@
           "content"
         ],
         "title": "PlanEntry",
-        "description": "A single entry in the agent's execution plan.\n\nFields use plain ``str`` so the domain layer stays free of wire-protocol\nenum imports.  Values correspond to ``PlanEntryStatus`` / ``PlanEntryPriority``\nmembers defined in ``api.schemas.enums``."
+        "description": "A single entry in the agent's execution plan.\n\nFields use plain ``str`` so the domain layer stays free of wire-protocol\nenum imports.  Values follow the ACP plan-entry vocabularies: status\n``pending`` / ``in_progress`` / ``completed``, priority ``high`` / ``medium``\n/ ``low``."
       },
       "PresetOrigin": {
         "type": "string",
         "enum": [
           "bundled",
-          "workspace",
-          "test_mock"
+          "workspace"
         ],
         "title": "PresetOrigin",
-        "description": "Which source supplied a discovered preset.\n\n``WORKSPACE`` outranks ``BUNDLED`` for the same id, because a workspace\ndefinition shadows the shipped one; the origin therefore reports where the\npreset a caller would actually get was found, not merely where a file\nexists. ``TEST_MOCK`` is a shipped preset that follows the mock naming\nconvention, kept a separate member rather than folded into ``BUNDLED`` so\nthe product layer can exclude fixtures without matching on the id."
+        "description": "Which source supplied a discovered preset.\n\n``WORKSPACE`` outranks ``BUNDLED`` for the same id, because a workspace\ndefinition shadows the shipped one; the origin therefore reports where the\npreset a caller would actually get was found, not merely where a file\nexists."
       },
       "PresetSummary": {
         "properties": {
@@ -2496,11 +3832,6 @@
               }
             ]
           },
-          "is_mock": {
-            "type": "boolean",
-            "title": "Is Mock",
-            "default": false
-          },
           "origin": {
             "anyOf": [
               {
@@ -2555,7 +3886,6 @@
           "codex",
           "deterministic",
           "kimi",
-          "mock",
           "openai",
           "zai",
           "zhipu"
@@ -2821,7 +4151,7 @@
           "ineligible"
         ],
         "title": "ProviderEligibility",
-        "description": "Whether at least one subprocess provider can actually run on this host.\n\nComputed through the credential-aware readiness probe: the configured\ncredential is checked first, then command resolvability. The probe is still\nno-instantiation - no provider is constructed and no subprocess is spawned\nto determine it - but a resolvable launch command is not on its own\nsufficient, because a provider whose binary is installed with its\ncredential absent cannot run. Codex is the deliberate exception: its auth\nis a file-based persisted session rather than a configured secret, so it\ngates on command resolvability alone."
+        "description": "Whether at least one subprocess provider may be served work on this host.\n\nDecided by lane admission, which requires a recorded completed-turn proof\nfor the lane, a resolved launcher whose reported version that proof admits,\nand the lane's own readiness - its configuration present and its launch\ncommand resolvable. All three, conjunctively.\n\nCredential readiness is NECESSARY and never SUFFICIENT: a lane whose\ncredential resolves and whose launcher is installed is still ``ineligible``\nuntil a live test has completed a real turn on it. An eligibility that\nstopped at the credential served lanes with handshake coverage only, which\nis the whole reason the proof term exists. No provider is constructed to\ndecide this, and the launcher's version report is cached per launch identity."
       },
       "ProviderHealthResponse": {
         "properties": {
@@ -3034,7 +4364,7 @@
           "operator_intervention_required"
         ],
         "title": "RepairStatus",
-        "description": "Repair and readiness classification distinct from lifecycle.\n\nTypes BOTH durable columns that carry this classification:\n``threads.repair_status`` and ``threads.execution_readiness``. The two ask\ndifferent questions — what is wrong with this run, and is it fit to resume —\nbut they answer from this one closed set, so a new member becomes available\nto both at once and neither can drift into a private vocabulary."
+        "description": "Repair and readiness classification distinct from lifecycle.\n\nTypes ``threads.repair_status``, the durable answer to what is wrong with a\nrun. A run's served ``execution_readiness`` asks whether it is fit to resume\nand answers from this same closed set, because it is derived from that repair\nposture at read time rather than judged on its own; a new member is available\nto both at once and neither can drift into a private vocabulary."
       },
       "RoleState": {
         "properties": {
@@ -3073,7 +4403,7 @@
           "blocked"
         ],
         "title": "RunAdmission",
-        "description": "Whether the gateway would admit a run right now - the execution-ready fact.\n\n``ready`` means execution-ready: a reachable worker and a provider that is\nboth installed and credentialed, so this staged gate and the\ncredential-aware gate launch applies agree, rather than admitting a run and\nreserving capacity for it that the latter then refuses.\n``deferred`` means gateway-ready but not yet execution-ready - the worker is\ncold or starting and will start on demand. It remains informational on the\nreadiness surface, while staged ``prepare`` admission refuses it fail-closed.\n``blocked`` means a hard dependency or the profile's required native\nexecution isolation is unavailable. Attachment can remain gateway-ready."
+        "description": "Whether the gateway would admit a run right now - the execution-ready fact.\n\n``ready`` means execution-ready: a reachable worker and a provider this host\nmay be served, so this staged gate and the admission gate launch applies\nagree, rather than admitting a run and reserving capacity for it that the\nlatter then refuses.\n``deferred`` means gateway-ready but not yet execution-ready - the worker is\ncold or starting and will start on demand. It remains informational on the\nreadiness surface, while staged ``prepare`` admission refuses it fail-closed.\n``blocked`` means a hard dependency or the profile's required native\nexecution isolation is unavailable. Attachment can remain gateway-ready."
       },
       "RunAgentSummary": {
         "properties": {
@@ -3460,6 +4790,16 @@
             },
             "type": "array",
             "title": "Permission Decisions"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -3470,7 +4810,7 @@
           "transcript_status"
         ],
         "title": "RunHistoryResponse",
-        "description": "The full read of one run, including terminal and archived ones.\n\nDeliberately distinct from run-status, which is the BOUNDED recovery\nsnapshot an engine reconciles from. This is the wide read - transcript,\nagents, plan, pending answers, and the run's metadata - for a consumer that\nwants the whole record rather than the authority fields.\n\nThe state snapshot is embedded by reference rather than restated field by\nfield, so the two cannot drift apart as the snapshot evolves.\n\nThe transcript is the one part of the record this verb cannot always\ndeliver, because it lives only in the checkpoint. ``transcript_available``\nand ``transcript_status`` say so outright, so ``state.messages`` is never\nread as \"this run had no conversation\" when the truth is that its\nconversation could not be read. They are the transcript's counterpart to the\nsnapshot's own ``snapshot_complete`` / ``degraded_reasons`` pairing.\n\n``permission_decisions`` is the settled counterpart to the snapshot's PENDING\npermissions. A gate leaves the pending list the moment it is answered or the\nrun ends, so without this the record of a decision a human actually made was\ndurable in the audit log and readable nowhere - a run could be reviewed whole\nwith no trace that anyone had approved anything."
+        "description": "The full read of one run, including terminal and archived ones.\n\nDeliberately distinct from run-status, which is the BOUNDED recovery\nsnapshot an engine reconciles from. This is the wide read - transcript,\nagents, plan, pending answers, and the run's metadata - for a consumer that\nwants the whole record rather than the authority fields.\n\nThe state snapshot is embedded by reference rather than restated field by\nfield, so the two cannot drift apart as the snapshot evolves.\n\nThe transcript is the one part of the record this verb cannot always\ndeliver, because it lives only in the checkpoint. ``transcript_available``\nand ``transcript_status`` say so outright, so ``state.messages`` is never\nread as \"this run had no conversation\" when the truth is that its\nconversation could not be read. They are the transcript's counterpart to the\nsnapshot's own ``snapshot_complete`` / ``degraded_reasons`` pairing.\n\n``permission_decisions`` is the settled counterpart to the snapshot's PENDING\npermissions. A gate leaves the pending list the moment it is answered or the\nrun ends, so without this the record of a decision a human actually made was\ndurable in the audit log and readable nowhere - a run could be reviewed whole\nwith no trace that anyone had approved anything.\n\n``usage`` is the run's token accounting, and is the same kind of disclosure\nfor the same reason: the counts were recorded on every turn and served on no\nsurface at all. It is ``null`` when the run recorded no accounting rows,\nrather than a zeroed object a reviewer would read as a run that spent\nnothing. Run-status stays the bounded recovery snapshot and carries none of\nthis, so counts are a cost of the wide read by design."
       },
       "RunMessageRefusalCode": {
         "type": "string",
@@ -3480,10 +4820,11 @@
           "conflict",
           "incompatible_state",
           "run_busy",
-          "queue_full"
+          "queue_full",
+          "authoring_subscriber_unavailable"
         ],
         "title": "RunMessageRefusalCode",
-        "description": "The conditions a run action can be refused for.\n\nA closed subset of the dispatch failure vocabulary, so the published\ncontract names only what this refusal can carry rather than every failure\nthe gateway knows. Each value is spelled as its failure-type counterpart.\n\nShared by every verb that reaches the worker through a run dispatch, not\nonly the follow-up turn: the same worker refusal must mean the same thing\nwhichever verb met it."
+        "description": "The conditions a run action can be refused for.\n\nA closed subset of the typed refusal vocabulary, so the published contract\nnames only what a refusal can carry rather than every failure the gateway\nknows. Each value is spelled as its failure-type counterpart.\n\nShared by every verb that reaches the worker through a run dispatch, not\nonly the follow-up turn: the same worker refusal must mean the same thing\nwhichever verb met it. One member instead names a condition run start\nsettles before any dispatch, so a client branches on one code set per verb\nrather than on a second vocabulary for the pre-dispatch half."
       },
       "RunMessageRefusalDetail": {
         "properties": {
@@ -3745,7 +5086,7 @@
           "option_id"
         ],
         "title": "RunPermissionRespondRequest",
-        "description": "Answer one permission request raised by a run.\n\nCarries the chosen option and, optionally, a reviewer comment. The options\nthemselves were advertised on the versioned progress stream in the\n``permission_request`` frame that raised the question, so the answer names\none rather than restating it. ``notes`` survives into the verdict resume\npayload for a locally-respondable verdict-style pause (D6); it is ignored\nfor a plain tool-permission response, which resumes on the bare option id."
+        "description": "Answer one permission request raised by a run.\n\nCarries the chosen option and, optionally, a reviewer comment. The options\nthemselves were advertised on the versioned progress stream in the\n``permission_request`` frame that raised the question, so the answer names\none rather than restating it. ``notes`` survives into the verdict resume\npayload for a locally-respondable verdict-style pause; it is ignored\nfor a plain tool-permission response, which resumes on the bare option id."
       },
       "RunPermissionRespondResponse": {
         "properties": {
@@ -4234,7 +5575,8 @@
           "approval_request_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 256
               },
               {
                 "type": "null"
@@ -4255,8 +5597,7 @@
           },
           "last_sequence": {
             "type": "integer",
-            "title": "Last Sequence",
-            "default": 0
+            "title": "Last Sequence"
           },
           "stream_resumable": {
             "type": "boolean",
@@ -4291,7 +5632,7 @@
           },
           "degraded_reasons": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/DegradedReason"
             },
             "type": "array",
             "title": "Degraded Reasons"
@@ -4383,10 +5724,11 @@
           "run_id",
           "status",
           "semantic_phase",
-          "topology"
+          "topology",
+          "last_sequence"
         ],
         "title": "RunStatusResponse",
-        "description": "The authoritative recovery snapshot for a run.\n\nDesigned as the read a restarted A2A resumes or reports a run from: topology\nposition, per-role state, and the engine proposal/changeset ids the run has\nproduced, plus the checkpoint cursor and repair posture. Non-authoritative\nSSE progress frames may be lost freely; this snapshot is the source of truth."
+        "description": "The authoritative recovery snapshot for a run.\n\nDesigned as the read a restarted A2A resumes or reports a run from: topology\nposition, per-role state, and the engine proposal/changeset ids the run has\nproduced, plus the checkpoint cursor and repair posture. Non-authoritative\nSSE progress frames may be lost freely; this snapshot is the source of truth.\n\nEvery relay frame is droppable, so this response is where a reloading client\nwith no live stream recovers the run's failure condition, its queue depth and\nthe question it is parked on."
       },
       "RunSummariesResponse": {
         "properties": {
@@ -4573,6 +5915,78 @@
         ],
         "title": "RunSummaryRecord",
         "description": "One run as the history reading reports it: identity plus its projection.\n\nDeliberately wider than :class:`ActiveRunRecord`, and deliberately a\nSEPARATE model rather than fields added to it. Discovery answers the narrow\nquestion \"which runs are live, and where do I bind a viewer\" and its shape is\ncertified byte-for-byte; a reader of history is asking what happened, and\nneeds the facts that distinguish a healthy run from a degraded one.\n\nEvery field here is one the list service already resolves - the degradation\nprojections in particular are its reading of checkpoint authority and stale\napproval pointers, not a restatement of stored columns - so nothing is\ninvented that the projection cannot fill."
+      },
+      "RunTokenUsage": {
+        "properties": {
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "cache_read_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Tokens"
+          },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
+          "reasoning_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "input_tokens",
+          "output_tokens"
+        ],
+        "title": "RunTokenUsage",
+        "description": "Token counts a run's provider lanes reported, summed as recorded.\n\nCounts, and only counts a lane actually declared. Nothing here is priced or\nderived: no served lane is metered per token and the project holds no rate\ntable, so a cost field could only ever carry a number nobody measured.\n\n``input_tokens`` and ``output_tokens`` are the two counts every lane\nreports. The other three are the breakdown a lane may or may not report,\nand they are ``null`` when no recorded turn reported them - which is a\ndifferent fact from a measured zero and is served as a different value."
+      },
+      "RunUsage": {
+        "properties": {
+          "total": {
+            "$ref": "#/components/schemas/RunTokenUsage"
+          },
+          "by_role": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RunTokenUsage"
+            },
+            "type": "object",
+            "title": "By Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total"
+        ],
+        "title": "RunUsage",
+        "description": "One run's token accounting, totalled and split by role.\n\n``by_role`` is keyed by the role id that spent the tokens, and is scoped to\nthe run being read: a role id names a seat in a team preset rather than one\nrun's agent, so these are this run's rows grouped by seat, never that\nseat's tokens across every run it ever took. A seat that took no turn is\nabsent rather than present with zeros."
       },
       "SemanticPhase": {
         "type": "string",
@@ -4871,11 +6285,13 @@
           },
           "source_branch": {
             "type": "string",
+            "maxLength": 256,
             "title": "Source Branch",
             "default": ""
           },
           "callee": {
             "type": "string",
+            "maxLength": 128,
             "title": "Callee",
             "default": ""
           },
@@ -4904,6 +6320,7 @@
           },
           "feedback_batch_id": {
             "type": "string",
+            "maxLength": 256,
             "title": "Feedback Batch Id",
             "default": ""
           }
@@ -4948,7 +6365,7 @@
           "pending_clarification": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ClarificationRequestSnapshot"
+                "$ref": "#/components/schemas/ClarificationRequest"
               },
               {
                 "type": "null"
@@ -5113,7 +6530,7 @@
           },
           "degraded_reasons": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/DegradedReason"
             },
             "type": "array",
             "title": "Degraded Reasons"
@@ -5126,24 +6543,22 @@
           "repair_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/RepairStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Repair Status"
+            ]
           },
           "execution_readiness": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/RepairStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Execution Readiness"
+            ]
           },
           "pause_cause": {
             "anyOf": [
@@ -5159,18 +6574,18 @@
           "approval_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ApprovalStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Approval Status"
+            ]
           },
           "approval_request_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 256
               },
               {
                 "type": "null"
@@ -5192,18 +6607,18 @@
           "provider_condition": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ProviderCondition"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Provider Condition"
+            ]
           },
           "repair_reason": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 500
               },
               {
                 "type": "null"
@@ -5213,6 +6628,7 @@
           },
           "queued_messages": {
             "type": "integer",
+            "minimum": 0.0,
             "title": "Queued Messages",
             "default": 0
           }
@@ -5224,7 +6640,7 @@
           "last_sequence"
         ],
         "title": "ThreadStateSnapshot",
-        "description": "Complete thread state for reconnection replay.\n\nThe client fetches this via REST, notes ``last_sequence``, then\ndiscards any WebSocket events with ``sequence <= last_sequence``."
+        "description": "Complete thread state for reattaching to a run's event stream.\n\nThe client fetches this via REST, notes ``last_sequence``, then discards any\nstreamed frame with ``sequence <= last_sequence``."
       },
       "ThreadStatus": {
         "type": "string",
@@ -5370,7 +6786,7 @@
           },
           "content": {
             "items": {
-              "oneOf": [
+              "anyOf": [
                 {
                   "$ref": "#/components/schemas/ToolCallContentText"
                 },
@@ -5380,15 +6796,7 @@
                 {
                   "$ref": "#/components/schemas/ToolCallContentTerminal"
                 }
-              ],
-              "discriminator": {
-                "propertyName": "content_type",
-                "mapping": {
-                  "diff": "#/components/schemas/ToolCallContentDiff",
-                  "terminal": "#/components/schemas/ToolCallContentTerminal",
-                  "text": "#/components/schemas/ToolCallContentText"
-                }
-              }
+              ]
             },
             "type": "array",
             "title": "Content"
@@ -5562,11 +6970,6 @@
       "GatewayServiceToken": {
         "type": "http",
         "description": "Gateway service token. The service publishes it in an owner-restricted `service.token` handoff file adjacent to the `service.json` discovery record, whose `handoff_reference` names that file without embedding the secret. Send it as `Authorization: Bearer <token>`.",
-        "scheme": "bearer"
-      },
-      "InternalIpcToken": {
-        "type": "http",
-        "description": "Internal gateway-to-worker IPC token. Not the gateway service token: these routes are the worker's callback surface, not a client surface.",
         "scheme": "bearer"
       }
     }

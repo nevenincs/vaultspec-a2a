@@ -4,8 +4,9 @@ Driven through a REAL uvicorn server on a real TCP socket rather than
 ``ASGITransport``, because the transport buffers a whole response before
 returning and an SSE consumer must read frames while the producer is still
 emitting. The run is parked by the production clarification node pair on the
-app's own checkpointer, and the frame is projected by the app's own aggregator,
-so what these tests read off the socket is what a consumer reads.
+app's own checkpointer, its frames are produced by a real worker producer and
+relayed by a real worker bridge to the gateway's own relay route, so what these
+tests read off the socket is what a consumer reads.
 
 The pair of assertions here is the whole design in one place: the SSE frame says
 only THAT a question is waiting, and ``run-status`` says WHAT it asks. Proving
@@ -28,24 +29,33 @@ from ...graph.nodes.clarification import (
     create_clarification_gate_node,
     create_clarification_request_node,
 )
-from ...streaming.transformer import emit_interrupt_events
-from ...testing.tests._support.sse import read_frame
+from ...ipc.serializers import sequenced_to_dict
+from ...streaming import RunEventProducer, emit_interrupt_events
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    add_test_node,
+    async_catalog_run_fields,
+    compile_test_graph,
+    new_state_graph,
+    read_frame,
+    serve_on_loopback,
+)
 from ...thread.clarification import (
     ClarificationKind,
     ClarificationQuestion,
     ClarificationRequest,
 )
-from .clarification_harness import new_state_graph
-from .conftest import SessionFactory, _live_server, async_catalog_run_fields, make_app
+from ...worker.ipc import WorkerBridge
+from .conftest import SessionFactory, make_app
 
 if TYPE_CHECKING:
+    from fastapi import FastAPI
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from ...streaming.aggregator import EventAggregator
+    from ...streaming import SequencedEvent
     from ...thread.state import TeamState
 
-_PRESET = "mock-success-single"
 _RUN_SEQ = itertools.count(1)
 _PROMPT = "Which side should the monitor panel dock to?"
 _OPTIONS = ["dock-right", "dock-left"]
@@ -53,16 +63,18 @@ _REQUEST_ID = "clarify-sse"
 
 
 async def _park_real_run(
-    aggregator: EventAggregator, checkpointer: AsyncSqliteSaver, *, thread_id: str
+    app: FastAPI, base: str, checkpointer: AsyncSqliteSaver, *, thread_id: str
 ) -> None:
-    """Park a real run on a real clarification and project it through the app.
+    """Park a real run on a real clarification and relay its frames to the app.
 
-    Uses the production node pair and the app's own checkpointer and aggregator,
-    so the frame that reaches the socket is produced by the same seam a live run
-    goes through. Builds its graph through the shared harness's typed
+    Uses the production node pair and the app's own checkpointer. A real worker
+    producer projects the park, and its broadcast hook hands each event to a
+    real worker bridge posting to the gateway at *base* - the relay a worker
+    executor wires - so the frame that reaches the socket crosses the same
+    seams a live run's does. Builds its graph through the shared harness's typed
     ``new_state_graph`` boundary rather than constructing ``StateGraph``
     directly, matching the pattern already proven clean in
-    ``clarification_harness.py``.
+    ``testing/parking.py``.
     """
     request = ClarificationRequest(
         request_id=_REQUEST_ID,
@@ -85,19 +97,22 @@ async def _park_real_run(
         return {}
 
     builder = new_state_graph()
-    builder.add_node(
+    add_test_node(
+        builder,
         "clarification_request",
         create_clarification_request_node(
             _producer, gate_target="clarification_gate", proceed_target="proceed"
         ),
     )
-    builder.add_node(
-        "clarification_gate", create_clarification_gate_node(proceed_target="proceed")
+    add_test_node(
+        builder,
+        "clarification_gate",
+        create_clarification_gate_node(proceed_target="proceed"),
     )
-    builder.add_node("proceed", _proceed)
+    add_test_node(builder, "proceed", _proceed)
     builder.add_edge("__start__", "clarification_request")
     builder.add_edge("proceed", "__end__")
-    graph = builder.compile(checkpointer=checkpointer)
+    graph = compile_test_graph(builder, checkpointer=checkpointer)
 
     config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
     state: TeamState = {
@@ -114,14 +129,41 @@ async def _park_real_run(
     assert isinstance(result, dict)
     assert "__interrupt__" in result
 
-    emitted = await emit_interrupt_events(
-        thread_id,
-        "supervisor",
-        graph,
-        cast("dict[str, Any]", config),
-        aggregator._emitters,
+    bridge = WorkerBridge(
+        api_url=base,
+        worker_id="clarification-relay-worker",
+        internal_token=app.state.internal_token,
     )
-    assert emitted
+    producer = RunEventProducer()
+
+    async def _relay(sequenced: SequencedEvent) -> None:
+        await bridge.send_event(thread_id, sequenced_to_dict(sequenced))
+
+    producer.add_broadcast_hook(_relay)
+    try:
+        emitted = await emit_interrupt_events(
+            thread_id, graph, cast("dict[str, Any]", config), producer._emitters
+        )
+        assert emitted
+        assert await bridge.flush_events()
+    finally:
+        await bridge.close()
+
+
+async def _start_run(client: httpx.AsyncClient) -> str:
+    """Start one run, giving each call its own id so the two tests never collide."""
+    start = await client.post(
+        "/v1/runs",
+        json={
+            "team_preset": DEFAULT_TEAM_PRESET,
+            "message": "plan it",
+            "autonomous": True,
+            "run_id": f"clarify-sse-{next(_RUN_SEQ):02d}",
+            **await async_catalog_run_fields(client),
+        },
+    )
+    assert start.status_code == 201, start.text
+    return str(start.json()["run_id"])
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -135,23 +177,12 @@ async def test_the_nudge_arrives_on_the_sse_stream_carrying_no_questions(
     questions from this has been handed authority the relay is not allowed to
     carry, because the relay may drop it.
     """
-    app, aggregator, _worker, cp = make_app(session_factory, checkpointer)
+    app, _aggregator, _worker, cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=15.0) as client,
     ):
-        start = await client.post(
-            "/v1/runs",
-            json={
-                "team_preset": _PRESET,
-                "message": "plan it",
-                "autonomous": True,
-                "run_id": f"clarify-sse-{next(_RUN_SEQ):02d}",
-                **await async_catalog_run_fields(client),
-            },
-        )
-        assert start.status_code == 201, start.text
-        run_id = str(start.json()["run_id"])
+        run_id = await _start_run(client)
 
         async with client.stream("GET", f"/v1/runs/{run_id}/stream") as resp:
             assert resp.status_code == 200
@@ -160,7 +191,7 @@ async def test_the_nudge_arrives_on_the_sse_stream_carrying_no_questions(
 
             # Subscribe first, then park: the relay is live, not replayed.
             await asyncio.sleep(0.2)
-            await _park_real_run(aggregator, cp, thread_id=run_id)
+            await _park_real_run(app, base, cp, thread_id=run_id)
 
             frame, _raw = await read_frame(
                 lines, wanted="clarification_pending", timeout=10.0
@@ -187,28 +218,17 @@ async def test_the_questions_live_on_run_status_not_on_the_relay(
     lets a client that reloaded - and so missed every frame ever sent - still
     render the question.
     """
-    app, aggregator, _worker, cp = make_app(session_factory, checkpointer)
+    app, _aggregator, _worker, cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=15.0) as client,
     ):
-        start = await client.post(
-            "/v1/runs",
-            json={
-                "team_preset": _PRESET,
-                "message": "plan it",
-                "autonomous": True,
-                "run_id": f"clarify-sse-{next(_RUN_SEQ):02d}",
-                **await async_catalog_run_fields(client),
-            },
-        )
-        assert start.status_code == 201, start.text
-        run_id = str(start.json()["run_id"])
+        run_id = await _start_run(client)
 
         async with client.stream("GET", f"/v1/runs/{run_id}/stream") as resp:
             lines = resp.aiter_lines()
             await asyncio.sleep(0.2)
-            await _park_real_run(aggregator, cp, thread_id=run_id)
+            await _park_real_run(app, base, cp, thread_id=run_id)
             frame, _raw = await read_frame(
                 lines, wanted="clarification_pending", timeout=10.0
             )

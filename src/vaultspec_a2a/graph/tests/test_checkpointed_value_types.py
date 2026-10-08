@@ -20,23 +20,23 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
+from ...providers import ProviderFactory
 from ...team.team_config import (
     ResearchThreadSpec,
     load_agent_config,
     load_team_config,
 )
+from ...testing import deterministic_model_assignment
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
 )
 from ...thread.enums import ControlActionType
 from ..compiler import compile_team_graph
-from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -66,43 +66,6 @@ class _Submitter:
     async def __call__(self, state: Any, phase: str) -> str:
         del state
         return f"prop-{phase}"
-
-
-class _PassingFactory:
-    """Every lane replies ``PASS`` so the run reaches its first human gate."""
-
-    def create(
-        self,
-        provider: Any,
-        *,
-        model: Any | None = None,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
-        **kwargs: Any,
-    ) -> FakeListChatModel:
-        del provider, model, agent_config, workspace_root, kwargs
-        return FakeListChatModel(responses=["PASS"])
-
-
-class _RoutingFactory:
-    """The supervisor names each route in turn; workers just report back."""
-
-    def __init__(self, routes: list[str]) -> None:
-        self._routes = routes
-
-    def create(
-        self,
-        provider: Any,
-        *,
-        model: Any | None = None,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
-        **kwargs: Any,
-    ) -> FakeListChatModel:
-        del provider, model, workspace_root, kwargs
-        if agent_config is None or getattr(agent_config, "role", "") == "supervisor":
-            return FakeListChatModel(responses=self._routes)
-        return FakeListChatModel(responses=["worked"])
 
 
 def _base_state(thread_id: str, **extra: Any) -> dict[str, Any]:
@@ -146,7 +109,7 @@ async def test_a_parked_document_gate_checkpoints_only_plain_values(
     database file, and resumes - so a leak shows up as a persisted member and
     not merely as a value the run was still holding.
     """
-    team = load_team_config("vaultspec-adr-research-mock")
+    team = load_team_config("vaultspec-adr-research-deterministic")
     topology = team.topology.model_copy(
         update={"research_threads": [ResearchThreadSpec(thread_id="primary")]}
     )
@@ -154,12 +117,14 @@ async def test_a_parked_document_gate_checkpoints_only_plain_values(
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     config: Any = {"configurable": {"thread_id": "plain-values-doc"}}
 
+    # The deterministic reviewer passes every draft, so the run reaches its
+    # first human gate.
     def _graph(saver: AsyncSqliteSaver) -> Any:
         return compile_team_graph(
             team_config=team,
             agent_configs=agent_configs,
             checkpointer=saver,
-            provider_factory=_PassingFactory(),
+            provider_factory=ProviderFactory(),
             proposal_submitter=_Submitter(),
             model_assignment=deterministic_model_assignment(team),
         )
@@ -210,8 +175,10 @@ async def test_a_parked_plan_approval_checkpoints_only_plain_values(
     ``approval_status`` is an ``ApprovalStatus`` member at the supervisor's
     write sites and ``pipeline_phase`` comes from the compiler's role-to-phase
     map, so a run parked for plan approval is where both would be persisted.
+    The deterministic supervisor routes to its one exec worker, which a plan in
+    the workspace holds behind plan approval.
     """
-    team = load_team_config("mock-supervisor-human-in-loop")
+    team = load_team_config("deterministic-supervisor-routing")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     supervisor_config = load_agent_config("vaultspec-supervisor")
     config: Any = {"configurable": {"thread_id": "plain-values-plan"}}
@@ -222,7 +189,7 @@ async def test_a_parked_plan_approval_checkpoints_only_plain_values(
             agent_configs=agent_configs,
             checkpointer=saver,
             supervisor_agent_config=supervisor_config,
-            provider_factory=_RoutingFactory(["mock-coder-human", "FINISH"]),
+            provider_factory=ProviderFactory(),
             model_assignment=deterministic_model_assignment(team),
         )
 
@@ -249,8 +216,9 @@ async def test_a_parked_plan_approval_checkpoints_only_plain_values(
         assert hydrated["pipeline_phase"] == "plan"
 
         # The gate still reads its own persisted value: approving routes on
-        # to the exec worker rather than re-asking.
-        await graph.ainvoke(
+        # to the exec worker, whose own permission request is the next park,
+        # rather than re-asking for the plan.
+        resumed = await graph.ainvoke(
             Command[str](
                 resume={
                     "verdict": "approved",
@@ -260,5 +228,6 @@ async def test_a_parked_plan_approval_checkpoints_only_plain_values(
             ),
             config,
         )
+        assert resumed["__interrupt__"][0].value["type"] == "permission_request"
         after = (await graph.aget_state(config)).values
         assert not sorted(enum_members(after))

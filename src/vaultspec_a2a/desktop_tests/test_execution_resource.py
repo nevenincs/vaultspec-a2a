@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from ..testing.resources import declared_claims
+from ..testing import declared_claims
 
 if TYPE_CHECKING:
     import pytest

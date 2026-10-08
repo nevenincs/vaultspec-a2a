@@ -20,8 +20,8 @@ def _agent(agent_id: str, role: str) -> SimpleNamespace:
 
 
 def test_active_role_maps_worker_node_to_its_role() -> None:
-    agents = [_agent("mock-planner", "planner"), _agent("mock-coder-success", "coder")]
-    assert _active_role(["mock-coder-success"], agents) == "coder"
+    agents = [_agent("planner-agent", "planner"), _agent("coder-agent", "coder")]
+    assert _active_role(["coder-agent"], agents) == "coder"
 
 
 def test_active_role_strips_mount_prefix_before_mapping() -> None:
@@ -32,18 +32,18 @@ def test_active_role_strips_mount_prefix_before_mapping() -> None:
 def test_active_role_orchestration_node_yields_none_never_node_name() -> None:
     # Internal orchestration/gate nodes have no matching agent; they must resolve
     # to None, never leak "phase_gate"/"diverge"/"supervisor" into the contract.
-    agents = [_agent("mock-planner", "planner")]
+    agents = [_agent("planner-agent", "planner")]
     result = _active_role(["phase_gate", "diverge", "__end__"], agents)
     assert result is None
 
 
 def test_active_role_skips_end_and_empty_then_finds_worker() -> None:
-    agents = [_agent("mock-planner", "planner")]
-    assert _active_role(["__end__", "", "mock-planner"], agents) == "planner"
+    agents = [_agent("planner-agent", "planner")]
+    assert _active_role(["__end__", "", "planner-agent"], agents) == "planner"
 
 
 def test_active_role_empty_next_nodes_is_none() -> None:
-    assert _active_role([], [_agent("mock-planner", "planner")]) is None
+    assert _active_role([], [_agent("planner-agent", "planner")]) is None
 
 
 def test_product_topology_has_no_next_nodes_field() -> None:

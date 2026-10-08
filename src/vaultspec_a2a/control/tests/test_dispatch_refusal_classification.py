@@ -10,82 +10,47 @@ answers instead.
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-import anyio
 import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...domain_config import domain_config
-from ...ipc.schemas import DispatchRequest
+from ...ipc.body_limit import dispatch_envelope_budget
+from ...ipc.schemas import DispatchRequest, SeedTranscriptMessage
 from ...team.team_config import load_team_config
+from ...testing import (
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    adopted_spawner,
+    capacity_holders,
+    current_execution_metadata,
+    served_worker,
+)
 from ...thread.action_receipts import (
     GraphActionReceipt,
     control_action_payload_fingerprint,
 )
+from ...thread.constants import MAX_RUN_MESSAGE_CHARS
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType
 from ...thread.executable_graph import freeze_graph_definition
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
 from ..accepted_input import freeze_accepted_input
 from ..circuit_breaker import WorkerCircuitBreaker
 from ..config import settings
 from ..dispatch import safe_dispatch
 from ..execution_authority import resolve_execution_authority
-from ..worker_management import LazyWorkerSpawner
-from ._catalog_authority import current_execution_metadata
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
     from pathlib import Path
+
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from ...worker._dispatch_contract import DispatchCapacityReservation
 
 _TEST_INTERNAL_TOKEN = "dispatch-refusal-test-token"
-
-
-@pytest.fixture(autouse=True)
-def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give both sides of real worker dispatch the current IPC credential."""
-    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
-
-
-@asynccontextmanager
-async def _real_worker(
-    checkpoint_path: Path,
-) -> AsyncGenerator[tuple[httpx.AsyncClient, Executor]]:
-    """Serve the production worker app over real ASGI with a real executor."""
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
-        await saver.setup()
-        bridge = WorkerBridge("http://control", "dispatch-refusal-test")
-        executor = Executor(saver, bridge)
-        app = create_worker_app()
-        app.state.executor = executor
-        async with anyio.create_task_group() as tasks:
-            app.state.task_group = tasks
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="http://worker",
-                headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-            ) as client:
-                yield client, executor
-            tasks.cancel_scope.cancel()
-        await executor.shutdown()
-        await bridge.close()
-
-
-def _spawner() -> LazyWorkerSpawner:
-    spawner = LazyWorkerSpawner(
-        worker_url="http://worker", worker_port=8001, auto_spawn=False
-    )
-    spawner.replace_process(None)
-    return spawner
 
 
 def _breaker() -> WorkerCircuitBreaker:
@@ -97,19 +62,19 @@ def _ingest(
 ) -> DispatchRequest:
     """Build the dispatch the gateway really sends, with real graph authority."""
     authority = resolve_execution_authority(
-        current_execution_metadata(workspace, required_roles=("mock-coder-success",))
+        current_execution_metadata(workspace, required_roles=(DEFAULT_REQUIRED_ROLE,))
     )
     request = DispatchRequest(
         dispatch_id=dispatch_id,
         action="ingest",
         thread_id=thread_id,
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         content="a turn",
         workspace_root=str(workspace),
         recursion_limit=25,
         model_assignment=authority.model_assignment,
         graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=workspace),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
             workspace_root=workspace,
         ),
     )
@@ -132,25 +97,92 @@ def _ingest(
     )
 
 
+def _oversized_ingest(workspace: Path, thread_id: str) -> DispatchRequest:
+    """An ingest every field of which is within its own published bound.
+
+    The seed transcript is a legal collection of legal messages: the published
+    caps admit 100 of them at 65,536 characters each, and the default transcript
+    depth is 20, so the sum crosses the internal delivery allowance while no
+    single field is anywhere near its own. Nothing here is a crafted payload -
+    this is a long conversation being continued.
+    """
+    base = _ingest(workspace, thread_id, f"{thread_id}-dispatch", with_receipt=True)
+    return base.model_copy(
+        update={
+            "seed_transcript": [
+                SeedTranscriptMessage(role="user", content="x" * MAX_RUN_MESSAGE_CHARS)
+                for _ in range(domain_config.successor_transcript_depth)
+            ]
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_envelope_is_refused_before_any_delivery(
+    tmp_path: Path,
+) -> None:
+    """The budget refuses it where it is built, not at the far end of a delivery.
+
+    No worker is listening at all: the client points at a closed loopback port.
+    Any refusal produced by attempting the delivery would therefore read as an
+    unreachable worker, and the condition would be one the recovery coordinator
+    retries forever against bytes that can never shrink. The typed refusal
+    instead means the delivery was never attempted.
+    """
+    dispatch = _oversized_ingest(tmp_path, "oversized-run")
+    budget = dispatch_envelope_budget(settings)
+    assert len(dispatch.encoded_envelope()) > budget
+
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as nobody:
+        outcome = await safe_dispatch(
+            nobody, dispatch, _breaker(), adopted_spawner("http://127.0.0.1:1")
+        )
+
+    assert outcome.failure_type == FailureType.ENVELOPE_TOO_LARGE.value, outcome.detail
+    assert str(budget) in (outcome.detail or "")
+
+
+@pytest.mark.asyncio
+async def test_an_envelope_inside_the_budget_still_reaches_the_worker(
+    tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """The budget admits an ordinary continuation: it is a bound, not a ban."""
+    dispatch = _ingest(tmp_path, "sized-run", "sized-dispatch", with_receipt=True)
+    dispatch = dispatch.model_copy(
+        update={
+            "seed_transcript": [
+                SeedTranscriptMessage(role="user", content="x" * 4096)
+                for _ in range(domain_config.successor_transcript_depth)
+            ]
+        }
+    )
+    assert len(dispatch.encoded_envelope()) < dispatch_envelope_budget(settings)
+
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
+        outcome = await safe_dispatch(
+            worker.client, dispatch, _breaker(), adopted_spawner()
+        )
+
+    assert outcome.success, outcome.detail
+
+
 @pytest.mark.asyncio
 async def test_a_full_worker_is_backpressure_and_says_when_to_return(
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Capacity is about the service, and it never counts against its health."""
-    async with _real_worker(tmp_path / "capacity.db") as (client, executor):
-        for index in range(domain_config.max_concurrent_threads):
-            reservation, _reason = await executor.reserve_dispatch_capacity(
-                f"held-{index}"
-            )
-            assert reservation is not None
-
+    async with served_worker(
+        checkpointer, token=_TEST_INTERNAL_TOKEN, held_threads=capacity_holders()
+    ) as worker:
         breaker = _breaker()
         outcomes = [
             await safe_dispatch(
-                client,
+                worker.client,
                 _ingest(tmp_path, "overflow", f"overflow-{attempt}", with_receipt=True),
                 breaker,
-                _spawner(),
+                adopted_spawner(),
             )
             for attempt in range(4)
         ]
@@ -167,21 +199,21 @@ async def test_a_full_worker_is_backpressure_and_says_when_to_return(
 @pytest.mark.asyncio
 async def test_a_worker_already_running_the_thread_refuses_it_as_busy(
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """One run's occupancy is a conflict about that run, not a service fault."""
-    async with _real_worker(tmp_path / "busy.db") as (client, executor):
-        reservation, _reason = await executor.reserve_dispatch_capacity("busy-thread")
-        assert reservation is not None
-
+    async with served_worker(
+        checkpointer, token=_TEST_INTERNAL_TOKEN, held_threads=("busy-thread",)
+    ) as worker:
         breaker = _breaker()
         outcomes = [
             await safe_dispatch(
-                client,
+                worker.client,
                 _ingest(
                     tmp_path, "busy-thread", f"second-{attempt}", with_receipt=True
                 ),
                 breaker,
-                _spawner(),
+                adopted_spawner(),
             )
             for attempt in range(3)
         ]
@@ -196,6 +228,7 @@ async def test_a_worker_already_running_the_thread_refuses_it_as_busy(
 @pytest.mark.asyncio
 async def test_refusals_for_one_run_never_shut_the_other_runs_out(
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The breaker is shared, so what counts against it decides who is served.
 
@@ -211,29 +244,31 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
     circuit the other runs opened.
     """
     threshold = settings.cb_failure_threshold
-    async with _real_worker(tmp_path / "shared.db") as (client, executor):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
         breaker = WorkerCircuitBreaker(
             failure_threshold=threshold,
             recovery_timeout=settings.cb_recovery_timeout_seconds,
         )
         held: list[DispatchCapacityReservation] = []
-        reservation, _reason = await executor.reserve_dispatch_capacity("busy-run")
+        reservation, _reason = await worker.executor.reserve_dispatch_capacity(
+            "busy-run"
+        )
         assert reservation is not None
         held.append(reservation)
 
         busy = [
             await safe_dispatch(
-                client,
+                worker.client,
                 _ingest(tmp_path, "busy-run", f"busy-{attempt}", with_receipt=True),
                 breaker,
-                _spawner(),
+                adopted_spawner(),
             )
             for attempt in range(threshold + 1)
         ]
 
         # Fill the rest of the worker so the same breaker now meets capacity.
         for index in range(domain_config.max_concurrent_threads - 1):
-            reservation, _reason = await executor.reserve_dispatch_capacity(
+            reservation, _reason = await worker.executor.reserve_dispatch_capacity(
                 f"held-{index}"
             )
             assert reservation is not None
@@ -241,22 +276,22 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
 
         full = [
             await safe_dispatch(
-                client,
+                worker.client,
                 _ingest(tmp_path, "other-run", f"full-{attempt}", with_receipt=True),
                 breaker,
-                _spawner(),
+                adopted_spawner(),
             )
             for attempt in range(threshold + 1)
         ]
 
         for reservation in held:
-            assert await executor.release_dispatch_capacity(reservation)
+            assert await worker.executor.release_dispatch_capacity(reservation)
 
         admitted = await safe_dispatch(
-            client,
+            worker.client,
             _ingest(tmp_path, "other-run", "other-admitted", with_receipt=True),
             breaker,
-            _spawner(),
+            adopted_spawner(),
         )
 
     assert [outcome.failure_type for outcome in busy] == [
@@ -272,6 +307,7 @@ async def test_refusals_for_one_run_never_shut_the_other_runs_out(
 @pytest.mark.asyncio
 async def test_a_dispatch_refused_before_the_worker_leaves_the_circuit_alone(
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """An authority refusal never reaches the worker, so it proves nothing about it.
 
@@ -279,13 +315,13 @@ async def test_a_dispatch_refused_before_the_worker_leaves_the_circuit_alone(
     the half-open probe on its way out: a request that was never sent cannot be
     the one probe that decides whether the worker is back.
     """
-    async with _real_worker(tmp_path / "authority.db") as (client, _executor):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
         breaker = _breaker()
         outcome = await safe_dispatch(
-            client,
+            worker.client,
             _ingest(tmp_path, "no-receipt-thread", "no-receipt", with_receipt=False),
             breaker,
-            _spawner(),
+            adopted_spawner(),
         )
 
     assert outcome.failure_type == FailureType.INCOMPATIBLE_STATE.value
@@ -297,10 +333,7 @@ async def test_a_dispatch_refused_before_the_worker_leaves_the_circuit_alone(
 async def test_an_unreachable_worker_opens_the_circuit(tmp_path: Path) -> None:
     """Transport failure is the thing the breaker exists for."""
     breaker = _breaker()
-    spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
-    )
-    spawner.replace_process(None)
+    spawner = adopted_spawner()
     async with httpx.AsyncClient(base_url="http://127.0.0.1:1", timeout=0.25) as client:
         outcomes = [
             await safe_dispatch(
@@ -338,7 +371,7 @@ async def test_a_server_fault_opens_the_circuit(tmp_path: Path) -> None:
                     tmp_path, "faulting-thread", f"fault-{attempt}", with_receipt=True
                 ),
                 breaker,
-                _spawner(),
+                adopted_spawner(),
             )
             for attempt in range(2)
         ]
@@ -352,6 +385,7 @@ async def test_a_server_fault_opens_the_circuit(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
     tmp_path: Path,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Recovery tests the worker with one request, not with the flood again.
 
@@ -360,7 +394,7 @@ async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
     probe is unsettled nothing else is admitted, and once it settles the circuit
     is open to everyone again.
     """
-    async with _real_worker(tmp_path / "probe.db") as (client, _executor):
+    async with served_worker(checkpointer, token=_TEST_INTERNAL_TOKEN) as worker:
         breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=0.0)
         breaker.force_open()
         assert breaker.state == "half_open"
@@ -370,19 +404,19 @@ async def test_only_one_dispatch_probes_a_worker_the_circuit_has_shut_out(
         probe = breaker.pre_dispatch()
         assert probe is not None
         blocked = await safe_dispatch(
-            client,
+            worker.client,
             _ingest(tmp_path, "probe-thread", "probe-blocked", with_receipt=True),
             breaker,
-            _spawner(),
+            adopted_spawner(),
         )
         assert blocked.failure_type == FailureType.CIRCUIT_OPEN.value
 
         breaker.release_probe(probe)
         admitted = await safe_dispatch(
-            client,
+            worker.client,
             _ingest(tmp_path, "probe-thread", "probe-admitted", with_receipt=True),
             breaker,
-            _spawner(),
+            adopted_spawner(),
         )
 
     assert admitted.success

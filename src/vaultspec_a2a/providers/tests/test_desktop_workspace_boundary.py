@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...control.state_layout import state_layout
-from ...testing import settings_override
+from ...testing import armed_desktop_app_home, settings_override
+from .._acp_request import jsonrpc_result
 from .._acp_rpc_handlers import (
     _read_workspace_text,
     _write_workspace_text,
@@ -37,12 +38,7 @@ def _config(root: Path) -> AcpModelConfig:
         mcp_servers=[],
         use_exec=False,
         provider=None,
-        runtime_authority=None,
-        acp_backend=None,
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
     )
 
@@ -58,7 +54,7 @@ def test_desktop_callbacks_reject_unsafe_roots_and_preserve_project_io(
     sentinel = state / "credential.txt"
     sentinel.write_text("private-state-sentinel", encoding="utf-8")
     (project / "data.txt").write_text("project-sentinel", encoding="utf-8")
-    with settings_override(desktop_app_home=home, provider_identity_launcher=None):
+    with armed_desktop_app_home(home, provider_identity_launcher=None):
         for root in (home, state, tmp_path):
             with pytest.raises(ValueError, match="configured workspace root"):
                 require_workspace_root(str(root), surface="provider cwd")
@@ -97,7 +93,7 @@ async def test_desktop_rpc_refuses_state_content_and_reads_admitted_project(
     state_file.write_text("private-state-sentinel", encoding="utf-8")
     (project / "data.txt").write_text("project-sentinel", encoding="utf-8")
     acp_session_context.session_id = "boundary-test"
-    with settings_override(desktop_app_home=home, provider_identity_launcher=None):
+    with armed_desktop_app_home(home, provider_identity_launcher=None):
         refused = await on_fs_read_text_file(
             1,
             {"sessionId": "boundary-test", "path": str(state_file)},
@@ -114,11 +110,7 @@ async def test_desktop_rpc_refuses_state_content_and_reads_admitted_project(
             acp_session_context,
             _config(project),
         )
-        assert admitted == {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "result": {"content": "project-sentinel"},
-        }
+        assert admitted == jsonrpc_result(2, {"content": "project-sentinel"})
 
 
 @contextmanager
@@ -188,7 +180,7 @@ def test_desktop_read_stays_confined_during_real_replacement(
     workspace_file.write_text("workspace-control", encoding="utf-8")
     secret.write_text("private-state-sentinel", encoding="utf-8")
     entry, target = (safe, private) if directory else (workspace_file, secret)
-    with settings_override(desktop_app_home=home, provider_identity_launcher=None):
+    with armed_desktop_app_home(home, provider_identity_launcher=None):
         config = _config(project)
         assert _read_workspace_text("safe/data.txt", config, line=None, limit=None) == (
             "workspace-control"
@@ -215,7 +207,7 @@ def test_desktop_write_does_not_truncate_replaced_private_leaf(tmp_path: Path) -
     secret.write_text("private-state-sentinel", encoding="utf-8")
     workspace_file = project / "data.txt"
     workspace_file.write_text("workspace-control", encoding="utf-8")
-    with settings_override(desktop_app_home=home, provider_identity_launcher=None):
+    with armed_desktop_app_home(home, provider_identity_launcher=None):
         config = _config(project)
         with _swapping_link(workspace_file, secret):
             for _ in range(400):
@@ -239,7 +231,7 @@ def test_desktop_callbacks_refuse_hardlinked_state_without_truncation(
     secret.write_text("private-state-sentinel", encoding="utf-8")
     alias = project / "alias.txt"
     alias.hardlink_to(secret)
-    with settings_override(desktop_app_home=home, provider_identity_launcher=None):
+    with armed_desktop_app_home(home, provider_identity_launcher=None):
         config = _config(project)
         with pytest.raises(ValueError, match="exactly one link"):
             _read_workspace_text("alias.txt", config, line=None, limit=None)

@@ -4,16 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import hashlib
-import json
 import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.constants import TAG_NOSTREAM
-from langgraph.types import interrupt
 
 from ...context.anchoring import build_anchoring_context
 from ...context.rules import RuleManager
@@ -21,10 +18,12 @@ from ...context.stage import infer_phase_from_vault_index
 from ...context.token_budget import compact_context, should_compact
 from ...domain_config import domain_config
 from ...graph.enums import PipelinePhase
-from ...thread.enums import VERDICT_APPROVED, ApprovalStatus
+from ...thread import canonical_digest
+from ...thread.enums import VERDICT_APPROVED, ApprovalStatus, InterruptType
 from ...thread.errors import SupervisorRoutingError
-from ...thread.state import merge_vault_index
-from .phase_gate import parse_verdict, verdict_answers_request
+from ...thread.resume_values import parse_approval_verdict
+from ...thread.state import merge_vault_index, read_untrusted_state_value
+from ._interrupts import await_request_scoped_resume
 from .vault_reader import refresh_vault_index
 
 if TYPE_CHECKING:
@@ -38,47 +37,22 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
-__all__ = ["create_plan_approval_node", "create_supervisor_node"]
+__all__ = ["SupervisorOptions", "create_plan_approval_node", "create_supervisor_node"]
 
 
-class _SupervisorOptions(TypedDict, total=False):
-    worker_phase_map: dict[str, str] | None
-    autonomous: bool
-    workspace_root: Path | None
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SupervisorOptions:
+    """Routing policy and workspace scope of one supervisor node.
 
+    ``worker_phase_map`` maps worker_id -> pipeline phase for phase artifact
+    prerequisite gates; workers absent from the map are exempt from gating.
+    ``autonomous`` skips the plan approval interrupt (headless MCP-launched runs
+    -- no human present to approve). ``workspace_root`` scopes the ACP CWD.
+    """
 
-def _bind_supervisor_options(
-    args: tuple[object, ...], options: _SupervisorOptions
-) -> tuple[dict[str, str] | None, bool, Path | None]:
-    names = ("worker_phase_map", "autonomous", "workspace_root")
-    if len(args) > len(names):
-        raise TypeError(
-            f"create_supervisor_node() takes at most {len(names) + 3} "
-            f"positional arguments ({len(args) + 3} given)"
-        )
-    unknown = set(options).difference(names)
-    if unknown:
-        name = sorted(unknown)[0]
-        raise TypeError(
-            f"create_supervisor_node() got an unexpected keyword argument {name!r}"
-        )
-    bound: list[object] = []
-    defaults: tuple[object, ...] = (None, False, None)
-    for index, name in enumerate(names):
-        if index < len(args):
-            if name in options:
-                raise TypeError(
-                    f"create_supervisor_node() got multiple values for argument "
-                    f"{name!r}"
-                )
-            bound.append(args[index])
-        else:
-            bound.append(options.get(name, defaults[index]))
-    return (
-        cast("dict[str, str] | None", bound[0]),
-        cast("bool", bound[1]),
-        cast("Path | None", bound[2]),
-    )
+    worker_phase_map: dict[str, str] | None = None
+    autonomous: bool = False
+    workspace_root: Path | None = None
 
 
 def _active_agent_for_route(route: str) -> str:
@@ -112,25 +86,52 @@ def _carried_approval(state: TeamState) -> dict[str, Any]:
 _PLAN_APPROVAL_ID_PREFIX = "plan-approval-"
 
 
+def _plan_approvals_asked(state: TeamState) -> list[str]:
+    """The plan approvals this run has already asked, narrowed at the boundary.
+
+    Read through the untrusted-state boundary because the annotation on the
+    channel describes what its reducer produces, not what a checkpoint
+    assembled elsewhere is guaranteed to hold.
+    """
+    recorded = read_untrusted_state_value(state, "plan_approvals_asked")
+    if not isinstance(recorded, list):
+        return []
+    return [
+        entry
+        for entry in cast("list[object]", recorded)
+        if isinstance(entry, str) and entry
+    ]
+
+
 def _plan_approval_request_id(
     state: TeamState, exec_worker: str, plan_paths: list[str]
 ) -> str:
-    """Name one plan-approval request by the run and the plan it approves.
+    """Name one plan-approval request by the run, the plan, and the asks before it.
 
     Derived from replay-stable material only: a resumed node re-runs from its
     start against the same checkpointed state, so the id it recomputes is the
-    id it disclosed. Naming the PLAN as well as the run is what makes a
-    verdict for a superseded plan recognisable after the plan was revised - a
+    id it disclosed. Naming the PLAN as well as the run is what makes a verdict
+    for a superseded plan recognisable after the plan was revised - a
     run-scoped handle alone would let an old approval release a new plan.
+
+    Naming the asks ALREADY MADE is what makes a re-ask a different request.
+    The plan and the exec worker are unchanged when a human rejects a plan and
+    the gate asks again, so this used to mint the id the human had just
+    answered; the control journal keys an answer by that id, so the second ask
+    replayed the first rejection and the run could not be approved at all. The
+    lineage is append-only, so each ask takes an id no earlier ask has spent,
+    and a replay of one ask recomputes its own.
     """
-    canonical = json.dumps(
-        [state.get("thread_id") or "", exec_worker, sorted(plan_paths)],
-        sort_keys=True,
-        separators=(",", ":"),
+    digest = canonical_digest(
+        [
+            state.get("thread_id") or "",
+            exec_worker,
+            sorted(plan_paths),
+            _plan_approvals_asked(state),
+        ],
         default=str,
     )
-    digest = hashlib.sha256(canonical.encode()).hexdigest()[:32]
-    return f"{_PLAN_APPROVAL_ID_PREFIX}{digest}"
+    return f"{_PLAN_APPROVAL_ID_PREFIX}{digest[:32]}"
 
 
 def _worker_owning_phase(
@@ -174,7 +175,7 @@ _REFUSED_TEXT_CHARS = 200
 def _named_options(text: str, options: list[str]) -> list[str]:
     """Every route the reply names, minus the ones only named inside another.
 
-    A worker id can contain another ("coder" inside "mock-coder"), so a reply
+    A worker id can contain another ("coder" inside "vaultspec-coder"), so a reply
     naming the longer one matches both. Dropping a match that is a substring
     of another match is what separates that from a reply that really does name
     two different routes.
@@ -444,7 +445,7 @@ def _plan_approval_decision(
     if autonomous or not exec_route or not plan_ready or approval_granted:
         return None
     payload = {
-        "type": "plan_approval_request",
+        "type": InterruptType.PLAN_APPROVAL_REQUEST.value,
         "feature": state.get("active_feature"),
         "plan_paths": vault_index.get("plan", []),
         "exec_worker": next_route,
@@ -716,8 +717,9 @@ def create_plan_approval_node(
     ``{"type": "plan_approval_request", "feature", "plan_paths",
     "exec_worker", "request_id"}``; resume ``{"verdict": "approved" |
     "rejected" | "request_changes", "notes": str | None, "request_id": str}`` —
-    the same verdict vocabulary the document phase gate resumes on (D6), parsed
-    via the shared :func:`...phase_gate.parse_verdict`. An unrecognised
+    the :class:`...thread.resume_values.ApprovalVerdict` the document phase
+    gate resumes on as well, parsed by the shared
+    :func:`...thread.resume_values.parse_approval_verdict`. An unrecognised
     verdict fails closed to revision rather than silently approving. An answer
     naming another request, or none - the retired ``{"approved": bool}`` shape
     among them - is not a decision on this plan, so the gate asks again.
@@ -735,28 +737,30 @@ def create_plan_approval_node(
         plan_paths = vault_index.get("plan", [])
         request_id = _plan_approval_request_id(state, exec_worker, plan_paths)
         payload = {
-            "type": "plan_approval_request",
+            "type": InterruptType.PLAN_APPROVAL_REQUEST.value,
             "feature": state.get("active_feature"),
             "plan_paths": plan_paths,
             "exec_worker": exec_worker,
             "request_id": request_id,
         }
-        resume_value = interrupt(payload)
         # An answer bound to another request, or to none, is not a decision on
         # this plan: the gate asks again instead of treating it as a rejection
         # that would send the plan back for revision nobody asked for.
-        while not verdict_answers_request(resume_value, request_id):
-            _logger.warning(
-                "Plan approval verdict did not name request %r; asking again",
-                request_id,
-            )
-            resume_value = interrupt(payload)
-        verdict, _notes = parse_verdict(resume_value)
-        if verdict == VERDICT_APPROVED:
+        decision = await_request_scoped_resume(
+            payload, request_id, parse_approval_verdict
+        )
+        # The ask is recorded only once it has been answered, which is also the
+        # only replay-safe place to record it: until the answer arrives this node
+        # re-runs from its start and recomputes the same id from the same
+        # lineage. Recorded on every verdict, so the next ask cannot reuse an id
+        # a human has already spent.
+        asked = {"plan_approvals_asked": [request_id]}
+        if decision.verdict == VERDICT_APPROVED:
             _logger.info(
                 "plan approved by user — routing to exec_worker=%r", exec_worker
             )
             return {
+                **asked,
                 "next": exec_worker,
                 "active_agent": _active_agent_for_route(exec_worker),
                 "current_plan": [_plan_entry_for_route(exec_worker)],
@@ -773,6 +777,7 @@ def create_plan_approval_node(
             # happens next rather than the rejection picking a worker for it.
             _logger.info("plan rejected by user — no plan-phase worker to revise")
             return {
+                **asked,
                 "next": "supervisor",
                 "active_agent": "",
                 "current_plan": [_plan_entry_for_route("supervisor")],
@@ -784,6 +789,7 @@ def create_plan_approval_node(
             "plan rejected by user — rerouting to %r for revision", revision_worker
         )
         return {
+            **asked,
             "next": revision_worker,
             "active_agent": _active_agent_for_route(revision_worker),
             "pipeline_phase": _phase_for_route(
@@ -805,28 +811,25 @@ def create_supervisor_node(
     model: BaseChatModel,
     system_prompt: str,
     workers: list[str],
-    *args: object,
-    **options: Unpack[_SupervisorOptions],
+    options: SupervisorOptions | None = None,
 ) -> SupervisorNode:
     """Create a LangGraph supervisor node for routing.
 
     Args:
-        model:            The LangChain chat model to use for this node.
-        system_prompt:    The system prompt defining the supervisor's behavior.
-        workers:          A list of available worker names to route to.
-        worker_phase_map: Optional mapping of worker_id -> pipeline phase for
-                          phase artifact prerequisite gates. Workers
-                          absent from the map are exempt from gating.
-        autonomous:       When True, skip plan approval interrupt (headless
-                          MCP-launched runs -- no human present to approve).
-        workspace_root:   Optional workspace root for ACP CWD scoping.
+        model:         The LangChain chat model to use for this node.
+        system_prompt: The system prompt defining the supervisor's behavior.
+        workers:       A list of available worker names to route to.
+        options:       Phase gating, autonomy and workspace scope; the
+                       defaults gate nothing, ask for plan approval, and
+                       scope no workspace.
 
     Returns:
         An async function that conforms to the LangGraph node signature.
     """
-    worker_phase_map, autonomous, workspace_root = _bind_supervisor_options(
-        args, options
-    )
+    resolved = options or SupervisorOptions()
+    worker_phase_map = resolved.worker_phase_map
+    autonomous = resolved.autonomous
+    workspace_root = resolved.workspace_root
     route_options = [*workers, "FINISH"]
 
     # Append routing instructions to ensure structured text output

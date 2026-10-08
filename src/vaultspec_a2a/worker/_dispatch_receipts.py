@@ -5,18 +5,23 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from ..database import read_latest_checkpoint
 from ..ipc.schemas import DispatchApplicationReceiptPayload
+from ..thread.action_receipts import GRAPH_ACTION_VERB
 from ..thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
-    read_checkpoint_evidence,
+    classify_checkpoint_evidence,
 )
+from ._run_registry import RunScopedRegistry
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from .ipc import WorkerBridge
+
+__all__ = ["DispatchReceiptReporter"]
 
 logger = logging.getLogger("vaultspec_a2a.worker.executor")
 
@@ -36,11 +41,11 @@ class DispatchReceiptReporter:
     """
 
     def __init__(self) -> None:
-        self._reported: dict[str, str] = {}
+        self._reported = RunScopedRegistry[str]()
 
     def forget(self, thread_id: str) -> None:
         """Drop what this thread reported, once its run is over."""
-        self._reported.pop(thread_id, None)
+        self._reported.drop(thread_id)
 
     async def report(
         self,
@@ -51,7 +56,7 @@ class DispatchReceiptReporter:
         dispatch_log_extra: Callable[..., dict[str, Any]],
     ) -> None:
         """Report incorporation after reading its committed checkpoint proof."""
-        if req.action != "ingest" and req.action != "resume":
+        if not req.requires_graph_receipt:
             return
         if self._reported.get(req.thread_id) == req.dispatch_id:
             return
@@ -62,10 +67,13 @@ class DispatchReceiptReporter:
             # receipt is only a write held against the parked checkpoint;
             # reading committed channels alone would never report it, and
             # recovery would redeliver an answer the run already consumed.
-            evidence = await read_checkpoint_evidence(
-                checkpointer,
+            evidence = classify_checkpoint_evidence(
+                await read_latest_checkpoint(
+                    checkpointer,
+                    receipt.thread_id,
+                    timeout=checkpoint_read_timeout_seconds,
+                ),
                 receipt,
-                timeout_seconds=checkpoint_read_timeout_seconds,
             )
             if evidence.kind is CheckpointEvidenceKind.UNAVAILABLE:
                 # A read that failed says nothing about the checkpoint, and if
@@ -91,12 +99,12 @@ class DispatchReceiptReporter:
                     req.thread_id,
                 )
                 return
-            self._reported[req.thread_id] = req.dispatch_id
+            self._reported.register(req.thread_id, req.dispatch_id)
             await bridge.send_event(
                 req.thread_id,
                 DispatchApplicationReceiptPayload(
                     dispatch_id=req.dispatch_id,
-                    action=req.action,
+                    action=GRAPH_ACTION_VERB[receipt.action_type],
                     graph_action_receipt=receipt,
                     checkpoint_id=evidence.checkpoint_id,
                 ).model_dump(mode="json"),

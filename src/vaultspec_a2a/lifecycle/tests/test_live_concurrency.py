@@ -15,11 +15,11 @@ never touched.
 
 from __future__ import annotations
 
-import socket
 import sys
-import time
 from typing import TYPE_CHECKING
 
+from ...testing import ProgressDeadline, wait_until
+from ...utils._process_tree import port_has_listener, wait_pid_gone
 from ..manager import attach, list_verdicts, rerun, serve_up, tree_kill
 from ..procs_config import PortBand, ProcsConfig, RoleConfig
 from ..registry import StalenessState, list_records, read_record, record_path
@@ -60,26 +60,13 @@ def _stacks_config() -> ProcsConfig:
     )
 
 
-def _wait_listener(port: int, *, timeout: float = 10.0) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(0.5)
-            if sock.connect_ex(("127.0.0.1", port)) == 0:
-                return True
-        time.sleep(0.1)
-    return False
-
-
-def _wait_pid_dead(pid: int, *, timeout: float = 10.0) -> bool:
-    from ..discovery import is_pid_alive
-
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not is_pid_alive(pid):
-            return True
-        time.sleep(0.05)
-    return not is_pid_alive(pid)
+def _wait_listener(port: int, *, timeout: float = 10.0) -> None:
+    wait_until(
+        lambda: port_has_listener(port, timeout=0.5),
+        deadline=ProgressDeadline(idle_window_s=timeout),
+        interval_s=0.1,
+        stalled=lambda: f"nothing listened on port {port}",
+    )
 
 
 def test_sequential_stacks_no_collision_reap_and_rerun(tmp_path: Path) -> None:
@@ -117,7 +104,7 @@ def test_sequential_stacks_no_collision_reap_and_rerun(tmp_path: Path) -> None:
 
         # (3) A stale orphan: fell e2 out-of-band. Its record now reads DEAD ...
         tree_kill(e2.pid)
-        assert _wait_pid_dead(e2.pid)
+        assert wait_pid_gone(e2.pid, timeout=10.0)
         after_kill = {
             (v.record.role, v.record.name): v.state
             for v in list_verdicts(home=tmp_path, config=config)
@@ -137,7 +124,7 @@ def test_sequential_stacks_no_collision_reap_and_rerun(tmp_path: Path) -> None:
         spawned = [e1, g1b, g2]
         assert g1b.port == g1.port
         assert g1b.pid != g1.pid
-        assert _wait_listener(g1b.port)
+        _wait_listener(g1b.port)
         assert attach("g1", home=tmp_path).endpoint.endswith(str(g1b.port))
     finally:
         for record in spawned:

@@ -1,10 +1,10 @@
-"""ACP prompt outcome and executable command validation."""
+"""ACP prompt outcome validation."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Never
 
-from ._acp_types import MAX_NATIVE_COMMAND_NAME_LENGTH
+from ..graph.enums import ProviderCondition
 from ._json_contract import JsonObject, lenient_json_object
 from .acp_exceptions import (
     AcpError,
@@ -12,7 +12,7 @@ from .acp_exceptions import (
     AcpPromptCancelledError,
     AcpPromptError,
 )
-from .conditions import ProviderCondition, condition_from_acp_error
+from .conditions import condition_from_acp_error
 
 if TYPE_CHECKING:
     from langchain_core.messages import UsageMetadata
@@ -105,14 +105,4 @@ def raise_for_prompt_stop_reason(
         data=data,
         effects_may_have_occurred=effects_may_have_occurred,
         usage_metadata=usage_metadata,
-    )
-
-
-def is_executable_native_command_name(name: str) -> bool:
-    if not name or name != name.strip() or not name.isprintable():
-        return False
-    return (
-        not any(character.isspace() for character in name)
-        and not name.startswith("/")
-        and len(name) <= MAX_NATIVE_COMMAND_NAME_LENGTH
     )

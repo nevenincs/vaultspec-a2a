@@ -44,11 +44,13 @@ from __future__ import annotations
 import contextlib
 import os
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
+
+from ._file_checks import path_is_link_like
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 __all__ = ["atomic_write_text"]
 
@@ -58,6 +60,23 @@ REPLACE_RETRY_SECONDS = 2.0
 ``os.replace`` is atomic, but on Windows a reader holding the target open can
 briefly deny it.  Retrying over a short window turns a spurious failure into a
 successful publication; the operation stays all-or-nothing either way.
+
+This budget is time this process spends WAITING between attempts, not elapsed
+wall-clock time.  The distinction is not academic: a denied rename on a volume
+with a filesystem filter driver attached does not return promptly, and a single
+call measured at over twenty seconds inside the kernel.  Charged against the
+wall clock, one such call spends the whole budget before a second attempt is
+ever made, and the publication fails having retried exactly once - which is how
+a two-second window still produced the intermittent ``WinError 5``.
+"""
+
+_REPLACE_FIRST_PAUSE = 0.001
+_REPLACE_MAX_PAUSE = 0.05
+"""Growth bounds for the pause between rename attempts.
+
+A denial usually clears within a few milliseconds, so the first pauses are short
+and the budget buys many of them; the cap keeps a long denial from turning into
+one idle wait that outlasts the contention it was waiting on.
 """
 
 _BYTE_WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
@@ -91,7 +110,7 @@ def _open_refusing_a_link(
 
     This is the only place either write path opens its temporary file.
     """
-    if os.path.islink(path) or os.path.isjunction(path):
+    if path_is_link_like(Path(path)):
         raise OSError(f"refusing to write through a link planted at {path}")
     return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0), mode)
 
@@ -128,8 +147,9 @@ def atomic_write_text(
         path: Destination to publish atomically.
         text: Content to write.
         encoding: Text encoding for the temporary file.
-        retry_seconds: How long to ride out a transient rename denial.  Zero
-            attempts the rename exactly once.
+        retry_seconds: How long to WAIT, in total, across repeated attempts at a
+            transient rename denial.  Time spent inside a slow attempt is not
+            charged against it, so zero still attempts the rename exactly once.
         mode: POSIX permission bits to create the temporary file with.  Pass
             this for a credential-bearing record so the bytes are never briefly
             world-readable between creation and rename; omitting it takes the
@@ -154,8 +174,9 @@ def atomic_write_text(
             bytes directly.
 
     Raises:
-        OSError: If the temporary path is a link, or the write or the rename
-            fails; the temporary file is removed before the error propagates.
+        OSError: If the temporary path is a link or cannot be inspected, or the
+            write or the rename fails; the temporary file is removed before the
+            error propagates.
     """
     encoding = options.get("encoding", "utf-8")
     retry_seconds = options.get("retry_seconds", REPLACE_RETRY_SECONDS)
@@ -194,13 +215,25 @@ def atomic_write_text(
 
 
 def _replace_with_retry(tmp: Path, path: Path, *, retry_seconds: float) -> None:
-    """Rename *tmp* over *path*, riding out a transient sharing violation."""
-    deadline = time.monotonic() + retry_seconds
+    """Rename *tmp* over *path*, riding out a transient sharing violation.
+
+    *retry_seconds* bounds the waiting, not the wall clock, because only the
+    waiting is this process's to spend: the kernel can hold a denied rename for
+    seconds while a reader's handle on the target is still being resolved, and
+    charging that against the budget retires it before the contention it exists
+    to outlast has cleared.  Zero therefore still attempts the rename exactly
+    once, however slow that attempt turns out to be.
+    """
+    waited = 0.0
+    pause = _REPLACE_FIRST_PAUSE
     while True:
         try:
             os.replace(tmp, path)
             return
         except PermissionError:
-            if time.monotonic() >= deadline:
+            if waited >= retry_seconds:
                 raise
-            time.sleep(0.01)
+            slept = min(pause, retry_seconds - waited)
+            time.sleep(slept)
+            waited += slept
+            pause = min(pause * 2, _REPLACE_MAX_PAUSE)

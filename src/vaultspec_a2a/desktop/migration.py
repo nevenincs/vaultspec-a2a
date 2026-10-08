@@ -8,9 +8,12 @@ schema mutations ordinary desktop boot refuses - the Alembic upgrade to the
 packaged head, the checkpointer schema setup, and the state-driven-development
 (SDD) backfill - against the application home's own stores, refusing any
 store that is live or locked, and returns a bounded, machine-readable result.
-It performs no network access and never touches a store the caller did not
-quiesce; rollback belongs to the dashboard's own snapshot, never to this
-module.
+Asked to compact, it then truncates each store's write-ahead log and vacuums it
+- the one path that returns freed pages to the operating system - after first
+refusing while any service listens on a configured port. That
+loopback probe is its only network access, and it never touches a store the
+caller did not quiesce; rollback belongs to the dashboard's own snapshot, never
+to this module.
 
 The result is a strict Pydantic model so the migrate command can emit it as
 JSON. On failure it names the failing stage and the exception class only; it
@@ -27,21 +30,26 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..database.checkpoint_schema import (
+from ..database import (
     CHECKPOINT_SCHEMA_VERSION,
+    backfill_teamstate_sdd_fields,
+    checkpoint_pragmas,
+    checkpoint_wal,
     install_checkpoint_schema_identity,
+    migration_script_location,
+    read_alembic_version,
+    run_migrations,
 )
-from ..database.migrate import migration_script_location, run_migrations
-from ..database.migrations import backfill_teamstate_sdd_fields
-from .profile import DesktopProfileError, ensure_private_state
+from .profile import DesktopProfileError, derive_state_paths, ensure_private_state
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from ..control.state_layout import StateLayout
     from .contract import MigrationRange
-    from .profile import DesktopStatePaths
 
 __all__ = [
+    "MigrationResult",
     "MigrationStage",
     "StoreName",
     "StoreStatus",
@@ -77,10 +85,15 @@ class MigrationStage(StrEnum):
     CHECKPOINT = "checkpoint"
     SDD = "sdd"
     CHECKPOINT_IDENTITY = "checkpoint-identity"
+    COMPACT = "compact"
 
 
 class StoreLockedError(RuntimeError):
     """A targeted store is live or otherwise locked and cannot be migrated."""
+
+
+class CompactionBlockedError(RuntimeError):
+    """An open read transaction kept the write-ahead log from being truncated."""
 
 
 class MigrationGraphError(RuntimeError):
@@ -144,7 +157,7 @@ class MigrationResult(BaseModel):
     )
     detail: str | None = Field(
         default=None,
-        description="Bounded operator-facing detail for a refused precondition.",
+        description="Bounded operator-facing detail for a refused or blocked stage.",
     )
 
 
@@ -169,23 +182,6 @@ def package_migration_range() -> MigrationRange:
             "one head."
         )
     return MigrationRange(base=bases[0], head=heads[0])
-
-
-def _read_revision(db_path: Path) -> str | None:
-    """Return the store's recorded Alembic revision, or ``None`` when absent."""
-    if not db_path.is_file():
-        return None
-    conn = sqlite3.connect(str(db_path))
-    try:
-        try:
-            row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
-        except sqlite3.OperationalError as exc:
-            if "no such table" in str(exc).lower():
-                return None
-            raise
-    finally:
-        conn.close()
-    return None if row is None else str(row[0])
 
 
 def _ensure_unlocked(db_path: Path) -> None:
@@ -213,12 +209,78 @@ def _ensure_unlocked(db_path: Path) -> None:
         conn.close()
 
 
+def _refuse_while_service_listening() -> None:
+    """Refuse compaction while a service holds a configured port.
+
+    The lock probe cannot see an idle service: a gateway between requests holds
+    no lock on its store, so ``BEGIN IMMEDIATE`` succeeds beside it and a VACUUM
+    would rewrite a store the service still has open. A connect probe rather
+    than an HTTP health request: an authenticated gateway answers an
+    unauthenticated health request with 401, and treating any HTTP error as "not
+    running" reads a live service as stopped whenever tokens are configured.
+    Whether a request is answered, refused or unauthorized, an accepted
+    connection is the evidence that something is serving the port.
+    """
+    from ..control.config import settings
+    from ..utils._process_tree import port_has_listener
+
+    for port in (settings.port, settings.worker_port):
+        if port_has_listener(port, timeout=2.0):
+            raise StoreLockedError(
+                f"a service is listening on port {port}; stop it before "
+                "compacting the store."
+            )
+
+
+def _compact_store(db_path: Path) -> None:
+    """Truncate the store's write-ahead log, then VACUUM it.
+
+    A blocked checkpoint is reported as the partial result it is: SQLite signals
+    it in the returned row rather than by raising. VACUUM needs the lock the same
+    reader is denying, so attempting it would only trade this precise diagnosis
+    for a bare "database is locked".
+    """
+    from ..control.config import settings
+
+    conn = sqlite3.connect(str(db_path), isolation_level=None)
+    try:
+        conn.execute(f"PRAGMA busy_timeout={settings.sqlite_busy_timeout_ms:d}")
+        result = checkpoint_wal(conn)
+        if result.blocked:
+            raise CompactionBlockedError(
+                f"WAL checkpoint blocked: {result.checkpointed_pages} of "
+                f"{result.log_pages} log pages were written back and the log was "
+                "not truncated. A process is holding an open read transaction; "
+                "stop it and re-run to reclaim space. VACUUM skipped."
+            )
+        conn.execute("VACUUM")
+    finally:
+        conn.close()
+
+
+async def _compact_stores(state: StateLayout) -> None:
+    """Compact every quiesced store, binding any failure to the compact stage.
+
+    Both stores, not just the primary: the checkpoint store is the one that grows,
+    holding a row per graph step per run, so pruning a finished run frees pages
+    the file keeps until a VACUUM rewrites it. An operator who runs compaction to
+    reclaim disk and gets back only the much smaller run store has not had their
+    disk returned.
+    """
+    try:
+        for path in (state.database_path, state.checkpoint_path):
+            await asyncio.to_thread(_compact_store, path)
+    except CompactionBlockedError:
+        raise
+    except Exception as exc:
+        raise _StageError(MigrationStage.COMPACT, type(exc).__name__) from exc
+
+
 async def _setup_checkpointer(checkpoint_path: Path) -> None:
     """Create the real LangGraph tables without claiming migration completion."""
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from ..control.config import settings
-    from ..database.checkpoint_schema import checkpoint_pragmas
 
     async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as checkpointer:
         await checkpointer.setup()
@@ -249,7 +311,7 @@ async def _apply_mutations(
     _ensure_unlocked(checkpoint_path)
 
     try:
-        from_revision = _read_revision(database_path)
+        from_revision = read_alembic_version(database_path)
         await run_migrations(database_url)
     except Exception as exc:
         raise _StageError(MigrationStage.PRIMARY, type(exc).__name__) from exc
@@ -306,13 +368,25 @@ def _failed_result(
 
 
 async def _run_mutations_bounded(
-    started: float, state: DesktopStatePaths, target_head: str
+    started: float,
+    state: StateLayout,
+    target_head: str,
+    *,
+    compact: bool = False,
 ) -> MigrationResult:
-    """Run the mutation core and fold every expected failure into the result."""
+    """Run the mutation core and fold every expected failure into the result.
+
+    With *compact*, a listening service refuses the whole run before any store
+    is touched, and every store is compacted once the mutations succeed.
+    """
     try:
+        if compact:
+            _refuse_while_service_listening()
         stores = await _apply_mutations(
             state.database_path, state.checkpoint_path, target_head
         )
+        if compact:
+            await _compact_stores(state)
         ensure_private_state(state)
     except DesktopProfileError as exc:
         return _failed_result(
@@ -326,6 +400,14 @@ async def _run_mutations_bounded(
         return _failed_result(
             started,
             MigrationStage.LOCK,
+            type(exc).__name__,
+            target_head=target_head,
+            detail=str(exc),
+        )
+    except CompactionBlockedError as exc:
+        return _failed_result(
+            started,
+            MigrationStage.COMPACT,
             type(exc).__name__,
             target_head=target_head,
             detail=str(exc),
@@ -351,6 +433,7 @@ async def migrate_stores(
     *,
     expect_from: str | None = None,
     expect_head: str | None = None,
+    compact: bool = False,
 ) -> MigrationResult:
     """Upgrade the application home's quiesced stores to the packaged head.
 
@@ -360,12 +443,13 @@ async def migrate_stores(
     schema work. *expect_from* and *expect_head* are optional fail-closed
     assertions of the observed current revision and the packaged head, so an
     updater that computed a base→head plan can refuse a store or a package
-    that is not the one it planned against. Rollback is the caller's snapshot;
-    this function only refuses (live/locked or failed preconditions) or
-    completes.
+    that is not the one it planned against. *compact* additionally truncates
+    each store's write-ahead log and vacuums it after the mutations; it
+    refuses at the ``lock`` stage while a service listens on a configured port,
+    and a checkpoint an open reader blocks fails the ``compact`` stage. Rollback
+    is the caller's snapshot; this function only refuses (live/locked or failed
+    preconditions) or completes.
     """
-    from .profile import derive_state_paths
-
     started = time.monotonic()
     try:
         target_head = package_migration_range().head
@@ -396,7 +480,7 @@ async def migrate_stores(
             detail="Desktop state requires owner-only access and unlinked paths.",
         )
     if expect_from is not None:
-        observed = _read_revision(state.database_path)
+        observed = read_alembic_version(state.database_path)
         if observed != expect_from:
             return _failed_result(
                 started,
@@ -408,7 +492,7 @@ async def migrate_stores(
                     f"{expect_from!r}"
                 ),
             )
-    return await _run_mutations_bounded(started, state, target_head)
+    return await _run_mutations_bounded(started, state, target_head, compact=compact)
 
 
 async def initialize_fresh_stores(app_home: Path) -> MigrationResult:
@@ -421,8 +505,6 @@ async def initialize_fresh_stores(app_home: Path) -> MigrationResult:
     store the dashboard has not snapshotted. Desktop boot itself remains
     non-mutating; this is the setup verb's seam.
     """
-    from .profile import derive_state_paths
-
     started = time.monotonic()
     state = derive_state_paths(app_home)
     try:
@@ -434,7 +516,7 @@ async def initialize_fresh_stores(app_home: Path) -> MigrationResult:
             type(exc).__name__,
             detail="Desktop state requires owner-only access and unlinked paths.",
         )
-    observed = _read_revision(state.database_path)
+    observed = read_alembic_version(state.database_path)
     if observed is not None:
         return _failed_result(
             started,

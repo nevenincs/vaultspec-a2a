@@ -9,11 +9,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control.provider_execution import native_execution_refusal_reason
+from ...control.provider_execution import (
+    NativeExecutionRefusedError,
+    native_execution_refusal_reason,
+)
 from ...control.state_layout import state_layout
 from ...graph.enums import Provider
-from ...testing import settings_override
-from ...utils.process import ProcessContainmentError
+from ...testing import armed_desktop_app_home, settings_override
 from .._acp_rpc_terminal_handlers import on_terminal_create
 from .._acp_types import AcpSessionContext
 from .._provider_execution import provider_execution_command
@@ -54,18 +56,21 @@ async def test_desktop_native_read_is_refused_before_child_execution(
     private.write_text("synthetic-private-state", encoding="utf-8")
     marker = project / "child-started.txt"
     command = _command(project, private, marker)
-    with settings_override(
-        desktop_app_home=home,
+    with armed_desktop_app_home(
+        home,
         provider_identity_launcher=sys.executable if identity_configured else None,
         provider_agent_uid=1002 if identity_configured else None,
         provider_agent_gid=1002 if identity_configured else None,
+        openai_api_key="synthetic-openai-key",
     ):
-        with pytest.raises(ProcessContainmentError, match="OS isolation backend"):
+        with pytest.raises(NativeExecutionRefusedError, match="OS isolation backend"):
             await spawn_acp_process(
                 command, dict(os.environ), str(project), use_exec=use_exec
             )
         for supervise in (False, True):
-            with pytest.raises(ProcessContainmentError, match="OS isolation backend"):
+            with pytest.raises(
+                NativeExecutionRefusedError, match="OS isolation backend"
+            ):
                 provider_execution_command(command, supervise=supervise)
         with pytest.raises(BinaryVersionProbeError, match="OS isolation backend"):
             probe_binary_version(sys.executable)
@@ -73,7 +78,9 @@ async def test_desktop_native_read_is_refused_before_child_execution(
             verdict = probe_provider_readiness(provider)
             assert not verdict.ready
             assert verdict.reason == native_execution_refusal_reason()
-        assert probe_provider_readiness(Provider.DETERMINISTIC).ready
+        # A hosted-API lane launches nothing native, so the refusal does not
+        # reach it; no in-process lane is held under this profile.
+        assert probe_provider_readiness(Provider.OPENAI).ready
     assert not marker.exists()
     assert private.read_text(encoding="utf-8") == "synthetic-private-state"
 
@@ -89,12 +96,10 @@ async def test_desktop_terminal_refuses_before_creating_child(tmp_path: Path) ->
     command = _command(project, private, marker)
     # An existing real stream owner supplies the session context; it is created
     # before arming, and no native agent/tool child is permitted after arming.
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-c",
-        "pass",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
+    # It is spawned the way a provider is, inside its own containment, which is
+    # the only authority the provider reaper releases a process through.
+    process = await spawn_acp_process(
+        [sys.executable, "-c", "pass"], dict(os.environ), str(tmp_path), use_exec=True
     )
     assert process.stdin is not None and process.stdout is not None
     ctx = AcpSessionContext(
@@ -109,7 +114,7 @@ async def test_desktop_terminal_refuses_before_creating_child(tmp_path: Path) ->
         session_id="terminal-refusal",
     )
     try:
-        with settings_override(desktop_app_home=home, provider_identity_launcher=None):
+        with armed_desktop_app_home(home, provider_identity_launcher=None):
             params: JsonObject = {
                 "sessionId": ctx.session_id,
                 "command": command[0],

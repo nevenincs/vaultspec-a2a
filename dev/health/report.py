@@ -10,7 +10,7 @@ cyclomatic   10        McCabe's own recommendation; the flake8, ruff, and
                        SonarQube default. REPORTED here, GATED by ruff's
                        ``C901`` - radon scores strictly higher because it
                        also counts boolean operators, ternaries, and
-                       comprehensions. See :data:`GATED`.
+                       comprehensions.
 maintain.    20        Radon's own A/B boundary for the Maintainability
                        Index; below 20 is documented as hard to maintain.
 module LOC   1000      Pylint's ``max-module-lines`` default, and this
@@ -42,6 +42,8 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+
+from dev.paths import is_test_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -167,10 +169,9 @@ def _python_files(root: Path) -> Iterator[Path]:
     pointed at debt someone can actually pay down.
     """
     for path in sorted(root.rglob("*.py")):
-        # Matches `tests`, `service_tests`, `desktop_tests`, and any future
-        # tier named the same way. Listing the directories individually is how
-        # `desktop_tests` leaked into the production ranking the first time.
-        if any(part == "tests" or part.endswith("_tests") for part in path.parts):
+        # Classified below the root, so a checkout that happens to sit under a
+        # directory named like a tier is not mistaken for test code.
+        if is_test_path(path.relative_to(root)):
             continue
         yield path
 
@@ -289,28 +290,18 @@ def _format_value(value: float) -> str:
     return f"{value:.1f}" if value % 1 else f"{int(value)}"
 
 
-def render_report(
-    dimensions: Sequence[Dimension], top_n: int = TOP_N, *, gating: bool = False
-) -> str:
+def render_report(dimensions: Sequence[Dimension], top_n: int = TOP_N) -> str:
     """Render the human-readable ranked report.
 
     Args:
         dimensions: The measured dimensions.
         top_n: How many offenders to list per dimension.
-        gating: Whether the caller will exit non-zero on a finding. The banner
-            must say which of the two this run is, because the same text under
-            both consequences is how a reader learns to distrust the banner.
 
     Returns:
         The full report text.
     """
-    banner = (
-        "Code-health GATE - a dimension with any offender fails this run."
-        if gating
-        else "Code-health report - MEASUREMENT ONLY, always exits 0."
-    )
     lines = [
-        banner,
+        "Code-health report - MEASUREMENT ONLY, always exits 0.",
         "Thresholds are published industry defaults, not this tree's current worst.",
         "",
     ]
@@ -346,7 +337,7 @@ def render_report(
             "",
             "Cognitive complexity is measured separately by 'just check-complexity'",
             "(complexipy, Sonar limit 15); duplication by 'just audit-duplication'",
-            "and dead code by 'just audit-dead-code'.",
+            "and unreachable code by 'just audit-reachability'.",
         ]
     )
     return "\n".join(lines)
@@ -374,25 +365,6 @@ def render_census(dimensions: Sequence[Dimension]) -> str:
             )
         lines.append("")
     return "\n".join(lines)
-
-
-#: Dimensions that GATE when :mod:`dev.health` is run with ``--gate``.
-#:
-#: The gate and the report are the same measurement - the gate simply refuses
-#: to exit 0 - so the two can never disagree about a number.
-#:
-#: ``cyclomatic`` is deliberately ABSENT, though this module measures it. Ruff's
-#: ``C901`` already gates that dimension from ``just check-limits``, and the two
-#: tools do not agree: on
-#: ``control/permission_service.py::_authorize_permission_response`` radon
-#: scores 26 and ruff scores 15, because radon also counts boolean operators,
-#: ternaries, and comprehensions while ruff counts only ``if``/``elif``/loops.
-#: Both numbers are correct for their own definition, but two gates at one
-#: threshold claiming one name is worse than either alone - a burndown would not
-#: know which number it was driving to zero. Ruff owns the gate because the
-#: conventional ceiling of 10 is calibrated against its mccabe definition;
-#: radon's stricter reading stays here as a ranking signal.
-GATED = ("module-lines", "statements", "arguments", "nesting")
 
 
 def render_json(dimensions: Sequence[Dimension]) -> str:

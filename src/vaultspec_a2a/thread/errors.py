@@ -267,12 +267,12 @@ class ProviderSessionError(VaultspecError):
 
 
 # ---------------------------------------------------------------------------
-# Event aggregation
+# Stream relay
 # ---------------------------------------------------------------------------
 
 
-class EventAggregatorError(VaultspecError):
-    """Raised when the central event bus or multiplexer encounters errors."""
+class StreamSubscriptionError(VaultspecError):
+    """Raised when the gateway's stream subscriber registry refuses a client."""
 
     __slots__ = ()
 
@@ -380,12 +380,12 @@ __all__ = [
     "ContextOverflowError",
     "DatabaseError",
     "DocumentConformanceError",
-    "EventAggregatorError",
     "HarnessToolContractError",
     "NicknameConflictError",
     "PermissionDeniedError",
     "ProtocolError",
     "ProviderSessionError",
+    "StreamSubscriptionError",
     "SupervisorRoutingError",
     "TeamConfigNotFoundError",
     "TokenBudgetExceededError",

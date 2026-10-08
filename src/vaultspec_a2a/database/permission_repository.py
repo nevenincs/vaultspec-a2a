@@ -1,80 +1,65 @@
-"""Permission repository — permission request lifecycle and control action journal."""
+"""Permission repository — permission requests and the permission decision log."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 from uuid import uuid4
 
-from sqlalchemy import delete, func, or_, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
-    from datetime import datetime
 
-    from sqlalchemy.engine import CursorResult
     from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..thread.enums import (
-    RECOVERY_ACTION_TYPES,
-    ControlActionResultStatus,
-    ControlActionType,
+    TERMINAL_STATUS_VALUES,
+    InterruptType,
     PermissionRequestStatus,
+    RepairStatus,
+    ThreadStatus,
 )
-from ._helpers import (
-    _coerce_control_action_type,
-    _coerce_control_result,
-    _coerce_permission_request_status,
-    save_model,
-)
-from .models import ControlActionModel, PermissionRequestModel, utcnow
+from ._helpers import _coerce, save_model
+from .models import PermissionLogModel, PermissionRequestModel, ThreadModel, utcnow
+from .thread_repository import path_safe_run_id_clause
 
 __all__ = [
-    "ControlActionReservation",
-    "acquire_control_action_lease",
-    "commit_control_action_lease",
-    "create_control_action",
+    "PendingPermission",
+    "actionable_pending_permissions",
+    "append_permission_log",
+    "decode_allowed_options",
     "expire_pending_permission_requests",
-    "get_control_action_by_dispatch_id",
-    "get_control_action_by_idempotency_key",
-    "get_latest_control_action",
-    "get_or_create_control_action",
     "get_pending_permission_requests",
+    "get_permission_logs_by_thread",
     "get_permission_request",
-    "mark_control_action_applied",
-    "mark_control_action_duplicate",
-    "mark_control_action_superseded",
     "mark_permission_request_applied",
     "outstanding_permission_pause",
-    "prune_repair_journal",
+    "pending_document_approval_thread",
     "record_permission_request",
     "record_permission_response_submission",
-    "release_control_action_lease",
-    "reserve_control_action",
+    "reopen_reasked_permission_request",
     "reset_permission_response_submission",
-    "settle_control_action_lease",
     "supersede_permission_requests",
 ]
 
 
 @dataclass(frozen=True, slots=True)
-class ControlActionReservation:
-    """Result of reserving one idempotent control intention.
+class PendingPermission:
+    """One unanswered permission request on a live run, its options read once.
 
-    ``payload_matches`` is false when the same idempotency key was already bound
-    to a competing action body.  Callers must surface that as conflict and must
-    never acquire or dispatch the returned row.
+    ``offered`` is the decoded option list, or ``None`` when the stored column
+    cannot be read, which a caller that must fail closed tells apart from a row
+    that offered nothing. ``checkpoint_unavailable`` is the run's recorded
+    checkpoint posture, carried here so a query across many runs needs no second
+    read of their threads.
     """
 
-    action: ControlActionModel
-    created: bool
-    payload_matches: bool
+    request: PermissionRequestModel
+    offered: list[object] | None
+    checkpoint_unavailable: bool
 
-
-_IN_CLAUSE_CHUNK = 500
-"""Bound on identifiers per ``IN`` clause, under every backend's parameter cap."""
 
 _OUTSTANDING_PERMISSION_STATUSES: tuple[str, str] = (
     PermissionRequestStatus.PENDING.value,
@@ -91,24 +76,8 @@ argument at those call sites rather than being folded into this constant.
 """
 
 
-def _encode_payload(payload: dict[str, object] | None) -> str | None:
-    if payload is None:
-        return None
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
-
-
-def _payload_matches(stored: str | None, expected: dict[str, object] | None) -> bool:
-    if stored is None:
-        return expected is None
-    try:
-        return json.loads(stored) == expected
-    except json.JSONDecodeError:
-        return False
-
-
 class _PermissionRequestOptional(TypedDict, total=False):
     tool_call: str | None
-    worker_generation: int
 
 
 class _PermissionRequestArgs(_PermissionRequestOptional):
@@ -130,7 +99,6 @@ async def record_permission_request(
     description = kwargs["description"]
     allowed_options = kwargs["allowed_options"]
     tool_call = kwargs.get("tool_call")
-    worker_generation = kwargs.get("worker_generation", 0)
     existing = await session.get(PermissionRequestModel, request_id)
     allowed_options_json = json.dumps(allowed_options)
     if existing is not None:
@@ -138,10 +106,7 @@ async def record_permission_request(
         existing.description = description
         existing.allowed_options_json = allowed_options_json
         existing.tool_call = tool_call
-        existing.worker_generation = worker_generation
         existing.request_status = PermissionRequestStatus.PENDING.value
-        existing.response_option_id = None
-        existing.idempotency_key = None
         existing.responded_at = None
         existing.applied_at = None
         await session.flush()
@@ -155,9 +120,25 @@ async def record_permission_request(
         description=description,
         allowed_options_json=allowed_options_json,
         request_status=PermissionRequestStatus.PENDING.value,
-        worker_generation=worker_generation,
     )
     return await save_model(session, model)
+
+
+def decode_allowed_options(raw_options_json: str | None) -> list[object] | None:
+    """Decode the offered options of a durable permission row.
+
+    An absent column offered nothing, so it decodes to an empty list. A column
+    that is present but empty, malformed JSON, or not a JSON list is unreadable
+    and decodes to ``None``, so a caller that must fail closed on a broken row
+    can tell it apart from a row that offered nothing.
+    """
+    if raw_options_json is None:
+        return []
+    try:
+        decoded: object = json.loads(raw_options_json)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return cast("list[object]", decoded) if isinstance(decoded, list) else None
 
 
 async def get_permission_request(
@@ -170,8 +151,15 @@ async def get_pending_permission_requests(
     session: AsyncSession,
     *,
     thread_id: str | None = None,
+    pause_reason_type: str | Collection[str] | None = None,
     include_answered_pending_apply: bool = True,
 ) -> Sequence[PermissionRequestModel]:
+    """Return unsettled permission requests, oldest first.
+
+    ``thread_id`` and ``pause_reason_type`` narrow the rows in the query itself,
+    so a caller that wants some kinds of pause never loads and filters the rest.
+    ``pause_reason_type`` names one cause or any collection of them.
+    """
     statuses = (
         _OUTSTANDING_PERMISSION_STATUSES
         if include_answered_pending_apply
@@ -182,8 +170,64 @@ async def get_pending_permission_requests(
     )
     if thread_id is not None:
         stmt = stmt.where(PermissionRequestModel.thread_id == thread_id)
+    if pause_reason_type is not None:
+        causes = (
+            (pause_reason_type,)
+            if isinstance(pause_reason_type, str)
+            else tuple(pause_reason_type)
+        )
+        stmt = stmt.where(PermissionRequestModel.pause_reason_type.in_(causes))
     stmt = stmt.order_by(PermissionRequestModel.created_at.asc())
     return (await session.execute(stmt)).scalars().all()
+
+
+async def actionable_pending_permissions(
+    session: AsyncSession,
+    *,
+    thread_id: str | None = None,
+) -> list[PendingPermission]:
+    """Return the unanswered permission requests on live runs, oldest first.
+
+    The one reading of "which permissions still wait on someone" shared by the
+    team status, the run status and the run listing. A run is live when its row
+    exists under a path-safe id and has not settled, so a request orphaned from
+    its run, left open on a settled run, or filed under an id the respond route
+    cannot address is never offered. The last matters beyond the route: one such
+    id handed to the status serializer would fail the whole response and hide
+    every other run's live question. ``thread_id`` narrows the query to one run.
+
+    Every live request is returned with its options already read, and the
+    surfaces keep their own stance on the ones that are not actionable: the team
+    status offers only requests that offer a usable option on a run with
+    checkpoint truth, while the run status degrades on an unreadable one and the
+    listing reads plan approvals alone. The run's recorded checkpoint posture is
+    judged by the team status only, because the run status and the listing read
+    their checkpoint afresh.
+    """
+    stmt = (
+        select(PermissionRequestModel, ThreadModel.repair_status)
+        .select_from(PermissionRequestModel)
+        .join(ThreadModel, ThreadModel.id == PermissionRequestModel.thread_id)
+        .where(
+            PermissionRequestModel.request_status
+            == PermissionRequestStatus.PENDING.value,
+            ThreadModel.status.not_in(TERMINAL_STATUS_VALUES),
+            path_safe_run_id_clause(),
+        )
+        .order_by(PermissionRequestModel.created_at.asc())
+    )
+    if thread_id is not None:
+        stmt = stmt.where(PermissionRequestModel.thread_id == thread_id)
+    return [
+        PendingPermission(
+            request=request,
+            offered=decode_allowed_options(request.allowed_options_json),
+            checkpoint_unavailable=(
+                repair_status == RepairStatus.CHECKPOINT_UNAVAILABLE.value
+            ),
+        )
+        for request, repair_status in (await session.execute(stmt)).all()
+    ]
 
 
 async def outstanding_permission_pause(
@@ -217,20 +261,91 @@ async def outstanding_permission_pause(
     return None if row is None else (row[0], row[1])
 
 
+async def pending_document_approval_thread(
+    session: AsyncSession,
+    *,
+    request_ids: Collection[str],
+) -> str | None:
+    """Return the parked run whose pending document approval is in ``request_ids``.
+
+    A document gate records its pause with the proposal it parked on as the
+    request id, so an engine verdict naming that proposal reaches its run through
+    this row alone, by primary key, however many runs are parked. Only a run
+    still ``INPUT_REQUIRED`` qualifies: an applied verdict resume settles the row
+    and moves the run on, so a replayed verdict finds nothing and is a no-op.
+    """
+    candidates = [request_id for request_id in dict.fromkeys(request_ids) if request_id]
+    if not candidates:
+        return None
+    stmt = (
+        select(PermissionRequestModel.thread_id)
+        .join(ThreadModel, ThreadModel.id == PermissionRequestModel.thread_id)
+        .where(
+            PermissionRequestModel.request_id.in_(candidates),
+            PermissionRequestModel.pause_reason_type
+            == InterruptType.DOCUMENT_APPROVAL_REQUEST.value,
+            PermissionRequestModel.request_status
+            == PermissionRequestStatus.PENDING.value,
+            ThreadModel.status == ThreadStatus.INPUT_REQUIRED.value,
+        )
+        .order_by(PermissionRequestModel.created_at.asc())
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
 async def record_permission_response_submission(
     session: AsyncSession,
     *,
     request_id: str,
-    option_id: str,
-    idempotency_key: str,
 ) -> PermissionRequestModel | None:
+    """Move a request to awaiting-application, because an answer was accepted.
+
+    The row records that the ask has been answered and when, never WHAT was
+    answered: the accepted response action's frozen envelope is the one record of
+    the chosen option, and ``permission_logs`` is the durable record of the
+    decision. ``None`` says the request has no row.
+    """
     permission = await session.get(PermissionRequestModel, request_id)
     if permission is None:
         return None
-    permission.response_option_id = option_id
-    permission.idempotency_key = idempotency_key
     permission.request_status = PermissionRequestStatus.ANSWERED_PENDING_APPLY.value
     permission.responded_at = utcnow()
+    await session.flush()
+    return permission
+
+
+async def reopen_reasked_permission_request(
+    session: AsyncSession,
+    *,
+    request_id: str,
+    allowed_options: list[dict[str, object]],
+) -> PermissionRequestModel | None:
+    """Return a settled request to pending, because its run asked it again.
+
+    A worker that parks again under a request id the run has already answered is
+    asking the SAME question a second time, and the row that recorded the first
+    ask is the request's journal: the request id is its primary key, so the ask
+    reopens that row rather than filing a second one. ``allowed_options`` is
+    what this ask offers, which the row caches afresh - the question is the same
+    question, but the choices offered for it need not be.
+
+    Only a SETTLED row reopens. One whose answer is still being applied belongs
+    to that settlement, and leaving it alone is what makes the reopen read the
+    same whether the re-ask's park frame reached the relay before or after the
+    receipt that proved the previous answer landed. ``None`` says nothing
+    reopened: the request has no row, or its row is not settled.
+    """
+    permission = await session.get(PermissionRequestModel, request_id)
+    if (
+        permission is None
+        or permission.request_status in _OUTSTANDING_PERMISSION_STATUSES
+    ):
+        return None
+    permission.allowed_options_json = json.dumps(allowed_options)
+    permission.request_status = PermissionRequestStatus.PENDING.value
+    permission.responded_at = None
+    permission.applied_at = None
     await session.flush()
     return permission
 
@@ -244,7 +359,9 @@ async def mark_permission_request_applied(
     permission = await session.get(PermissionRequestModel, request_id)
     if permission is None:
         return None
-    permission.request_status = _coerce_permission_request_status(status).value
+    permission.request_status = _coerce(
+        PermissionRequestStatus, status, label="permission request status"
+    ).value
     permission.applied_at = utcnow()
     await session.flush()
     return permission
@@ -260,8 +377,6 @@ async def reset_permission_response_submission(
     if permission is None:
         return None
     permission.request_status = PermissionRequestStatus.PENDING.value
-    permission.response_option_id = None
-    permission.idempotency_key = None
     permission.responded_at = None
     await session.flush()
     return permission
@@ -271,20 +386,30 @@ async def supersede_permission_requests(
     session: AsyncSession,
     *,
     thread_id: str,
-    pause_reason_type: str | None = None,
-    except_request_id: str | None = None,
+    held_request_ids: Collection[str],
 ) -> int:
-    """Mark earlier pending permission requests as superseded."""
+    """Retire every outstanding request the run is no longer parked on.
+
+    ``held_request_ids`` is the set of requests the caller read off the run's
+    live checkpoint, which is the only authority on what a run is still being
+    asked. A row for one of them is never superseded, however old it is: a
+    fan-out stage parks on several tool calls at once, and retiring the earlier
+    ones hid questions the checkpoint went on waiting for - they left every
+    pending-permission surface while the run could not resume without them.
+
+    Rows for requests the checkpoint does NOT hold are residue of a pause the
+    run has left, and they are what this retires. Pass an empty collection for a
+    run holding nothing.
+    """
     stmt = select(PermissionRequestModel).where(
         PermissionRequestModel.thread_id == thread_id,
         PermissionRequestModel.request_status.in_(_OUTSTANDING_PERMISSION_STATUSES),
     )
-    if pause_reason_type is not None:
-        stmt = stmt.where(PermissionRequestModel.pause_reason_type == pause_reason_type)
+    held = frozenset(held_request_ids)
     permissions = (await session.execute(stmt)).scalars().all()
     updated = 0
     for permission in permissions:
-        if permission.request_id == except_request_id:
+        if permission.request_id in held:
             continue
         permission.request_status = PermissionRequestStatus.SUPERSEDED.value
         permission.applied_at = permission.applied_at or utcnow()
@@ -312,466 +437,49 @@ async def expire_pending_permission_requests(
     return len(permissions)
 
 
-class _ControlActionOptional(TypedDict, total=False):
-    request_id: str | None
-    payload: dict[str, object] | None
-    worker_generation: int
-    result_status: ControlActionResultStatus | str
-    dispatch_id: str | None
-    recovery_deadline_at: datetime | None
+class _PermissionLogOptional(TypedDict, total=False):
+    option_id: str | None
 
 
-class _ControlActionArgs(_ControlActionOptional):
+class _PermissionLogArgs(_PermissionLogOptional):
     thread_id: str
-    action_type: ControlActionType | str
-    idempotency_key: str
+    agent_id: str | None
+    tool_name: str
+    action: str
 
 
-class _GetOrCreateActionOptional(_ControlActionOptional, total=False):
-    absence_already_resolved: bool
+async def append_permission_log(
+    session: AsyncSession,
+    **kwargs: Unpack[_PermissionLogArgs],
+) -> PermissionLogModel:
+    """Append one permission decision to the durable audit log.
 
+    ``action`` is the verdict (approved or rejected) and ``option_id`` the
+    concrete option that produced it. The two are recorded together because the
+    verdict alone cannot distinguish which of several rejecting options a
+    reviewer chose, and the option id alone is only interpretable against the
+    request's option list, which this row does not carry.
 
-class _GetOrCreateActionArgs(_GetOrCreateActionOptional):
-    thread_id: str
-    action_type: ControlActionType | str
-    idempotency_key: str
-
-
-class _ReserveActionOptional(TypedDict, total=False):
-    request_id: str | None
-    payload: dict[str, object] | None
-    worker_generation: int
-    dispatch_id: str | None
-    recovery_deadline_at: datetime | None
-
-
-class _ReserveActionArgs(_ReserveActionOptional):
-    thread_id: str
-    action_type: ControlActionType | str
-    idempotency_key: str
-
-
-async def create_control_action(
-    session: AsyncSession, **kwargs: Unpack[_ControlActionArgs]
-) -> ControlActionModel:
-    """Append a durable control journal record."""
-    thread_id = kwargs["thread_id"]
-    resolved_type = _coerce_control_action_type(kwargs["action_type"])
-    request_id = kwargs.get("request_id")
-    payload = kwargs.get("payload")
-    worker_generation = kwargs.get("worker_generation", 0)
-    result_status = kwargs.get(
-        "result_status", ControlActionResultStatus.ACCEPTED_NOT_APPLIED
-    )
-    dispatch_id = kwargs.get("dispatch_id")
-    recovery_deadline_at = kwargs.get("recovery_deadline_at")
-    requires_deadline = resolved_type in RECOVERY_ACTION_TYPES
-    if requires_deadline != (recovery_deadline_at is not None):
-        requirement = "requires" if requires_deadline else "cannot carry"
-        raise ValueError(f"{resolved_type.value} {requirement} a recovery deadline")
-    model = ControlActionModel(
+    ``agent_id`` is keyword-required despite being nullable: a caller that has no
+    attribution must say so, rather than inherit an absence it never considered.
+    """
+    log_entry = PermissionLogModel(
         id=uuid4().hex,
-        thread_id=thread_id,
-        action_type=resolved_type.value,
-        request_id=request_id,
-        idempotency_key=kwargs["idempotency_key"],
-        payload_json=_encode_payload(payload),
-        worker_generation=worker_generation,
-        result_status=_coerce_control_result(result_status).value,
-        dispatch_id=dispatch_id or uuid4().hex,
-        recovery_deadline_at=recovery_deadline_at,
-    )
-    return await save_model(session, model)
-
-
-async def get_or_create_control_action(
-    session: AsyncSession, **kwargs: Unpack[_GetOrCreateActionArgs]
-) -> tuple[ControlActionModel, bool]:
-    """Return the journal record for ``(thread_id, idempotency_key)``, inserting it
-    only when absent.
-
-    Idempotency-key inserts must replay as a no-op, never crash: a duplicate key is
-    the SUCCESS signal of an already-applied action, so racing a UNIQUE violation on
-    it contradicts the key's whole purpose. Startup reconciliation re-derives the
-    same key across boots for a thread that has not advanced its epoch (e.g. rows
-    written before the epoch-increment fix), and the app must not die on the second
-    boot. Returns ``(action, created)`` where ``created`` is ``False`` for a replay.
-
-    ``absence_already_resolved`` skips only the existence pre-read, for a caller
-    that resolved the same absence for a whole batch in one query. It weakens no
-    guarantee: the pre-read never was the authority - the SAVEPOINT-wrapped insert
-    and its ``IntegrityError`` re-read are, precisely because a concurrent writer
-    can land between any pre-read and the insert.
-    """
-    thread_id = kwargs["thread_id"]
-    idempotency_key = kwargs["idempotency_key"]
-    if not kwargs.get("absence_already_resolved", False):
-        existing = await get_control_action_by_idempotency_key(
-            session,
-            thread_id=thread_id,
-            idempotency_key=idempotency_key,
-        )
-        if existing is not None:
-            return existing, False
-    # Atomic insert: wrap the INSERT in a SAVEPOINT so a concurrent boot that wins
-    # the race raises IntegrityError on the UNIQUE key, rolls back only the nested
-    # savepoint (leaving the outer transaction usable), and is then resolved by
-    # re-reading the row the winner committed. This closes the lookup-then-insert
-    # time-of-check/time-of-use window so the name matches the guarantee.
-    try:
-        async with session.begin_nested():
-            created = await create_control_action(
-                session,
-                thread_id=thread_id,
-                action_type=kwargs["action_type"],
-                idempotency_key=idempotency_key,
-                request_id=kwargs.get("request_id"),
-                payload=kwargs.get("payload"),
-                worker_generation=kwargs.get("worker_generation", 0),
-                result_status=kwargs.get(
-                    "result_status", ControlActionResultStatus.ACCEPTED_NOT_APPLIED
-                ),
-                dispatch_id=kwargs.get("dispatch_id"),
-                recovery_deadline_at=kwargs.get("recovery_deadline_at"),
-            )
-    except IntegrityError:
-        conflicting = await get_control_action_by_idempotency_key(
-            session,
-            thread_id=thread_id,
-            idempotency_key=idempotency_key,
-        )
-        if conflicting is None:
-            raise
-        return conflicting, False
-    return created, True
-
-
-async def reserve_control_action(
-    session: AsyncSession, **kwargs: Unpack[_ReserveActionArgs]
-) -> ControlActionReservation:
-    """Reserve one durable intention and compare any replay with its winner."""
-    resolved_type = _coerce_control_action_type(kwargs["action_type"]).value
-    action, created = await get_or_create_control_action(
-        session,
         thread_id=kwargs["thread_id"],
-        action_type=resolved_type,
-        idempotency_key=kwargs["idempotency_key"],
-        request_id=kwargs.get("request_id"),
-        payload=kwargs.get("payload"),
-        worker_generation=kwargs.get("worker_generation", 0),
-        dispatch_id=kwargs.get("dispatch_id"),
-        recovery_deadline_at=kwargs.get("recovery_deadline_at"),
+        agent_id=kwargs["agent_id"],
+        tool_name=kwargs["tool_name"],
+        action=kwargs["action"],
+        option_id=kwargs.get("option_id"),
     )
-    matches = (
-        action.action_type == resolved_type
-        and action.request_id == kwargs.get("request_id")
-        and _payload_matches(action.payload_json, kwargs.get("payload"))
-    )
-    return ControlActionReservation(
-        action=action, created=created, payload_matches=matches
-    )
+    return await save_model(session, log_entry)
 
 
-async def acquire_control_action_lease(
-    session: AsyncSession,
-    action_id: str,
-    *,
-    claim_token: str,
-    claim_expires_at: datetime,
-    now: datetime | None = None,
-) -> bool:
-    """Atomically acquire or renew one unapplied action lease."""
-    if not claim_token:
-        raise ValueError("claim_token must not be empty")
-    acquired_at = now or utcnow()
-    if claim_expires_at <= acquired_at:
-        raise ValueError("claim_expires_at must be later than now")
+async def get_permission_logs_by_thread(
+    session: AsyncSession, thread_id: str
+) -> Sequence[PermissionLogModel]:
     stmt = (
-        update(ControlActionModel)
-        .where(
-            ControlActionModel.id == action_id,
-            ControlActionModel.applied_at.is_(None),
-            or_(
-                ControlActionModel.claim_token.is_(None),
-                ControlActionModel.claim_expires_at.is_(None),
-                ControlActionModel.claim_expires_at <= acquired_at,
-                ControlActionModel.claim_token == claim_token,
-            ),
-        )
-        .values(claim_token=claim_token, claim_expires_at=claim_expires_at)
+        select(PermissionLogModel)
+        .where(PermissionLogModel.thread_id == thread_id)
+        .order_by(PermissionLogModel.responded_at)
     )
-    result = cast("CursorResult[Any]", await session.execute(stmt))
-    return result.rowcount == 1
-
-
-async def commit_control_action_lease(
-    session: AsyncSession,
-    action_id: str,
-    *,
-    claim_token: str,
-) -> ControlActionModel:
-    """Commit verified lease ownership and its complete accepted projections."""
-    await session.flush()
-    action = await session.get(ControlActionModel, action_id, populate_existing=True)
-    if (
-        action is None
-        or action.claim_token != claim_token
-        or action.claim_expires_at is None
-        or action.applied_at is not None
-    ):
-        raise RuntimeError("control action lease is not owned by this dispatcher")
-    await session.commit()
-    return action
-
-
-async def release_control_action_lease(
-    session: AsyncSession,
-    action_id: str,
-    *,
-    claim_token: str,
-) -> bool:
-    """Release ownership only for a dispatch proven not to have been delivered."""
-    result = cast(
-        "CursorResult[Any]",
-        await session.execute(
-            update(ControlActionModel)
-            .where(
-                ControlActionModel.id == action_id,
-                ControlActionModel.applied_at.is_(None),
-                ControlActionModel.claim_token == claim_token,
-            )
-            .values(claim_token=None, claim_expires_at=None)
-        ),
-    )
-    return result.rowcount == 1
-
-
-async def settle_control_action_lease(
-    session: AsyncSession,
-    action_id: str,
-    *,
-    claim_token: str,
-    applied_at: datetime | None = None,
-    result_status: ControlActionResultStatus | str = ControlActionResultStatus.APPLIED,
-) -> bool:
-    """Settle application iff the caller still owns the durable lease."""
-    result = cast(
-        "CursorResult[Any]",
-        await session.execute(
-            update(ControlActionModel)
-            .where(
-                ControlActionModel.id == action_id,
-                ControlActionModel.applied_at.is_(None),
-                ControlActionModel.claim_token == claim_token,
-            )
-            .values(
-                applied_at=applied_at or utcnow(),
-                result_status=_coerce_control_result(result_status).value,
-                claim_token=None,
-                claim_expires_at=None,
-            )
-        ),
-    )
-    return result.rowcount == 1
-
-
-async def get_control_action_by_idempotency_key(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    idempotency_key: str,
-) -> ControlActionModel | None:
-    stmt = select(ControlActionModel).where(
-        ControlActionModel.thread_id == thread_id,
-        ControlActionModel.idempotency_key == idempotency_key,
-    )
-    return (await session.execute(stmt)).scalar_one_or_none()
-
-
-async def get_control_action_by_dispatch_id(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    dispatch_id: str,
-) -> ControlActionModel | None:
-    """Return the exact journal action named by a worker application receipt."""
-    stmt = select(ControlActionModel).where(
-        ControlActionModel.thread_id == thread_id,
-        ControlActionModel.dispatch_id == dispatch_id,
-    )
-    return (await session.execute(stmt)).scalar_one_or_none()
-
-
-async def get_latest_control_action(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    action_type: ControlActionType | str | None = None,
-) -> ControlActionModel | None:
-    stmt = (
-        select(ControlActionModel)
-        .where(ControlActionModel.thread_id == thread_id)
-        .order_by(ControlActionModel.requested_at.desc())
-    )
-    if action_type is not None:
-        stmt = stmt.where(
-            ControlActionModel.action_type
-            == _coerce_control_action_type(action_type).value
-        )
-    return (await session.execute(stmt.limit(1))).scalar_one_or_none()
-
-
-_REPAIR_JOURNAL_ACTION_TYPES: frozenset[str] = frozenset(
-    {
-        ControlActionType.REPAIR_STARTED.value,
-        ControlActionType.REPAIR_FINISHED.value,
-    }
-)
-
-
-MINIMUM_REPAIR_JOURNAL_RETENTION_ROWS = 2
-"""Floor on the repair-journal cap: one boot's own started/finished pair.
-
-The running pass is still holding both rows in its open transaction when the
-prune fires, so a cap that could rank either as history would delete a live
-object mid-reconciliation. Clamping makes that structural instead of relying on
-the caller to pass a sane number.
-"""
-
-
-async def prune_repair_journal(
-    session: AsyncSession,
-    *,
-    thread_ids: Collection[str],
-    keep_rows: int,
-) -> int:
-    """Bound each thread's startup-repair journal to its newest ``keep_rows`` rows.
-
-    Startup reconciliation appends a ``repair_started``/``repair_finished`` pair
-    per non-terminal thread on EVERY boot, under an idempotency key seeded by the
-    recovery epoch that the same pass increments - so the key never repeats and
-    the pair never replays onto an existing row. That is unbounded growth on a
-    desktop that restarts often and keeps long-lived threads.
-
-    Only that pair is pruned, and only once settled. It is the sole journal class
-    with no reader: recovery reads unapplied rows by action type
-    (``permission_response_submitted``, ``message_followup_requested``, ``cancel``)
-    or by idempotency-key prefix, the terminal handler reads only the latest
-    ``cancel``, and receipts resolve a ``dispatch_id`` that no repair row is ever
-    dispatched under. Nothing outside this table's own writer has ever read a
-    repair row, so bounding them costs no redrive, replay, or reconciliation
-    evidence. Every OTHER action type stays append-only: those rows back
-    idempotent replay windows whose length is set by how long a client may retry,
-    which is not a horizon this layer can derive.
-
-    Ranking is partitioned per thread inside a single statement, so the whole
-    startup backlog costs one delete per parameter chunk rather than one per
-    thread - the same flat-cost rule the surrounding reads already follow.
-
-    ``keep_rows`` of zero or less disables pruning; anything lower than
-    :data:`MINIMUM_REPAIR_JOURNAL_RETENTION_ROWS` is raised to it.
-
-    Returns the number of rows deleted.
-    """
-    if keep_rows <= 0:
-        return 0
-    retained = max(keep_rows, MINIMUM_REPAIR_JOURNAL_RETENTION_ROWS)
-    unique_ids = list(dict.fromkeys(thread_ids))
-    if not unique_ids:
-        return 0
-    # The caller wrote and mutated this pass's pair in the open transaction; the
-    # ranking below reads it back through the database, so the pending state has
-    # to be on the wire before the delete is ranked against it.
-    await session.flush()
-
-    deleted = 0
-    # Chunked for the same reason every other multi-thread lookup here is: the
-    # backlog is unbounded and each backend caps bound parameters per statement.
-    for start in range(0, len(unique_ids), _IN_CLAUSE_CHUNK):
-        chunk = unique_ids[start : start + _IN_CLAUSE_CHUNK]
-        ranked = (
-            select(
-                ControlActionModel.id.label("id"),
-                func.row_number()
-                .over(
-                    partition_by=ControlActionModel.thread_id,
-                    order_by=(
-                        ControlActionModel.requested_at.desc(),
-                        ControlActionModel.id.desc(),
-                    ),
-                )
-                .label("rank"),
-            )
-            .where(
-                ControlActionModel.thread_id.in_(chunk),
-                ControlActionModel.action_type.in_(_REPAIR_JOURNAL_ACTION_TYPES),
-            )
-            .subquery()
-        )
-        history = select(ranked.c.id).where(ranked.c.rank > retained)
-        result = cast(
-            "CursorResult[Any]",
-            await session.execute(
-                delete(ControlActionModel)
-                .where(
-                    ControlActionModel.id.in_(history),
-                    # Deliberately narrow: an unsettled row may still be owed a
-                    # redrive and a leased row is owned by a live dispatcher.
-                    # Neither is ever true of a repair row today, and stating it
-                    # as a predicate keeps it true if that ever changes.
-                    ControlActionModel.result_status
-                    == ControlActionResultStatus.APPLIED.value,
-                    ControlActionModel.claim_token.is_(None),
-                )
-                # The ranked subquery is not evaluable in Python, and letting
-                # SQLAlchemy fall back to "fetch" would issue a SELECT per call.
-                # Nothing this pass still holds is a deletion candidate, so the
-                # identity map needs no reconciliation.
-                .execution_options(synchronize_session=False)
-            ),
-        )
-        deleted += result.rowcount or 0
-    return deleted
-
-
-async def mark_control_action_applied(
-    session: AsyncSession,
-    action_id: str,
-    *,
-    applied_at: datetime | None = None,
-    result_status: ControlActionResultStatus | str = ControlActionResultStatus.APPLIED,
-) -> ControlActionModel | None:
-    action = await session.get(ControlActionModel, action_id)
-    if action is None:
-        return None
-    action.applied_at = applied_at or utcnow()
-    action.result_status = _coerce_control_result(result_status).value
-    action.claim_token = None
-    action.claim_expires_at = None
-    await session.flush()
-    return action
-
-
-async def mark_control_action_duplicate(
-    session: AsyncSession,
-    action_id: str,
-) -> ControlActionModel | None:
-    action = await session.get(ControlActionModel, action_id)
-    if action is None:
-        return None
-    action.result_status = ControlActionResultStatus.DUPLICATE.value
-    await session.flush()
-    return action
-
-
-async def mark_control_action_superseded(
-    session: AsyncSession,
-    action_id: str,
-) -> ControlActionModel | None:
-    action = await session.get(ControlActionModel, action_id)
-    if action is None:
-        return None
-    action.result_status = ControlActionResultStatus.SUPERSEDED.value
-    action.superseded_at = utcnow()
-    await session.flush()
-    return action
+    return (await session.execute(stmt)).scalars().all()

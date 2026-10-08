@@ -23,7 +23,6 @@ import contextvars
 import itertools
 import json
 import logging
-import re
 import sys
 from contextlib import contextmanager
 from datetime import UTC, date, datetime
@@ -31,12 +30,12 @@ from enum import Enum
 from logging.handlers import RotatingFileHandler
 from pathlib import PurePath
 from types import MappingProxyType, TracebackType
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, override
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast, overload, override
 
 from opentelemetry import trace
 from opentelemetry.trace.span import format_span_id, format_trace_id
 
-from ..control.state_layout import seal_state_home, state_layout
+from .redaction import REDACTED, is_secret_name, redact_text
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
@@ -52,6 +51,7 @@ __all__ = [
     "LivenessPollFilter",
     "LogContextFilter",
     "OTelCorrelationFilter",
+    "active_trace_ids",
     "configure_logging",
     "log_context",
     "reconfigure_console_utf8",
@@ -68,12 +68,18 @@ _FILE_MAX_BYTES = 10 * 1024 * 1024
 _FILE_BACKUP_COUNT = 5
 
 
+class _LogsLayout(Protocol):
+    """The one state-layout path the service lane writes under."""
+
+    @property
+    def logs_dir(self) -> Path: ...
+
+
 class _LoggingSettings(Protocol):
     """Structural type for the settings attributes :func:`configure_logging` reads.
 
-    Note: ty does not yet have a Pydantic plugin (astral-sh/ty#2403), so
-    Pydantic models passed here require ``# ty: ignore[invalid-argument-type]``
-    at call sites.
+    The caller hands its settings in, so this leaf module never reaches up into
+    the configuration that owns the state layout and its directory preparation.
     """
 
     @property
@@ -89,7 +95,9 @@ class _LoggingSettings(Protocol):
     def is_dev(self) -> bool: ...
 
     @property
-    def a2a_home(self) -> Path: ...
+    def state_layout(self) -> _LogsLayout: ...
+
+    def prepare_state_dir(self, directory: Path) -> Path: ...
 
 
 # Standard LogRecord attributes that should not be included as extra fields.
@@ -166,6 +174,26 @@ class LivenessPollFilter(logging.Filter):
         return True
 
 
+def active_trace_ids() -> tuple[str | None, str | None]:
+    """Return the ambient span's W3C trace and span ids, hex-formatted.
+
+    ``(None, None)`` where no valid span context is in scope: outside any
+    span, and under a non-recording one. The pair is never a zero id, which is
+    the whole reason this is a function rather than two format calls - an
+    all-zero id reads as a trace that exists, so a caller recording the
+    absence must be able to record it AS absence.
+
+    Shared because two unrelated consumers correlate on the same two values:
+    every log record this process emits, and every retained progress frame
+    this gateway numbers. A second reading of the span context would be a
+    second chance to disagree about what "no trace" looks like.
+    """
+    context = trace.get_current_span().get_span_context()
+    if not context.is_valid:
+        return None, None
+    return format_trace_id(context.trace_id), format_span_id(context.span_id)
+
+
 class OTelCorrelationFilter(logging.Filter):
     """Inject OTel correlation fields into log records when a span is active."""
 
@@ -174,13 +202,14 @@ class OTelCorrelationFilter(logging.Filter):
         """Populate correlation fields without overwriting caller-provided values."""
         span = trace.get_current_span()
         context = span.get_span_context()
-        if not context.is_valid:
+        trace_id, span_id = active_trace_ids()
+        if trace_id is None or span_id is None:
             return True
 
         if "trace_id" not in record.__dict__:
-            record.trace_id = format_trace_id(context.trace_id)
+            record.trace_id = trace_id
         if "span_id" not in record.__dict__:
-            record.span_id = format_span_id(context.span_id)
+            record.span_id = span_id
         if "trace_sampled" not in record.__dict__:
             record.trace_sampled = bool(context.trace_flags.sampled)
 
@@ -232,53 +261,25 @@ class LogContextFilter(logging.Filter):
         return True
 
 
-# Key segments that name a credential. Matched per segment, and only against a
-# string value, so ``input_tokens`` counts and a ``token_usage`` mapping pass.
-_SENSITIVE_KEY_SEGMENTS: frozenset[str] = frozenset(
-    {
-        "apikey",
-        "authorization",
-        "bearer",
-        "cookie",
-        "credential",
-        "credentials",
-        "passwd",
-        "password",
-        "secret",
-        "token",
-    }
-)
-# Credential shapes a value can carry wherever it appears, message text included.
-_SECRET_VALUE = re.compile(
-    r"(?i)\bbearer\s+[a-z0-9._~+/=-]{8,}"
-    r"|\bsk-[a-z0-9_-]{16,}"
-    r"|\b(?:ghp|gho|ghs|ghu|github_pat)_[a-z0-9_]{16,}"
-    r"|\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}"
-)
-_REDACTED = "[redacted]"
+def _redacted_entry(key: object, value: object) -> object:
+    """Return one keyed value safe to log.
 
-
-def _is_sensitive_key(key: str) -> bool:
-    normalized = key.lower()
-    segments = set(re.split(r"[^a-z0-9]+", normalized))
-    return bool(segments & _SENSITIVE_KEY_SEGMENTS) or any(
-        marker in normalized for marker in ("api_key", "private_key")
-    )
+    A text value under a secret-named key goes whole; anything else is
+    redacted by content. Only text is masked by its key, so ``input_tokens``
+    counts and a ``token_usage`` mapping pass.
+    """
+    if isinstance(key, str) and is_secret_name(key) and isinstance(value, str):
+        return REDACTED
+    return _redacted(value)
 
 
 def _redacted(value: object) -> object:
     """Return *value* with credential-shaped content replaced, recursively."""
     if isinstance(value, str):
-        return _SECRET_VALUE.sub(_REDACTED, value)
+        return redact_text(value)
     if isinstance(value, dict):
         return {
-            key: (
-                _REDACTED
-                if isinstance(key, str)
-                and _is_sensitive_key(key)
-                and isinstance(item, str)
-                else _redacted(item)
-            )
+            key: _redacted_entry(key, item)
             for key, item in cast("dict[object, object]", value).items()
         }
     if isinstance(value, list | tuple):
@@ -348,12 +349,9 @@ class JSONFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key in _STANDARD_LOG_ATTRS or key.startswith("_"):
                 continue
-            safe = (
-                _REDACTED
-                if _is_sensitive_key(key) and isinstance(value, str)
-                else _redacted(value)
+            log_data[f"extra_{key}" if key in log_data else key] = _redacted_entry(
+                key, value
             )
-            log_data[f"extra_{key}" if key in log_data else key] = safe
 
         exception = self._exception_text(record.exc_info)
         if exception is not None:
@@ -412,14 +410,6 @@ def reconfigure_console_utf8() -> None:
         except (ValueError, OSError, AttributeError):
             # Not a reconfigurable text stream (redirected pipe, closed, etc.).
             continue
-
-
-def _resolve_settings(settings_override: _LoggingSettings | None) -> _LoggingSettings:
-    if settings_override is not None:
-        return settings_override
-    from ..control.config import settings
-
-    return settings
 
 
 def _numeric_level(level: Any) -> int:
@@ -534,10 +524,9 @@ def _configure_service(settings: _LoggingSettings, service_name: str) -> None:
         _stderr_json_handler(level, service=service_name)
     ]
 
-    runtime_dir = state_layout(settings.a2a_home).logs_dir
+    runtime_dir = settings.state_layout.logs_dir
     try:
-        seal_state_home(settings.a2a_home)
-        runtime_dir.mkdir(parents=True, exist_ok=True)
+        settings.prepare_state_dir(runtime_dir)
         file_handler = RotatingFileHandler(
             runtime_dir / f"{service_name}.log",
             maxBytes=_FILE_MAX_BYTES,
@@ -604,28 +593,48 @@ def _configure_protocol() -> None:
     _assert_no_stdout_handler(root)
 
 
+@overload
+def configure_logging(
+    kind: Literal["service"],
+    *,
+    settings: _LoggingSettings,
+    service_name: str = ...,
+) -> None: ...
+
+
+@overload
+def configure_logging(kind: Literal["cli"], *, settings: _LoggingSettings) -> None: ...
+
+
+@overload
+def configure_logging(kind: Literal["protocol", "library"]) -> None: ...
+
+
 def configure_logging(
     kind: ProcessKind,
     *,
+    settings: _LoggingSettings | None = None,
     service_name: str = "service",
-    settings_override: _LoggingSettings | None = None,
 ) -> None:
     """Configure the process's output lanes for its *kind* (see module docstring).
 
+    ``settings`` is the caller's configuration, read by the ``service`` and
+    ``cli`` lanes; the ``protocol`` and ``library`` lanes read none.
     ``service_name`` names the rotating file lane for the ``service`` kind
-    (e.g. ``"gateway"``, ``"worker"``). ``settings_override`` injects settings for
-    tests; production reads the config singleton lazily so import stays side-effect
-    free. ``library`` returns immediately, leaving the root logger untouched.
+    (e.g. ``"gateway"``, ``"worker"``). ``library`` returns immediately, leaving
+    the root logger untouched.
     """
     if kind == "library":
-        return
-    if kind == "cli":
-        _configure_cli(_resolve_settings(settings_override))
         return
     if kind == "protocol":
         _configure_protocol()
         return
+    if settings is None:
+        raise TypeError(f"the {kind!r} logging lane reads settings; pass them in")
+    if kind == "cli":
+        _configure_cli(settings)
+        return
     if kind == "service":
-        _configure_service(_resolve_settings(settings_override), service_name)
+        _configure_service(settings, service_name)
         return
     raise ValueError(f"unknown process kind: {kind!r}")

@@ -53,8 +53,24 @@ IMPURE_FIXTURES: Final = frozenset(
     {
         # Spawns a real Python child and hands over its actual stdio streams.
         "acp_session_context",
+        # Spawns a real echoing Python child and round-trips frames through it.
+        "echo_context",
         # Reads a discovery record from disk and probes a live engine over HTTP.
         "live_engine",
+        # Copy a schema template onto a per-test SQLite file.
+        "database_file",
+        "migrated_database_file",
+        # Runs the Alembic chain against a real SQLite file once per session.
+        "migrated_template",
+        # Real async engines and sessions over those per-test SQLite files.
+        "engine",
+        "session_factory",
+        "session",
+        "migrated_engine",
+        "migrated_session_factory",
+        # The per-test checkpoint store and the real saver opened over it.
+        "checkpoint_file",
+        "checkpointer",
     }
 )
 

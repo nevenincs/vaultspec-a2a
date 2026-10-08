@@ -1,0 +1,26 @@
+[team]
+id           = "deterministic-success-single"
+display_name = "Deterministic Success Single"
+description  = """
+Scripted completion scenario: one coder takes its turn on the in-process
+deterministic provider and finishes, so a run completes with no credential and
+no network.
+"""
+
+[team.topology]
+type  = "pipeline"
+order = ["deterministic-coder-success"]
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = "Run the in-process deterministic completion scenario."
+
+[team.graph]
+step_timeout_seconds = 60
+run_timeout_seconds  = 600
+recursion_limit      = 10
+
+[[team.workers]]
+agent_id = "deterministic-coder-success"

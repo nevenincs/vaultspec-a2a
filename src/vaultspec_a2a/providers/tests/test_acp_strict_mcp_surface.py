@@ -41,14 +41,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...control.config import settings
 from ...graph.enums import Provider
-from ...service_tests._provider_catalog_live import declared_lane_model_value
+from ...testing import declared_lane_model_value
 from .._acp_mcp import harness_allowed_tool_names, resolve_harness_mcp_servers
 from .._subprocess import kill_process_tree
 from ..acp_chat_model import AcpChatModel
 
 if TYPE_CHECKING:
     from ...conftest import ExternalPrerequisiteRule
-from .._factory_commands import _classify_acp_command, claude_acp_entry
+from .._factory_commands import _classify_acp_command
 from ..factory import ProviderFactory
 
 _RAG = "vaultspec-rag"
@@ -73,14 +73,6 @@ def chirp() -> str:
 if __name__ == "__main__":
     server.run("stdio")
 '''
-
-
-def _require_acp_entry() -> None:
-    if settings.acp_backend != "binary" and not claude_acp_entry().exists():
-        pytest.skip(
-            "Claude ACP node entry not installed; run 'npm install' "
-            "(@agentclientprotocol/claude-agent-acp) per the ACP runbook"
-        )
 
 
 def _ambient_user_server_names() -> list[str]:
@@ -124,9 +116,9 @@ async def _armed_model(workspace: Path, rule: ExternalPrerequisiteRule) -> AcpCh
     """Arm the claude lane on the model the OPERATOR declared.
 
     Both tests below drive a real turn, so this is a billable lane and the
-    entry has to be named rather than chosen - a capability tier used to stand
-    in here, and production stopped accepting one because tiers carry no
-    cross-provider meaning. Absent a declaration the caller SKIPS with the
+    entry has to be named rather than chosen - production accepts no capability
+    tier here because tiers carry no cross-provider meaning. Absent a
+    declaration the caller SKIPS with the
     runbook reason instead of spending on a model nobody picked.
     """
     served, reason = await declared_lane_model_value(Provider.CLAUDE.value, workspace)
@@ -145,7 +137,7 @@ async def _armed_model(workspace: Path, rule: ExternalPrerequisiteRule) -> AcpCh
 
 async def _run_turn(armed: AcpChatModel, prompt: str) -> str:
     messages = [SystemMessage(content="You are terse."), HumanMessage(content=prompt)]
-    _, meta = _classify_acp_command(settings.acp_backend)
+    meta = _classify_acp_command(settings.acp_backend).metadata()
     try:
         return "".join([str(chunk.content) async for chunk in armed.astream(messages)])
     finally:
@@ -192,7 +184,7 @@ async def test_strict_session_bounds_the_surface_to_the_injected_set(
     tmp_path: Path,
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
-    _require_acp_entry()
+    external_prerequisite("claude-acp-adapter")
     seeded = _seed_workspace_canary(tmp_path)
     ambient_names = _ambient_user_server_names()
 
@@ -235,7 +227,7 @@ async def test_strict_session_bounds_the_surface_to_the_injected_set(
 async def test_injected_rag_tool_completes_real_work_under_strict(
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
-    _require_acp_entry()
+    external_prerequisite("claude-acp-adapter")
     ambient_names = _ambient_user_server_names()
     project_names = _project_scope_server_names(_REPO_ROOT)
     # The regression premise: the repository's own project scope declares

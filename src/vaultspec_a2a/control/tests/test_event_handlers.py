@@ -1,6 +1,5 @@
 """Focused replay/idempotency tests for worker->gateway event handlers."""
 
-import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -10,10 +9,10 @@ from uuid import uuid4
 
 import httpx
 import pytest
-import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.types import Command, interrupt
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
@@ -23,48 +22,76 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from ...api.schemas.events import PermissionRequestEvent
-from ...conftest import materialize_schema
-from ...control._permission_response_contract import permission_response_action_key
-from ...control.accepted_input import freeze_accepted_input
+from ...conftest import SqlitePosture
+from ...control.accepted_input import freeze_accepted_input, read_accepted_input
 from ...control.dispatch_receipts import prepare_graph_action_receipt
 from ...control.event_handlers import (
+    RelayServices,
     _handle_permission_event,
     _handle_progress_event,
     _handle_terminal_event,
+    relay_event,
 )
 from ...database import (
+    ControlActionModel,
+    ThreadModel,
     ThreadStatusElectionOutcome,
     acquire_control_action_lease,
+    actionable_pending_permissions,
     create_control_action,
     create_thread,
+    decode_allowed_options,
     elect_thread_status,
     get_permission_request,
     get_thread,
     record_permission_request,
     record_permission_response_submission,
     set_thread_approval_state,
-    successor_thread_write_authority,
     thread_write_expectation,
-    update_thread_status,
 )
-from ...database.models import ControlActionModel, RunWriteAuthority, ThreadModel
-from ...database.session import configure_sqlite_transactions
-from ...database.tests._backends import BACKENDS, migrated_session_factory
 from ...graph.enums import ServerEventType
 from ...ipc.schemas import DispatchRequest
+from ...streaming.sse_frames import enforce_progress_allowlist
 from ...team.team_config import load_team_config
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    add_test_node,
+    ainvoke_test_graph,
+    compile_test_graph,
+    elect_status,
+    new_state_graph,
+    park_permissions,
+    seed_accepted_thread,
+)
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
+from ...thread import RunWriteAuthority
 from ...thread.action_receipts import GraphActionReceipt, GraphCompletionReceipt
 from ...thread.constants import MAX_PERMISSION_DESCRIPTION_CHARS
-from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
+from ...thread.enums import (
+    ControlActionResultStatus,
+    ControlActionType,
+    PermissionRequestStatus,
+    ThreadStatus,
+)
 from ...thread.executable_graph import freeze_graph_definition
 from ...thread.failure_evidence import GraphFailureEvidence, failure_detail_fingerprint
+from ...thread.idempotency import (
+    permission_response_action_key,
+    thread_create_action_key,
+)
 from ...worker.ipc import WorkerBridge
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
+
+# These seeds write a checkpoint from INSIDE an open, uncommitted application
+# transaction, which the one file production serves both stores from cannot
+# admit: the saver's write upgrades a read transaction and SQLite refuses it
+# outright. The shape is the test's, not production's - the worker writes
+# checkpoints on its own connection - so the two stores are separated here
+# until the seeds commit before they checkpoint.
+pytestmark = pytest.mark.separate_checkpoint_store
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,11 +100,15 @@ class _SeedActionSpec:
     idempotency_key: str
     request_id: str | None = None
     completed: bool = False
+    #: The option a seeded permission response froze as the answer given. The
+    #: accepted envelope is what the settlement reads the decision from, so a
+    #: fixture that means a denial has to record the denial here.
+    answer_option_id: str = "allow_once"
 
 
 async def _seed_unapplied_leased_action(
     session: AsyncSession,
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
     *,
     thread_id: str,
     spec: _SeedActionSpec,
@@ -85,7 +116,7 @@ async def _seed_unapplied_leased_action(
     """Create current accepted graph authority and its unapplied lease."""
     dispatch_id = uuid4().hex
     graph_definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=Path.cwd()),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=Path.cwd()),
         workspace_root=Path.cwd(),
     )
     intent: dict[str, object]
@@ -96,7 +127,7 @@ async def _seed_unapplied_leased_action(
             thread_id=thread_id,
             content="original message",
             workspace_root=str(Path.cwd()),
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=graph_definition,
             recursion_limit=25,
         )
@@ -111,7 +142,7 @@ async def _seed_unapplied_leased_action(
             thread_id=thread_id,
             content="current follow-up",
             workspace_root=str(Path.cwd()),
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=graph_definition,
             recursion_limit=25,
         )
@@ -124,13 +155,13 @@ async def _seed_unapplied_leased_action(
             dispatch_id=dispatch_id,
             action="resume",
             thread_id=thread_id,
-            option_id={"option_id": "allow_once", "notes": None},
+            option_id={"option_id": spec.answer_option_id, "notes": None},
             workspace_root=str(Path.cwd()),
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=graph_definition,
             recursion_limit=25,
         )
-        intent = {"option_id": "allow_once", "notes": None}
+        intent = {"option_id": spec.answer_option_id, "notes": None}
     else:
         raise ValueError(f"unsupported graph action fixture: {spec.action_type}")
     action = await create_control_action(
@@ -151,11 +182,8 @@ async def _seed_unapplied_leased_action(
         thread_id,
         expectation=expectation,
         status=expectation.status,
-        successor=successor_thread_write_authority(
-            expectation,
-            action_type=spec.action_type,
-            action_receipt_id=dispatch_id,
-        ),
+        action_type=spec.action_type,
+        action_receipt_id=dispatch_id,
     )
     assert election.outcome is ThreadStatusElectionOutcome.WON
     receipt = await prepare_graph_action_receipt(
@@ -205,10 +233,109 @@ async def _seed_unapplied_leased_action(
     return action, receipt, checkpoint_id
 
 
+async def _answered_bash_permission_awaiting_apply(
+    session: AsyncSession,
+    checkpointer: AsyncSqliteSaver,
+    *,
+    title: str,
+) -> tuple[ThreadModel, str, ControlActionModel, GraphActionReceipt, str]:
+    """Seat a parked-then-submitted bash permission, unapplied, ready to apply.
+
+    Shared by the two ``dispatch_applied``-after-submission tests below, which
+    differ only in what they do to the thread's status AFTER this arrangement.
+    """
+    thread = await create_thread(
+        session,
+        write_authority=make_test_write_authority(),
+        title=title,
+        status="input_required",
+    )
+    request_id = f"{thread.id}:perm-1"
+    await record_permission_request(
+        session,
+        request_id=request_id,
+        thread_id=thread.id,
+        pause_reason_type="bash",
+        description="Allow action?",
+        allowed_options=[
+            {"option_id": "allow_once", "name": "Allow once", "kind": "allow_once"}
+        ],
+        tool_call="bash",
+    )
+    await record_permission_response_submission(session, request_id=request_id)
+    (
+        submitted,
+        submitted_receipt,
+        submitted_checkpoint,
+    ) = await _seed_unapplied_leased_action(
+        session,
+        checkpointer,
+        thread_id=thread.id,
+        spec=_SeedActionSpec(
+            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+            idempotency_key=permission_response_action_key(request_id),
+            request_id=request_id,
+        ),
+    )
+    return thread, request_id, submitted, submitted_receipt, submitted_checkpoint
+
+
+async def _apply_submitted_permission_response(
+    thread_id: str,
+    submitted: ControlActionModel,
+    submitted_receipt: GraphActionReceipt,
+    submitted_checkpoint: str,
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """Relay the dispatch_applied progress event for a submitted permission response.
+
+    Shared by the replay-guard and failed-turn tests below, which differ only
+    in what they assert after the application lands.
+    """
+    await _handle_progress_event(
+        thread_id,
+        {
+            "type": "dispatch_applied",
+            "dispatch_id": submitted.dispatch_id,
+            "action": "resume",
+            "graph_action_receipt": submitted_receipt.model_dump(mode="json"),
+            "checkpoint_id": submitted_checkpoint,
+        },
+        session_factory=session_factory,
+        checkpointer=checkpointer,
+    )
+
+
+async def _park_on_interrupt(
+    checkpointer: AsyncSqliteSaver, *, thread_id: str, payload: dict[str, object]
+) -> None:
+    """Park a real graph on *payload*'s interrupt in the run's own checkpoint.
+
+    The pause recorder reads the checkpoint to decide whether a run is parked, so
+    a test that expects the run to read parked has to put a real interrupt where
+    that read looks.
+    """
+
+    def gate(_state: Any) -> dict[str, object]:
+        interrupt(payload)
+        return {}
+
+    builder = new_state_graph()
+    add_test_node(builder, "gate", gate)
+    builder.add_edge("__start__", "gate")
+    builder.add_edge("gate", "__end__")
+    graph = compile_test_graph(builder, checkpointer=checkpointer)
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    parked = await ainvoke_test_graph(graph, {}, config)
+    assert "__interrupt__" in parked
+
+
 @pytest.mark.asyncio
 async def test_dispatch_application_receipt_settles_exact_message_action(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A worker receipt settles its named follow-up, never another action."""
     async with session_factory() as session:
@@ -271,11 +398,9 @@ async def test_dispatch_application_receipt_settles_exact_message_action(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend_name", BACKENDS)
 async def test_dispatch_application_receipt_settles_ingest_action(
-    backend_name: str,
-    tmp_path: Path,
-    checkpointer: InMemorySaver,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A proven ingest settles its own journal row without waiting on terminal.
 
@@ -284,53 +409,52 @@ async def test_dispatch_application_receipt_settles_ingest_action(
     it as the thread's last applied action - not leave it to whatever later
     reconciles the run's eventual completion.
     """
-    async with migrated_session_factory(backend_name, tmp_path) as (_target, factory):
-        async with factory() as session:
-            thread = await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="ingest-receipt-thread",
-                status="running",
-            )
-            action, receipt, checkpoint_id = await _seed_unapplied_leased_action(
-                session,
-                checkpointer,
-                thread_id=thread.id,
-                spec=_SeedActionSpec(
-                    action_type=ControlActionType.INGEST,
-                    idempotency_key=f"thread-create:{thread.id}",
-                ),
-            )
-            await session.commit()
-
-        await _handle_progress_event(
-            thread.id,
-            {
-                "type": "dispatch_applied",
-                "dispatch_id": action.dispatch_id,
-                "action": "ingest",
-                "graph_action_receipt": receipt.model_dump(mode="json"),
-                "checkpoint_id": checkpoint_id,
-            },
-            session_factory=factory,
-            checkpointer=checkpointer,
+    async with migrated_session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="ingest-receipt-thread",
+            status="running",
         )
+        action, receipt, checkpoint_id = await _seed_unapplied_leased_action(
+            session,
+            checkpointer,
+            thread_id=thread.id,
+            spec=_SeedActionSpec(
+                action_type=ControlActionType.INGEST,
+                idempotency_key=thread_create_action_key(thread.id),
+            ),
+        )
+        await session.commit()
 
-        async with factory() as session:
-            stored_action = await session.get(ControlActionModel, action.id)
-            stored_thread = await session.get(ThreadModel, thread.id)
+    await _handle_progress_event(
+        thread.id,
+        {
+            "type": "dispatch_applied",
+            "dispatch_id": action.dispatch_id,
+            "action": "ingest",
+            "graph_action_receipt": receipt.model_dump(mode="json"),
+            "checkpoint_id": checkpoint_id,
+        },
+        session_factory=migrated_session_factory,
+        checkpointer=checkpointer,
+    )
 
-        assert stored_action is not None
-        assert stored_action.applied_at is not None
-        assert stored_action.claim_token is None
-        assert stored_thread is not None
-        assert stored_thread.last_applied_action == ControlActionType.INGEST.value
+    async with migrated_session_factory() as session:
+        stored_action = await session.get(ControlActionModel, action.id)
+        stored_thread = await session.get(ThreadModel, thread.id)
+
+    assert stored_action is not None
+    assert stored_action.applied_at is not None
+    assert stored_action.claim_token is None
+    assert stored_thread is not None
+    assert stored_thread.last_applied_action == ControlActionType.INGEST.value
 
 
 @pytest.mark.asyncio
 async def test_dispatch_application_receipt_requires_named_durable_checkpoint(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     async with session_factory() as session:
         thread = await create_thread(
@@ -368,29 +492,6 @@ async def test_dispatch_application_receipt_requires_named_durable_checkpoint(
     assert stored is not None
     assert stored.applied_at is None
     assert stored.claim_token is not None
-
-
-@pytest_asyncio.fixture
-async def engine(tmp_path_factory: pytest.TempPathFactory):
-    """Create a file-backed engine for replay-focused control tests."""
-    case_dir = tmp_path_factory.mktemp("control-event-handler-db")
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    """Provide an async session factory bound to the test engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest.fixture
-def checkpointer() -> InMemorySaver:
-    """Keep exact incorporated checkpoints for application receipts."""
-    return InMemorySaver()
 
 
 async def _seed_current_cancel(
@@ -472,7 +573,7 @@ async def test_exact_cancellation_evidence_settles_current_action(
     }
     for _delivery in range(2):
         await _handle_terminal_event(
-            thread_id, payload, session_factory=session_factory
+            thread_id, payload, services=RelayServices(session_factory=session_factory)
         )
 
     async with session_factory() as session:
@@ -506,7 +607,7 @@ def _busy_once_control_app(
             await _handle_terminal_event(
                 event["thread_id"],
                 event["payload"],
-                session_factory=sessions,
+                services=RelayServices(session_factory=sessions),
             )
         except OperationalError as exc:
             if not isinstance(exc.orig, sqlite3.OperationalError):
@@ -550,22 +651,20 @@ async def _assert_cancel_applied(db_file: Path, action_id: str, thread_id: str) 
 
 
 @pytest.mark.asyncio
-async def test_terminal_election_busy_retries_same_receipt_once(tmp_path: Path) -> None:
+@pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS, timeout=0)
+async def test_terminal_election_busy_retries_same_receipt_once(
+    database_file: Path,
+    engine: AsyncEngine,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
     """A busy terminal election can recover through the bounded bridge retry."""
-    db_file = materialize_schema(tmp_path / "terminal-election-contention.db")
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{db_file}",
-        connect_args={"timeout": 0},
-    )
-    configure_sqlite_transactions(engine)
-    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    blocker = sqlite3.connect(str(db_file), isolation_level=None, timeout=0)
+    blocker = sqlite3.connect(str(database_file), isolation_level=None, timeout=0)
     attempts: list[dict[str, Any]] = []
     busy_errors: list[str] = []
-    app = _busy_once_control_app(sessions, blocker, attempts, busy_errors)
+    app = _busy_once_control_app(session_factory, blocker, attempts, busy_errors)
 
     action_id = await _seed_current_cancel(
-        sessions,
+        session_factory,
         thread_id="terminal-election-contention",
         dispatch_id="terminal-election-receipt",
     )
@@ -605,7 +704,9 @@ async def test_terminal_election_busy_retries_same_receipt_once(tmp_path: Path) 
         "terminal-election-receipt"
     )
 
-    await _assert_cancel_applied(db_file, action_id, "terminal-election-contention")
+    await _assert_cancel_applied(
+        database_file, action_id, "terminal-election-contention"
+    )
 
 
 @pytest.mark.asyncio
@@ -645,7 +746,7 @@ async def test_unproven_cancelled_terminal_does_not_settle_cancel_action(
     await _handle_terminal_event(
         thread_id,
         payload,
-        session_factory=session_factory,
+        services=RelayServices(session_factory=session_factory),
     )
 
     async with session_factory() as session:
@@ -661,65 +762,168 @@ async def test_unproven_cancelled_terminal_does_not_settle_cancel_action(
 
 
 @pytest.mark.asyncio
-async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
+@pytest.mark.parametrize(
+    "evidence_overrides",
+    [
+        # Wrong schema version: this evidence kind is versioned, so an older
+        # or newer shape must never be read as this one.
+        {"schema_version": "cancellation-evidence-v0"},
+        # Outcome outside the closed vocabulary the settlement maps from.
+        {"outcome": "partially_ceased"},
+        # Missing the one field that names what actually happened.
+        {"outcome": None},
+        # The model forbids extra fields, so a field it does not declare must
+        # refuse the whole payload rather than being silently dropped.
+        {"unexpected_field": "smuggled"},
+    ],
+)
+async def test_malformed_cancellation_evidence_is_refused_without_settling(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    evidence_overrides: dict[str, object],
 ) -> None:
-    """A replayed permission_resolved event must not append a second applied action."""
+    """A cancellation terminal whose evidence fails validation settles nothing.
+
+    Posted exactly as the real relay would receive it from a worker: through
+    :func:`_handle_terminal_event`, the one entry point ``api/internal.py``
+    hands every worker-relayed event to. Evidence that does not even parse as
+    :class:`CancellationEvidence` must be refused the same way stale evidence
+    already is - the run stays where it was, and the journaled cancel action
+    stays unapplied. *dispatch_id* is the run's OWN current dispatch in every
+    case, so a refusal here can only come from the malformed field: nothing is
+    left for a dispatch mismatch to explain instead.
+    """
+    thread_id = "malformed-cancellation-evidence"
+    dispatch_id = f"dispatch-{thread_id}"
+    action_id = await _seed_current_cancel(
+        session_factory, thread_id=thread_id, dispatch_id=dispatch_id
+    )
+    evidence: dict[str, object] = {
+        "schema_version": "cancellation-evidence-v1",
+        "dispatch_id": dispatch_id,
+        "outcome": "ceased",
+        **evidence_overrides,
+    }
+    evidence = {key: value for key, value in evidence.items() if value is not None}
+
+    await _handle_terminal_event(
+        thread_id,
+        {
+            "event_type": "thread_terminal",
+            "status": "cancelled",
+            "cancellation_evidence": evidence,
+        },
+        services=RelayServices(session_factory=session_factory),
+    )
+
+    async with session_factory() as session:
+        action = await session.get(ControlActionModel, action_id)
+        thread = await session.get(ThreadModel, thread_id)
+    assert action is not None
+    assert action.applied_at is None
+    assert thread is not None
+    assert thread.status == ThreadStatus.CANCELLING.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_evidence_overrides",
+    [
+        {"schema_version": "graph-failure-v0"},
+        {"outcome": "errored"},
+        {"provider_condition": ""},
+        {"detail_fingerprint": "not-a-fingerprint"},
+    ],
+)
+async def test_malformed_failure_evidence_is_refused_without_settling(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    bad_evidence_overrides: dict[str, object],
+) -> None:
+    """A failure terminal whose evidence fails validation settles nothing.
+
+    Posted through :func:`_handle_terminal_event`, exactly as a worker's
+    relayed event reaches the control plane from the real internal endpoint.
+    A payload that does not even parse as :class:`GraphFailureEvidence` must
+    be refused before it is ever matched against the run's accepted action.
+    """
+    detail = "provider transport ended before a response"
+    condition = "network_unreachable"
+    thread_id = "malformed-failure-evidence"
     async with session_factory() as session:
         thread = await create_thread(
             session,
             write_authority=make_test_write_authority(),
-            title="Replay Guard",
-            status="input_required",
+            thread_id=thread_id,
+            status=ThreadStatus.RUNNING,
         )
-        request_id = f"{thread.id}:perm-1"
-        await record_permission_request(
-            session,
-            request_id=request_id,
-            thread_id=thread.id,
-            pause_reason_type="bash",
-            description="Allow action?",
-            allowed_options=[
-                {
-                    "option_id": "allow_once",
-                    "name": "Allow once",
-                    "kind": "allow_once",
-                }
-            ],
-            tool_call="bash",
-        )
-        await record_permission_response_submission(
-            session,
-            request_id=request_id,
-            option_id="allow_once",
-            idempotency_key="response-1",
-        )
-        (
-            submitted,
-            submitted_receipt,
-            submitted_checkpoint,
-        ) = await _seed_unapplied_leased_action(
+        action, receipt, _checkpoint = await _seed_unapplied_leased_action(
             session,
             checkpointer,
             thread_id=thread.id,
             spec=_SeedActionSpec(
-                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-                idempotency_key=permission_response_action_key(request_id),
-                request_id=request_id,
+                action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+                idempotency_key="message:malformed-failure",
             ),
         )
         await session.commit()
+    evidence = {
+        "schema_version": "graph-failure-v1",
+        "action": receipt.model_dump(mode="json"),
+        "outcome": "failed",
+        "detail_fingerprint": failure_detail_fingerprint(detail),
+        "provider_condition": condition,
+        **bad_evidence_overrides,
+    }
 
-    await _handle_progress_event(
+    await _handle_terminal_event(
         thread.id,
         {
-            "type": "dispatch_applied",
-            "dispatch_id": submitted.dispatch_id,
-            "action": "resume",
-            "graph_action_receipt": submitted_receipt.model_dump(mode="json"),
-            "checkpoint_id": submitted_checkpoint,
+            "event_type": "thread_terminal",
+            "status": "failed",
+            "error_detail": detail,
+            "provider_condition": condition,
+            "failure_evidence": evidence,
         },
+        services=RelayServices(session_factory=session_factory),
+    )
+
+    async with session_factory() as session:
+        refused_thread = await session.get(ThreadModel, thread.id)
+        refused_action = await session.get(ControlActionModel, action.id)
+    assert refused_thread is not None
+    assert refused_thread.status == ThreadStatus.RUNNING.value
+    assert refused_action is not None
+    assert refused_action.applied_at is None
+
+
+@pytest.mark.asyncio
+async def test_a_replayed_application_receipt_appends_no_second_applied_action(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """Re-delivering the receipt that settled an answer settles nothing twice.
+
+    The receipt is the only announcement of a landed answer, and the worker may
+    deliver it more than once, so the settlement's own idempotence is what keeps
+    the journal one record of one decision.
+    """
+    async with session_factory() as session:
+        (
+            thread,
+            request_id,
+            submitted,
+            submitted_receipt,
+            submitted_checkpoint,
+        ) = await _answered_bash_permission_awaiting_apply(
+            session, checkpointer, title="Replay Guard"
+        )
+        await session.commit()
+
+    await _apply_submitted_permission_response(
+        thread.id,
+        submitted,
+        submitted_receipt,
+        submitted_checkpoint,
         session_factory=session_factory,
         checkpointer=checkpointer,
     )
@@ -749,10 +953,13 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
         assert submitted_action.applied_at is not None
         assert submitted_action.claim_token is None
 
-    await _handle_permission_event(
+    await _apply_submitted_permission_response(
         thread.id,
-        {"type": "permission_resolved", "request_id": request_id},
+        submitted,
+        submitted_receipt,
+        submitted_checkpoint,
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     async with session_factory() as session:
@@ -774,7 +981,7 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
 @pytest.mark.asyncio
 async def test_an_answer_applied_by_a_turn_that_then_failed_leaves_the_run_failed(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The answer settles; the run is not marked running again after it ended.
 
@@ -785,61 +992,24 @@ async def test_an_answer_applied_by_a_turn_that_then_failed_leaves_the_run_faile
     transition that would fail the relay.
     """
     async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Applied After Failure",
-            status="input_required",
-        )
-        request_id = f"{thread.id}:perm-1"
-        await record_permission_request(
-            session,
-            request_id=request_id,
-            thread_id=thread.id,
-            pause_reason_type="bash",
-            description="Allow action?",
-            allowed_options=[
-                {
-                    "option_id": "allow_once",
-                    "name": "Allow once",
-                    "kind": "allow_once",
-                }
-            ],
-            tool_call="bash",
-        )
-        await record_permission_response_submission(
-            session,
-            request_id=request_id,
-            option_id="allow_once",
-            idempotency_key="response-1",
-        )
         (
+            thread,
+            request_id,
             submitted,
             submitted_receipt,
             submitted_checkpoint,
-        ) = await _seed_unapplied_leased_action(
-            session,
-            checkpointer,
-            thread_id=thread.id,
-            spec=_SeedActionSpec(
-                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-                idempotency_key=permission_response_action_key(request_id),
-                request_id=request_id,
-            ),
+        ) = await _answered_bash_permission_awaiting_apply(
+            session, checkpointer, title="Applied After Failure"
         )
-        await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
-        await update_thread_status(session, thread.id, ThreadStatus.FAILED)
+        await elect_status(session, thread.id, ThreadStatus.RUNNING)
+        await elect_status(session, thread.id, ThreadStatus.FAILED)
         await session.commit()
 
-    await _handle_progress_event(
+    await _apply_submitted_permission_response(
         thread.id,
-        {
-            "type": "dispatch_applied",
-            "dispatch_id": submitted.dispatch_id,
-            "action": "resume",
-            "graph_action_receipt": submitted_receipt.model_dump(mode="json"),
-            "checkpoint_id": submitted_checkpoint,
-        },
+        submitted,
+        submitted_receipt,
+        submitted_checkpoint,
         session_factory=session_factory,
         checkpointer=checkpointer,
     )
@@ -856,39 +1026,54 @@ async def test_an_answer_applied_by_a_turn_that_then_failed_leaves_the_run_faile
 @pytest.mark.asyncio
 async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """Supervisor plan approval interrupts must become durable pending rows."""
+    """Supervisor plan approval interrupts must become durable pending rows.
+
+    The relayed request is journaled as a pending permission and nothing else:
+    the run reads parked, with its approval pending, because its checkpoint holds
+    the interrupt and the pause recorder wrote that. The park is elected under
+    the dispatch that raised it, once, however often the request is replayed.
+
+    The frame carries the ``permission_request`` wire type every permission
+    frame crosses the relay as, so the ``plan_approval_request`` cause on the
+    row can only have come from the interrupt the checkpoint holds.
+    """
     async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Plan approval relay",
-        )
+        thread_id, receipt = await seed_accepted_thread(session, status="running")
         await session.commit()
-        thread_id = thread.id
 
     request_id = f"{thread_id}:plan-approval-1"
+    options: list[dict[str, object]] = [
+        {"option_id": "approve", "name": "Approve", "kind": "allow_once"},
+        {"option_id": "reject", "name": "Reject", "kind": "reject_once"},
+    ]
+    await _park_on_interrupt(
+        checkpointer,
+        thread_id=thread_id,
+        payload={
+            "type": "plan_approval_request",
+            "request_id": request_id,
+            "feature": "audit-5",
+            "exec_worker": "coder",
+        },
+    )
     payload: dict[str, object] = {
-        "type": "plan_approval_request",
+        "type": "permission_request",
         "request_id": request_id,
         "description": "Approve plan for feature 'audit-5'",
-        "options": [
-            {"option_id": "approve", "name": "Approve", "kind": "allow_once"},
-            {"option_id": "reject", "name": "Reject", "kind": "reject_once"},
-        ],
+        "options": options,
         "tool_call": "plan_approval",
     }
 
-    await _handle_permission_event(
-        thread_id,
-        payload,
-        session_factory=session_factory,
-    )
-    await _handle_permission_event(
-        thread_id,
-        payload,
-        session_factory=session_factory,
-    )
+    for _delivery in range(2):
+        await relay_event(
+            thread_id,
+            payload,
+            services=RelayServices(
+                session_factory=session_factory, checkpointer=checkpointer
+            ),
+        )
 
     async with session_factory() as session:
         permission = await get_permission_request(session, request_id)
@@ -896,13 +1081,20 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
         assert permission.pause_reason_type == "plan_approval_request"
         assert permission.request_status == "pending"
         assert permission.tool_call == "plan_approval"
-        assert json.loads(permission.allowed_options_json) == payload["options"]
+        assert (
+            decode_allowed_options(permission.allowed_options_json)
+            == payload["options"]
+        )
 
         thread = await session.get(ThreadModel, thread_id)
         assert thread is not None
+        assert thread.status == ThreadStatus.INPUT_REQUIRED.value
         assert thread.approval_status == "pending"
         assert thread.approval_request_id == request_id
         assert thread.run_revision == 1
+        assert thread.writer_generation == 1
+        assert thread.writer_action_type == ControlActionType.INGEST
+        assert thread.writer_action_receipt_id == receipt.dispatch_id
         actions = (
             (
                 await session.execute(
@@ -917,86 +1109,20 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
             .all()
         )
         assert len(actions) == 1
-        assert thread.writer_action_receipt_id == actions[0].dispatch_id
-
-
-@pytest.mark.asyncio
-async def test_stale_permission_creation_replay_cannot_reclaim_newer_authority(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Stale permission replay",
-        )
-        await session.commit()
-        thread_id = thread.id
-    request_id = f"{thread_id}:stale-permission"
-    payload: dict[str, object] = {
-        "type": "permission_request",
-        "request_id": request_id,
-        "description": "Allow the first action?",
-        "options": [{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
-        "tool_call": "bash",
-    }
-    await _handle_permission_event(
-        thread_id,
-        payload,
-        session_factory=session_factory,
-    )
-
-    async with session_factory() as session:
-        thread = await session.get(ThreadModel, thread_id)
-        assert thread is not None
-        expectation = thread_write_expectation(thread)
-        response = await create_control_action(
-            session,
-            thread_id=thread_id,
-            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-            request_id=request_id,
-            idempotency_key=f"permission-response:{request_id}",
-            payload={"option_id": "allow"},
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-        )
-        assert response.dispatch_id is not None
-        election = await elect_thread_status(
-            session,
-            thread_id,
-            expectation=expectation,
-            status=ThreadStatus.RUNNING,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-                action_receipt_id=response.dispatch_id,
-            ),
-        )
-        assert election.outcome is ThreadStatusElectionOutcome.WON
-        await session.commit()
-        expected_revision = thread.run_revision
-        expected_generation = thread.writer_generation
-        expected_receipt = thread.writer_action_receipt_id
-
-    await _handle_permission_event(
-        thread_id,
-        payload,
-        session_factory=session_factory,
-    )
-
-    async with session_factory() as session:
-        thread = await session.get(ThreadModel, thread_id)
-    assert thread is not None
-    assert thread.status == ThreadStatus.RUNNING.value
-    assert thread.run_revision == expected_revision
-    assert thread.writer_generation == expected_generation
-    assert thread.writer_action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED
-    assert thread.writer_action_receipt_id == expected_receipt
+        # An applied journal row says WHEN it was applied. The request creation
+        # action is applied the moment it is written - nothing dispatches it -
+        # so it is settled through the one settler rather than by assigning the
+        # status alone, which left `applied_at` null on every such row and made
+        # a settled action read as one still owed a dispatch.
+        assert actions[0].result_status == ControlActionResultStatus.APPLIED.value
+        assert actions[0].applied_at is not None
+        assert actions[0].claim_token is None
 
 
 @pytest.mark.asyncio
 async def test_terminal_event_expires_pending_plan_approval_projection(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Checkpoint completion atomically expires pending approval residue."""
     async with session_factory() as session:
@@ -1028,7 +1154,6 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
             thread_id,
             approval_status="pending",
             approval_request_id=request_id,
-            approval_reason="Approve the plan before completion",
         )
         action, _receipt, _checkpoint = await _seed_unapplied_leased_action(
             session,
@@ -1045,8 +1170,9 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
     await _handle_terminal_event(
         thread_id,
         {"event_type": "thread_terminal", "status": "completed"},
-        session_factory=session_factory,
-        checkpointer=checkpointer,
+        services=RelayServices(
+            session_factory=session_factory, checkpointer=checkpointer
+        ),
     )
 
     async with session_factory() as session:
@@ -1059,7 +1185,6 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
         assert thread.status == "completed"
         assert thread.approval_status is None
         assert thread.approval_request_id is None
-        assert thread.approval_reason is None
         assert thread.approval_response_action_id is None
         stored_action = await session.get(ControlActionModel, action.id)
         assert stored_action is not None
@@ -1069,7 +1194,7 @@ async def test_terminal_event_expires_pending_plan_approval_projection(
 @pytest.mark.asyncio
 async def test_failure_evidence_elects_only_its_current_graph_action(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     detail = "provider transport ended before a response"
     condition = "network_unreachable"
@@ -1107,7 +1232,7 @@ async def test_failure_evidence_elects_only_its_current_graph_action(
             "provider_condition": condition,
             "failure_evidence": evidence.model_dump(mode="json"),
         },
-        session_factory=session_factory,
+        services=RelayServices(session_factory=session_factory),
     )
     async with session_factory() as session:
         refused_thread = await session.get(ThreadModel, thread.id)
@@ -1126,7 +1251,7 @@ async def test_failure_evidence_elects_only_its_current_graph_action(
             "provider_condition": condition,
             "failure_evidence": evidence.model_dump(mode="json"),
         },
-        session_factory=session_factory,
+        services=RelayServices(session_factory=session_factory),
     )
 
     async with session_factory() as session:
@@ -1143,40 +1268,53 @@ async def test_failure_evidence_elects_only_its_current_graph_action(
 @pytest.mark.asyncio
 async def test_document_approval_request_is_persisted_as_durable_pending_permission(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Document phase-gate interrupts must become durable pending rows.
 
     The research_adr phase gate parks with a ``document_approval_request``
     interrupt; the relay must record it as a verdict-style approval so the thread
     is INPUT_REQUIRED and the out-of-run verdict subscriber can correlate an
-    engine verdict to the parked run.
+    engine verdict to the parked run. The journal holds the request; the run
+    reads parked because the pause recorder found the interrupt in its checkpoint.
+
+    The gate's frame reaches the relay as a ``permission_request`` naming the
+    ``plan_approval`` subject, exactly as the projection emits it, so only the
+    checkpoint can supply the document-approval cause the lookup matches on.
     """
     async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Document approval relay",
-        )
+        thread_id, _receipt = await seed_accepted_thread(session, status="running")
         await session.commit()
-        thread_id = thread.id
 
     request_id = f"{thread_id}:document-approval-1"
+    await _park_on_interrupt(
+        checkpointer,
+        thread_id=thread_id,
+        payload={
+            "type": "document_approval_request",
+            "request_id": request_id,
+            "phase": "research",
+            "proposal_id": request_id,
+            "feature": "sse-reconnection",
+        },
+    )
     payload: dict[str, object] = {
-        "type": "document_approval_request",
+        "type": "permission_request",
         "request_id": request_id,
-        "phase": "research",
-        "feature": "sse-reconnection",
         "description": "Approve the research document for feature 'sse-reconnection'",
         "options": [
             {"option_id": "approve", "name": "Approve Document", "kind": "allow_once"},
             {"option_id": "reject", "name": "Reject", "kind": "reject_once"},
         ],
+        "tool_call": "plan_approval",
     }
 
-    await _handle_permission_event(
+    await relay_event(
         thread_id,
         payload,
-        session_factory=session_factory,
+        services=RelayServices(
+            session_factory=session_factory, checkpointer=checkpointer
+        ),
     )
 
     async with session_factory() as session:
@@ -1192,6 +1330,138 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
         assert thread.approval_request_id == request_id
 
 
+@pytest.mark.asyncio
+async def test_a_fan_out_of_two_tool_calls_supersedes_neither_held_request(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """Two requests one checkpoint holds together both stay answerable.
+
+    A worker turn that asks for two tool calls at once parks the run on both,
+    and the relay journals them one frame at a time. Superseding "every earlier
+    outstanding request" on the second frame retired a row whose request the run
+    is still parked on: the question left every pending-permission surface while
+    the checkpoint went on waiting for an answer to it, so the run could never
+    be resumed. The checkpoint decides instead - a request it holds is never
+    superseded - which is the same rule the journal already reads a request's
+    pause kind and its very existence from.
+    """
+    async with session_factory() as session:
+        thread_id, _receipt = await seed_accepted_thread(session, status="running")
+        await session.commit()
+
+    request_ids = await park_permissions(
+        checkpointer,
+        thread_id=thread_id,
+        calls=[("bash", {"command": "ls"}), ("write_file", {"path": "notes.md"})],
+    )
+    assert len(request_ids) == 2, request_ids
+
+    for request_id in request_ids:
+        await relay_event(
+            thread_id,
+            {
+                "type": "permission_request",
+                "request_id": request_id,
+                "description": "Allow action?",
+                "options": [
+                    {
+                        "optionId": "allow_once",
+                        "name": "Allow once",
+                        "kind": "allow_once",
+                    },
+                    {
+                        "optionId": "reject_once",
+                        "name": "Reject once",
+                        "kind": "reject_once",
+                    },
+                ],
+                "tool_call": "bash",
+            },
+            services=RelayServices(
+                session_factory=session_factory, checkpointer=checkpointer
+            ),
+        )
+
+    async with session_factory() as session:
+        for request_id in request_ids:
+            permission = await get_permission_request(session, request_id)
+            assert permission is not None, request_id
+            assert permission.request_status == (
+                PermissionRequestStatus.PENDING.value
+            ), request_id
+        live = await actionable_pending_permissions(session, thread_id=thread_id)
+        assert {pending.request.request_id for pending in live} == set(request_ids)
+
+
+@pytest.mark.asyncio
+async def test_a_request_answered_before_its_relay_lands_journals_no_pending_row(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """A request the checkpoint no longer holds leaves no row to answer.
+
+    The worker emits a permission request, batches it, and POSTs it a moment
+    later. An answer accepted and applied inside that window releases the
+    pause, so the frame arrives describing a question nobody is being asked.
+    Journaled as pending it became a ghost: the run reads as holding an open
+    question, every pending-permission surface offers it, and the respond verb
+    refuses it because the checkpoint knows better. The journal consults the
+    checkpoint instead and writes nothing.
+    """
+    async with session_factory() as session:
+        thread_id, _receipt = await seed_accepted_thread(session, status="running")
+        await session.commit()
+
+    request_id = f"{thread_id}:answered-before-relay"
+    payload: dict[str, object] = {
+        "type": "permission_request",
+        "request_id": request_id,
+        "description": "Allow bash?",
+        "options": [{"option_id": "allow_once", "name": "Allow once"}],
+        "tool_call": "bash",
+    }
+
+    # The run parks, is answered, and runs on - all before the frame is relayed.
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+
+    def _gate(_state: object) -> dict[str, str]:
+        return {"active_agent": str(interrupt(payload))}
+
+    builder = new_state_graph()
+    add_test_node(builder, "gate", _gate)
+    builder.add_edge("__start__", "gate")
+    builder.add_edge("gate", "__end__")
+    graph = compile_test_graph(builder, checkpointer=checkpointer)
+    assert "__interrupt__" in await ainvoke_test_graph(graph, {}, config)
+    await ainvoke_test_graph(graph, Command(resume="allow_once"), config)
+
+    await relay_event(
+        thread_id,
+        payload,
+        services=RelayServices(
+            session_factory=session_factory, checkpointer=checkpointer
+        ),
+    )
+
+    async with session_factory() as session:
+        assert await get_permission_request(session, request_id) is None
+        actions = (
+            (
+                await session.execute(
+                    select(ControlActionModel).where(
+                        ControlActionModel.thread_id == thread_id,
+                        ControlActionModel.action_type
+                        == ControlActionType.PERMISSION_REQUEST_CREATED.value,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert actions == []
+
+
 @dataclass(frozen=True, slots=True)
 class _RejectionSpec:
     title: str
@@ -1202,7 +1472,7 @@ class _RejectionSpec:
 
 async def _answered_rejection(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
     *,
     spec: _RejectionSpec,
 ) -> tuple[str, str, str, GraphActionReceipt, str]:
@@ -1230,12 +1500,7 @@ async def _answered_rejection(
             allowed_options=spec.options,
             tool_call=spec.pause_reason_type,
         )
-        await record_permission_response_submission(
-            session,
-            request_id=request_id,
-            option_id="reject",
-            idempotency_key="response-reject-1",
-        )
+        await record_permission_response_submission(session, request_id=request_id)
         (
             submitted,
             submitted_receipt,
@@ -1248,6 +1513,7 @@ async def _answered_rejection(
                 action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
                 idempotency_key=permission_response_action_key(request_id),
                 request_id=request_id,
+                answer_option_id="reject",
             ),
         )
         if spec.stamp_thread_rejected:
@@ -1256,7 +1522,6 @@ async def _answered_rejection(
                 thread.id,
                 approval_status="rejected",
                 approval_request_id=request_id,
-                approval_reason="Approve?",
             )
         await session.commit()
         thread_id = thread.id
@@ -1265,9 +1530,13 @@ async def _answered_rejection(
 
     async with session_factory() as session:
         permission = await get_permission_request(session, request_id)
+        accepted = await session.get(ControlActionModel, submitted.id)
         assert permission is not None
         assert permission.request_status == "answered_pending_apply"
-        assert permission.response_option_id == "reject"
+        # The denial as the settlement reads it: off the frozen envelope of the
+        # accepted response, not off the request row's own copy of it.
+        assert accepted is not None
+        assert read_accepted_input(accepted).intent["option_id"] == "reject"
 
     return (
         thread_id,
@@ -1292,24 +1561,24 @@ _KIMI_OPTIONS: list[dict[str, object]] = [
 
 
 @pytest.mark.asyncio
-async def test_plan_rejection_survives_the_resolution_projection(
+async def test_plan_rejection_survives_the_settlement_the_receipt_prompts(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """The resolution handler must not overwrite a denial with an approval.
+    """The settlement must not overwrite a denial with an approval.
 
     The control service stamps the thread REJECTED when the response is submitted.
-    The ``permission_resolved`` projection then recomputes the verdict, and used to
-    recompute it from a rejecting-*kind* set matched against the response option
-    *id* -- so the bare ``"reject"`` the plan gate mints read as an approval and was
-    written straight over the correct state.
+    The settlement the application receipt prompts then recomputes the verdict,
+    and used to recompute it from a rejecting-*kind* set matched against the
+    response option *id* -- so the bare ``"reject"`` the plan gate mints read as
+    an approval and was written straight over the correct state.
     """
     (
         thread_id,
         request_id,
-        _dispatch_id,
-        _receipt,
-        _checkpoint,
+        dispatch_id,
+        receipt,
+        checkpoint_id,
     ) = await _answered_rejection(
         session_factory,
         checkpointer,
@@ -1321,10 +1590,17 @@ async def test_plan_rejection_survives_the_resolution_projection(
         ),
     )
 
-    await _handle_permission_event(
+    await _handle_progress_event(
         thread_id,
-        {"type": "permission_resolved", "request_id": request_id},
+        {
+            "type": "dispatch_applied",
+            "dispatch_id": dispatch_id,
+            "action": "resume",
+            "graph_action_receipt": receipt.model_dump(mode="json"),
+            "checkpoint_id": checkpoint_id,
+        },
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     async with session_factory() as session:
@@ -1340,7 +1616,7 @@ async def test_plan_rejection_survives_the_resolution_projection(
 @pytest.mark.asyncio
 async def test_generic_progress_does_not_settle_an_answered_permission(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Uncorrelated progress must not settle any answered permission."""
     (
@@ -1377,9 +1653,9 @@ async def test_generic_progress_does_not_settle_an_answered_permission(
 
 
 @pytest.mark.asyncio
-async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
+async def test_a_kimi_tool_denial_settles_as_rejected(
     session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: InMemorySaver,
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A provider-defined rejecting id must settle as a denial, not an approval.
 
@@ -1388,28 +1664,6 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
     the ACP agent does receive ``"reject"`` and the tool is refused, so recording
     it as applied corrupts the journal rather than authorising anything.
     """
-    (
-        resolved_thread,
-        resolved_request,
-        _resolved_dispatch,
-        _resolved_receipt,
-        _resolved_checkpoint,
-    ) = await _answered_rejection(
-        session_factory,
-        checkpointer,
-        spec=_RejectionSpec(
-            title="Kimi denial via resolution",
-            pause_reason_type="bash",
-            options=_KIMI_OPTIONS,
-            stamp_thread_rejected=False,
-        ),
-    )
-    await _handle_permission_event(
-        resolved_thread,
-        {"type": "permission_resolved", "request_id": resolved_request},
-        session_factory=session_factory,
-    )
-
     (
         progress_thread,
         progress_request,
@@ -1440,65 +1694,35 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
     )
 
     async with session_factory() as session:
-        for request_id in (resolved_request, progress_request):
-            permission = await get_permission_request(session, request_id)
-            assert permission is not None
-            assert permission.request_status == "rejected"
+        permission = await get_permission_request(session, progress_request)
+        assert permission is not None
+        assert permission.request_status == "rejected"
 
-        # A tool permission carries no plan approval state, so neither path may
-        # invent one on the thread.
-        for thread_id in (resolved_thread, progress_thread):
-            thread = await session.get(ThreadModel, thread_id)
-            assert thread is not None
-            assert thread.approval_status is None
-
-
-@pytest.mark.asyncio
-async def test_permission_resolution_for_unknown_request_is_a_clean_noop(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    """The resolution stage no-ops when no matching request row exists.
-
-    After the split into a validation-then-dispatch handler, the resolution
-    stage's missing-permission guard is exercised directly through the handler:
-    a permission_resolved event for a request that was never recorded must
-    settle nothing and append no control action.
-    """
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Unknown Resolution",
-        )
-        await session.commit()
-        thread_id = thread.id
-
-    await _handle_permission_event(
-        thread_id,
-        {"type": "permission_resolved", "request_id": f"{thread_id}:never-recorded"},
-        session_factory=session_factory,
-    )
-
-    async with session_factory() as session:
-        actions = (await session.execute(select(ControlActionModel))).scalars().all()
-        assert actions == []
+        # A tool permission carries no plan approval state, so the settlement
+        # may not invent one on the thread.
+        thread = await session.get(ThreadModel, progress_thread)
+        assert thread is not None
+        assert thread.approval_status is None
 
 
 @pytest.mark.asyncio
 async def test_persisted_description_matches_what_the_stream_showed(
     session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """The durable row holds exactly what the operator was streamed.
 
     Two readers truncate the same worker-supplied text at different times: this
-    handler before writing the row, and the wire model when the frame is built.
-    A reload re-reads the row, so a stream permitted to carry more than the row
-    stores would show text live that vanishes on refresh - which is the bug the
-    shared bound exists to prevent, and the one a second declaration reopens.
+    handler before writing the row, and the stream catalog when the frame is
+    served. A reload re-reads the row, so a stream permitted to carry more than
+    the row stores would show text live that vanishes on refresh - which is the
+    bug the shared bound exists to prevent, and the one a second declaration
+    reopens.
 
-    Driven end to end against a real migrated SQLite database and the real wire
-    model, from a single pathological description, so the two truncations are
-    compared rather than each compared to a number written down twice.
+    Driven end to end against a real migrated SQLite database and the real
+    stream catalog, from a single pathological description, so the two
+    truncations are compared rather than each compared to a number written down
+    twice.
     """
     async with session_factory() as session:
         thread = await create_thread(
@@ -1514,6 +1738,16 @@ async def test_persisted_description_matches_what_the_stream_showed(
     # this pass with both truncations removed.
     assert len(oversize) > MAX_PERMISSION_DESCRIPTION_CHARS
 
+    await _park_on_interrupt(
+        checkpointer,
+        thread_id=thread.id,
+        payload={
+            "type": "permission_request",
+            "request_id": "bounded-description",
+            "tool_name": "bash",
+            "options": [],
+        },
+    )
     await _handle_permission_event(
         thread.id,
         {
@@ -1523,22 +1757,25 @@ async def test_persisted_description_matches_what_the_stream_showed(
             "options": [],
         },
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     async with session_factory() as session:
         stored = await get_permission_request(session, "bounded-description")
 
-    streamed = PermissionRequestEvent(
-        type=ServerEventType.PERMISSION_REQUEST,
-        thread_id=thread.id,
-        agent_id="agent-1",
-        timestamp=datetime.now(UTC),
-        sequence=1,
-        request_id="bounded-description",
-        description=oversize,
-        options=[],
+    streamed = enforce_progress_allowlist(
+        {
+            "type": ServerEventType.PERMISSION_REQUEST,
+            "thread_id": thread.id,
+            "agent_id": "agent-1",
+            "timestamp": datetime.now(UTC).timestamp(),
+            "sequence": 1,
+            "request_id": "bounded-description",
+            "description": oversize,
+            "options": [],
+        }
     )
 
     assert stored is not None
     assert len(stored.description) < len(oversize)
-    assert stored.description == streamed.description
+    assert stored.description == streamed["description"]

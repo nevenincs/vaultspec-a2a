@@ -28,19 +28,22 @@ import asyncio
 import json
 import os
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from vaultspec_a2a.service_tests._provider_catalog_live import (
-    LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
-)
+from dev.exit_codes import FAILED, OK
+from dev.paths import REPO_ROOT
+from vaultspec_a2a.testing import LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vaultspec_a2a.providers.provider_catalog import ProviderCatalog
 
+__all__ = ["main"]
+
 #: The five identifiers one live proof lane is declared with. Imported from the
-#: suite that consumes them rather than restated, so a rename cannot leave this
-#: reporter emitting a block nothing reads.
+#: test-support package that reads them rather than restated, so a rename cannot
+#: leave this reporter emitting a block nothing reads.
 _SELECTION_NAMES = LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON
 
 #: Discovery spawns real provider subprocesses; a wedged CLI must not hang a
@@ -133,7 +136,7 @@ def _render_exports(
     provider_id, _, model_value = selection.partition("=")
     if not provider_id or not model_value:
         print("--exports expects PROVIDER=MODEL, e.g. claude=haiku", file=sys.stderr)
-        return 2
+        return FAILED
 
     lane = next(
         (
@@ -145,7 +148,7 @@ def _render_exports(
     )
     if lane is None:
         print(f"no lane discovered for provider {provider_id!r}", file=sys.stderr)
-        return 1
+        return FAILED
 
     model = next(
         (m for m in lane["models"] if m["provider_value"] == model_value), None
@@ -156,12 +159,12 @@ def _render_exports(
             f"{provider_id} does not serve model {model_value!r}; it serves: {served}",
             file=sys.stderr,
         )
-        return 1
+        return FAILED
 
     control_id, option_id = _resolve_option(lane, option)
     if control_id is None:
         print(f"{provider_id} serves no control matching {option!r}", file=sys.stderr)
-        return 1
+        return FAILED
 
     values = (
         provider_id,
@@ -179,7 +182,7 @@ def _render_exports(
             print(f'export {name}="{value}"')
         else:
             print(f'$env:{name} = "{value}"')
-    return 0
+    return OK
 
 
 def _resolve_option(
@@ -236,15 +239,15 @@ def main(argv: list[str] | None = None) -> int:
     # the same settings, so this reporter must not describe a different posture.
     os.environ.setdefault("VAULTSPEC_A2A_ENVIRONMENT", "development")
 
-    lanes = _as_payload(asyncio.run(_discover(Path.cwd())))
+    lanes = _as_payload(asyncio.run(_discover(REPO_ROOT)))
 
     if args.exports:
         return _render_exports(lanes, args.exports, args.option, args.shell)
     if args.json:
         print(json.dumps(lanes, indent=2))
-        return 0
+        return OK
     _print_report(lanes)
-    return 0
+    return OK
 
 
 if __name__ == "__main__":

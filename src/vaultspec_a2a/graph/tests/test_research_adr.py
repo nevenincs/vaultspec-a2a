@@ -1,10 +1,10 @@
 """Tests for the research_adr topology compilation.
 
-The topology is compiled from the real ``vaultspec-adr-research`` preset with a
-stub provider factory (FakeChatModel) and a fake proposal submitter, then driven
-over a real ``AsyncSqliteSaver`` to its first document gate. No mocks of the
-graph itself: the fan-out, synthesis join, inner review advance, and the gate
-interrupt are all exercised.
+The topology is compiled from the real ``vaultspec-adr-research`` preset on the
+deterministic lane through the real provider factory, with a fake proposal
+submitter, then driven over a real ``AsyncSqliteSaver`` to its first document
+gate. No mocks of the graph itself: the fan-out, synthesis join, inner review
+advance, and the gate interrupt are all exercised.
 """
 
 from __future__ import annotations
@@ -12,36 +12,34 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
-import pytest_asyncio
-from langchain_core.language_models import BaseChatModel
+from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import BaseMessage, HumanMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
-    from pathlib import Path
+    from uuid import UUID
 
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from ..protocols import ProviderFactoryProtocol
 
 from langchain_core.messages import AIMessage
 
-from ...database.tests._backends import migrated_session_factory
 from ...streaming.node_metadata import node_metadata_from_graph
 from ...team.team_config import (
     ResearchThreadSpec,
     load_agent_config,
     load_team_config,
 )
+from ...testing import deterministic_model_assignment
+from ...testing.lanes import UNATTENDED_REPLY
 from ...thread.errors import ConfigError
 from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
 from .._compiler_research import _doc_review_router
 from ..compiler import compile_team_graph
 from ..nodes.worker import render_research_findings
-from .conftest import deterministic_model_assignment
 
 
 def _review_state(review_text: str) -> dict[str, Any]:
@@ -116,13 +114,6 @@ class _StateCapturingSubmitter:
         return f"prop-{phase}"
 
 
-@pytest_asyncio.fixture
-async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        yield saver
-
-
 def _research_adr_team(research_threads: list[ResearchThreadSpec] | None = None) -> Any:
     team = load_team_config("vaultspec-adr-research")
     if research_threads is not None:
@@ -156,7 +147,7 @@ def _answer(parked: Any, verdict: str, notes: str | None = None) -> Command[str]
 async def test_research_adr_compiles_expected_node_set(
     checkpointer: AsyncSqliteSaver,
     pf: ProviderFactoryProtocol,
-    tmp_path: Path,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     team = _research_adr_team(
         [
@@ -164,17 +155,16 @@ async def test_research_adr_compiles_expected_node_set(
             ResearchThreadSpec(thread_id="prior-art"),
         ]
     )
-    async with migrated_session_factory("sqlite", tmp_path) as (_target, factory):
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=_agent_configs(team),
-            checkpointer=checkpointer,
-            provider_factory=pf,
-            step_timeout=42.0,
-            proposal_submitter=_FakeSubmitter(),
-            model_assignment=deterministic_model_assignment(team),
-            runtime_identity_port=SqlRuntimeIdentityPort(factory),
-        )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        step_timeout=42.0,
+        proposal_submitter=_FakeSubmitter(),
+        model_assignment=deterministic_model_assignment(team),
+        runtime_identity_port=SqlRuntimeIdentityPort(migrated_session_factory),
+    )
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
     assert {
@@ -236,10 +226,9 @@ async def test_research_adr_discloses_one_metadata_entry_per_worker(
         "plan_author",
         "plan_review",
     }
-    # This is the assertion that fails without the fix: node_metadata_from_graph
-    # SKIPS a node whose metadata dict is empty, and every one of these used to
-    # be added with no metadata= at all - the whole roster was absent, not just
-    # short a field.
+    # node_metadata_from_graph SKIPS a node whose metadata dict is empty, so every
+    # one of these must be added with metadata= - otherwise the whole roster is
+    # absent, not just short a field.
     assert expected_worker_nodes <= set(disclosed), disclosed
 
     for node_name in expected_worker_nodes:
@@ -295,7 +284,7 @@ async def test_research_adr_runs_to_first_document_gate(
 ) -> None:
     """The machine fans out, synthesises, passes review, and parks at gate one.
 
-    The stub models return no ``REVISION`` sentinel, so the inner review loop
+    The deterministic reviewer returns ``PASS``, so the inner review loop
     advances; the research gate then proposes+submits and interrupts for the
     human verdict.
     """
@@ -540,92 +529,37 @@ async def test_plan_gate_request_changes_loops_the_plan_writer(
     assert "Step S02 has no success check." in reparked["validation_errors"]
 
 
-class _Transcript:
-    """Every turn each agent was invoked with, shared across the run's lanes.
-
-    A plain object rather than a field on the chat model: the model is a
-    pydantic class, so a ``dict`` field would be validated into a per-instance
-    copy and each lane would record into its own.
-    """
-
-    def __init__(self) -> None:
-        self.turns: dict[str, list[list[BaseMessage]]] = {}
-
-    def record(self, agent_id: str, messages: list[BaseMessage]) -> None:
-        self.turns.setdefault(agent_id, []).append(list(messages))
-
-
-class _PromptRecordingChat(BaseChatModel):
-    """A scripted lane that keeps the exact message list each turn was given.
+class _SynthesisTurns(AsyncCallbackHandler):
+    """Keeps the exact message list each synthesis model turn was given.
 
     Needed because the defect this guards is invisible in the run's OUTPUT: the
     branches' findings reach the checkpoint either way, and only the synthesis
-    turn's INPUT says whether they were ever shown to the model.
+    turn's INPUT says whether they were ever shown to the model. The node a
+    turn runs in is read off the metadata the graph stamps on its config.
     """
 
-    agent_id: str = ""
-    recorder: Any = None
-
-    @property
-    @override
-    def _llm_type(self) -> str:
-        return "prompt-recording"
-
-    @override
-    def _generate(
-        self,
-        messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: Any | None = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        del stop, run_manager, kwargs
-        cast("_Transcript", self.recorder).record(self.agent_id, messages)
-        return ChatResult(
-            generations=[
-                ChatGeneration(message=AIMessage(content=_reply_for(messages)))
-            ]
-        )
-
-
-_BRANCH_CLAIM = "Branch {thread} found the join point is structural."
-
-
-def _reply_for(messages: list[BaseMessage]) -> str:
-    """Answer as the researcher branch whose spec is in *messages*, else neutrally."""
-    for message in messages:
-        content = str(message.content)
-        if content.startswith("Research thread "):
-            thread = content.split("'")[1] if "'" in content else "unknown"
-            return _BRANCH_CLAIM.format(thread=thread)
-    return "PASS"
-
-
-class _PromptRecordingFactory:
-    """Hands every role a recording lane sharing one transcript."""
-
     def __init__(self) -> None:
-        self.transcript = _Transcript()
+        self.turns: list[list[BaseMessage]] = []
 
-    def create(
+    @override
+    async def on_chat_model_start(
         self,
-        provider: Any,
+        serialized: dict[str, Any],
+        messages: list[list[BaseMessage]],
         *,
-        model: Any | None = None,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
+        run_id: UUID,
+        metadata: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> _PromptRecordingChat:
-        del provider, model, workspace_root, kwargs
-        return _PromptRecordingChat(
-            agent_id=getattr(agent_config, "id", "") or "",
-            recorder=self.transcript,
-        )
+    ) -> None:
+        del serialized, run_id, kwargs
+        if (metadata or {}).get("langgraph_node") == "synthesis":
+            self.turns.extend(list(batch) for batch in messages)
 
 
 @pytest.mark.asyncio
 async def test_every_branch_claim_reaches_the_synthesis_model_input(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """The fan-out's join point shows synthesis every branch's finding.
 
@@ -633,21 +567,20 @@ async def test_every_branch_claim_reaches_the_synthesis_model_input(
     turn that never receives them is synthesising research it has not read. The
     accumulated list in the checkpoint proves only that the branches ran; this
     asserts on the message list the synthesis lane was actually invoked with,
-    which is the only place the defect is observable.
+    which is the only place the defect is observable. The branches run the
+    lane's branch researcher, whose finding names its branch, so each branch's
+    claim is told apart from the other's; the run is autonomous, so neither
+    branch stops to ask before it reports.
     """
-    factory = _PromptRecordingFactory()
-    team = _research_adr_team(
-        [
-            ResearchThreadSpec(thread_id="codebase"),
-            ResearchThreadSpec(thread_id="prior-art"),
-        ]
-    )
+    synthesis = _SynthesisTurns()
+    team = load_team_config("deterministic-research-branches")
     graph = compile_team_graph(
         team_config=team,
         agent_configs=_agent_configs(team),
         checkpointer=checkpointer,
-        provider_factory=factory,
+        provider_factory=pf,
         step_timeout=42.0,
+        autonomous=True,
         proposal_submitter=_FakeSubmitter(),
         model_assignment=deterministic_model_assignment(team),
     )
@@ -664,7 +597,11 @@ async def test_every_branch_claim_reaches_the_synthesis_model_input(
         "token_usage": {},
     }
     result = await graph.ainvoke(
-        state, config={"configurable": {"thread_id": run_thread_id}}
+        state,
+        config={
+            "configurable": {"thread_id": run_thread_id},
+            "callbacks": [synthesis],
+        },
     )
 
     # Both branches really did contribute a finding to the checkpoint.
@@ -673,11 +610,10 @@ async def test_every_branch_claim_reaches_the_synthesis_model_input(
         "prior-art",
     ]
 
-    synthesis_turns = factory.transcript.turns.get("vaultspec-synthesist") or []
-    assert synthesis_turns, "the synthesis lane was never invoked"
-    first_turn = "\n".join(str(m.content) for m in synthesis_turns[0])
+    assert synthesis.turns, "the synthesis lane was never invoked"
+    first_turn = "\n".join(str(m.content) for m in synthesis.turns[0])
     for thread in ("codebase", "prior-art"):
-        assert _BRANCH_CLAIM.format(thread=thread) in first_turn, (
+        assert f"{thread}: {UNATTENDED_REPLY}" in first_turn, (
             f"branch {thread!r} claim never reached the synthesis model input"
         )
         assert f"`{thread}`" in first_turn, (

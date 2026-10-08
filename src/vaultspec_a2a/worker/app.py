@@ -9,8 +9,7 @@ Run standalone::
     python -m uvicorn vaultspec_a2a.worker.app:create_worker_app \
         --factory --host 127.0.0.1 --port 18001
 
-Or via the ``vaultspec-worker`` console script (once registered in
-``pyproject.toml``).
+Or as ``python -m vaultspec_a2a.worker``, which runs :func:`main`.
 """
 
 from __future__ import annotations
@@ -29,7 +28,6 @@ from uuid import uuid4
 
 import anyio  # anyio: structured task groups for heartbeat + dispatch.
 import httpx
-import uvicorn
 from anyio.to_thread import run_sync
 from fastapi import Depends, FastAPI, Header, HTTPException
 from opentelemetry import metrics, trace
@@ -38,12 +36,18 @@ from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
 from vaultspec_core.config import ConfigurationError
 
 from ..control.config import settings
-from ..database.checkpoints import open_checkpointer
-from ..ipc.body_limit import BoundedHttpBodyMiddleware, worker_body_limit
-from ..ipc.schemas import DispatchRequest, DispatchResponse
+from ..control.settings_base import build_now
+from ..database import open_checkpointer
+from ..domain_config import domain_config
+from ..ipc import (
+    BoundedHttpBodyMiddleware,
+    DispatchRequest,
+    DispatchResponse,
+    worker_body_limit,
+)
 from ..lifecycle.pairing import DispatchPairingStatus, resolve_worker_gateway_target
 from ..lifecycle.registration import deregister_serve, register_serve
-from ..lifecycle.shutdown import ShutdownDeadline, ShutdownServer, finish_before
+from ..lifecycle.shutdown import ShutdownDeadline, build_shutdown_server, finish_before
 from ..providers.warmup import warm_model_imports
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..thread.dispatch_policy import FailureType
@@ -54,7 +58,6 @@ from ..utils import (
     reconfigure_console_utf8,
     verify_internal_bearer,
 )
-from ..utils.asyncio_compat import configure_asyncio_runtime
 from ._dispatch_contract import CAPACITY_DRAINING, CAPACITY_THREAD_ACTIVE
 from .authoring_relay import AuthoringRelay
 from .authoring_relay import router as authoring_router
@@ -62,7 +65,13 @@ from .dispatch_ids import DispatchIdAdmission
 from .executor import Executor
 from .ipc import WorkerBridge
 
-__all__ = ["WorkerApp", "create_worker_app", "main"]
+__all__ = [
+    "WorkerApp",
+    "capacity_refusal",
+    "create_worker_app",
+    "main",
+    "verify_dispatch_token",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +105,7 @@ async def _warm_model_imports() -> None:
         )
 
 
-async def _verify_dispatch_token(
+async def verify_dispatch_token(
     authorization: str | None = Header(None),
 ) -> None:
     """Verify bearer token for gateway->worker dispatch requests.
@@ -164,8 +173,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Worker lifespan: initialise checkpointer, bridge, executor, heartbeat.
 
     Startup sequence:
-    1. Open the configured backend-selectable checkpointer (SQLite or Postgres) via
-       ``open_checkpointer()``.
+    1. Open the SQLite checkpointer via ``open_checkpointer()``.
     2. Create the ``WorkerBridge`` HTTP client.
     3. Instantiate the ``Executor`` with checkpointer + bridge.
     4. Launch the heartbeat loop as a background task.
@@ -176,7 +184,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """
     worker_id = uuid4().hex[:8]
     logger.info("Worker %s starting", worker_id)
-    settings.validate_postgres_requirement()
 
     # Configure OTel with the worker service name so spans are
     # attributed separately from the gateway in Jaeger/OTLP backends.
@@ -313,10 +320,8 @@ because slots are freed by runs ending, which the caller cannot observe.
 
 
 def _require_dispatch_receipt(req: DispatchRequest) -> None:
-    if req.action == "cancel":
-        return
     try:
-        req.require_graph_action_receipt()
+        req.graph_receipt_if_required()
     except ValueError as exc:
         raise HTTPException(
             status_code=409,
@@ -351,10 +356,10 @@ async def _reserve_dispatch_or_replay(
     # A duplicate can be admitted while this request waits for capacity.
     if req.dispatch_id in dispatch_ids:
         return None, True
-    raise _capacity_refusal(reason)
+    raise capacity_refusal(reason)
 
 
-def _capacity_refusal(reason: str) -> HTTPException:
+def capacity_refusal(reason: str) -> HTTPException:
     """Answer a refused reservation in the terms the refusal actually had.
 
     The refusals used to share a 429, which told the gateway that a worker
@@ -400,7 +405,7 @@ def _start_dispatch_task(
 
 async def _dispatch_request(app: FastAPI, req: DispatchRequest) -> DispatchResponse:
     """Admit one gateway dispatch and schedule it in the worker task group."""
-    if req.action != "cancel" and req.workspace_root is not None:
+    if req.requires_graph_receipt and req.workspace_root is not None:
         from ..control.workspace import require_admitted_workspace_root
 
         try:
@@ -414,7 +419,7 @@ async def _dispatch_request(app: FastAPI, req: DispatchRequest) -> DispatchRespo
     if req.dispatch_id in dispatch_ids:
         return _duplicate_dispatch_response(req)
 
-    owns_capacity = req.action in {"ingest", "resume"}
+    owns_capacity = req.requires_graph_receipt
     reservation, replayed = await _reserve_dispatch_or_replay(
         executor, req, dispatch_ids, owns_capacity
     )
@@ -469,13 +474,15 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
 
     # Instrument incoming requests so the worker's spans participate
     # in distributed traces started by the gateway (W3C traceparent extraction).
-    app.add_middleware(cast("Any", BoundedHttpBodyMiddleware), limit=worker_body_limit)
+    app.add_middleware(
+        cast("Any", BoundedHttpBodyMiddleware), limit=worker_body_limit(settings)
+    )
     app.add_middleware(cast("Any", TelemetryMiddleware))
 
     @app.post(
         "/dispatch",
         response_model=DispatchResponse,
-        dependencies=[Depends(_verify_dispatch_token)],
+        dependencies=[Depends(verify_dispatch_token)],
     )
     async def dispatch_endpoint(req: DispatchRequest) -> DispatchResponse:
         """Accept a work dispatch from the gateway.
@@ -485,7 +492,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         """
         return await _dispatch_request(app, req)
 
-    @app.get("/health", dependencies=[Depends(_verify_dispatch_token)])
+    @app.get("/health", dependencies=[Depends(verify_dispatch_token)])
     async def health_endpoint() -> dict[str, object]:
         """Worker health check.
 
@@ -515,16 +522,16 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
                 app.state, "gateway_pairing_warning", None
             ),
             "worker_port": settings.worker_port,
-            "database_backend": settings.resolved_database_backend,
-            "checkpoint_backend": settings.resolved_checkpoint_backend,
-            "postgres_required": settings.postgres_required,
+            "database_backend": settings.database_backend,
+            "checkpoint_backend": settings.checkpoint_backend,
             # Pairing identity, reported not asserted. A URL cannot distinguish a
             # gateway from its own restart on the same port, so a worker naming
             # only its target looks correctly paired to a gateway that no longer
             # exists. These two say WHICH gateway incarnation started this worker
             # and which spawn attempt it was. Empty when the worker was started
-            # by something other than a gateway spawn - Compose, an operator, or
-            # a test - which is itself the honest answer rather than a default.
+            # by something other than a gateway spawn - the process registry, an
+            # operator, or a test - which is itself the honest answer rather than
+            # a default.
             "paired_gateway_lifetime": settings.gateway_lifetime_id,
             "worker_generation": settings.worker_generation,
         }
@@ -532,7 +539,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
     @app.post(
         "/admin/shutdown",
         status_code=202,
-        dependencies=[Depends(_verify_dispatch_token)],
+        dependencies=[Depends(verify_dispatch_token)],
     )
     async def shutdown_endpoint() -> dict[str, str]:
         """Terminate this worker process.
@@ -571,8 +578,10 @@ def main() -> None:
 def _serve() -> None:
     """Configure the process and run the worker's server until shutdown."""
     reconfigure_console_utf8()
-    configure_logging("service", service_name="worker")
-    configure_asyncio_runtime()
+    configure_logging("service", settings=settings, service_name="worker")
+    # Built with the infrastructure settings, so a refused domain value is
+    # reported by the process that starts the service, not by the first reader.
+    build_now(domain_config)
     logger.info(
         "Worker main config: gateway_port=%d worker_host=%s"
         " worker_port=%d worker_url=%s",
@@ -582,23 +591,6 @@ def _serve() -> None:
         settings.worker_url,
     )
     app = create_worker_app()
-    config = uvicorn.Config(
-        app,
-        host=settings.worker_host,
-        port=settings.worker_port,
-        log_level=settings.log_level.value,
-        access_log=settings.access_log,
-        loop="auto",
-        timeout_graceful_shutdown=settings.shutdown_stream_grace_seconds,
-    )
-    server = ShutdownServer(
-        config,
-        app=app,
-        total_seconds=settings.shutdown_total_timeout_seconds,
-    )
-    app.state.request_server_shutdown = lambda: setattr(server, "should_exit", True)
-    server.run()
-
-
-if __name__ == "__main__":
-    main()
+    build_shutdown_server(
+        app, host=settings.worker_host, port=settings.worker_port
+    ).run()

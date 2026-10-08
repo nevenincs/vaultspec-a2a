@@ -4,9 +4,9 @@
 delimited JSON, ``{id, method, params}`` requests answered by ``{id, result}``
 or ``{id, error}``, ``{method, params}`` notifications in both directions). It is
 neither ACP nor an OpenAI Chat-Completions endpoint, so it cannot reuse
-``AcpChatModel`` or ``ChatOpenAI``. This module drives the protocol directly,
-following the ``mock_chat_model.py`` precedent of a non-ACP ``BaseChatModel`` and
-reusing ``_subprocess.py``'s protocol-agnostic process-lifecycle helpers.
+``AcpChatModel`` or ``ChatOpenAI``. This module drives the protocol directly as a
+non-ACP ``BaseChatModel``, reusing ``_subprocess.py``'s protocol-agnostic
+process-lifecycle helpers.
 
 Authentication is file-based: ``codex app-server`` inherits the persisted local
 session from the Codex home (``~/.codex`` by default, ``CODEX_HOME`` override),
@@ -20,7 +20,7 @@ import logging
 import re
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import aclosing
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
@@ -41,13 +41,12 @@ from pydantic import Field, PrivateAttr
 
 from ..control.config import settings
 from ..desktop.native_isolation import NativeLaunchAuthority, NativeWorkspaceAuthority
+from ..graph.enums import Provider, ProviderCondition
 from ..team.team_config import AgentConfig
 from ..utils.enums import CodexWebSearchMode
 from ..workspace.environment import resolve_env_vars
 from ._acp_mcp import codex_mcp_server_specs
 from ._acp_types import (
-    NativeCommandOutcome,
-    NativeCommandResult,
     PermissionCallback,
     require_workspace_root,
 )
@@ -55,8 +54,6 @@ from ._cleanup import CleanupStep, run_independent_cleanups
 from ._codex_app_server_client import (
     _CAPABILITIES,
     _CLIENT_INFO,
-    _MAX_CODEX_RUNTIME_ID_LENGTH,
-    _NATIVE_CONTROL_TIMEOUT_SECONDS,
     _STREAM_CLOSED,
     _CodexAppServerClient,
 )
@@ -82,15 +79,21 @@ from ._codex_protocol import (
     _turn_failure,
     _usage_metadata,
 )
+from ._factory_commands import CODEX_HOME_ENV, ProviderCommand
 from ._json_contract import JsonObject, lenient_json_object
 from ._mcp_contract import verify_harness_mcp_contract
 from ._native_role import require_native_workspace
 from ._project_scope import RunProjectScope
-from ._runtime_identity import RuntimeIdentityBinding, identity_path, identity_text
+from ._runtime_identity import (
+    RuntimeIdentityBinding,
+    identity_command,
+    identity_path,
+    identity_text,
+)
 from ._stream_lifetime import ProcessChatModel
 from ._subprocess import kill_process_tree, spawn_acp_process
 from .binary_version import probe_binary_version
-from .conditions import ProviderCondition
+from .execution_modes import EXTERNAL_EXECUTION_MODES
 from .lane_admission import is_web_lane_proven
 
 if TYPE_CHECKING:
@@ -101,14 +104,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "CodexChatModel",
 ]
-
-
-@dataclass(slots=True)
-class _ActiveCodexTurn:
-    client: "_CodexAppServerClient"
-    interrupt_in_flight: bool = False
-    terminal_status: str | None = None
-    terminal_seen: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 @dataclass(slots=True)
@@ -155,7 +150,7 @@ class CodexChatModel(ProcessChatModel):
     # The Codex counterpart of ``AcpChatModel.permission_callback``, in the same
     # field shape so the two lanes converge: the worker node wires a supervised
     # run's human rung onto any model that DECLARES this attribute
-    # (``resolve_effective_worker_model``), which is why its absence used to
+    # (``_resolve_effective_worker_model``), which is why its absence used to
     # skip Codex silently rather than fail. Left unset, the lane is autonomous
     # and decides against the run's composed surface.
     permission_callback: PermissionCallback | None = Field(
@@ -175,16 +170,9 @@ class CodexChatModel(ProcessChatModel):
     # Observability metadata (mirrors AcpChatModel's runtime fields).
     provider: str = "codex"
     execution_mode: str | None = Field(default=None, exclude=True)
-    runtime_authority: str | None = None
-    command_origin: str | None = None
-    command_kind: str | None = None
-    command_executable: str | None = None
-    command_target: str | None = None
+    provider_command: ProviderCommand | None = Field(default=None, exclude=True)
     version_proof_required: bool = Field(default=False, exclude=True)
 
-    _active_turns: dict[tuple[str, str], _ActiveCodexTurn] = PrivateAttr(
-        default_factory=dict
-    )
     _runtime_identity: RuntimeIdentityBinding | None = PrivateAttr(default=None)
     _native_workspace: NativeWorkspaceAuthority | None = PrivateAttr(default=None)
 
@@ -225,7 +213,8 @@ class CodexChatModel(ProcessChatModel):
             raise _CodexProtocolError(
                 "Codex initialize omitted a versioned server identity"
             )
-        cli = identity_path(self.command_target, field="Codex CLI executable path")
+        launch = identity_command(self.provider_command)
+        cli = identity_path(launch.command_target, field="Codex CLI executable path")
         cli_version = await asyncio.to_thread(
             probe_binary_version, cli, native_authority=native_authority
         )
@@ -240,9 +229,9 @@ class CodexChatModel(ProcessChatModel):
                 self.execution_mode, field="execution mode"
             ),
             "runtime_authority": identity_text(
-                self.runtime_authority, field="runtime authority"
+                launch.runtime_authority, field="runtime authority"
             ),
-            "adapter_name": "codex-app-server",
+            "adapter_name": EXTERNAL_EXECUTION_MODES[Provider.CODEX],
             "adapter_version": match.group(1),
             "adapter_entry_path": cli,
             "cli_executable_path": cli,
@@ -436,116 +425,8 @@ class CodexChatModel(ProcessChatModel):
         env = resolve_env_vars(workspace)
         codex_home = self.codex_home or settings.codex_home
         if codex_home and codex_home.strip():
-            env["CODEX_HOME"] = codex_home
+            env[CODEX_HOME_ENV] = codex_home
         return env
-
-    @staticmethod
-    def _validate_runtime_id(value: str, *, field: str) -> None:
-        if (
-            not value
-            or value != value.strip()
-            or not value.isprintable()
-            or len(value) > _MAX_CODEX_RUNTIME_ID_LENGTH
-        ):
-            raise ValueError(f"{field} is not an exact bounded runtime identity")
-
-    def active_native_control_targets(self) -> tuple[tuple[str, str], ...]:
-        """Return the exact Codex thread/turn pairs this instance currently owns."""
-        return tuple(sorted(self._active_turns))
-
-    def _native_control_admission(
-        self, name: str, thread_id: str, turn_id: str
-    ) -> _ActiveCodexTurn | NativeCommandResult:
-        if name != "interrupt":
-            return NativeCommandResult(
-                name=name,
-                outcome=NativeCommandOutcome.UNSUPPORTED,
-                reason="Codex did not expose this control through the admitted lane",
-            )
-        self._validate_runtime_id(thread_id, field="thread_id")
-        self._validate_runtime_id(turn_id, field="turn_id")
-        active = self._active_turns.get((thread_id, turn_id))
-        if active is None:
-            return NativeCommandResult(
-                name=name,
-                outcome=NativeCommandOutcome.BLOCKED,
-                reason="the exact Codex turn is not active on this provider instance",
-            )
-        if active.terminal_seen.is_set():
-            return NativeCommandResult(
-                name=name,
-                outcome=NativeCommandOutcome.BLOCKED,
-                reason="the exact Codex turn has already ended",
-            )
-        if active.interrupt_in_flight:
-            return NativeCommandResult(
-                name=name,
-                outcome=NativeCommandOutcome.BUSY,
-                reason="an interrupt request already owns this exact Codex turn",
-            )
-        return active
-
-    async def execute_native_control(
-        self,
-        name: str,
-        *,
-        thread_id: str,
-        turn_id: str,
-    ) -> NativeCommandResult:
-        """Execute one proven Codex control against one exact active turn."""
-        admission = self._native_control_admission(name, thread_id, turn_id)
-        if isinstance(admission, NativeCommandResult):
-            return admission
-        active = admission
-
-        active.interrupt_in_flight = True
-        deadline = asyncio.get_running_loop().time() + _NATIVE_CONTROL_TIMEOUT_SECONDS
-        try:
-            await asyncio.wait_for(
-                active.client.request(
-                    "turn/interrupt",
-                    {"threadId": thread_id, "turnId": turn_id},
-                ),
-                timeout=_NATIVE_CONTROL_TIMEOUT_SECONDS,
-            )
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                raise TimeoutError
-            await asyncio.wait_for(active.terminal_seen.wait(), timeout=remaining)
-        except TimeoutError:
-            return NativeCommandResult(
-                name=name,
-                outcome=NativeCommandOutcome.FAILED,
-                reason=(
-                    "Codex did not confirm the exact turn as interrupted before "
-                    "the deadline"
-                ),
-                effects_may_have_occurred=True,
-            )
-        except _CodexProtocolError as exc:
-            return NativeCommandResult(
-                name=name,
-                outcome=NativeCommandOutcome.FAILED,
-                reason=str(exc),
-                effects_may_have_occurred=True,
-            )
-        finally:
-            active.interrupt_in_flight = False
-        if active.terminal_status != "interrupted":
-            return NativeCommandResult(
-                name=name,
-                outcome=NativeCommandOutcome.FAILED,
-                reason=(
-                    "Codex acknowledged interruption but the exact turn ended as "
-                    f"{active.terminal_status!r}"
-                ),
-                effects_may_have_occurred=True,
-            )
-        return NativeCommandResult(
-            name=name,
-            outcome=NativeCommandOutcome.COMPLETED,
-            effects_may_have_occurred=True,
-        )
 
     @override
     async def _provider_astream(
@@ -590,7 +471,7 @@ class CodexChatModel(ProcessChatModel):
                 if self._native_workspace is not None
                 else None
             )
-            env["CODEX_HOME"] = str(codex_config_home)
+            env[CODEX_HOME_ENV] = str(codex_config_home)
             await verify_harness_mcp_contract(
                 codex_mcp_server_specs(
                     self.harness_mcp_servers, project_root=self.workspace_root
@@ -603,13 +484,14 @@ class CodexChatModel(ProcessChatModel):
 
                 require_binary_proof(
                     codex_binary_proof_reason(
-                        self.command, native_authority=native_authority
+                        self.provider_command, native_authority=native_authority
                     )
                 )
+            launch = self.provider_command
             metadata = {
                 "provider": self.provider,
-                "command_executable": self.command_executable,
-                "command_target": self.command_target,
+                "command_executable": launch.command_executable if launch else None,
+                "command_target": launch.command_target if launch else None,
             }
 
             process = await spawn_acp_process(
@@ -703,22 +585,9 @@ class CodexChatModel(ProcessChatModel):
                     "codex_turn_id": turn_id,
                 },
             )
-            active_key = (thread_id, turn_id)
-            if active_key in self._active_turns:
-                raise _CodexProtocolError(
-                    "codex app-server reused an active thread/turn identity"
-                )
-            active_turn = _ActiveCodexTurn(client)
-            self._active_turns[active_key] = active_turn
-            try:
-                async with aclosing(
-                    self._consume_turn(client, thread_id, active_turn=active_turn)
-                ) as stream:
-                    async for chunk in stream:
-                        yield chunk
-            finally:
-                if self._active_turns.get(active_key) is active_turn:
-                    self._active_turns.pop(active_key, None)
+            async with aclosing(self._consume_turn(client, thread_id)) as stream:
+                async for chunk in stream:
+                    yield chunk
         finally:
             # Independent cleanup: a failure reaping the app-server session must
             # not skip removing the per-run CODEX_HOME (it holds a copied
@@ -747,6 +616,41 @@ class CodexChatModel(ProcessChatModel):
             )
             await run_independent_cleanups(*cleanup_steps)
 
+    @staticmethod
+    def _raise_held_suspension(client: _CodexAppServerClient) -> None:
+        """Re-raise the suspension this session is holding, if it holds one.
+
+        A supervised run's human rung suspends the graph to ask a person, and the
+        session holds that suspension for the turn consumer to re-raise. It is
+        the OUTCOME of the turn, so it takes precedence over every other way the
+        frame wait can end - the idle backstop, the lane's deferred retry
+        condition, and the provider's own end of stream - and the precedence is
+        applied at each of those exits rather than once after the wait.
+
+        The end of the session is not evidence against a park, it is the
+        consequence of one: the request is answered with the lane's abandon
+        action and the session tree is released in the turn's ``finally``. A
+        parked run that reported the timeout or the closed stream instead
+        described the provider while losing the fact that it is waiting on a
+        person, and the run failed rather than parking.
+        """
+        suspension = client.pending_interrupt
+        if suspension is not None:
+            raise suspension
+
+    @staticmethod
+    def _deferred_condition(state: _TurnStreamState) -> _CodexProtocolError | None:
+        """Return the retry failure the lane last stated, or ``None``.
+
+        A stated retry failure is more useful than the later silence or bare EOF
+        that follows it, and it carries whatever the turn had already done by the
+        time it was raised.
+        """
+        if state.deferred is None:
+            return None
+        state.deferred.effects_may_have_occurred |= state.effects_may_have_occurred
+        return state.deferred
+
     async def _next_turn_message(
         self,
         client: _CodexAppServerClient,
@@ -759,23 +663,18 @@ class CodexChatModel(ProcessChatModel):
                 timeout=idle_limit if idle_limit > 0 else None,
             )
             if message is _STREAM_CLOSED:
-                # Prefer the lane's last stated retry failure to a bare EOF.
-                if state.deferred is not None:
-                    state.deferred.effects_may_have_occurred |= (
-                        state.effects_may_have_occurred
-                    )
-                    raise _carry_condition(state.deferred, None)
+                self._raise_held_suspension(client)
+                deferred = self._deferred_condition(state)
+                if deferred is not None:
+                    raise _carry_condition(deferred, None)
                 raise await client.unexpected_eof_error()
         except TimeoutError:
-            # A stated retry failure is more useful than later silence.
-            if state.deferred is not None:
-                state.deferred.effects_may_have_occurred |= (
-                    state.effects_may_have_occurred
-                )
-                raise state.deferred from None
+            self._raise_held_suspension(client)
+            deferred = self._deferred_condition(state)
+            if deferred is not None:
+                raise deferred from None
             raise
-        if client.pending_interrupt is not None:
-            raise client.pending_interrupt
+        self._raise_held_suspension(client)
         return message
 
     @staticmethod
@@ -813,17 +712,12 @@ class CodexChatModel(ProcessChatModel):
 
     @staticmethod
     def _complete_turn(
-        params: JsonObject,
-        active_turn: _ActiveCodexTurn | None,
-        state: _TurnStreamState,
+        params: JsonObject, state: _TurnStreamState
     ) -> ChatGenerationChunk | None:
         turn = _required_object_field(
             params, "turn", context="turn/completed notification"
         )
         status = turn.get("status")
-        if active_turn is not None:
-            active_turn.terminal_status = status if isinstance(status, str) else None
-            active_turn.terminal_seen.set()
         if status != "completed":
             failure = _failed_turn_error(turn, status)
             failure.effects_may_have_occurred = state.effects_may_have_occurred
@@ -846,7 +740,6 @@ class CodexChatModel(ProcessChatModel):
         cls,
         method: object,
         params: JsonObject,
-        active_turn: _ActiveCodexTurn | None,
         state: _TurnStreamState,
     ) -> tuple[bool, ChatGenerationChunk | None]:
         if method == "error":
@@ -864,15 +757,13 @@ class CodexChatModel(ProcessChatModel):
                 )
             )
         elif method == "turn/completed":
-            return True, cls._complete_turn(params, active_turn, state)
+            return True, cls._complete_turn(params, state)
         return False, None
 
     async def _consume_turn(
         self,
         client: _CodexAppServerClient,
         thread_id: str,
-        *,
-        active_turn: _ActiveCodexTurn | None = None,
     ) -> AsyncGenerator[ChatGenerationChunk]:
         """Yield delta chunks until the turn completes, raising on failure.
 
@@ -909,7 +800,7 @@ class CodexChatModel(ProcessChatModel):
                     yield chunk
                 continue
             completed, final_chunk = self._turn_control_notification(
-                method, params, active_turn, state
+                method, params, state
             )
             if final_chunk is not None:
                 yield final_chunk

@@ -5,30 +5,21 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter, ValidationError
-
-from ..testing.tests._support.payloads import (
+from ..testing import (
+    ProgressDeadline,
     json_object,
     json_object_list,
     required_bool,
     required_text,
+    text_list,
+    wait_for_run_status,
+    wait_until,
 )
-from ._state import wait_for_state
+from ._state import thread_state
 
 if TYPE_CHECKING:
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
     from .harness import ServiceStack
-
-
-_TEXT_LIST = TypeAdapter(list[str])
-
-
-def _text_list(value: object, *, at: str) -> list[str]:
-    """Read a strict list of text values from a real public payload."""
-    try:
-        return _TEXT_LIST.validate_python(value, strict=True)
-    except ValidationError as exc:
-        raise TypeError(f"expected a text list at {at}: {exc}") from exc
 
 
 def _is_active(state: JsonObject) -> bool:
@@ -49,68 +40,69 @@ def _is_completed(state: JsonObject) -> bool:
     return state.get("status") == "completed"
 
 
+def _is_worker_ipc_trace(trace: JsonObject) -> bool:
+    """Whether *trace* is the worker's event-batch IPC call seen from A2A."""
+    processes = json_object(trace.get("processes"), at="Jaeger trace processes")
+    trace_services = {
+        service_name
+        for process in processes.values()
+        for service_name in [
+            json_object(process, at="Jaeger process").get("serviceName")
+        ]
+        if isinstance(service_name, str)
+    }
+    spans = json_object_list(trace.get("spans"), at="Jaeger trace spans")
+    operation_names = {
+        operation_name
+        for span in spans
+        for operation_name in [span.get("operationName")]
+        if isinstance(operation_name, str)
+    }
+    return (
+        "vaultspec-a2a" in trace_services
+        and "POST /internal/events/batch" in operation_names
+    )
+
+
 def _assert_worker_ipc_trace(service_stack: ServiceStack, start_us: int) -> None:
     """Poll Jaeger until the worker-originated IPC trace is visible."""
-    found = False
-    traces: JsonObject = {}
-    deadline = time.monotonic() + 30.0
-    while time.monotonic() < deadline:
-        end_us = int(time.time() * 1_000_000)
+
+    def _exported() -> bool:
         traces = json_object(
             service_stack.jaeger_traces(
                 service="vaultspec-a2a",
                 start_us=start_us,
-                end_us=end_us,
+                end_us=int(time.time() * 1_000_000),
                 limit=50,
             ),
             at="Jaeger traces",
         )
-        for trace in json_object_list(traces.get("data"), at="Jaeger traces.data"):
-            processes = json_object(trace.get("processes"), at="Jaeger trace processes")
-            trace_services = {
-                service_name
-                for process in processes.values()
-                for service_name in [
-                    json_object(process, at="Jaeger process").get("serviceName")
-                ]
-                if isinstance(service_name, str)
-            }
-            spans = json_object_list(trace.get("spans"), at="Jaeger trace spans")
-            operation_names = {
-                operation_name
-                for span in spans
-                for operation_name in [span.get("operationName")]
-                if isinstance(operation_name, str)
-            }
-            if "vaultspec-a2a" in trace_services and operation_names & {
-                "POST /internal/events",
-                "POST /internal/events/batch",
-            }:
-                found = True
-                break
-        if found:
-            break
-        time.sleep(1.0)
+        return any(
+            _is_worker_ipc_trace(trace)
+            for trace in json_object_list(traces.get("data"), at="Jaeger traces.data")
+        )
 
-    assert found, "expected a Jaeger trace for worker-originated IPC traffic"
+    wait_until(
+        _exported,
+        deadline=ProgressDeadline(idle_window_s=30.0),
+        interval_s=1.0,
+        stalled=lambda: "expected a Jaeger trace for worker-originated IPC traffic",
+    )
 
 
 def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -> None:
     """A running thread can be cancelled through the public REST API."""
     created = service_stack.create_thread(
         initial_message="Start a long-running task and then cancel it.",
-        team_preset="mock-looping",
+        team_preset="deterministic-looping",
         title="service cancel",
     )
     thread_id = required_text(
         json_object(created, at="created thread"), "run_id", at="created thread"
     )
 
-    active = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_active,
-        timeout=30.0,
+    active = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_active, timeout=30.0
     )
     service_stack.record(f"cancel-active:{thread_id}", active)
 
@@ -120,10 +112,8 @@ def test_cancel_transitions_to_terminal_cancelled(service_stack: ServiceStack) -
     assert required_bool(cancelling, "cancelled", at="cancel response") is True
     assert required_text(cancelling, "status", at="cancel response") == "cancelling"
 
-    cancelled = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_cancelled,
+    cancelled = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_cancelled
     )
     service_stack.record(f"cancelled-state:{thread_id}", cancelled)
 
@@ -149,17 +139,14 @@ def test_health_and_trace_surface_are_observable(
     trace_started_at = time.time()
     created = service_stack.create_thread(
         initial_message="Run a short task so worker IPC generates traceable traffic.",
-        team_preset="mock-success-single",
+        team_preset="deterministic-supervisor-routing",
         title="service trace probe",
     )
     thread_id = required_text(
         json_object(created, at="created thread"), "run_id", at="created thread"
     )
-    traced_thread = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_completed,
-        timeout=60.0,
+    traced_thread = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_completed, timeout=60.0
     )
     service_stack.record(f"trace-probe:{thread_id}", traced_thread)
 
@@ -167,5 +154,5 @@ def test_health_and_trace_surface_are_observable(
     _assert_worker_ipc_trace(service_stack, start_us)
 
     services = json_object(service_stack.jaeger_services(), at="Jaeger services")
-    service_names = set(_text_list(services.get("data"), at="Jaeger services.data"))
+    service_names = set(text_list(services.get("data"), at="Jaeger services.data"))
     assert "vaultspec-a2a" in service_names

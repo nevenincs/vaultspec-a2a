@@ -48,8 +48,7 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from dev.exit_codes import INIT_HOST_TOOL_MISSING, INIT_STALE, OK
 from dev.init import plan
@@ -83,6 +82,10 @@ from dev.init.stamp import (
 from dev.init.stamp import (
     write as write_stamp,
 )
+from dev.paths import REPO_ROOT
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 #: The selectors the justfile recipes pass, mapped to the phases they run.
 SELECTIONS = {
@@ -92,16 +95,6 @@ SELECTIONS = {
     "node": ("node",),
     "tools": ("tools",),
 }
-
-
-def _repo_root() -> Path:
-    """Return the worktree root.
-
-    Returns:
-        The directory two levels above this file, which is the repository root
-        for ``dev/init/__main__.py`` in every repository in the fleet.
-    """
-    return Path(__file__).resolve().parents[2]
 
 
 def _truthy(name: str) -> bool:
@@ -330,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    repo_root = _repo_root()
+    repo_root = REPO_ROOT
     emitter = Emitter(json_mode=args.json or _truthy(JSON_ENV))
     force = args.force or _truthy(FORCE_ENV)
 

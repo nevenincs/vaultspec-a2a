@@ -12,10 +12,6 @@ arrive - promoted by nothing, reported to no one. That is the silent drop the
 queue rules forbid, which is why the refusal is asserted here as part of the
 settlement rather than as a later sweep: when the settlement does not happen,
 nothing is refused either.
-
-Both backends run the settlement proofs. The refusal reads the waiting rows
-under ``FOR UPDATE``, which is a no-op on SQLite, so proving it there alone
-would prove half of it.
 """
 
 from __future__ import annotations
@@ -30,36 +26,34 @@ import pytest
 from ...database import (
     ThreadStatusElectionOutcome,
     begin_write_transaction,
+    close_db,
+    count_queued_continuations,
     create_control_action,
     create_thread,
     elect_thread_status,
+    get_session_factory,
     get_thread,
-    successor_thread_write_authority,
+    init_db,
     thread_write_expectation,
 )
-from ...database.models import RunWriteAuthority
-from ...database.session import close_db, get_session_factory, init_db
-from ...database.tests._backends import BACKENDS
 from ...ipc.schemas import DispatchRequest
+from ...testing import DEFAULT_TEAM_PRESET, adopted_spawner, current_execution_metadata
+from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionResultStatus, ControlActionType, ThreadStatus
 from ...thread.failure_evidence import (
     GraphFailureEvidence,
     failure_detail_fingerprint,
 )
+from ...thread.idempotency import thread_create_action_key
 from ..accepted_input import freeze_accepted_input
 from ..circuit_breaker import WorkerCircuitBreaker
 from ..dispatch import redispatch_reconciling_threads
 from ..dispatch_receipts import prepare_graph_action_receipt
-from ..event_handlers import _handle_terminal_event
-from ..repositories import count_queued_continuations
-from ..worker_management import LazyWorkerSpawner
-from ._catalog_authority import current_execution_metadata
+from ..event_handlers import RelayServices, _handle_terminal_event
 from ._continuation import (
     FIRST_RECEIPT,
-    PRESET,
     RUN,
     BusyRun,
-    busy_run_state,
     envelope,
     journal_action,
     queue_continuation,
@@ -144,11 +138,8 @@ async def _take_cancel_authority(run: BusyRun) -> None:
             RUN,
             expectation=expectation,
             status=ThreadStatus.CANCELLING,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=ControlActionType.CANCEL,
-                action_receipt_id=_CANCEL_RECEIPT,
-            ),
+            action_type=ControlActionType.CANCEL,
+            action_receipt_id=_CANCEL_RECEIPT,
         )
         assert election.outcome is ThreadStatusElectionOutcome.WON
         await db.commit()
@@ -172,51 +163,50 @@ async def _assert_refused_in_place(
         assert await count_queued_continuations(reader, thread_id=RUN) == 0
 
 
-@pytest.mark.parametrize("backend_name", BACKENDS)
 @pytest.mark.asyncio
 async def test_a_failed_turn_refuses_the_continuation_waiting_on_it(
-    tmp_path: Path, backend_name: str
+    busy_run: BusyRun,
 ) -> None:
     """A run settling FAILED answers its queue instead of stranding it."""
-    async with busy_run_state(tmp_path, backend=backend_name) as run:
-        continuation = await queue_continuation(run.sessions, run.workspace)
+    continuation = await queue_continuation(busy_run.sessions, busy_run.workspace)
 
-        await _handle_terminal_event(
-            RUN, _failure_payload(run), session_factory=run.sessions
-        )
+    await _handle_terminal_event(
+        RUN,
+        _failure_payload(busy_run),
+        services=RelayServices(session_factory=busy_run.sessions),
+    )
 
-        async with run.sessions() as reader:
-            thread = await get_thread(reader, RUN)
-            assert thread is not None
-            assert thread.status == ThreadStatus.FAILED.value
-        await _assert_refused_in_place(run.sessions, continuation)
+    async with busy_run.sessions() as reader:
+        thread = await get_thread(reader, RUN)
+        assert thread is not None
+        assert thread.status == ThreadStatus.FAILED.value
+    await _assert_refused_in_place(busy_run.sessions, continuation)
 
 
-@pytest.mark.parametrize("backend_name", BACKENDS)
 @pytest.mark.asyncio
 async def test_a_cancelled_run_refuses_the_continuation_waiting_on_it(
-    tmp_path: Path, backend_name: str
+    busy_run: BusyRun,
 ) -> None:
     """A run settling CANCELLED answers its queue instead of stranding it."""
-    async with busy_run_state(tmp_path, backend=backend_name) as run:
-        continuation = await queue_continuation(run.sessions, run.workspace)
-        await _take_cancel_authority(run)
+    continuation = await queue_continuation(busy_run.sessions, busy_run.workspace)
+    await _take_cancel_authority(busy_run)
 
-        await _handle_terminal_event(
-            RUN, _cancellation_payload(), session_factory=run.sessions
-        )
+    await _handle_terminal_event(
+        RUN,
+        _cancellation_payload(),
+        services=RelayServices(session_factory=busy_run.sessions),
+    )
 
-        async with run.sessions() as reader:
-            thread = await get_thread(reader, RUN)
-            assert thread is not None
-            assert thread.status == ThreadStatus.CANCELLED.value
-        await _assert_refused_in_place(run.sessions, continuation)
+    async with busy_run.sessions() as reader:
+        thread = await get_thread(reader, RUN)
+        assert thread is not None
+        assert thread.status == ThreadStatus.CANCELLED.value
+    await _assert_refused_in_place(busy_run.sessions, continuation)
 
 
-@pytest.mark.parametrize("backend_name", BACKENDS)
 @pytest.mark.asyncio
 async def test_a_settlement_that_is_refused_refuses_nothing_in_the_queue(
-    tmp_path: Path, backend_name: str
+    busy_run: BusyRun,
 ) -> None:
     """No settlement, no refusal: the two are one transaction or neither.
 
@@ -226,39 +216,42 @@ async def test_a_settlement_that_is_refused_refuses_nothing_in_the_queue(
     refusal written anyway would have discarded accepted work for an event
     that changed nothing.
     """
-    async with busy_run_state(tmp_path, backend=backend_name) as run:
-        continuation = await queue_continuation(run.sessions, run.workspace)
-        published: list[str] = []
+    continuation = await queue_continuation(busy_run.sessions, busy_run.workspace)
+    published: list[str] = []
 
-        payload = _failure_payload(run)
-        payload["error_detail"] = "a different failure"
+    payload = _failure_payload(busy_run)
+    payload["error_detail"] = "a different failure"
 
-        await _handle_terminal_event(
-            RUN,
-            payload,
-            session_factory=run.sessions,
+    await _handle_terminal_event(
+        RUN,
+        payload,
+        services=RelayServices(
+            session_factory=busy_run.sessions,
             publish_terminal=lambda: published.append("terminal"),
-        )
-        assert published == [], "a refused terminal must not close the live stream"
+        ),
+    )
+    assert published == [], "a refused terminal must not close the live stream"
 
-        async with run.sessions() as reader:
-            thread = await get_thread(reader, RUN)
-            assert thread is not None
-            assert thread.status == ThreadStatus.RUNNING.value
-            waiting = await journal_action(reader, continuation)
-            assert waiting.result_status == ControlActionResultStatus.QUEUED.value
-            assert waiting.applied_at is None
-            assert waiting.claim_token is not None
-            assert await count_queued_continuations(reader, thread_id=RUN) == 1
+    async with busy_run.sessions() as reader:
+        thread = await get_thread(reader, RUN)
+        assert thread is not None
+        assert thread.status == ThreadStatus.RUNNING.value
+        waiting = await journal_action(reader, continuation)
+        assert waiting.result_status == ControlActionResultStatus.QUEUED.value
+        assert waiting.applied_at is None
+        assert waiting.claim_token is not None
+        assert await count_queued_continuations(reader, thread_id=RUN) == 1
 
-        await _handle_terminal_event(
-            RUN,
-            _failure_payload(run),
-            session_factory=run.sessions,
+    await _handle_terminal_event(
+        RUN,
+        _failure_payload(busy_run),
+        services=RelayServices(
+            session_factory=busy_run.sessions,
             publish_terminal=lambda: published.append("terminal"),
-        )
-        assert published == ["terminal"]
-        await _assert_refused_in_place(run.sessions, continuation)
+        ),
+    )
+    assert published == ["terminal"]
+    await _assert_refused_in_place(busy_run.sessions, continuation)
 
 
 def _authority_absent(workspace: Path) -> str:
@@ -282,7 +275,7 @@ async def _seed_reconciling_run(
             db,
             thread_id=RUN,
             status=ThreadStatus.RECONCILING,
-            team_preset=PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
             metadata=metadata,
             write_authority=RunWriteAuthority(
                 0, 1, ControlActionType.INGEST, FIRST_RECEIPT
@@ -292,7 +285,7 @@ async def _seed_reconciling_run(
             db,
             thread_id=RUN,
             action_type=ControlActionType.INGEST,
-            idempotency_key=f"thread-create:{RUN}",
+            idempotency_key=thread_create_action_key(RUN),
             dispatch_id=FIRST_RECEIPT,
             recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=30),
             payload=envelope("first turn", workspace),
@@ -325,10 +318,7 @@ async def test_the_recovery_sweep_refuses_the_queue_of_a_run_it_fails(
         await _seed_reconciling_run(sessions, tmp_path, stored_metadata(tmp_path))
         continuation = await queue_continuation(sessions, tmp_path)
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.replace_process(None)
+        spawner = adopted_spawner()
         async with httpx.AsyncClient(
             base_url="http://127.0.0.1:9", timeout=0.2
         ) as client:

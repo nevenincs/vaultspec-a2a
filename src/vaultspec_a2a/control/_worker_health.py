@@ -12,13 +12,18 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import TypeAdapter, ValidationError
-
 from ..lifecycle.pairing import (
     WorkerPairingVerdict,
     classify_worker_pairing,
     eviction_is_authorized,
 )
+from ..utils import bearer_header, redact_text
+from ..utils._process_tree import (
+    PortClaim,
+    classify_port_claim_async,
+    port_has_listener_async,
+)
+from ..utils.coercion import coerce_object_mapping
 from .config import settings
 from .worker_status import WorkerConnectionStatus
 
@@ -33,23 +38,23 @@ __all__ = [
     "WorkerHealthProbe",
     "WorkerLiveness",
     "WorkerState",
-    "_build_worker_restart_detail",
-    "_desktop_worker_port_clear",
-    "_evict_stale_worker",
-    "_internal_auth_headers",
-    "_read_log_tail",
-    "_shared_worker_port_clear",
-    "_tcp_port_ready",
-    "_worker_stderr_log_path",
+    "build_worker_restart_detail",
+    "desktop_worker_port_clear",
+    "evict_stale_worker",
+    "internal_auth_headers",
     "probe_worker_health",
+    "read_log_tail",
+    "shared_worker_port_clear",
     "sweep_orphan_worker_logs",
+    "worker_credential_authorized",
     "worker_liveness",
     "worker_ready_and_ours",
+    "worker_stderr_log_path",
 ]
 
 logger = logging.getLogger("vaultspec_a2a.control.worker_management")
 _WORKER_STDERR_TAIL_BYTES = 4096
-_JSON_OBJECT = TypeAdapter(dict[str, object])
+_PORT_PROBE_TIMEOUT_SECONDS = 0.5
 
 # ---------------------------------------------------------------------------
 # WorkerState dataclass — decouples watchdog from app.state
@@ -242,7 +247,7 @@ def _runtime_dir() -> Path:
     return runtime_dir
 
 
-def _worker_stderr_log_path(worker_port: int) -> Path:
+def worker_stderr_log_path(worker_port: int) -> Path:
     """Return the deterministic stderr log path for the auto-spawned worker."""
     return _runtime_dir() / f"worker-autospawn-{worker_port}.stderr.log"
 
@@ -317,7 +322,7 @@ def _advance_to_character_boundary(raw: bytes) -> bytes:
     return raw[index:]
 
 
-def _read_log_tail(log_path: Path, max_bytes: int = _WORKER_STDERR_TAIL_BYTES) -> str:
+def read_log_tail(log_path: Path, max_bytes: int = _WORKER_STDERR_TAIL_BYTES) -> str:
     """Read and decode the tail of a worker stderr log file.
 
     The tail starts at a byte offset, which for a log carrying non-ASCII provider
@@ -339,49 +344,78 @@ def _read_log_tail(log_path: Path, max_bytes: int = _WORKER_STDERR_TAIL_BYTES) -
     return raw.decode("utf-8", errors="replace").strip()
 
 
-def _build_worker_restart_detail(
+def build_worker_restart_detail(
     *,
     returncode: int | None,
     stderr_log_path: Path | None,
 ) -> str:
     """Build a compact diagnostic string for health/readiness surfaces."""
     detail = f"returncode={returncode}"
-    stderr_tail = _read_log_tail(stderr_log_path) if stderr_log_path is not None else ""
+    stderr_tail = read_log_tail(stderr_log_path) if stderr_log_path is not None else ""
     if stderr_tail:
-        compact_tail = re.sub(r"\s+", " ", stderr_tail)[:500]
+        compact_tail = redact_text(re.sub(r"\s+", " ", stderr_tail))[:500]
         detail += f"; stderr_tail={compact_tail}"
     detail += f"; stderr_log={stderr_log_path}"
     return detail
 
 
-async def _tcp_port_ready(host: str, port: int) -> bool:
-    """Fast-path: check if a TCP port is accepting connections.
-
-    Much cheaper than a full HTTP health check — used to skip expensive
-    httpx probes while the process is still binding.
-    """
-    try:
-        _reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=0.5,
-        )
-        writer.close()
-        await writer.wait_closed()
-    except (OSError, TimeoutError):
-        return False
-    return True
-
-
-def _internal_auth_headers() -> dict[str, str] | None:
-    """Return the worker-IPC bearer header when the internal token is configured.
+def internal_auth_headers(token: str | None) -> dict[str, str] | None:
+    """Return the worker-IPC bearer header for *token*, or none when it is unset.
 
     The gateway-worker pair authenticates every probe and command with the shared
-    worker interprocess-communication credential; a DEVELOPMENT gateway with no
-    token sends none, matching the bearer rule the worker enforces.
+    worker interprocess-communication credential the gateway seated on its
+    application state; a DEVELOPMENT gateway with no token sends none, matching
+    the bearer rule the worker enforces.
     """
-    if settings.internal_token is None:
+    if token is None:
         return None
-    return {"Authorization": f"Bearer {settings.internal_token}"}
+    return bearer_header(token)
+
+
+async def _worker_port_claim(worker_port: int, *, owner_pid: int) -> PortClaim:
+    """Classify the worker port against *owner_pid*'s process tree.
+
+    The gateway starts every worker it owns as its own child, so ancestry is
+    already proof of ownership and needs no challenge protocol: either the
+    listener sits in the tree rooted at *owner_pid* or it belongs to someone
+    else. Pre-spawn that root is the gateway process, whose descendants include
+    any generation it still owns; during readiness it is the worker just spawned,
+    which is the narrowest tree that can be ours.
+    """
+    return await classify_port_claim_async(
+        worker_port, owner_pid, timeout=_PORT_PROBE_TIMEOUT_SECONDS
+    )
+
+
+async def worker_credential_authorized(
+    worker_port: int, *, owner_pid: int | None, action: str
+) -> bool:
+    """Whether *action* may present this gateway's worker credential on the port.
+
+    Authorized only when the occupant is confirmed to be *owner_pid* or one of
+    its descendants. A port nobody holds is not authorized either - there is no
+    occupant to talk to - so a caller that must distinguish "clear to bind" from
+    "held by a stranger" reads :func:`_worker_port_claim` instead of this.
+
+    *owner_pid* is ``None`` for an externally managed worker
+    (``auto_spawn_worker=False``): the operator points this gateway at a process
+    it never spawned, so ancestry proves nothing there and the credential rests
+    on that configuration rather than on a verdict this gateway can reach.
+    """
+    if owner_pid is None:
+        return True
+    claim = await _worker_port_claim(worker_port, owner_pid=owner_pid)
+    if claim is PortClaim.OURS:
+        return True
+    logger.warning(
+        "Withholding the worker credential from port %d before %s: the listener"
+        " is not pid %d nor a descendant of it (claim: %s)",
+        worker_port,
+        action,
+        owner_pid,
+        claim.value,
+    )
+    return False
 
 
 async def probe_worker_health(
@@ -389,6 +423,7 @@ async def probe_worker_health(
     timeout: float = 2.0,
     *,
     client: httpx.AsyncClient | None = None,
+    internal_token: str | None,
 ) -> WorkerHealthProbe:
     """Probe the worker's ``GET /health`` once.
 
@@ -396,17 +431,30 @@ async def probe_worker_health(
     the watchdog's authoritative crash check, and ``/health``. Request-path
     callers pass the app-pooled *client* to reuse its connection pool (already
     carrying the worker IPC bearer); the watchdog and boot paths pass none and get
-    a self-contained one-shot client that presents the same bearer, so a worker
-    that enforces the credential on ``/health`` still answers its owner.
+    a self-contained one-shot client that presents *internal_token* as the same
+    bearer, so a worker that enforces the credential on ``/health`` still answers
+    its owner. *internal_token* is not read when a *client* is supplied.
 
-    The health verdict is an exact ``200`` and nothing else, so every caller
-    agrees and ``/health`` can never silently diverge from the watchdog's
-    restart decision (a ``204`` fails both, not one). The decoded body is a
-    strictly additive by-product for callers that also want what the worker
-    *reported*: a body that will not decode leaves the verdict untouched and
-    yields ``None``, so reporting can never turn a healthy worker unhealthy.
+    *internal_token* is required, with no default: a credential this probe was
+    never handed and one the caller holds but forgot to pass produce the same
+    unauthenticated request, and the second is a defect that reads as a worker
+    refusing its owner. Naming ``None`` is how a caller says it has none.
+
+    The health verdict is an exact ``200`` whose body passes the shared
+    role-aware readiness rule
+    (:func:`~vaultspec_a2a.lifecycle.discovery.health_payload_ready`), so every
+    caller agrees and ``/health`` can never silently diverge from the watchdog's
+    restart decision (a ``204`` fails both, not one). Reading the status code
+    alone is not enough on loopback: the gateway serves ``/health`` as well, and
+    its readiness is a different fact under a different key, so a status-only
+    verdict let one service's answer stand in for the other's readiness - and a
+    200 carrying no health object at all read as a ready worker. ``healthy``
+    therefore implies a readable worker body, which is also the pairing evidence
+    every adoption decision goes on to read.
     """
     import httpx
+
+    from ..lifecycle.discovery import health_payload_ready
 
     async def _probe(active: httpx.AsyncClient) -> WorkerHealthProbe:
         resp = await active.get(f"{url}/health", timeout=timeout)
@@ -415,17 +463,18 @@ async def probe_worker_health(
         try:
             decoded: object = resp.json()
         except ValueError:
-            return WorkerHealthProbe(healthy=True, body=None)
-        try:
-            body = _JSON_OBJECT.validate_python(decoded)
-        except ValidationError:
-            return WorkerHealthProbe(healthy=True, body=None)
+            return WorkerHealthProbe(healthy=False, body=None)
+        body = coerce_object_mapping(decoded)
+        if not health_payload_ready(body, "worker"):
+            return WorkerHealthProbe(healthy=False, body=body)
         return WorkerHealthProbe(healthy=True, body=body)
 
     try:
         if client is not None:
             return await _probe(client)
-        async with httpx.AsyncClient(headers=_internal_auth_headers()) as owned:
+        async with httpx.AsyncClient(
+            headers=internal_auth_headers(internal_token)
+        ) as owned:
             return await _probe(owned)
     except Exception as exc:
         # An unreachable verdict decides run admission, so a silent swallow here
@@ -491,7 +540,12 @@ def _classify_worker_body(
 
 
 async def worker_ready_and_ours(
-    worker_url: str, *, current_generation: int = 0
+    worker_url: str,
+    worker_port: int,
+    *,
+    current_generation: int = 0,
+    internal_token: str | None,
+    owner_pid: int | None,
 ) -> bool:
     """Whether a healthy worker at *worker_url* is provably THIS gateway's.
 
@@ -499,12 +553,17 @@ async def worker_ready_and_ours(
     ``/health`` 200 only proves *some* worker holds the port, which a foreign
     orphan squatting a shared band port satisfies just as well as our own.
 
+    Ownership is settled before the credential, never by it: the occupant must be
+    *owner_pid* or one of its descendants, or no probe is sent at all (see
+    :func:`worker_credential_authorized`, which also documents the ``None``
+    exemption for an externally managed worker).
+
     Profile-split enforcement (the authenticated-pairing decision): under the
     ARMED desktop profile the authenticated pairing verdict is the authority -
     only a worker whose reported gateway lifetime and spawn generation classify
     as ``OWNED`` is adopted; missing, blank, or foreign evidence fails closed.
-    Unarmed profiles require an exact declared ``gateway_url`` match. Registry-
-    and Compose-managed workers publish that current evidence through health.
+    Unarmed profiles require an exact declared ``gateway_url`` match.
+    Registry-managed workers publish that current evidence through health.
 
     An occupant that answered but reported nothing readable is not ours under
     either profile. This is the opposite reading from the spawn path, which
@@ -513,7 +572,11 @@ async def worker_ready_and_ours(
     questions, and the safe answer to the first is the unsafe answer to the
     second. Missing, blank and unreadable targets are all absence of evidence.
     """
-    probe = await probe_worker_health(worker_url)
+    if not await worker_credential_authorized(
+        worker_port, owner_pid=owner_pid, action="a worker readiness probe"
+    ):
+        return False
+    probe = await probe_worker_health(worker_url, internal_token=internal_token)
     body = probe.body
     if not probe.healthy or body is None:
         return False
@@ -531,42 +594,70 @@ async def worker_ready_and_ours(
     return _same_gateway(body.get("gateway_url"), settings.gateway_url)
 
 
-async def _evict_stale_worker(
+async def evict_stale_worker(
     worker_url: str,
     worker_port: int,
     *,
+    internal_token: str | None,
+    owner_pid: int,
     timeout: float = 10.0,
 ) -> bool:
-    """Terminate a stale worker and wait for the port to free.
+    """Terminate a prior generation of OUR worker and wait for the port to free.
 
     Posts the worker's bearer-authenticated ``/admin/shutdown`` (an
     ``os.kill(SIGTERM)`` that is an immediate ``TerminateProcess`` on Windows, not
     a graceful run-draining stop) and polls the TCP port until it stops accepting
-    connections. Only ever aimed at a foreign-gateway orphan, never at a worker
-    serving this gateway's runs, so the abrupt stop cannot drop live work of ours.
-    Returns ``True`` once the port is free, ``False`` if it is still bound after
-    *timeout* seconds. The internal token is presented so the shutdown is accepted
-    only when this gateway is the worker's paired owner.
+    connections. Returns ``True`` once the port is free and ``False`` if it is
+    still bound after *timeout* seconds.
+
+    The shutdown request is sent only to an occupant confirmed to sit inside
+    *owner_pid*'s process tree. That confirmation is the whole admission rule
+    here: terminating another process is the most destructive thing the gateway
+    does on the worker port, so it is aimed only at a listener this gateway
+    demonstrably owns, never at a worker serving someone else's runs. A caller's
+    pairing verdict decides WHETHER to evict; ancestry decides whether it MAY,
+    and the credential follows that, never precedes it. An occupant it does not
+    own is a conflict and the port is reported as still held, with nothing sent.
+
+    A port nobody holds needs no request: the eviction's whole purpose is a free
+    port, so it reports success and still collects the orphan's log.
     """
     import httpx
 
-    with contextlib.suppress(Exception):
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                f"{worker_url}/admin/shutdown",
-                headers=_internal_auth_headers(),
-                timeout=2.0,
-            )
+    claim = await _worker_port_claim(worker_port, owner_pid=owner_pid)
+    if claim in (PortClaim.FOREIGN, PortClaim.UNRESOLVED):
+        logger.error(
+            "Refusing to evict the occupant of worker port %d: the listener is"
+            " not pid %d nor a descendant of it (claim: %s), so it receives no"
+            " credential and no shutdown request",
+            worker_port,
+            owner_pid,
+            claim.value,
+        )
+        return False
+
+    if claim is PortClaim.OURS:
+        with contextlib.suppress(Exception):
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"{worker_url}/admin/shutdown",
+                    headers=internal_auth_headers(internal_token),
+                    timeout=2.0,
+                )
 
     deadline = asyncio.get_event_loop().time() + timeout
     freed = False
     while asyncio.get_event_loop().time() < deadline:
-        if not await _tcp_port_ready("127.0.0.1", worker_port):
+        if not await port_has_listener_async(
+            worker_port, timeout=_PORT_PROBE_TIMEOUT_SECONDS
+        ):
             freed = True
             break
         await asyncio.sleep(0.25)
     else:
-        freed = not await _tcp_port_ready("127.0.0.1", worker_port)
+        freed = not await port_has_listener_async(
+            worker_port, timeout=_PORT_PROBE_TIMEOUT_SECONDS
+        )
     if freed:
         # The evicted worker's own stderr log is a dead end from this point:
         # nothing will append to it unless OUR spawn reuses the same port (which
@@ -574,111 +665,169 @@ async def _evict_stale_worker(
         # would otherwise leave it behind exactly like the registry orphans this
         # step's kill/reap deletion closes.
         with contextlib.suppress(OSError):
-            _worker_stderr_log_path(worker_port).unlink(missing_ok=True)
+            worker_stderr_log_path(worker_port).unlink(missing_ok=True)
     return freed
 
 
-async def _desktop_worker_port_clear(
-    worker_url: str, worker_port: int, generation: int
+async def _occupant_is_addressable(worker_port: int, *, owner_pid: int) -> bool | None:
+    """Whether the pre-spawn occupant of *worker_port* may be addressed at all.
+
+    ``None`` means nothing holds the port, so the caller is clear to spawn onto
+    it. ``True`` means the occupant sits inside *owner_pid*'s tree and may
+    receive a credentialed probe. ``False`` is a conflict: a listener this
+    gateway does not own, or one whose owner could not be read, which it must
+    neither credential, adopt, nor evict - including a listener that would answer
+    ``/health`` exactly like ours, since echoing our shape is not evidence of
+    ancestry.
+    """
+    claim = await _worker_port_claim(worker_port, owner_pid=owner_pid)
+    if claim is PortClaim.FREE:
+        return None
+    if claim is PortClaim.OURS:
+        return True
+    logger.error(
+        "Worker port %d is held by a listener this gateway does not own"
+        " (claim: %s, expected pid %d or a descendant of it) — refusing to"
+        " spawn, probe, adopt, or evict",
+        worker_port,
+        claim.value,
+        owner_pid,
+    )
+    return False
+
+
+async def _ready_occupant_body(
+    worker_url: str, worker_port: int, *, internal_token: str | None
+) -> Mapping[str, object] | None:
+    """The held port's occupant body, or ``None`` when it is not a ready worker.
+
+    Reached only once the listener is confirmed to be ours, so a ``None`` here is
+    never "the port is free": something our tree owns holds it and did not answer
+    as a ready worker. That is unadoptable AND unspawnable - a replacement could
+    not bind the held port, and the readiness poll would then wait out its whole
+    budget against the survivor - so the caller refuses rather than tries.
+    """
+    occupant = await probe_worker_health(worker_url, internal_token=internal_token)
+    if occupant.healthy and occupant.body is not None:
+        return occupant.body
+    logger.error(
+        "Worker port %d is held by an occupant that does not answer as a ready"
+        " worker — refusing to spawn onto the held port, adopt it, or evict it",
+        worker_port,
+    )
+    return None
+
+
+async def desktop_worker_port_clear(
+    worker_url: str,
+    worker_port: int,
+    generation: int,
+    *,
+    internal_token: str | None,
+    owner_pid: int,
 ) -> bool:
     """Adopt or evict only a proven desktop worker occupying this port."""
-    occupant = await probe_worker_health(worker_url)
-    if occupant.healthy:
-        verdict = _classify_worker_body(
-            occupant.body or {}, current_generation=generation
-        )
-        if verdict is WorkerPairingVerdict.OWNED:
-            logger.info(
-                "Worker already running at %s with an owned pairing "
-                "verdict — adopting instead of spawning",
-                worker_url,
-            )
-            return False
-        if eviction_is_authorized(
-            verdict, desktop_profile_armed=settings.desktop_profile_armed
-        ):
-            logger.warning(
-                "Worker at %s is this gateway's prior generation "
-                "(verdict: %s) — evicting before spawning the replacement",
-                worker_url,
-                verdict.value,
-            )
-            if not await _evict_stale_worker(worker_url, worker_port):
-                logger.error(
-                    "Prior-generation worker at %s did not release port %d "
-                    "after an authorized eviction — refusing to spawn onto "
-                    "a held port (conflict, no adoption)",
-                    worker_url,
-                    worker_port,
-                )
-                return False
-        else:
-            logger.error(
-                "Worker port %d is held by a process this gateway cannot "
-                "adopt or evict (pairing verdict: %s) — refusing to spawn "
-                "(conflict, no adoption, no eviction)",
-                worker_port,
-                verdict.value,
-            )
-            return False
-    return True
-
-
-async def _shared_worker_port_clear(worker_url: str, worker_port: int) -> bool:
-    """Handle a same-gateway worker or a stale foreign development worker."""
-    existing = await probe_worker_health(worker_url)
-    if existing.healthy:
-        if existing.body is None:
-            logger.error(
-                "Worker port %d is held by a healthy worker with unreadable "
-                "pairing evidence — refusing to spawn or adopt",
-                worker_port,
-            )
-            return False
-        declared_target = existing.body.get("gateway_url")
-        if not isinstance(declared_target, str) or not declared_target.strip():
-            logger.error(
-                "Worker port %d is held by a healthy worker without an exact "
-                "gateway target — refusing to spawn, adopt, or evict",
-                worker_port,
-            )
-            return False
-        if _same_gateway(
-            declared_target,
-            settings.gateway_url,
-        ):
-            logger.info(
-                "Worker already running at %s targeting this gateway (%s)"
-                " — skipping auto-spawn",
-                worker_url,
-                settings.gateway_url,
-            )
-            return False
-        # A stale orphan from a dead dev-band gateway is squatting the worker
-        # port: it heartbeats a gateway that no longer exists and would never
-        # be re-pointed. Evict it and spawn a fresh worker wired to THIS
-        # gateway.
-        logger.warning(
-            "Worker at %s targets a foreign gateway (%s != %s) — evicting the"
-            " stale orphan before spawning a fresh worker",
+    addressable = await _occupant_is_addressable(worker_port, owner_pid=owner_pid)
+    if addressable is None:
+        return True
+    if not addressable:
+        return False
+    body = await _ready_occupant_body(
+        worker_url, worker_port, internal_token=internal_token
+    )
+    if body is None:
+        return False
+    verdict = _classify_worker_body(body, current_generation=generation)
+    if verdict is WorkerPairingVerdict.OWNED:
+        logger.info(
+            "Worker already running at %s with an owned pairing "
+            "verdict — adopting instead of spawning",
             worker_url,
-            declared_target,
+        )
+        return False
+    if not eviction_is_authorized(
+        verdict, desktop_profile_armed=settings.desktop_profile_armed
+    ):
+        logger.error(
+            "Worker port %d is held by a process this gateway cannot "
+            "adopt or evict (pairing verdict: %s) — refusing to spawn "
+            "(conflict, no adoption, no eviction)",
+            worker_port,
+            verdict.value,
+        )
+        return False
+    logger.warning(
+        "Worker at %s is this gateway's prior generation "
+        "(verdict: %s) — evicting before spawning the replacement",
+        worker_url,
+        verdict.value,
+    )
+    if not await evict_stale_worker(
+        worker_url,
+        worker_port,
+        internal_token=internal_token,
+        owner_pid=owner_pid,
+    ):
+        logger.error(
+            "Prior-generation worker at %s did not release port %d "
+            "after an authorized eviction — refusing to spawn onto "
+            "a held port (conflict, no adoption)",
+            worker_url,
+            worker_port,
+        )
+        return False
+    return True
+
+
+async def shared_worker_port_clear(
+    worker_url: str, worker_port: int, *, internal_token: str | None, owner_pid: int
+) -> bool:
+    """Adopt only a same-gateway worker this gateway owns; never evict.
+
+    An unarmed gateway has no authority to terminate a process on the worker
+    port, so every occupant it cannot adopt is a conflict it reports and leaves
+    alone: a stale development orphan belongs to the dev-process registry, which
+    reaps it through its own kill verb. Eviction is reserved for an armed desktop
+    gateway reclaiming a generation it demonstrably spawned
+    (:func:`~vaultspec_a2a.lifecycle.pairing.eviction_is_authorized`).
+    """
+    addressable = await _occupant_is_addressable(worker_port, owner_pid=owner_pid)
+    if addressable is None:
+        return True
+    if not addressable:
+        return False
+    body = await _ready_occupant_body(
+        worker_url, worker_port, internal_token=internal_token
+    )
+    if body is None:
+        return False
+    declared_target = body.get("gateway_url")
+    if not isinstance(declared_target, str) or not declared_target.strip():
+        logger.error(
+            "Worker port %d is held by a healthy worker without an exact "
+            "gateway target — refusing to spawn, adopt, or evict",
+            worker_port,
+        )
+        return False
+    if _same_gateway(declared_target, settings.gateway_url):
+        logger.info(
+            "Worker already running at %s targeting this gateway (%s)"
+            " — skipping auto-spawn",
+            worker_url,
             settings.gateway_url,
         )
-        if not await _evict_stale_worker(worker_url, worker_port):
-            # The foreign orphan would not release the port. Spawning anyway is
-            # the adoption hazard this guard exists to close: our new worker
-            # cannot bind the held port, and the readiness probe would find the
-            # SURVIVING foreign worker healthy and hand it back as ours. Fail
-            # loud instead of spawning a competitor onto a port a foreign
-            # gateway's worker still serves.
-            logger.error(
-                "Stale worker at %s did not release port %d after eviction —"
-                " refusing to spawn onto a foreign-held port (manual reap"
-                " required)",
-                worker_url,
-                worker_port,
-            )
-            return False
-
-    return True
+        return False
+    # A worker of ours that heartbeats a gateway that no longer exists. It
+    # still holds the port, and spawning a competitor onto it is the adoption
+    # hazard this guard closes: our new worker cannot bind, and the readiness
+    # probe would find the SURVIVING worker healthy and hand it back as ours.
+    # Report the conflict instead of terminating it.
+    logger.error(
+        "Worker at %s targets a foreign gateway (%s != %s) — refusing to"
+        " spawn onto the held port; an unarmed gateway does not evict, so"
+        " reap the stale worker through the dev-process registry",
+        worker_url,
+        declared_target,
+        settings.gateway_url,
+    )
+    return False

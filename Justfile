@@ -94,12 +94,11 @@ procs := creds + " service -- uv run --no-sync --frozen --no-default-groups vaul
 # The vaultspec-core and vaultspec-rag CLIs this checkout runs on ITSELF.
 core := "uv run --no-sync --frozen --no-default-groups --group tooling vaultspec-core"
 rag := "uv run --no-sync --frozen --no-default-groups --extra rag vaultspec-rag"
-safe_enroll := "uv run --no-sync --frozen --no-default-groups --group tooling python dev/vault/enroll.py"
+safe_enroll := "uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.vault.enroll"
 
-# The bounded Docker Compose projects. Each is pinned to its own project name
-# so one stack can never tear another's containers down.
+# The bounded Docker Compose project. It is pinned to its own project name so
+# it can never tear another stack's containers down.
 compose_integration := creds + " compose -- docker compose --project-name vaultspec-a2a-integration -f service/docker-compose.integration.yml"
-compose_infrastructure := creds + " compose -- docker compose --project-name vaultspec-a2a-infrastructure -f service/docker-compose.integration.yml"
 
 # List every recipe, grouped by consequence.
 [group('meta')]
@@ -143,7 +142,7 @@ init:
 init-full:
     uv run --no-project --python 3.13 -- python -m dev.init full
 
-# Resolve the locked tooling and server dependency profiles into .venv.
+# Resolve the locked tooling, OTLP and development profiles into .venv.
 [group('setup')]
 init-python:
     uv run --no-project --python 3.13 -- python -m dev.init python
@@ -173,10 +172,10 @@ init-full-check:
 deps-base:
     {{dev}} deps base
 
-# Resolve the server runtime profile from the project lock.
+# Resolve the base runtime plus the optional OTLP exporter from the project lock.
 [group('setup')]
-deps-server:
-    {{dev}} deps server
+deps-otlp:
+    {{dev}} deps otlp
 
 # Resolve the RAG runtime profile without provisioning models.
 [group('setup')]
@@ -203,7 +202,7 @@ deps-claude-cli:
 deps-codex-cli:
     {{dev}} deps codex-cli
 
-# Verify rootless Docker and install pinned integration CLI plugins.
+# Verify rootless Docker and install the pinned Docker Compose plugin.
 [group('setup')]
 deps-docker-ci:
     {{dev}} deps docker-ci
@@ -262,7 +261,7 @@ doctor-docker:
 # Resolve the locked development environment used by the git hooks.
 [group('setup')]
 hooks-bootstrap:
-    uv sync --locked --no-default-groups --extra server --group all
+    uv sync --locked --no-default-groups --extra otlp --group all
 
 # Install the repository-managed, path-agnostic prek hook.
 [group('setup')]
@@ -339,16 +338,6 @@ check-exports:
 check-complexity:
     {{dev}} lint complexity
 
-# Gate cyclomatic complexity.
-[group('check')]
-check-cyclomatic:
-    {{dev}} lint cyclomatic
-
-# Gate function and class shape.
-[group('check')]
-check-shape:
-    {{dev}} lint shape
-
 # Gate the declared design limits.
 [group('check')]
 check-limits:
@@ -373,6 +362,13 @@ check-imports:
 [group('check')]
 check-anchors:
     {{dev}} lint anchors
+
+# Gate copy-paste clones against the adjudicated baseline (Q.2): blocking,
+# every tier plus dev/. `audit-duplication` below is the separate advisory
+# production-only measurement (duplicated-line percentage, uncapped listing).
+[group('check')]
+check-duplication:
+    {{dev}} lint duplication
 
 # Gate the declared dependency surface.
 [group('check')]
@@ -455,11 +451,6 @@ audit-deps:
 audit-security:
     {{dev}} audit security
 
-# Report unreachable code; advisory, exits 0.
-[group('audit')]
-audit-dead-code:
-    {{dev}} audit dead-code
-
 # Report copy-paste clones; advisory, exits 0.
 [group('audit')]
 audit-duplication:
@@ -469,11 +460,6 @@ audit-duplication:
 [group('audit')]
 audit-reachability:
     {{dev}} audit reachability
-
-# Print the reachability burndown as one integer; scan failures return nonzero.
-[group('audit')]
-audit-dead-code-burndown:
-    uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.audit.dead_code_burndown
 
 # Print every type diagnostic verbatim, behind the grouped gate's summary.
 [group('audit')]
@@ -531,7 +517,7 @@ test-parallel:
 test-service:
     {{creds}} live-tests -- {{dev}} test service
 
-# Certify native services against development-only trace and mock fixtures.
+# Certify native services against the development-only trace fixture.
 [group('test')]
 test-native-integration:
     {{dev}} test native-integration
@@ -623,17 +609,12 @@ test-collect-all *ARGS:
 build-package:
     {{dev}} build package
 
-# Build the development-only VidaiMock fixture image.
-[group('build')]
-build-docker:
-    {{dev}} build docker
-
 # Remove generated package, documentation, and Python cache artifacts.
 [group('build')]
 build-clean:
     {{dev}} build clean
 
-# Build every artifact producible without Docker.
+# Build every artifact.
 [group('build')]
 build-all:
     {{dev}} build all
@@ -655,7 +636,7 @@ docs-build:
 
 # ===========================================================================
 #  dev - passthroughs to the product CLI, the process registry, the bounded
-#  Compose stacks, and this checkout's own vaultspec and RAG state.
+#  Jaeger fixture stack, and this checkout's own vaultspec and RAG state.
 # ===========================================================================
 
 # Pass arguments directly to the product CLI.
@@ -743,45 +724,25 @@ service-worker-up NAME="dev" *ARGS="":
 service-engine-up NAME REPO BUILD_REPO WORKSPACE *ARGS:
     {{procs}} up engine-dev {{ NAME }} --repo {{ REPO }} --build-repo {{ BUILD_REPO }} --workspace {{ WORKSPACE }} {{ ARGS }}
 
-# Validate the deterministic integration stack configuration.
+# Validate the Jaeger trace fixture's Compose configuration.
 [group('dev')]
 stack-integration-config: doctor-docker
     {{compose_integration}} config
 
-# Start the deterministic integration stack.
+# Start the Jaeger trace fixture.
 [group('dev')]
 stack-integration-up: doctor-docker
-    {{compose_integration}} up -d --build --wait
+    {{compose_integration}} up -d --wait jaeger
 
-# Stop and remove the deterministic integration stack.
+# Stop and remove the Jaeger trace fixture.
 [group('dev')]
 stack-integration-down: doctor-docker
     {{compose_integration}} down --remove-orphans
 
-# Show deterministic integration stack status.
+# Show Jaeger trace fixture status.
 [group('dev')]
 stack-integration-status: doctor-docker
     {{compose_integration}} ps
-
-# Validate the integration file used by the isolated infrastructure project.
-[group('dev')]
-stack-infrastructure-config: doctor-docker
-    {{compose_infrastructure}} config
-
-# Start only Jaeger in its isolated infrastructure Compose project.
-[group('dev')]
-stack-infrastructure-up: doctor-docker
-    {{compose_infrastructure}} up -d --wait jaeger
-
-# Stop and remove the isolated infrastructure Compose project.
-[group('dev')]
-stack-infrastructure-down: doctor-docker
-    {{compose_infrastructure}} down --remove-orphans
-
-# Show infrastructure stack status.
-[group('dev')]
-stack-infrastructure-status: doctor-docker
-    {{compose_infrastructure}} ps
 
 # Resolve locked tooling and enroll the workspace through Vaultspec Core.
 [group('dev')]

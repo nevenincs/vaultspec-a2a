@@ -7,6 +7,7 @@ from typing import cast
 
 import pytest
 
+from .._team_selection_record import frozen_team_selection_from_record
 from ..provider_catalog import (
     AdmissionState,
     AuthenticationState,
@@ -28,7 +29,6 @@ from ..provider_catalog import (
 from ..team_selection import (
     TeamSelectionError,
     freeze_team_selection,
-    frozen_team_selection_from_record,
     normalize_replay_selection,
 )
 
@@ -93,17 +93,20 @@ def _record() -> ProviderRecord:
     )
 
 
-def _selection(**changes: object) -> SelectionReference:
-    values: dict[str, object] = {
-        "schema_version": 1,
-        "provider_id": "codex",
-        "execution_mode": "codex-app-server",
-        "catalog_revision": "rev-1",
-        "entry_id": "entry-1",
-        "controls": (),
-    }
-    values.update(changes)
-    return SelectionReference(**values)  # type: ignore[arg-type]
+def _selection(
+    *,
+    catalog_revision: str = "rev-1",
+    entry_id: str = "entry-1",
+    controls: tuple[ControlSelection, ...] = (),
+) -> SelectionReference:
+    return SelectionReference(
+        schema_version=1,
+        provider_id="codex",
+        execution_mode="codex-app-server",
+        catalog_revision=catalog_revision,
+        entry_id=entry_id,
+        controls=controls,
+    )
 
 
 def test_freeze_normalizes_authoritative_defaults_and_exact_model_value() -> None:
@@ -118,7 +121,7 @@ def test_freeze_normalizes_authoritative_defaults_and_exact_model_value() -> Non
     assert frozen.selection.reference.controls == (
         ControlSelection(control_id="reasoning", option_id="low"),
     )
-    assert frozen.compiler_map()["coder"]["model_name"] == "gpt-exact"
+    assert frozen.compiler_map()["coder"].model_name == "gpt-exact"
     assert frozen.to_record()["selection"]["controls"] == [
         {
             "control_id": "reasoning",
@@ -305,13 +308,13 @@ def test_replay_normalizes_implicit_and_explicit_default_identically() -> None:
         records=(_record(),),
     )
     omitted, _, _ = normalize_replay_selection(
-        record=frozen.to_record(),
+        frozen=frozen,
         selection=_selection(),
         overrides={},
         fallbacks=(),
     )
     explicit, _, _ = normalize_replay_selection(
-        record=frozen.to_record(),
+        frozen=frozen,
         selection=_selection(controls=(ControlSelection("reasoning", "low"),)),
         overrides={},
         fallbacks=(),

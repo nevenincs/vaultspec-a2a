@@ -1,28 +1,25 @@
-"""Infrastructure configuration and backwards-compatible Settings facade.
+"""Infrastructure settings and the process-wide ``settings`` singleton.
 
-``InfraConfig`` holds every field that touches external services: ports, hosts,
-database URLs, API keys, filesystem paths, pool sizes, service timeouts, etc.
+``InfraConfig`` declares every field that touches external services: ports,
+hosts, database URLs, API keys, filesystem paths and service timeouts.
+``Settings`` adds the derivation and path-anchoring validators and the
+properties built on the resolved values.
 
-``Settings`` composes ``DomainConfig`` (Layer 1 behavioural knobs) with
-``InfraConfig`` via multiple inheritance, producing a single object that is
-a drop-in replacement for the former ``core.config.Settings``.
+Behavioural knobs are not declared here: they belong to
+:mod:`vaultspec_a2a.domain_config`, and no field is reachable through both.
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Self
+from typing import TYPE_CHECKING, Self
 
 from pydantic import (
     PrivateAttr,
     model_validator,
 )
-from pydantic_settings import SettingsConfigDict
 
-from ..domain_config import DomainSettingsConfig
 from ..utils.enums import Environment
-from .env_prefix import ENV_PREFIX
 from .infra_config import (
     InfraConfig,
-    _synchronous_url,
     _warn_seating_discard,
 )
 from .settings_base import (
@@ -47,24 +44,15 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from sqlalchemy.engine.url import URL
+
     from ..desktop.credentials import DesktopCredentialPaths
 
+_ONLY_SQLITE = "SQLite is the only supported store"
 
-class Settings(DomainSettingsConfig, InfraConfig):
-    """Backwards-compatible composed settings.
 
-    Inherits all ~18 domain fields from ``DomainConfig`` and all ~75
-    infrastructure fields from ``InfraConfig``.  The resulting object is
-    a drop-in replacement for the former ``core.config.Settings``.
-    """
-
-    model_config = SettingsConfigDict(
-        env_file=InfraConfig.operator_env_file(),
-        env_file_encoding="utf-8",
-        env_prefix=ENV_PREFIX,
-        extra="ignore",
-        env_ignore_empty=True,
-    )
+class Settings(InfraConfig):
+    """The infrastructure settings, with their derived values and anchored paths."""
 
     # The fields a source actually supplied, captured before any validator below
     # assigns one: an assignment marks a field as set, after which a configured
@@ -148,7 +136,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
         """Seat every mutable path under the explicit desktop application home.
 
         The desktop profile is armed only when ``desktop_app_home`` is set. While
-        unarmed (the Compose and development profiles), this is a no-op and the
+        unarmed (the development profile), this is a no-op and the
         configuration is byte-for-byte unchanged — including the import surface,
         since the desktop path authority is imported only on the armed branch.
 
@@ -164,7 +152,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
             return self
 
         # Imported lazily and only when armed: unarmed construction never pulls
-        # the desktop package, preserving the Compose/dev import surface.
+        # the desktop package, preserving the development import surface.
         from ..desktop.profile import derive_state_paths
 
         state = derive_state_paths(self.desktop_app_home)
@@ -177,7 +165,7 @@ class Settings(DomainSettingsConfig, InfraConfig):
         # seats: each carries the variable an operator would have set it with,
         # so a displaced value is reported in the operator's own vocabulary.
         seated: dict[str, tuple[str, object]] = {
-            "a2a_home": ("VAULTSPEC_A2A_HOME", state.app_home),
+            "a2a_home": ("VAULTSPEC_A2A_HOME", state.home),
             "workspace_root": (
                 "VAULTSPEC_A2A_WORKSPACE_ROOT",
                 state.workspaces_root,
@@ -216,25 +204,43 @@ class Settings(DomainSettingsConfig, InfraConfig):
         return self
 
     @model_validator(mode="after")
-    def _validate_synchronous_url_derivation(self) -> Self:
-        """Refuse a configured URL that has no synchronous SQLAlchemy equivalent.
+    def _refuse_every_store_but_sqlite(self) -> Self:
+        """Refuse each input that would select a store other than SQLite.
 
-        The admin and command-line paths - schema creation and the destructive
-        ``db clear`` - run on synchronous engines built from these URLs. Leaving the
-        check to those call sites means a shipped-configuration typo first surfaces
-        part-way through a destructive command; here it surfaces at boot.
+        A retired backend selector, a retired requirement flag or a store URL
+        naming another database would otherwise be ignored - booting an empty
+        SQLite store beside the database the operator believes is in use - or
+        fail wherever the first engine built from it happens to be created. Every
+        problem is reported together, and no URL is ever echoed: it routinely
+        carries a password.
 
-        Declared after the desktop seating so it validates the URLs the process will
-        actually use, not the ones the seating is about to replace. The anchoring
-        that follows only ever swaps a relative SQLite path for an absolute one, so
-        it cannot change the backend or driver this validator just accepted.
+        Declared after the desktop seating so it validates the URLs the process
+        will actually use, not the ones the seating is about to replace.
         """
-        _synchronous_url(self.database_url, setting="VAULTSPEC_A2A_DATABASE_URL")
-        if self.checkpoint_database_url is not None:
-            _synchronous_url(
-                self.checkpoint_database_url,
-                setting="VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
+        problems = [
+            f"{setting_env(field)}={value!r} is refused because {_ONLY_SQLITE}"
+            for field, value in (
+                ("database_backend", self.database_backend),
+                ("checkpoint_backend", self.checkpoint_backend),
             )
+            if value != "sqlite"
+        ]
+        if self.postgres_required:
+            problems.append(
+                f"{setting_env('postgres_required')}=true is refused because "
+                f"{_ONLY_SQLITE}"
+            )
+        for field, url in (
+            ("database_url", self.database_url),
+            ("checkpoint_database_url", self.checkpoint_database_url),
+        ):
+            if url is None:
+                continue
+            problem = _store_url_problem(setting_env(field), url)
+            if problem is not None:
+                problems.append(problem)
+        if problems:
+            raise ValueError("; ".join(problems))
         return self
 
     @model_validator(mode="after")
@@ -254,20 +260,11 @@ class Settings(DomainSettingsConfig, InfraConfig):
         configured = self._configured_fields
         layout = self.state_layout
         if self.desktop_profile_armed:
-            return self._check_backends()
+            return self
         if "database_url" not in configured:
             self.database_url = _sqlite_url(layout.database_path)
             if "checkpoint_database_url" not in configured:
                 self.checkpoint_database_url = _sqlite_url(layout.checkpoint_path)
-        return self._check_backends()
-
-    def _check_backends(self) -> Self:
-        # Resolving the backends here raises when a declared backend and its URL
-        # disagree, which the synchronous admin engines built from these values
-        # have no other seam to catch.
-        _ = self.resolved_database_backend
-        if self.checkpoint_database_url is not None:
-            _ = self.resolved_checkpoint_backend
         return self
 
     @property
@@ -368,9 +365,9 @@ class Settings(DomainSettingsConfig, InfraConfig):
         authority for those references; it derives them through the desktop profile
         path authority rather than restating the layout.
 
-        Returns ``None`` while the profile is unarmed (the Compose and development
-        profiles), so no credential path resolves relative to a launch directory and
-        the unarmed import surface never pulls the desktop package.
+        Returns ``None`` while the profile is unarmed (the development profile),
+        so no credential path resolves relative to a launch directory and the
+        unarmed import surface never pulls the desktop package.
         """
         if self.desktop_app_home is None:
             return None
@@ -382,34 +379,6 @@ class Settings(DomainSettingsConfig, InfraConfig):
 
         state = derive_state_paths(self.desktop_app_home)
         return credential_paths(state.credentials_dir)
-
-    @property
-    def temp_homes_dir(self) -> Path:
-        """The root per-run provider configuration homes are created inside.
-
-        Inside the state home, so every home a run leaves behind is accounted
-        for with the rest of a2a's state rather than scattered through the
-        system temporary directory.
-        """
-        return self.state_layout.temp_homes_dir
-
-    @property
-    def resolved_database_backend(self) -> Literal["sqlite", "postgres"]:
-        """Validate the configured application database backend against the URL."""
-        url = self.database_url
-        if self.database_backend == "sqlite" and not url.startswith("sqlite"):
-            msg = (
-                "VAULTSPEC_A2A_DATABASE_BACKEND=sqlite requires "
-                "VAULTSPEC_A2A_DATABASE_URL to use a sqlite SQLAlchemy URL."
-            )
-            raise ValueError(msg)
-        if self.database_backend == "postgres" and not url.startswith("postgresql"):
-            msg = (
-                "VAULTSPEC_A2A_DATABASE_BACKEND=postgres requires "
-                "VAULTSPEC_A2A_DATABASE_URL to use a postgresql SQLAlchemy URL."
-            )
-            raise ValueError(msg)
-        return self.database_backend
 
     @property
     def internal_max_event_batch_bytes(self) -> int:
@@ -426,127 +395,76 @@ class Settings(DomainSettingsConfig, InfraConfig):
         )
 
     @property
-    def resolved_checkpoint_backend(self) -> Literal["sqlite", "postgres"]:
-        """Validate the configured checkpoint backend against the configured DSN."""
-        url = self.checkpoint_database_url or self.database_url
-        if self.checkpoint_backend == "sqlite" and not url.startswith("sqlite"):
-            msg = (
-                "VAULTSPEC_A2A_CHECKPOINT_BACKEND=sqlite requires the checkpoint URL "
-                "to use a sqlite-compatible scheme."
-            )
-            raise ValueError(msg)
-        if self.checkpoint_backend == "postgres" and not url.startswith("postgresql"):
-            msg = (
-                "VAULTSPEC_A2A_CHECKPOINT_BACKEND=postgres requires the checkpoint URL "
-                "to use a postgresql-compatible scheme."
-            )
-            raise ValueError(msg)
-        return self.checkpoint_backend
-
-    @property
     def database_path(self) -> Path:
         """Extract the plain file path from the SQLAlchemy database URL."""
-        if self.resolved_database_backend != "sqlite":
-            msg = "database_path is only valid when the database backend is SQLite."
-            raise ValueError(msg)
-        url = self.database_url
-        raw = url.split("///", 1)[1] if ":///" in url else "vaultspec.db"
-        if raw == ":memory:":
-            return Path(":memory:")
-        return Path(raw).resolve()
+        return _sqlite_file(self.database_url)
 
     @property
     def checkpoint_path(self) -> Path:
-        """Return the SQLite checkpoint path when the checkpoint backend is SQLite."""
-        if self.resolved_checkpoint_backend != "sqlite":
-            msg = "checkpoint_path is only valid when the checkpoint backend is SQLite."
-            raise ValueError(msg)
-        url = self.checkpoint_database_url or self.database_url
-        raw = url.split("///", 1)[1] if ":///" in url else "vaultspec.db"
-        if raw == ":memory:":
-            return Path(":memory:")
-        return Path(raw).resolve()
+        """Return the SQLite checkpoint path."""
+        return _sqlite_file(self.checkpoint_database_url or self.database_url)
 
     @property
     def checkpoint_connection_string(self) -> str:
-        """Return the backend-specific DSN expected by the LangGraph saver."""
+        """Return the file path (or ``:memory:``) the LangGraph SQLite saver opens."""
         url = self.checkpoint_database_url or self.database_url
-        if self.resolved_checkpoint_backend == "sqlite":
-            if ":///" not in url:
-                msg = f"Unsupported SQLite checkpoint URL: {url!r}"
-                raise ValueError(msg)
-            raw = url.split("///", 1)[1]
-            if raw == ":memory:":
-                return ":memory:"
-            return str(Path(raw).resolve())
-
-        return url.replace("postgresql+asyncpg://", "postgresql://", 1).replace(
-            "postgresql+psycopg://", "postgresql://", 1
-        )
-
-    @property
-    def database_sync_url(self) -> str:
-        """Return a synchronous SQLAlchemy URL for admin/CLI operations.
-
-        URL/backend agreement is enforced at construction rather than here, so this
-        reads as the pure derivation it is.
-        """
-        return _synchronous_url(self.database_url, setting="VAULTSPEC_A2A_DATABASE_URL")
-
-    @property
-    def checkpoint_sync_url(self) -> str:
-        """Return a synchronous SQLAlchemy URL for the checkpoint store.
-
-        Falls back to the application database when no dedicated checkpoint URL
-        is configured, matching the runtime savers: the two stores share one file
-        by default and split only when explicitly configured.
-        """
-        if self.checkpoint_database_url is None:
-            return _synchronous_url(
-                self.database_url, setting="VAULTSPEC_A2A_DATABASE_URL"
-            )
-        return _synchronous_url(
-            self.checkpoint_database_url,
-            setting="VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL",
-        )
-
-    def validate_postgres_requirement(self) -> None:
-        """Fail fast when Postgres-backed dependencies are required but absent."""
-        if not self.postgres_required:
-            return
-
-        problems: list[str] = []
-        if self.resolved_database_backend != "postgres":
-            problems.append(
-                "VAULTSPEC_A2A_POSTGRES_REQUIRED=true requires "
-                "VAULTSPEC_A2A_DATABASE_BACKEND=postgres"
-            )
-        if self.resolved_checkpoint_backend != "postgres":
-            problems.append(
-                "VAULTSPEC_A2A_POSTGRES_REQUIRED=true requires "
-                "VAULTSPEC_A2A_CHECKPOINT_BACKEND=postgres"
-            )
-        if problems:
-            raise ValueError("; ".join(problems))
+        if ":///" not in url:
+            msg = f"Unsupported SQLite checkpoint URL: {url!r}"
+            raise ValueError(msg)
+        raw = url.split("///", 1)[1]
+        if raw == ":memory:":
+            return ":memory:"
+        return str(Path(raw).resolve())
 
 
 def _sqlite_url(path: Path) -> str:
     return f"sqlite+aiosqlite:///{path.as_posix()}"
 
 
-def _resolve_sqlite_url(root: Path, url: str) -> str:
-    """Return ``url`` with a relative SQLite file path resolved against ``root``.
+def _sqlite_file(url: str) -> Path:
+    """Return the file a SQLite URL names, or ``:memory:`` for an in-memory store."""
+    raw = url.split("///", 1)[1] if ":///" in url else "vaultspec.db"
+    if raw == ":memory:":
+        return Path(":memory:")
+    return Path(raw).resolve()
 
-    Anything that is not a relative SQLite file - a server URL, an in-memory
-    store, an absolute path, an unparseable value - is returned unchanged; the
-    synchronous-derivation validator reports an unparseable one.
-    """
+
+def _parsed_url(url: str) -> "URL | None":
+    """Parse a SQLAlchemy URL, or return ``None`` when it cannot be parsed."""
+    # Imported lazily: SQLAlchemy costs roughly a quarter-second to import, and the
+    # settings module sits on the CLI startup path.
     from sqlalchemy.engine.url import make_url
     from sqlalchemy.exc import ArgumentError
 
     try:
-        parsed = make_url(url)
+        return make_url(url)
     except ArgumentError:
+        return None
+
+
+def _store_url_problem(setting: str, url: str) -> str | None:
+    """Say why ``url`` cannot name a store, or ``None`` when it names SQLite.
+
+    The URL itself is never echoed: it routinely carries a password.
+    """
+    parsed = _parsed_url(url)
+    if parsed is None:
+        return f"{setting} is not a parseable SQLAlchemy URL"
+    backend = parsed.get_backend_name()
+    if backend != "sqlite":
+        return f"{setting} names the {backend!r} backend, but {_ONLY_SQLITE}"
+    return None
+
+
+def _resolve_sqlite_url(root: Path, url: str) -> str:
+    """Return ``url`` with a relative SQLite file path resolved against ``root``.
+
+    Anything that is not a relative SQLite file - another database's URL, an
+    in-memory store, an absolute path, an unparseable value - is returned
+    unchanged; the store-URL validator reports the ones it cannot use.
+    """
+    parsed = _parsed_url(url)
+    if parsed is None:
         return url
     database = parsed.database
     if (

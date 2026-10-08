@@ -12,7 +12,7 @@ permission matcher, and a real model would make the one thing under test
 (whether a named path is read) depend on what the model decided to do.
 
 The contrast each test draws is between the spelling the lane writes and the
-spelling it used to write. The CLI reads a single leading slash as relative to
+single-leading-slash spelling. The CLI reads a single leading slash as relative to
 the session's primary working directory, so a rule that LOOKS like an absolute
 path names a directory beneath the workspace, and the rule matches nothing at
 the path it appears to name.
@@ -23,15 +23,15 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, override
+from http.server import BaseHTTPRequestHandler
+from typing import TYPE_CHECKING
 
 import pytest
 
 from ...graph.enums import Provider
+from ...testing import JsonReplyHandler, inherited_environment, serve_handler
 from .._claude_tool_policy import claude_rule_path, workspace_scoped_tool_rule
 from ..cli_resolution import resolve_provider_cli_executable
 
@@ -161,13 +161,8 @@ def _tool_results_in(body: JsonObject) -> list[JsonObject]:
 
 
 def _handler_for(turn: _Turn) -> type[BaseHTTPRequestHandler]:
-    class _Handler(BaseHTTPRequestHandler):
+    class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
-
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            """Keep the endpoint silent; the test reports what matters."""
-            del format, args
 
         def do_POST(self) -> None:
             length = int(self.headers.get("content-length") or 0)
@@ -197,31 +192,25 @@ def _handler_for(turn: _Turn) -> type[BaseHTTPRequestHandler]:
 def _scripted_endpoint(read_path: Path) -> Generator[tuple[str, _Turn]]:
     """Serve the scripted turn on a real loopback socket for one CLI run."""
     turn = _Turn(read_path=read_path)
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(turn))
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}", turn
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=10)
+    with serve_handler(_handler_for(turn)) as port:
+        yield f"http://127.0.0.1:{port}", turn
 
 
 def _child_environment(home: Path, base_url: str) -> dict[str, str]:
     """The environment the CLI runs under: this endpoint, and nobody's home."""
-    env = dict(os.environ)
-    env["HOME"] = str(home)
-    env["USERPROFILE"] = str(home)
-    env["CLAUDE_CONFIG_DIR"] = str(home / ".claude")
-    env["ANTHROPIC_BASE_URL"] = base_url
-    env["ANTHROPIC_API_KEY"] = "rule-probe"
-    env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-    # The endpoint is on this machine, so no proxy may stand between them.
-    for proxy in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
-        env.pop(proxy, None)
-    env["NO_PROXY"] = "127.0.0.1,localhost"
-    return env
+    return inherited_environment(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "CLAUDE_CONFIG_DIR": str(home / ".claude"),
+            "ANTHROPIC_BASE_URL": base_url,
+            "ANTHROPIC_API_KEY": "rule-probe",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+            # The endpoint is on this machine, so no proxy may stand between them.
+            **dict.fromkeys(("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")),
+            "NO_PROXY": "127.0.0.1,localhost",
+        }
+    )
 
 
 def _read_under_rules(

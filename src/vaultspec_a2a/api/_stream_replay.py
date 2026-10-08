@@ -16,23 +16,33 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from ..control.config import settings
-from ..database.run_event_repository import RunEventStore
+from ..database import RunEventStore, retained_high_water_mark
+from ._replay_writer_seat import replay_writer_seat
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from ..database.run_event_repository import RunEventRecord
-    from ..streaming.aggregator import EventAggregator
+    from ..database import RunEventRecord
+    from ..streaming import RelayHub
     from ..streaming.run_event_writer import RunEventWriter
 
 logger = logging.getLogger(__name__)
 
-__all__: list[str] = []
+__all__ = [
+    "ReplayFrame",
+    "ResumePosition",
+    "replay_is_served",
+    "replay_window",
+    "resume_position",
+    "retained_after",
+    "retained_sequence",
+    "run_stream_resumability",
+]
 
-RESUME_WINDOW_START = "-"
+_RESUME_WINDOW_START = "-"
 """The cursor meaning "from the start of whatever is still retained".
 
 A client with no position of its own - a fresh viewer that wants the recent
@@ -76,7 +86,7 @@ def resume_position(cursor: str, thread_id: str) -> ResumePosition | None:
     live-only stream while it believed it had resumed. Both answers are the
     same to the caller - this stream will not replay from what you sent.
     """
-    if cursor == RESUME_WINDOW_START:
+    if cursor == _RESUME_WINDOW_START:
         return ResumePosition(after_sequence=0, from_window_start=True)
     run_id, separator, decimal = cursor.rpartition(":")
     if not separator or run_id != thread_id:
@@ -88,7 +98,7 @@ def resume_position(cursor: str, thread_id: str) -> ResumePosition | None:
     return ResumePosition(after_sequence=int(decimal), from_window_start=False)
 
 
-def replay_is_served(aggregator: EventAggregator, thread_id: str) -> bool:
+def replay_is_served(relay_hub: RelayHub, thread_id: str) -> bool:
     """Whether this run's outgoing frames can be replayed to a reconnect.
 
     Two conditions, and both are about this gateway rather than this stream.
@@ -101,8 +111,59 @@ def replay_is_served(aggregator: EventAggregator, thread_id: str) -> bool:
     """
     if not settings.stream_replay_enabled:
         return False
-    allocator = aggregator.sequence_allocator
+    allocator = relay_hub.sequence_allocator
     return allocator is not None and allocator.is_numbered(thread_id)
+
+
+async def run_stream_resumability(app: Any, db: AsyncSession, thread_id: str) -> bool:
+    """Whether this run's stream can be resumed from the id its frames carry.
+
+    Three conditions, because any two of them alone misreport it. The switch
+    governs the whole mechanism. The retained rows say whether THIS run has a
+    window behind it, which a run that has produced nothing - or one whose
+    window has expired - does not; the writer's unflushed ring counts as
+    retained, since a resume taken in that interval reads it, and answering
+    false there would understate a capability the stream has. And this
+    gateway must not have FAILED to establish the run's numbering: such a run
+    is unnumbered for the rest of this process's lifetime, so every frame it
+    serves carries no id and a client is handed no cursor to come back with,
+    however much is retained.
+
+    Only that last failure is read off this gateway's numbering, and the
+    asymmetry is deliberate. A gateway that merely never touched the run - a
+    second process, or this one after a restart - still reads the table and
+    still serves what it holds, so its silence is not an answer about the
+    run. A failed seed is an answer: it is a decision this process took and
+    will keep.
+
+    Probed on the caller's own session rather than through a factory of its
+    own. Run-status is the hottest read on the gateway and it already holds a
+    pooled connection; opening a second one beside it for an additive
+    boolean halved how many of these calls an engine could serve at once,
+    and on a small pool that is the difference between answering and waiting.
+
+    A store that cannot answer reports false, which is the safe direction:
+    a client told it cannot resume loses nothing but an optimisation, while
+    one told it can and then refused has already thrown away its position.
+    """
+    if not settings.stream_replay_enabled:
+        return False
+    relay_hub = cast("RelayHub | None", getattr(app.state, "relay_hub", None))
+    if relay_hub is not None and relay_hub.numbering_failed(thread_id):
+        return False
+    writer = replay_writer_seat(app)
+    if writer is not None and writer.pending(thread_id):
+        return True
+    try:
+        return (await retained_high_water_mark(db, thread_id)) is not None
+    except Exception:
+        logger.warning(
+            "Could not read the replay window of run %s for run-status",
+            thread_id,
+            exc_info=True,
+            extra={"thread_id": thread_id, "action": "run_event_replay_failed"},
+        )
+        return False
 
 
 def retained_sequence(payload: dict[str, object]) -> int | None:
@@ -197,7 +258,7 @@ async def retained_after(
 
 
 @dataclass(frozen=True, slots=True)
-class ReplayWindow:
+class _ReplayWindow:
     """What a resume can actually be served, and what it costs to say so."""
 
     frames: list[ReplayFrame]
@@ -238,7 +299,7 @@ async def replay_window(
     writer: RunEventWriter | None,
     thread_id: str,
     resume: ResumePosition,
-) -> ReplayWindow:
+) -> _ReplayWindow:
     """Read what this resume can be served, and classify what it cannot.
 
     Three honest answers, and the difference between them is the whole point
@@ -252,7 +313,7 @@ async def replay_window(
     here is live-only rather than being left to assume it resumed.
     """
     if not settings.stream_replay_enabled:
-        return ReplayWindow([], _REPLAY_UNAVAILABLE)
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
     try:
         frames = await retained_after(
             session_factory=session_factory,
@@ -268,7 +329,7 @@ async def replay_window(
             exc_info=True,
             extra={"thread_id": thread_id, "action": "run_event_replay_failed"},
         )
-        return ReplayWindow([], _REPLAY_UNAVAILABLE)
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
 
     if not frames:
         return await _empty_replay_window(
@@ -292,8 +353,8 @@ async def replay_window(
     # claim to hold everything up to it is one the window just corroborated.
     floor = resume.after_sequence
     if complete:
-        return ReplayWindow(served, dedup_floor=floor)
-    return ReplayWindow(
+        return _ReplayWindow(served, dedup_floor=floor)
+    return _ReplayWindow(
         served, _REPLAY_WINDOW_EXCEEDED, served[0].sequence, dedup_floor=floor
     )
 
@@ -304,7 +365,7 @@ async def _empty_replay_window(
     writer: RunEventWriter | None,
     thread_id: str,
     resume: ResumePosition,
-) -> ReplayWindow:
+) -> _ReplayWindow:
     """Classify a resume with nothing after its cursor.
 
     Three cases wear the same empty answer and must not be reported the same
@@ -340,14 +401,14 @@ async def _empty_replay_window(
             exc_info=True,
             extra={"thread_id": thread_id, "action": "run_event_replay_failed"},
         )
-        return ReplayWindow([], _REPLAY_UNAVAILABLE)
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
     # The ring holds what the table does not have yet, so the run's mark is
     # the higher of the two rather than the durable one alone.
     held = [record.sequence for record in writer.pending(thread_id)] if writer else []
     if retained is not None:
         held.append(retained)
     if not held:
-        return ReplayWindow([], _REPLAY_UNAVAILABLE)
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE)
     mark = max(held)
     if resume.after_sequence > mark:
         logger.info(
@@ -361,5 +422,5 @@ async def _empty_replay_window(
                 "sequence": resume.after_sequence,
             },
         )
-        return ReplayWindow([], _REPLAY_UNAVAILABLE, dedup_floor=mark)
-    return ReplayWindow([], dedup_floor=min(resume.after_sequence, mark))
+        return _ReplayWindow([], _REPLAY_UNAVAILABLE, dedup_floor=mark)
+    return _ReplayWindow([], dedup_floor=min(resume.after_sequence, mark))

@@ -83,7 +83,6 @@ async def test_shared_fixture_child_keeps_session_state_function_scoped(
     assert sibling.background_tasks == set()
     assert sibling.terminals == {}
     assert sibling.tool_calls == {}
-    assert sibling.native_command_catalogs == {}
     assert sibling.config_options == []
     assert sibling.stdin_lock is not acp_session_context.stdin_lock
 
@@ -113,8 +112,15 @@ async def test_concurrent_codex_close_callers_join_one_completed_release(
             assert results[0] is None
         assert results[1] is None
         assert not pid_is_live(process.pid)
-        assert client._reader_task.done()
-        assert client._stderr_task is not None and client._stderr_task.done()
+        transport = getattr(process, "_transport", None)
+        assert isinstance(transport, asyncio.SubprocessTransport)
+        assert transport.is_closing()
+        owned = f"{_CodexAppServerClient.__qualname__}."
+        assert not [
+            task
+            for task in asyncio.all_tasks()
+            if getattr(task.get_coro(), "__qualname__", "").startswith(owned)
+        ], "release completed while a client-owned task was still running"
     finally:
         await client.aclose()
 

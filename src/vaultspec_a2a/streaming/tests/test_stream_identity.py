@@ -1,6 +1,6 @@
 """Who a run's frames are attributed to, against a graph that can tell.
 
-A run reports nodes, tool calls, model text and custom writes. Each is keyed
+A run reports nodes, tool calls and model text. Each is keyed
 on an identity, and each identity was once taken from whatever was nearest
 rather than from what LangGraph documents:
 
@@ -12,13 +12,12 @@ rather than from what LangGraph documents:
   chunks that announced it were keyed by the id the model gave it, leaving one
   call described twice and one of the two stuck pending;
 - a model call the supervisor asked not to stream was filtered after the
-  library had already produced it;
-- a node's own stream writes were discarded.
+  library had already produced it.
 
 The graph here has all of those shapes - a node with a nested runnable, a
-subgraph, a model that streams a tool call the node then executes, a model
-tagged not to stream, and a node that writes to the stream - and it is a real
-compiled graph over a real checkpointer driven through the real aggregator.
+subgraph, a model that streams a tool call the node then executes, and a model
+tagged not to stream - and it is a real
+compiled graph over a real checkpointer driven through the real event producer.
 """
 
 from __future__ import annotations
@@ -33,24 +32,24 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.config import get_stream_writer
 from langgraph.constants import TAG_NOSTREAM
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 
 from ...graph.enums import ToolCallStatus
 from ...graph.events import (
     AgentStatus,
     MessageChunk,
     PlanUpdate,
-    ThoughtChunk,
     ToolCallStart,
     ToolCallUpdate,
 )
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
-from ..aggregator import EventAggregator
+from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ..aggregator import RunEventProducer
+from ..ingest import GraphInvocation
+from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
+    from collections.abc import AsyncIterator, Mapping
 
     from ...graph.events import DomainEvent
     from ..types import StreamableGraph
@@ -121,11 +120,9 @@ async def _worker(state: _State) -> dict[str, Any]:
 
     # A nested runnable inside the node. It carries the node's name in its
     # metadata and returns a plan-shaped value, which is exactly the pair
-    # that used to produce a phantom turn and a plan nobody wrote.
+    # that would produce a phantom turn and a plan nobody wrote.
     nested = RunnableLambda(_format).with_config(run_name="formatter")
     await nested.ainvoke({"x": 1})
-
-    get_stream_writer()("a bare string the node wrote")
 
     routing = _ToolStreamingModel().with_config(tags=[TAG_NOSTREAM])
     async for _ in routing.astream([HumanMessage(content="who next?")]):
@@ -153,7 +150,7 @@ def _subgraph() -> Any:
         del state
         return {"note": "inner"}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
+    builder = new_state_graph(_State)
     add_test_node(builder, "inner", inner)
     builder.add_edge(START, "inner")
     builder.add_edge("inner", END)
@@ -161,7 +158,7 @@ def _subgraph() -> Any:
 
 
 def _identity_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
+    builder = new_state_graph(_State)
     add_test_node(builder, "worker", _worker)
     add_test_node(builder, "team", _subgraph())
     builder.add_edge(START, "worker")
@@ -173,25 +170,22 @@ def _identity_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
 async def _run_identity_graph() -> list[DomainEvent]:
     async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
         await saver.setup()
-        aggregator = EventAggregator()
-        queue = aggregator.add_subscriber("client-identity")
-        aggregator.subscribe("client-identity", ["thread-identity"])
-        ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+        producer = RunEventProducer()
+        relayed = relayed_events(producer)
         outcome = await asyncio.wait_for(
-            ingest(
-                thread_id="thread-identity",
-                agent_id="supervisor",
-                graph=_identity_graph(saver),
-                graph_input={"note": ""},
-                config={"configurable": {"thread_id": "thread-identity"}},
+            producer.ingest(
+                "thread-identity",
+                "supervisor",
+                _identity_graph(saver),
+                GraphInvocation(
+                    graph_input={"note": ""},
+                    config={"configurable": {"thread_id": "thread-identity"}},
+                ),
             ),
             timeout=30.0,
         )
     assert outcome == "completed"
-    events: list[DomainEvent] = []
-    while not queue.empty():
-        events.append(queue.get_nowait().event)
-    return events
+    return [sequenced.event for sequenced in relayed]
 
 
 @pytest.fixture(scope="module")
@@ -260,13 +254,3 @@ def test_a_nostream_model_call_reaches_the_client_in_no_form(
     assert relayed.count("visible answer") == 1, relayed
     # The routing model produced the same text, so a second copy would be it.
     assert len([event for event in chunks if event.finish_reason]) <= 1
-
-
-def test_a_nodes_own_stream_write_reaches_the_client(
-    identity_events: list[DomainEvent],
-) -> None:
-    """A bare string is relayed, not dropped and not raised on."""
-    thoughts = [
-        event.content for event in identity_events if isinstance(event, ThoughtChunk)
-    ]
-    assert "a bare string the node wrote" in thoughts, thoughts

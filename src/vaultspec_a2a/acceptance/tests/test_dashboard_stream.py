@@ -13,12 +13,12 @@ is checked to be a bounded positive DTO carrying no forbidden body.
 Two adjacent contracts are certified elsewhere and are not duplicated here. The
 adversarial half of the allowlist - an oversized token delta truncated to the
 cap and an artifact body or edit diff stripped at the encoded boundary - is
-proven discriminatingly by injecting hostile payloads into the real aggregator
+proven discriminatingly by injecting hostile payloads into the real relay hub
 behind a real authenticated stream in the api progress-allowlist suite; a benign
 run never emits a forbidden body, so re-asserting exclusion here could only be
 tautological. Live multi-frame ordering from a resuming run needs the
 deterministic provider that keeps a run non-terminal and is certified in the
-Compose service suite.
+service suite.
 """
 
 from __future__ import annotations
@@ -28,9 +28,8 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from ...testing.tests._support.sse import read_frame
+from ...testing import read_frame
 from ...thread.enums import TERMINAL_STATUS_VALUES
-from .conftest import wait_for_terminal
 
 if TYPE_CHECKING:
     from ._harness import CertifiedGateway
@@ -49,7 +48,7 @@ def _assert_positive_frame(payload: dict[str, object], raw: str) -> None:
 async def test_terminal_replay_is_idempotent_across_reconnects_and_reconciles(
     gateway: CertifiedGateway,
 ) -> None:
-    """S79: reconnecting a terminal run replays the terminal frame, reconciled.
+    """Reconnecting a terminal run replays the terminal frame, reconciled.
 
     Discriminating: two independent stream connections each replay a terminal
     frame for the same run, both carry the same terminal status, and that status
@@ -59,9 +58,9 @@ async def test_terminal_replay_is_idempotent_across_reconnects_and_reconciles(
     reconnect, or replayed a different status than run-status, would fail.
     """
     run_id = "run-stream-terminal"
-    started = gateway.start(run_id)
+    started = gateway.runs.start(run_id)
     assert started.status_code == 201, started.text
-    authoritative = wait_for_terminal(gateway, run_id)
+    authoritative = gateway.wait_for_status(run_id)
 
     statuses: list[str] = []
     for _ in range(2):
@@ -87,7 +86,7 @@ async def test_terminal_replay_is_idempotent_across_reconnects_and_reconciles(
 async def test_unauthenticated_stream_open_is_refused(
     gateway: CertifiedGateway,
 ) -> None:
-    """S79: the progress stream is gated - an unauthenticated open never begins.
+    """The progress stream is gated - an unauthenticated open never begins.
 
     Discriminating against the authenticated opens above: the identical request
     without the attach credential is refused 401, so those streams proved a real

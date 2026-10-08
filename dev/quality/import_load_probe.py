@@ -33,13 +33,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from dev.exit_codes import FAILED, OK, TOOL_BROKEN
+from dev.exit_codes import TOOL_BROKEN
 from dev.paths import PACKAGE_ROOT, REPO_ROOT, is_test_path
 from dev.process import ToolUnavailableError, run_tool
+from dev.quality.gate import emit_verdict
 from dev.quality.import_load_worker import SEPARATOR
 from dev.quality.source_import_analysis import (
     alembic_script_location,
@@ -50,6 +50,18 @@ from dev.quality.source_import_analysis import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
+
+__all__ = [
+    "MINIMUM_GOVERNED_MODULES",
+    "TIMEOUT_SECONDS",
+    "LoadFailure",
+    "LoadProbeResult",
+    "governed_modules",
+    "main",
+    "parse_worker_output",
+    "result_as_json",
+    "run_probe",
+]
 
 #: Importing three hundred modules pulls in the whole dependency tree; two
 #: minutes is generous and a probe that has not answered by then has hung.
@@ -262,8 +274,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv: The argument vector, or ``None`` to read :data:`sys.argv`.
 
     Returns:
-        :data:`OK` when every module loads, :data:`FAILED` when one does not,
-        and :data:`TOOL_BROKEN` when the probe could not run.
+        :data:`~dev.exit_codes.OK` when every module loads,
+        :data:`~dev.exit_codes.FAILED` when one does not, and
+        :data:`TOOL_BROKEN` when the probe could not run.
     """
     parser = argparse.ArgumentParser(
         description="Prove every shipped production module imports.",
@@ -273,12 +286,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     result = run_probe()
     report = result_as_json(result) if args.json else result.report()
-    stream = sys.stdout if result.is_clean else sys.stderr
-    stream.write(report + "\n")
-
-    if not result.is_available:
-        return TOOL_BROKEN
-    return OK if result.is_clean else FAILED
+    code = emit_verdict(clean=result.is_clean, report=report)
+    return code if result.is_available else TOOL_BROKEN
 
 
 if __name__ == "__main__":

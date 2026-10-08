@@ -16,13 +16,6 @@ if TYPE_CHECKING:
 FAILED_SERVICE_TESTS: list[dict[str, str]] = []
 
 
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Mark all tests in this package as service tests."""
-    for item in items:
-        if "service_tests" in str(item.path):
-            item.add_marker(pytest.mark.service)
-
-
 @pytest.fixture(scope="session")
 def service_stack(
     request: pytest.FixtureRequest,
@@ -56,20 +49,16 @@ def service_stack(
 
 
 @pytest.fixture
-def service_started_at(service_stack: ServiceStack) -> float:
-    """Convenience fixture for trace-window assertions."""
-    return service_stack.started_at
-
-
-@pytest.fixture
-def provisioned_workspace(tmp_path: Path) -> Path:
+def provisioned_workspace(
+    tmp_path: Path, external_prerequisite: ExternalPrerequisiteRule
+) -> Path:
     """A freshly provisioned, harness-ready run workspace.
 
     Adopts the provision verb: one ``provision_workspace`` call scaffolds
-    the ``.vaultspec`` corpus and verifies its harness, replacing the manual
-    recipe the acceptance harness used to hand-roll. Fails loudly if provisioning
-    runs but leaves the harness incomplete; skips honestly only when
-    ``vaultspec-core`` is not resolvable in the environment at all.
+    the ``.vaultspec`` corpus and verifies its harness, in place of a manual
+    hand-rolled recipe. Fails loudly if provisioning
+    runs but leaves the harness incomplete; reports an absent prerequisite only
+    when ``vaultspec-core`` is not resolvable in the environment at all.
     """
     from ..cli.provision import ProvisionError, provision_workspace
 
@@ -77,7 +66,7 @@ def provisioned_workspace(tmp_path: Path) -> Path:
     try:
         result = provision_workspace(ws)
     except ProvisionError as exc:
-        pytest.skip(f"vaultspec-core not provisionable in this environment: {exc}")
+        external_prerequisite.absent("vaultspec-core", str(exc))
     assert result.ok, result.harness.reasons
     return ws
 

@@ -8,55 +8,65 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
-
 from ..database import (
     ThreadModel,
     ThreadStatusElectionOutcome,
-    begin_write_transaction,
+    WriteContentionError,
     elect_thread_status,
-    expire_pending_permission_requests,
     get_control_action_by_dispatch_id,
+    get_thread,
+    has_live_queued_continuation_lease,
     mark_control_action_applied,
-    set_thread_approval_state,
-    set_thread_repair_state,
-    successor_thread_write_authority,
+    read_latest_checkpoint,
+    read_next_queued_continuation,
+    retry_write_contention,
     thread_write_expectation,
 )
 from ..thread.checkpoint_evidence import (
     CheckpointEvidenceKind,
-    read_checkpoint_evidence,
+    classify_checkpoint_evidence,
 )
 from ..thread.enums import (
     NON_ACTIVE_STATUSES,
     ControlActionType,
-    RepairStatus,
     ThreadStatus,
 )
-from ..thread.terminal_effects import compute_terminal_effects
+from ..thread.repair_policy import (
+    RECONCILIATION_REQUIRED_TRANSITION,
+    RepairPhase,
+    repair_state_for_action,
+)
+from .continuation_queue import (
+    open_promoted_continuation,
+    promoted_turn_deadline,
+    promotion_dispatch_pending,
+    run_lifetime_deadline,
+)
 from .dispatch_receipts import (
     prepare_graph_action_receipt,
     validate_current_graph_receipt,
 )
-from .repair_transitions import mark_message_followup_requested
-from .repositories.continuation_queue import (
-    lock_run_for_continuation_decision,
-    open_promoted_continuation,
-    promoted_turn_deadline,
-    promotion_dispatch_pending,
-    promotion_owner_holds_run,
-    read_next_queued_continuation,
-    refuse_queued_continuations,
-    run_lifetime_deadline,
-)
+from .repair_transitions import apply_repair_transition
+from .terminal_settlement import TerminalEvidence, lock_terminal_run, settle_terminal
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.checkpoints import Checkpointer
-    from ..database.thread_repository import ThreadWriteExpectation
+    from ..database import Checkpointer
+    from ..thread import ThreadWriteExpectation
     from ..thread.action_receipts import GraphActionReceipt
     from ..thread.checkpoint_evidence import CheckpointEvidence
+
+__all__ = [
+    "CONTINUATION_PROMOTED",
+    "HOLDS_QUEUED_CONTINUATION",
+    "PROMOTION_OWNED_CONDITIONS",
+    "STORE_CONTENDED",
+    "RecoveryObservation",
+    "RecoveryRequest",
+    "RecoveryTrigger",
+    "reconcile_run_checkpoint",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -81,16 +91,33 @@ class RecoveryTrigger(StrEnum):
 #: could not be made into one, so nothing was settled and nothing was
 #: promoted; the third says a promoted turn is still owed its delivery.
 CONTINUATION_PROMOTED = "continuation_promoted"
-CONTINUATION_NOT_PROMOTABLE = "continuation_not_promotable"
-AWAITING_PROMOTION_DISPATCH = "awaiting_promotion_dispatch"
+_CONTINUATION_NOT_PROMOTABLE = "continuation_not_promotable"
+_AWAITING_PROMOTION_DISPATCH = "awaiting_promotion_dispatch"
 HOLDS_QUEUED_CONTINUATION = "holds_queued_continuation"
 
 #: The conditions that say a promoter, not a dead writer, explains this run.
 #: A startup pass counts these apart from its repair backlog, because an
 #: owned run needs nobody's attention.
 PROMOTION_OWNED_CONDITIONS = frozenset(
-    {AWAITING_PROMOTION_DISPATCH, HOLDS_QUEUED_CONTINUATION}
+    {_AWAITING_PROMOTION_DISPATCH, HOLDS_QUEUED_CONTINUATION}
 )
+
+#: Why a run past its total lifetime refuses the continuations still waiting on
+#: it: no further turn may start, so none of them can be promoted.
+_LIFETIME_SPENT_REFUSAL = "the run's total lifetime is spent"
+
+#: The run is parked on a question and is waiting for a human, not for recovery.
+_AWAITING_CONTROL = "awaiting_control"
+
+#: Every attempt at this pass's write was refused by a competing writer, so
+#: nothing was applied: the run holds exactly the state the pass found, and the
+#: outcome it proved is still owed. Named rather than left as the driver error
+#: because this pass runs inside the run READS, which must answer the durable
+#: truth about a run rather than fail over a store condition that resolves by
+#: itself - the error reached the gateway as a 500 on run-status and run-history
+#: alike. A caller that serves run state discloses it; a caller that only
+#: triggers a pass needs nothing of it, because a later pass makes the write.
+STORE_CONTENDED = "store_contended"
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,7 +167,7 @@ def _promotion_owner(decision: _CheckpointDecision) -> str | None:
         decision.promotion_pending
         and decision.evidence.kind is CheckpointEvidenceKind.PRIOR_ACTION
     ):
-        return AWAITING_PROMOTION_DISPATCH
+        return _AWAITING_PROMOTION_DISPATCH
     if decision.queue_owned:
         return HOLDS_QUEUED_CONTINUATION
     return None
@@ -151,6 +178,19 @@ async def _reconcile_incomplete_checkpoint(
 ) -> RecoveryObservation:
     status = decision.status
     evidence = decision.evidence
+    if (
+        status is ThreadStatus.INPUT_REQUIRED
+        and evidence.kind is CheckpointEvidenceKind.INTERRUPTED
+    ):
+        # A park is this pair and nothing else: the run row says it is parked
+        # and its checkpoint holds an unanswered question. The rule this
+        # replaces looked for a ``permission_request_created`` writer, which no
+        # park carries - a permission park elects under the graph-run dispatch
+        # that raised it, as a clarification does - so it matched nothing and
+        # every pass read a waiting run as an unfinished execution.
+        return RecoveryObservation(
+            status, _AWAITING_CONTROL, evidence.checkpoint_id, False
+        )
     owner = _promotion_owner(decision)
     if owner is not None:
         return RecoveryObservation(status, owner, evidence.checkpoint_id, False)
@@ -163,22 +203,18 @@ async def _reconcile_incomplete_checkpoint(
             decision.thread_id,
             expectation=decision.expectation,
             status=ThreadStatus.RECONCILING,
-            successor=successor_thread_write_authority(
-                decision.expectation,
-                action_type=decision.receipt.action_type,
-                action_receipt_id=decision.receipt.dispatch_id,
-            ),
+            action_type=decision.receipt.action_type,
+            action_receipt_id=decision.receipt.dispatch_id,
         )
         if election.outcome is ThreadStatusElectionOutcome.WON:
-            await set_thread_repair_state(
+            await apply_repair_transition(
                 db,
                 decision.thread_id,
-                repair_status=RepairStatus.NEEDS_RECONCILIATION,
-                repair_reason=evidence.kind.value,
-                execution_readiness=RepairStatus.NEEDS_RECONCILIATION.value,
+                RECONCILIATION_REQUIRED_TRANSITION,
+                reason=evidence.kind.value,
             )
         await db.commit()
-        fresh = await db.get(ThreadModel, decision.thread_id, populate_existing=True)
+        fresh = await get_thread(db, decision.thread_id, refresh=True)
         return RecoveryObservation(
             ThreadStatus(fresh.status) if fresh is not None else None,
             evidence.kind.value,
@@ -195,6 +231,8 @@ async def _promote_queued_continuation(
     thread: ThreadModel,
     settled_action_id: str,
     decision: _CheckpointDecision,
+    *,
+    promoted_at: datetime,
 ) -> RecoveryObservation | None:
     """Hand the run to the continuation waiting behind this proven turn.
 
@@ -203,25 +241,11 @@ async def _promote_queued_continuation(
     settlement and defers it or meets a settled run. There is no third
     outcome, and that is what keeps a terminal state from ever being reopened.
 
-    Returns ``None`` when nothing is waiting, and when nothing may be
-    promoted any more, which leaves the caller to settle exactly as it always
-    has.
+    Returns ``None`` when nothing is waiting, which leaves the caller to settle
+    exactly as it always has.
     """
     waiting = await read_next_queued_continuation(db, thread_id=decision.thread_id)
     if waiting is None:
-        return None
-    promoted_at = datetime.now(UTC)
-    if promoted_at >= decision.lifetime_deadline_at:
-        # A queue must not make a run immortal. The run ends with the terminal
-        # its last turn actually reached, and everything still waiting is
-        # refused in the same transaction rather than left on a settled run
-        # waiting for a promotion that can never come.
-        await refuse_queued_continuations(
-            db,
-            thread_id=decision.thread_id,
-            refused_at=promoted_at,
-            reason="the run's total lifetime is spent",
-        )
         return None
     deadline_at = promoted_turn_deadline(
         waiting,
@@ -241,11 +265,8 @@ async def _promote_queued_continuation(
         decision.thread_id,
         expectation=decision.expectation,
         status=ThreadStatus.RUNNING,
-        successor=successor_thread_write_authority(
-            decision.expectation,
-            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-            action_receipt_id=dispatch_id,
-        ),
+        action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+        action_receipt_id=dispatch_id,
     )
     if election.outcome is not ThreadStatusElectionOutcome.WON:
         return await _refuse_promotion(db, decision, election.outcome.value)
@@ -256,7 +277,13 @@ async def _promote_queued_continuation(
         return await _refuse_promotion(db, decision, "receipt refused")
     if decision.last_sequence is not None:
         thread.last_sequence = decision.last_sequence
-    await mark_message_followup_requested(db, decision.thread_id)
+    await apply_repair_transition(
+        db,
+        decision.thread_id,
+        repair_state_for_action(
+            ControlActionType.MESSAGE_FOLLOWUP_REQUESTED, RepairPhase.REQUESTED
+        ),
+    )
     await db.commit()
     return RecoveryObservation(
         ThreadStatus.RUNNING,
@@ -289,7 +316,7 @@ async def _refuse_promotion(
     )
     return RecoveryObservation(
         decision.status,
-        CONTINUATION_NOT_PROMOTABLE,
+        _CONTINUATION_NOT_PROMOTABLE,
         decision.evidence.checkpoint_id,
         False,
     )
@@ -301,69 +328,44 @@ async def _reconcile_completed_checkpoint(
     action_id: str,
     decision: _CheckpointDecision,
 ) -> RecoveryObservation:
-    # The queue is read before anything is written, so this transaction must
-    # already hold the write lock. A transaction that begins deferred and
-    # reads first cannot upgrade to a write once another connection has
-    # committed in between: SQLite refuses it outright instead of waiting.
-    await begin_write_transaction(db)
-    # The run's own row is locked before the queue is read, against the same
-    # lock an admission takes. Without it a settlement can read an empty queue
-    # while an uncommitted admission reads a live run, and both commit: the
-    # waiting turn is then stranded on a settled run.
-    locked = await lock_run_for_continuation_decision(db, thread_id=decision.thread_id)
+    # The queue is read under the settlement's own lock, so a promotion and
+    # the settlement it defers decide against the same locked row.
+    locked = await lock_terminal_run(db, decision.thread_id)
     if locked is not None:
         thread = locked
-    promoted = await _promote_queued_continuation(db, thread, action_id, decision)
-    if promoted is not None:
-        return promoted
-    election = await elect_thread_status(
+    observed_at = datetime.now(UTC)
+    # A queue must not make a run immortal. Past its lifetime the run ends with
+    # the terminal its last turn actually reached, and the settlement refuses
+    # everything still waiting rather than leaving it on a settled run waiting
+    # for a promotion that can never come.
+    lifetime_spent = observed_at >= decision.lifetime_deadline_at
+    if not lifetime_spent:
+        promoted = await _promote_queued_continuation(
+            db, thread, action_id, decision, promoted_at=observed_at
+        )
+        if promoted is not None:
+            return promoted
+    outcome = await settle_terminal(
         db,
-        decision.thread_id,
-        expectation=decision.expectation,
-        status=ThreadStatus.COMPLETED,
-        successor=successor_thread_write_authority(
-            decision.expectation,
+        thread,
+        ThreadStatus.COMPLETED,
+        evidence=TerminalEvidence(
+            expectation=decision.expectation,
+            action_id=action_id,
             action_type=decision.receipt.action_type,
             action_receipt_id=decision.receipt.dispatch_id,
+            queue_refusal_reason=_LIFETIME_SPENT_REFUSAL if lifetime_spent else None,
         ),
+        last_sequence=decision.last_sequence,
     )
-    if election.outcome is ThreadStatusElectionOutcome.WON:
-        if decision.last_sequence is not None:
-            thread.last_sequence = decision.last_sequence
-        await mark_control_action_applied(db, action_id)
-        await expire_pending_permission_requests(db, thread_id=decision.thread_id)
-        await set_thread_approval_state(
-            db,
-            decision.thread_id,
-            approval_status=None,
-            approval_request_id=None,
-            approval_reason=None,
-            approval_response_action_id=None,
-        )
-        effects = compute_terminal_effects(
-            ThreadStatus.COMPLETED, has_cancel_action=False
-        )
-        await set_thread_repair_state(
-            db,
-            decision.thread_id,
-            repair_status=effects.repair_status,
-            repair_reason=effects.repair_reason,
-            execution_readiness=effects.repair_status.value,
-            last_applied_action=effects.last_applied_action,
-        )
     await db.commit()
-    fresh = await db.scalar(
-        select(ThreadModel)
-        .where(ThreadModel.id == decision.thread_id)
-        .execution_options(populate_existing=True)
-    )
+    fresh = await get_thread(db, decision.thread_id, refresh=True)
+    won = outcome is ThreadStatusElectionOutcome.WON
     return RecoveryObservation(
         ThreadStatus(fresh.status) if fresh is not None else None,
-        decision.evidence.kind.value
-        if election.outcome is ThreadStatusElectionOutcome.WON
-        else election.outcome.value,
+        decision.evidence.kind.value if won else outcome.value,
         decision.evidence.checkpoint_id,
-        election.outcome is ThreadStatusElectionOutcome.WON,
+        won,
     )
 
 
@@ -374,11 +376,7 @@ async def reconcile_run_checkpoint(
 ) -> RecoveryObservation:
     """Settle completion only from current durable action and checkpoint evidence."""
     thread_id = request.thread_id
-    thread = await db.scalar(
-        select(ThreadModel)
-        .where(ThreadModel.id == thread_id)
-        .execution_options(populate_existing=True)
-    )
+    thread = await get_thread(db, thread_id, refresh=True)
     if thread is None:
         return RecoveryObservation(None, "run_missing", None, False)
     status = ThreadStatus(thread.status)
@@ -388,14 +386,6 @@ async def reconcile_run_checkpoint(
     action = await get_control_action_by_dispatch_id(
         db, thread_id=thread_id, dispatch_id=expectation.authority.action_receipt_id
     )
-    if (
-        action is not None
-        and status is ThreadStatus.INPUT_REQUIRED
-        and action.action_type == ControlActionType.PERMISSION_REQUEST_CREATED
-        and expectation.authority.action_type
-        is ControlActionType.PERMISSION_REQUEST_CREATED
-    ):
-        return RecoveryObservation(status, "awaiting_control", None, False)
     receipt = validate_current_graph_receipt(thread, action)
     if receipt is None or action is None:
         return RecoveryObservation(status, "incompatible_action_receipt", None, False)
@@ -403,14 +393,19 @@ async def reconcile_run_checkpoint(
     observed_at = datetime.now(UTC)
     lifetime_deadline_at = run_lifetime_deadline(thread.created_at)
     promotion_pending = promotion_dispatch_pending(action, observed_at=observed_at)
-    queue_owned = await promotion_owner_holds_run(
+    queue_owned = await has_live_queued_continuation_lease(
         db, thread_id=thread_id, observed_at=observed_at
     )
     # The checkpoint store is a different transaction owner. Release this read
     # snapshot before awaiting it; the later election compares the saved witness.
     await db.commit()
-    evidence = await read_checkpoint_evidence(
-        checkpointer, receipt, timeout_seconds=request.checkpoint_timeout_seconds
+    evidence = classify_checkpoint_evidence(
+        await read_latest_checkpoint(
+            checkpointer,
+            receipt.thread_id,
+            timeout=request.checkpoint_timeout_seconds,
+        ),
+        receipt,
     )
     decision = _CheckpointDecision(
         thread_id,
@@ -424,6 +419,30 @@ async def reconcile_run_checkpoint(
         promotion_pending,
         queue_owned,
     )
-    if evidence.kind is not CheckpointEvidenceKind.COMPLETED:
-        return await _reconcile_incomplete_checkpoint(db, decision)
-    return await _reconcile_completed_checkpoint(db, thread, action_id, decision)
+
+    async def apply() -> RecoveryObservation:
+        if evidence.kind is not CheckpointEvidenceKind.COMPLETED:
+            return await _reconcile_incomplete_checkpoint(db, decision)
+        return await _reconcile_completed_checkpoint(db, thread, action_id, decision)
+
+    # Under the store's one write-contention policy, like every other durable
+    # write this package makes. Each refusal rolls the session back, so the next
+    # attempt opens its own write transaction and re-locks the run's row: a
+    # deferred transaction left behind by a refusal would be joined by that
+    # attempt's first read and refused again without consulting the lock wait.
+    try:
+        return await retry_write_contention(db, apply)
+    except WriteContentionError as exc:
+        logger.warning(
+            "Recovery of %s found the store contended: %s",
+            thread_id,
+            exc,
+            extra={
+                "thread_id": thread_id,
+                "trigger": request.trigger.value,
+                "action": "recovery_pass_contended",
+            },
+        )
+        return RecoveryObservation(
+            status, STORE_CONTENDED, evidence.checkpoint_id, False
+        )

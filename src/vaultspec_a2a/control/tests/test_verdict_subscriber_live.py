@@ -21,8 +21,8 @@ Each decision payload carries ``{decision, comment, proposal_id, changeset_id,
 approval_id, resulting_status, resulting_revision}``. Every frame is replayed
 over ``GET /authoring/v1/events`` and decoded by the subscriber's SSE parser;
 the verdict + reviewer notes are extracted, and each decision correlates to the
-right run seeded into a real ``AsyncSqliteSaver`` checkpoint by its
-proposal/changeset id. The end-to-end resume dispatch runs through the real
+right run through the pending document-approval row seeded under its proposal
+id. The end-to-end resume dispatch runs through the real
 ``safe_dispatch`` path (a real - here unreachable - worker, so no double),
 proving the subscriber reaches the resume with no crash; the worker-side landing
 of the resumed graph belongs to the phase-gate topology and the service harness,
@@ -38,7 +38,6 @@ first.
 from __future__ import annotations
 
 import uuid
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -47,72 +46,54 @@ import anyio
 import httpx
 import pytest
 import pytest_asyncio
-from langchain_core.messages import AIMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...authoring import (
     AuthoringClient,
     AuthoringResponse,
     AuthoringSession,
     EngineEndpoint,
     LifecycleEvent,
-    mint_actor_token,
     verdict_from_event,
 )
-from ...conftest import materialize_schema
 from ...control._verdict_subscriber_config import VerdictSubscriberConfig
-from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.config import settings
-from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.event_handlers import relay_event
+from ...control.event_handlers import RelayServices, relay_event
 from ...control.execution_authority import resolve_execution_authority
-from ...control.verdict_subscriber import (
-    VerdictSubscriber,
-    _verdict_resume_idempotency_key,
-)
-from ...control.worker_management import LazyWorkerSpawner
+from ...control.verdict_subscriber import VerdictSubscriber
 from ...database import (
-    create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
     get_permission_request,
     get_thread,
+    pending_document_approval_thread,
     record_permission_request,
-    update_thread_status,
 )
-from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    adopted_spawner,
+    current_execution_metadata,
+    mint_raw_token,
+    seed_create_action,
+    served_worker,
+)
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
-from ...worker.app import create_worker_app
-from ...worker.executor import Executor
-from ...worker.ipc import WorkerBridge
-from ._catalog_authority import current_execution_metadata
+from ...thread.idempotency import authoring_verdict_action_key
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncIterator
 
-    from fastapi import FastAPI
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from ...worker.ipc import WorkerBridge
 
 
 _TEST_INTERNAL_TOKEN = "verdict-subscriber-live-test-token"
-
-
-@pytest.fixture(autouse=True)
-def _configure_test_dispatch_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Give both sides of real worker dispatch the current IPC credential."""
-    monkeypatch.setattr(settings, "internal_token", _TEST_INTERNAL_TOKEN)
 
 
 @pytest_asyncio.fixture
@@ -140,11 +121,7 @@ async def test_live_stream_decodes_real_lifecycle_event(
 ) -> None:
     """A real session's outbox event decodes and correlates by its aggregate id."""
     run_id = f"s08-{uuid.uuid4().hex[:8]}"
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    assert isinstance(minted.data, dict)
-    minted_data = cast("dict[str, Any]", minted.data)
-    client._actor_token = minted_data["raw_token"]
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     baseline = await _high_water(client)
     session = AuthoringSession(client, run_id)
@@ -182,11 +159,7 @@ async def test_live_non_verdict_event_does_not_resume(
     every decoded frame must yield no verdict.
     """
     run_id = f"s08-{uuid.uuid4().hex[:8]}"
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    assert isinstance(minted.data, dict)
-    minted_data = cast("dict[str, Any]", minted.data)
-    client._actor_token = minted_data["raw_token"]
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     baseline = await _high_water(client)
     session = AuthoringSession(client, run_id)
@@ -246,15 +219,6 @@ class _ClobberedRun:
 
     info: dict[str, str]
     thread_id: str
-
-
-@dataclass(frozen=True, slots=True)
-class _LiveDatabase:
-    """SQLite resources shared by one live subscriber test."""
-
-    engine: AsyncEngine
-    session_factory: async_sessionmaker[AsyncSession]
-    checkpoints: Path
 
 
 def _whole_document_op(run_id: str, label: str) -> dict[str, Any]:
@@ -343,9 +307,23 @@ async def _seed_parked(
     )
     async with session_factory() as session:
         await create_thread(
-            session, write_authority=make_test_write_authority(), thread_id=thread_id
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id=thread_id,
+            status=ThreadStatus.INPUT_REQUIRED,
         )
-        await update_thread_status(session, thread_id, ThreadStatus.INPUT_REQUIRED)
+        # The gate parks under its proposal id; this row is what a verdict
+        # correlates to.
+        await record_permission_request(
+            session,
+            request_id=proposal_id,
+            thread_id=thread_id,
+            pause_reason_type="document_approval_request",
+            description="Approve the document",
+            allowed_options=[
+                {"option_id": "approve", "name": "Approve", "kind": "allow_once"}
+            ],
+        )
         await session.commit()
 
 
@@ -354,16 +332,12 @@ async def _prepare_verdict_round_trip(
 ) -> _VerdictRoundTrip:
     """Create the three proposals and publish their human decisions."""
     run_id = f"rt-{uuid.uuid4().hex[:8]}"
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    client._actor_token = minted.data["raw_token"]
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     baseline = await _high_water(client)
     session = AuthoringSession(client, run_id)
     await session.create_session(scope="repo", title=run_id)
-    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
-    assert isinstance(reviewer, AuthoringResponse)
-    reviewer_token = reviewer.data["raw_token"]
+    reviewer_token = await mint_raw_token(client, f"human:{run_id}", "human")
 
     approve = await _submit_proposal(session, run_id, "appr")
     reject = await _submit_proposal(session, run_id, "rej")
@@ -413,6 +387,7 @@ async def _seed_verdict_round_trip(
 async def _assert_verdict_round_trip(
     client: AuthoringClient,
     subscriber: VerdictSubscriber,
+    session_factory: async_sessionmaker[AsyncSession],
     round_trip: _VerdictRoundTrip,
 ) -> None:
     lifecycle = [
@@ -442,7 +417,10 @@ async def _assert_verdict_round_trip(
             f"{verdict_kind} rode {frame.event_kind}, expected {want_kind}"
         )
         assert info["proposal_id"] in frame.correlation_ids()
-        thread_id = await subscriber._find_parked_thread(frame.correlation_ids())
+        async with session_factory() as db:
+            thread_id = await pending_document_approval_thread(
+                db, request_ids=frame.correlation_ids()
+            )
         assert thread_id is not None
         assert thread_id == round_trip.seeds[verdict_kind][0]
         matched[verdict_kind] = thread_id
@@ -455,7 +433,9 @@ async def _assert_verdict_round_trip(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_verdict_round_trip_parks_and_resumes(
-    client: AuthoringClient, tmp_path: Path
+    client: AuthoringClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """Approve / reject / request_changes each resume the correct parked run.
 
@@ -470,19 +450,7 @@ async def test_live_verdict_round_trip_parks_and_resumes(
     round_trip = await _prepare_verdict_round_trip(client)
 
     # --- a2a side: seed a parked run per proposal on a real checkpointer ---
-    db_file = tmp_path / "rt.db"
-    materialize_schema(Path(db_file))
-    db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
-    checkpoints = tmp_path / "rt-cp.db"
-
-    async with (
-        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
-        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
-    ):
-        await checkpointer.setup()
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client:
         await _seed_verdict_round_trip(session_factory, checkpointer, round_trip.seeds)
 
         subscriber = VerdictSubscriber(
@@ -493,16 +461,39 @@ async def test_live_verdict_round_trip_parks_and_resumes(
                 circuit_breaker=WorkerCircuitBreaker(
                     failure_threshold=3, recovery_timeout=30.0
                 ),
-                worker_spawner=LazyWorkerSpawner(
-                    worker_url="http://127.0.0.1:1", worker_port=1, auto_spawn=False
-                ),
+                worker_spawner=adopted_spawner(),
                 endpoint_provider=lambda: None,
-                recursion_limit=25,
             )
         )
-        await _assert_verdict_round_trip(client, subscriber, round_trip)
+        await _assert_verdict_round_trip(
+            client, subscriber, session_factory, round_trip
+        )
 
-    await db_engine.dispose()
+
+async def _reconcile_parked_runs_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    worker_client: httpx.AsyncClient,
+    live_engine: EngineEndpoint,
+) -> None:
+    """Build the subscriber against *live_engine* and run one reconcile pass.
+
+    Shared by the missed-reject and clobbered-run recovery tests, which differ
+    only in what they assert about the one action the pass dispatches.
+    """
+    subscriber = VerdictSubscriber(
+        VerdictSubscriberConfig(
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+            worker_client=worker_client,
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=3, recovery_timeout=30.0
+            ),
+            worker_spawner=adopted_spawner(),
+            endpoint_provider=lambda: live_engine,
+        )
+    )
+    await subscriber._reconcile_parked_runs(live_engine)
 
 
 async def _seed_parked_gate(
@@ -514,7 +505,8 @@ async def _seed_parked_gate(
 
     Mirrors what the phase submit node commits before the gate parks:
     ``gate_pending_proposal_id`` is the ONE proposal the run awaits a verdict for,
-    and a durable ``document_approval_request`` permission row records the pause.
+    and a durable ``document_approval_request`` permission row, keyed by that
+    proposal id as the gate keys it, records the pause.
 
     ``status`` defaults to ``INPUT_REQUIRED`` (the healthy parked posture); pass
     ``RUNNING`` to model the clobber, where a prior gate's verdict resume
@@ -554,46 +546,24 @@ async def _seed_parked_gate(
         {},
     )
     async with session_factory() as session:
-        authority = make_test_write_authority()
         await create_thread(
             session,
-            write_authority=authority,
+            write_authority=make_test_write_authority(),
             thread_id=thread_id,
             team_preset=seed.team_preset,
             metadata=metadata,
+            status=seed.status,
         )
-        if seed.team_preset is not None and definition is not None:
-            dispatch = DispatchRequest(
-                dispatch_id=authority.action_receipt_id,
-                action="ingest",
-                thread_id=thread_id,
-                content="seed accepted graph authority",
+        if seed.team_preset is not None:
+            await seed_create_action(
+                session,
+                thread_id,
+                workspace=workspace,
                 team_preset=seed.team_preset,
-                graph_definition=definition,
-                workspace_root=str(workspace),
-                recursion_limit=25,
-                model_assignment=execution_authority.model_assignment,
             )
-            await create_control_action(
-                session,
-                thread_id=thread_id,
-                action_type=authority.action_type,
-                idempotency_key=f"thread-create:{thread_id}",
-                dispatch_id=authority.action_receipt_id,
-                payload=freeze_accepted_input(
-                    dispatch, intent={"content": "seed accepted graph authority"}
-                ),
-            )
-            receipt = await prepare_graph_action_receipt(
-                session,
-                thread_id=thread_id,
-                dispatch_id=authority.action_receipt_id,
-            )
-            assert receipt is not None
-        await update_thread_status(session, thread_id, seed.status)
         await record_permission_request(
             session,
-            request_id=f"{thread_id}:adr-gate",
+            request_id=proposal_id,
             thread_id=thread_id,
             pause_reason_type="document_approval_request",
             description="Approve the ADR document",
@@ -604,63 +574,6 @@ async def _seed_parked_gate(
         await session.commit()
 
 
-def _install_receipt_graph(
-    executor: Executor,
-    checkpointer: AsyncSqliteSaver,
-    thread_id: str,
-) -> None:
-    async def complete(_state: Any) -> dict[str, Any]:
-        return {"messages": [AIMessage(content="resumed")], "next": "FINISH"}
-
-    builder = new_state_graph()
-    builder.add_node("worker", complete)
-    builder.add_edge("__start__", "worker")
-    builder.add_edge("worker", "__end__")
-    workspace = Path.cwd()
-    definition = freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
-        workspace_root=workspace,
-    )
-    executor.register_compiled_graph(
-        thread_id,
-        (
-            "mock-success-single",
-            str(workspace),
-            False,
-            resolve_execution_authority(
-                current_execution_metadata(workspace)
-            ).model_assignment_digest,
-            definition.digest(),
-        ),
-        builder.compile(checkpointer=checkpointer),
-    )
-
-
-@asynccontextmanager
-async def _worker_runtime(
-    checkpointer: AsyncSqliteSaver,
-    *,
-    receipt_threads: tuple[str, ...] = (),
-) -> AsyncGenerator[tuple[httpx.AsyncClient, FastAPI, WorkerBridge]]:
-    bridge = WorkerBridge("http://127.0.0.1:1", "verdict-live-receipt-test")
-    executor = Executor(checkpointer, bridge)
-    for thread_id in receipt_threads:
-        _install_receipt_graph(executor, checkpointer, thread_id)
-    app = create_worker_app()
-    app.state.executor = executor
-    async with anyio.create_task_group() as tasks:
-        app.state.task_group = tasks
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://worker",
-            headers={"Authorization": f"Bearer {_TEST_INTERNAL_TOKEN}"},
-        ) as client:
-            yield client, app, bridge
-        tasks.cancel_scope.cancel()
-    await executor.shutdown()
-    await bridge.close()
-
-
 async def _wait_for_receipt(
     bridge: WorkerBridge,
     *,
@@ -668,15 +581,8 @@ async def _wait_for_receipt(
 ) -> dict[str, object]:
     with anyio.fail_after(5.0):
         while True:
-            buffered = cast(
-                "list[dict[str, object]]",
-                getattr(bridge, "_event_buffer", []),
-            )
-            for item in buffered:
-                candidate = item.get("payload")
-                if not isinstance(candidate, dict):
-                    continue
-                receipt = cast("dict[str, object]", candidate)
+            for item in bridge._event_buffer:
+                receipt = item.payload
                 if (
                     receipt.get("type") == "dispatch_applied"
                     and receipt.get("dispatch_id") == dispatch_id
@@ -688,15 +594,11 @@ async def _wait_for_receipt(
 async def _prepare_missed_reject(
     client: AuthoringClient, run_id: str
 ) -> dict[str, str]:
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    client._actor_token = minted.data["raw_token"]
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     session = AuthoringSession(client, run_id)
     await session.create_session(scope="repo", title=run_id)
-    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
-    assert isinstance(reviewer, AuthoringResponse)
-    reviewer_token = reviewer.data["raw_token"]
+    reviewer_token = await mint_raw_token(client, f"human:{run_id}", "human")
 
     info = await _submit_proposal(session, run_id, "adr")
     await _decide(
@@ -729,7 +631,10 @@ async def _prepare_missed_reject(
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_missed_reject_is_recovered_by_parked_reconcile(
-    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path: Path
+    client: AuthoringClient,
+    live_engine: EngineEndpoint,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A HUMAN reject consumed BEFORE the run parks is recovered by the reconcile.
 
@@ -754,89 +659,60 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
     info = await _prepare_missed_reject(client, run_id)
 
     # --- a2a side: seed the parked run, NEVER processing the reject event ---
-    db_file = tmp_path / "mr.db"
-    materialize_schema(Path(db_file))
-    db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
-    checkpoints = tmp_path / "mr-cp.db"
     thread_id = f"thread-{run_id}"
+    await _seed_parked_gate(
+        session_factory,
+        checkpointer,
+        _ParkedGateSeed(
+            thread_id=thread_id,
+            proposal_id=info["proposal_id"],
+            changeset_id=info["changeset_id"],
+            team_preset=DEFAULT_TEAM_PRESET,
+        ),
+    )
+    async with served_worker(
+        checkpointer, token=_TEST_INTERNAL_TOKEN, receipt_threads=(thread_id,)
+    ) as worker:
+        await _reconcile_parked_runs_once(
+            session_factory, checkpointer, worker.client, live_engine
+        )
 
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer:
-        await checkpointer.setup()
-        await _seed_parked_gate(
-            session_factory,
-            checkpointer,
-            _ParkedGateSeed(
+        assert len(worker.app.state.dispatch_ids) == 1
+        async with session_factory() as db:
+            action = await get_control_action_by_idempotency_key(
+                db,
                 thread_id=thread_id,
-                proposal_id=info["proposal_id"],
-                changeset_id=info["changeset_id"],
-                team_preset="mock-success-single",
+                idempotency_key=authoring_verdict_action_key(info["proposal_id"]),
+            )
+            gate_row = await get_permission_request(db, info["proposal_id"])
+            thread = await get_thread(db, thread_id)
+        assert action is not None
+        assert action.dispatch_id in worker.app.state.dispatch_ids
+        assert action.applied_at is None
+        assert gate_row is not None
+        assert gate_row.request_status == PermissionRequestStatus.PENDING.value
+        assert thread is not None
+        assert thread.status == ThreadStatus.INPUT_REQUIRED.value
+
+        # A dispatched control action always carries its dispatch id;
+        # the column is nullable for the pre-dispatch row only.
+        assert action.dispatch_id is not None
+        receipt = await _wait_for_receipt(worker.bridge, dispatch_id=action.dispatch_id)
+        await relay_event(
+            thread_id,
+            receipt,
+            services=RelayServices(
+                session_factory=session_factory, checkpointer=checkpointer
             ),
         )
-        async with _worker_runtime(checkpointer, receipt_threads=(thread_id,)) as (
-            worker_client,
-            worker_app,
-            bridge,
-        ):
-            subscriber = VerdictSubscriber(
-                VerdictSubscriberConfig(
-                    session_factory=session_factory,
-                    checkpointer=checkpointer,
-                    worker_client=worker_client,
-                    circuit_breaker=WorkerCircuitBreaker(
-                        failure_threshold=3, recovery_timeout=30.0
-                    ),
-                    worker_spawner=LazyWorkerSpawner(
-                        worker_url="http://worker", worker_port=1, auto_spawn=False
-                    ),
-                    endpoint_provider=lambda: live_engine,
-                    recursion_limit=25,
-                )
-            )
 
-            await subscriber._reconcile_parked_runs(live_engine)
-
-            assert len(worker_app.state.dispatch_ids) == 1
-            async with session_factory() as db:
-                action = await get_control_action_by_idempotency_key(
-                    db,
-                    thread_id=thread_id,
-                    idempotency_key=_verdict_resume_idempotency_key(
-                        info["proposal_id"]
-                    ),
-                )
-                gate_row = await get_permission_request(db, f"{thread_id}:adr-gate")
-                thread = await get_thread(db, thread_id)
-            assert action is not None
-            assert action.dispatch_id in worker_app.state.dispatch_ids
-            assert action.applied_at is None
-            assert gate_row is not None
-            assert gate_row.request_status == PermissionRequestStatus.PENDING.value
-            assert thread is not None
-            assert thread.status == ThreadStatus.INPUT_REQUIRED.value
-
-            # A dispatched control action always carries its dispatch id;
-            # the column is nullable for the pre-dispatch row only.
-            assert action.dispatch_id is not None
-            receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
-            await relay_event(
-                thread_id,
-                receipt,
-                session_factory=session_factory,
-                checkpointer=checkpointer,
-            )
-
-            async with session_factory() as db:
-                gate_row = await get_permission_request(db, f"{thread_id}:adr-gate")
-                thread = await get_thread(db, thread_id)
-            assert gate_row is not None
-            assert gate_row.request_status == PermissionRequestStatus.APPLIED.value
-            assert thread is not None
-            assert thread.status == ThreadStatus.RUNNING.value
-
-    await db_engine.dispose()
+        async with session_factory() as db:
+            gate_row = await get_permission_request(db, info["proposal_id"])
+            thread = await get_thread(db, thread_id)
+        assert gate_row is not None
+        assert gate_row.request_status == PermissionRequestStatus.APPLIED.value
+        assert thread is not None
+        assert thread.status == ThreadStatus.RUNNING.value
 
 
 async def _assert_clobbered_snapshot(
@@ -857,15 +733,11 @@ async def _assert_clobbered_snapshot(
 async def _prepare_clobbered_run(client: AuthoringClient) -> _ClobberedRun:
     """Submit a request-changes proposal before seeding its clobbered run."""
     run_id = f"cl-{uuid.uuid4().hex[:8]}"
-    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
-    assert isinstance(minted, AuthoringResponse)
-    client._actor_token = minted.data["raw_token"]
+    client._actor_token = await mint_raw_token(client, f"agent:{run_id}", "agent")
 
     session = AuthoringSession(client, run_id)
     await session.create_session(scope="repo", title=run_id)
-    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
-    assert isinstance(reviewer, AuthoringResponse)
-    reviewer_token = reviewer.data["raw_token"]
+    reviewer_token = await mint_raw_token(client, f"human:{run_id}", "human")
 
     info = await _submit_proposal(session, run_id, "adr")
     await _decide(
@@ -883,100 +755,67 @@ async def _prepare_clobbered_run(client: AuthoringClient) -> _ClobberedRun:
     return _ClobberedRun(info=info, thread_id=f"thread-{run_id}")
 
 
-def _open_live_database(tmp_path: Path, stem: str) -> _LiveDatabase:
-    db_file = tmp_path / f"{stem}.db"
-    materialize_schema(db_file)
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    session_factory = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    return _LiveDatabase(
-        engine=engine,
-        session_factory=session_factory,
-        checkpoints=tmp_path / f"{stem}-cp.db",
-    )
-
-
 async def _run_clobbered_reconcile(
-    database: _LiveDatabase,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
     seed: _ClobberedRun,
     live_engine: EngineEndpoint,
 ) -> None:
-    async with AsyncSqliteSaver.from_conn_string(
-        str(database.checkpoints)
-    ) as checkpointer:
-        await checkpointer.setup()
-        await _seed_parked_gate(
-            database.session_factory,
-            checkpointer,
-            _ParkedGateSeed(
+    await _seed_parked_gate(
+        session_factory,
+        checkpointer,
+        _ParkedGateSeed(
+            thread_id=seed.thread_id,
+            proposal_id=seed.info["proposal_id"],
+            changeset_id=seed.info["changeset_id"],
+            status=ThreadStatus.RUNNING,
+            team_preset=DEFAULT_TEAM_PRESET,
+        ),
+    )
+    async with served_worker(
+        checkpointer, token=_TEST_INTERNAL_TOKEN, receipt_threads=(seed.thread_id,)
+    ) as worker:
+        await _reconcile_parked_runs_once(
+            session_factory, checkpointer, worker.client, live_engine
+        )
+
+        assert len(worker.app.state.dispatch_ids) == 1
+        async with session_factory() as db:
+            action = await get_control_action_by_idempotency_key(
+                db,
                 thread_id=seed.thread_id,
-                proposal_id=seed.info["proposal_id"],
-                changeset_id=seed.info["changeset_id"],
-                status=ThreadStatus.RUNNING,
-                team_preset="mock-success-single",
+                idempotency_key=authoring_verdict_action_key(seed.info["proposal_id"]),
+            )
+        assert action is not None
+        assert action.applied_at is None
+        # A dispatched control action always carries its dispatch id;
+        # the column is nullable for the pre-dispatch row only.
+        assert action.dispatch_id is not None
+        receipt = await _wait_for_receipt(worker.bridge, dispatch_id=action.dispatch_id)
+        await relay_event(
+            seed.thread_id,
+            receipt,
+            services=RelayServices(
+                session_factory=session_factory, checkpointer=checkpointer
             ),
         )
-        async with _worker_runtime(checkpointer, receipt_threads=(seed.thread_id,)) as (
-            worker_client,
-            worker_app,
-            bridge,
-        ):
-            subscriber = VerdictSubscriber(
-                VerdictSubscriberConfig(
-                    session_factory=database.session_factory,
-                    checkpointer=checkpointer,
-                    worker_client=worker_client,
-                    circuit_breaker=WorkerCircuitBreaker(
-                        failure_threshold=3, recovery_timeout=30.0
-                    ),
-                    worker_spawner=LazyWorkerSpawner(
-                        worker_url="http://worker", worker_port=1, auto_spawn=False
-                    ),
-                    endpoint_provider=lambda: live_engine,
-                    recursion_limit=25,
-                )
+        async with session_factory() as db:
+            settled = await get_control_action_by_idempotency_key(
+                db,
+                thread_id=seed.thread_id,
+                idempotency_key=authoring_verdict_action_key(seed.info["proposal_id"]),
             )
-
-            await subscriber._reconcile_parked_runs(live_engine)
-
-            assert len(worker_app.state.dispatch_ids) == 1
-            async with database.session_factory() as db:
-                action = await get_control_action_by_idempotency_key(
-                    db,
-                    thread_id=seed.thread_id,
-                    idempotency_key=_verdict_resume_idempotency_key(
-                        seed.info["proposal_id"]
-                    ),
-                )
-            assert action is not None
-            assert action.applied_at is None
-            # A dispatched control action always carries its dispatch id;
-            # the column is nullable for the pre-dispatch row only.
-            assert action.dispatch_id is not None
-            receipt = await _wait_for_receipt(bridge, dispatch_id=action.dispatch_id)
-            await relay_event(
-                seed.thread_id,
-                receipt,
-                session_factory=database.session_factory,
-                checkpointer=checkpointer,
-            )
-            async with database.session_factory() as db:
-                settled = await get_control_action_by_idempotency_key(
-                    db,
-                    thread_id=seed.thread_id,
-                    idempotency_key=_verdict_resume_idempotency_key(
-                        seed.info["proposal_id"]
-                    ),
-                )
-            assert settled is not None
-            assert settled.applied_at is not None
+        assert settled is not None
+        assert settled.applied_at is not None
 
 
 @pytest.mark.service
 @pytest.mark.asyncio
 async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcile(
-    client: AuthoringClient, live_engine: EngineEndpoint, tmp_path: Path
+    client: AuthoringClient,
+    live_engine: EngineEndpoint,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
 ) -> None:
     """A run parked at a gate but mis-statused RUNNING is still recovered.
 
@@ -996,6 +835,4 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
     re-dispatch exactly one ``resume`` carrying the missed ``request_changes``.
     """
     seed = await _prepare_clobbered_run(client)
-    database = _open_live_database(tmp_path, "cl")
-    await _run_clobbered_reconcile(database, seed, live_engine)
-    await database.engine.dispose()
+    await _run_clobbered_reconcile(session_factory, checkpointer, seed, live_engine)

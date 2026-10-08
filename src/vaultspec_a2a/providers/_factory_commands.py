@@ -1,33 +1,97 @@
 """Provider command resolution and explicit subprocess environment builders."""
 
-from __future__ import annotations
-
 import functools
 import os
 import platform
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
+
+from vaultspec_core.config import ConfigVariable
 
 from ..control.config import settings
+from ..control.env_prefix import ENV_PREFIX
+from ..control.env_registry import CREDENTIAL_VARIABLES
+from ..control.infra_config import AcpBackend
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from .cli_resolution import resolve_provider_cli_executable, resolve_service_executable
+from .execution_modes import ACP_BACKEND_LANES, BINARY_BACKEND, NODE_BACKEND
 
 __all__ = [
+    "ANTHROPIC_AUTH_TOKEN_ENV",
+    "CLAUDE_CONFIG_DIR_ENV",
+    "CLAUDE_OAUTH_TOKEN",
+    "CODEX_HOME_ENV",
+    "COMMAND_LANES",
+    "KIMI_API_KEY_ENV",
     "_BIN_PATH",
+    "ProviderCommand",
     "_build_kimi_env",
-    "_build_zai_env",
     "_classify_acp_command",
-    "_classify_codex_command",
-    "_classify_kimi_command",
-    "_kimi_home_env",
+    "acp_launch_options",
     "capsule_acp_entry",
     "capsule_claude_executable",
     "capsule_node_executable",
     "classify_provider_command",
     "claude_acp_entry",
+    "foreign_credential",
     "kimi_temporary_model_configuration_reason",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCommand:
+    """One provider launch command and the runtime facts its resolution found.
+
+    The command is resolved once and every consumer reads these facts rather
+    than re-testing the argv.
+
+    The chat models hold one as a pydantic field, so this module keeps its
+    annotations evaluated rather than deferred.
+    """
+
+    argv: tuple[str, ...]
+    runtime_authority: str
+    command_origin: str
+    command_kind: str
+    command_executable: str
+    command_target: str
+    acp_backend: AcpBackend | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a launcher the child would get to resolve for itself.
+
+        Every lane's command is built here, so the absolute-launcher rule is
+        stated once at this constructor rather than re-checked per origin or at
+        spawn. A bare or relative program name is resolved by whoever launches
+        it: POSIX ``execvp`` walks the child's own ``PATH``, and the Windows
+        ``cmd.exe`` shim this project takes for ``.cmd`` launchers reads the
+        working directory first - which for every provider child is the agent's
+        own workspace. A lane that could not be resolved has no command at all;
+        it does not get a name to look up later.
+        """
+        if not self.argv:
+            raise ValueError("a provider command needs at least one argument")
+        launcher = self.argv[0]
+        if not Path(launcher).is_absolute():
+            raise ValueError(
+                f"a provider launcher must be an absolute path: {launcher!r}"
+            )
+
+    def metadata(self) -> dict[str, str]:
+        """Return the bounded runtime metadata attached to launches and probes."""
+        fields = {
+            "runtime_authority": self.runtime_authority,
+            "command_origin": self.command_origin,
+            "command_kind": self.command_kind,
+            "command_executable": self.command_executable,
+            "command_target": self.command_target,
+        }
+        if self.acp_backend is not None:
+            fields["acp_backend"] = self.acp_backend
+        return fields
 
 
 # Resolve the claude-agent-acp entry point from the checkout's node_modules.
@@ -78,26 +142,46 @@ _CAPSULE_ACP_RELATIVE_PATH = (
 )
 
 
-def _build_zai_env(
-    zai_base_url: str | None = None,
-    zai_auth_token: str | None = None,
-) -> dict[str, str]:
-    """Return explicit Z.ai auth env vars for the Claude ACP subprocess.
+def foreign_credential(field: str) -> ConfigVariable:
+    """Return the registry entry for the name a lane's own tool reads ``field`` by.
 
-    Z.ai rides the Claude ACP path: the wrapper's
-    Claude Code CLI honours ``ANTHROPIC_BASE_URL``/``ANTHROPIC_AUTH_TOKEN`` to
-    retarget the Anthropic Messages API at Z.ai's compatible gateway. The base env
-    removes ambient credentials and gateway overrides, so the selected provider
-    supplies both names explicitly after scrubbing. The token
-    is a secret: it is placed in the returned dict but never logged.
+    A credential is registered under its canonical a2a name and the owning
+    tool's own spelling. A child process reads the latter, so the provider layer
+    takes it from the registry instead of spelling it again.
+
+    Raises:
+        ValueError: ``field`` is not registered under exactly one foreign name.
     """
-    env_vars: dict[str, str] = {}
-    if not (zai_auth_token and zai_auth_token.strip()):
-        return env_vars
-    if zai_base_url and zai_base_url.strip():
-        env_vars["ANTHROPIC_BASE_URL"] = zai_base_url
-    env_vars["ANTHROPIC_AUTH_TOKEN"] = zai_auth_token
-    return env_vars
+    (variable,) = (
+        entry
+        for entry in CREDENTIAL_VARIABLES[field]
+        if not entry.env_name.startswith(ENV_PREFIX)
+    )
+    return variable
+
+
+CLAUDE_OAUTH_TOKEN: Final = foreign_credential("claude_code_oauth_token")
+KIMI_API_KEY_ENV: Final = foreign_credential("kimi_model_api_key").env_name
+
+# Names the provider tools read that no credential entry declares. The registry
+# lists ANTHROPIC_AUTH_TOKEN only as a name a child never inherits, so the Z.ai
+# lane is the sole writer of it.
+ANTHROPIC_AUTH_TOKEN_ENV: Final = "ANTHROPIC_AUTH_TOKEN"
+CLAUDE_CONFIG_DIR_ENV: Final = "CLAUDE_CONFIG_DIR"
+CODEX_HOME_ENV: Final = "CODEX_HOME"
+_BUN_SINGLE_FILE_ENV: Final = "CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"
+
+
+def acp_launch_options(backend: AcpBackend | None) -> tuple[bool, dict[str, str]]:
+    """Return ``use_exec`` and the adapter environment ``backend`` launches with.
+
+    The precompiled Bun executable is a native binary that needs no ``.cmd``
+    shim, and it must be told it is the single-file build. A command with no
+    selectable backend launches with neither.
+    """
+    if backend == BINARY_BACKEND:
+        return True, {_BUN_SINGLE_FILE_ENV: "1"}
+    return False, {}
 
 
 def _build_kimi_env(
@@ -106,12 +190,17 @@ def _build_kimi_env(
     kimi_temporary_model_name: str | None = None,
     kimi_temporary_model_max_context_size: int | None = None,
     kimi_temporary_model_capabilities: str | None = None,
+    kimi_thinking_effort: str | None = None,
 ) -> dict[str, str]:
-    """Return the explicit Kimi Code home and temporary-provider definition.
+    """Return the Kimi temporary-provider definition and its model controls.
 
     Kimi Code 0.28.1 treats ``KIMI_MODEL_*`` as one temporary provider, not as
     independent launch overrides. The tuple is injected only when complete;
     exact configured-alias selection is a separate ``-m`` argument.
+
+    *kimi_thinking_effort* is the run's selected native control and rides
+    independently of the tuple's completeness, which is how the launch path has
+    always emitted it.
     """
     reason = kimi_temporary_model_configuration_reason(
         kimi_api_key=kimi_api_key,
@@ -124,7 +213,7 @@ def _build_kimi_env(
         raise ValueError(reason)
     env_vars: dict[str, str] = {}
     if kimi_api_key and kimi_base_url and kimi_temporary_model_name:
-        env_vars["KIMI_MODEL_API_KEY"] = kimi_api_key.strip()
+        env_vars[KIMI_API_KEY_ENV] = kimi_api_key.strip()
         env_vars["KIMI_MODEL_BASE_URL"] = kimi_base_url.strip()
         env_vars["KIMI_MODEL_NAME"] = kimi_temporary_model_name.strip()
         if kimi_temporary_model_max_context_size is not None:
@@ -135,13 +224,9 @@ def _build_kimi_env(
             env_vars["KIMI_MODEL_CAPABILITIES"] = (
                 kimi_temporary_model_capabilities.strip()
             )
+    if kimi_thinking_effort and kimi_thinking_effort.strip():
+        env_vars["KIMI_MODEL_THINKING_EFFORT"] = kimi_thinking_effort.strip()
     return env_vars
-
-
-def _kimi_home_env(kimi_code_home: str | None) -> dict[str, str]:
-    if kimi_code_home and kimi_code_home.strip():
-        return {"KIMI_CODE_HOME": kimi_code_home.strip()}
-    return {}
 
 
 def kimi_temporary_model_configuration_reason(
@@ -278,9 +363,7 @@ def _resolve_capsule_asset(
     return canonical_asset
 
 
-def _classify_capsule_acp_command(
-    capsule_assets_root: Path,
-) -> tuple[list[str], dict[str, str]]:
+def _classify_capsule_acp_command(capsule_assets_root: Path) -> ProviderCommand:
     """Resolve the Node ACP command strictly from capsule-owned assets.
 
     The desktop capsule owns Node.js and the ACP adapter, so resolution never
@@ -303,23 +386,24 @@ def _classify_capsule_acp_command(
         asset_name="Claude ACP entry point",
         repair_hint="the bundled @agentclientprotocol/claude-agent-acp adapter",
     )
-    return [str(node_executable), str(acp_entry)], {
-        "runtime_authority": "capsule",
-        "command_origin": "capsule",
-        "command_kind": "node_entry",
-        "command_executable": node_executable.name,
-        "command_target": str(acp_entry),
-        "acp_backend": "node",
-    }
+    return ProviderCommand(
+        argv=(str(node_executable), str(acp_entry)),
+        runtime_authority="capsule",
+        command_origin="capsule",
+        command_kind="node_entry",
+        command_executable=node_executable.name,
+        command_target=str(acp_entry),
+        acp_backend=NODE_BACKEND,
+    )
 
 
 def _classify_acp_command(
-    backend: str,
+    backend: AcpBackend,
     *,
     capsule_assets_root: Path | _CapsuleAssetsRootOmitted | None = (
         _CAPSULE_ASSETS_ROOT_OMITTED
     ),
-) -> tuple[list[str], dict[str, str]]:
+) -> ProviderCommand:
     """Return the ACP gateway subprocess command for the given backend.
 
     Args:
@@ -327,7 +411,7 @@ def _classify_acp_command(
             ``"binary"`` for the precompiled Bun executable in bin/.
         capsule_assets_root: Explicit desktop capsule assets root. When omitted,
             the configured ``settings.capsule_assets_root`` is consulted. Explicit
-            ``None`` forces Compose/project-local resolution even when a capsule
+            ``None`` forces project-local resolution even when a capsule
             root is configured. When a root is in force, the default Node backend
             resolves its executable and ACP entry ONLY from capsule assets — no
             checkout or PATH fallback. The experimental binary backend is already
@@ -336,7 +420,7 @@ def _classify_acp_command(
     Raises:
         ConfigError: If the resolved entry point does not exist.
     """
-    if backend == "binary":
+    if backend == BINARY_BACKEND:
         if _BIN_PATH is None:
             raise ConfigError(
                 f"ACP binary backend requested but no executable found in {_BIN_DIR}. "
@@ -347,14 +431,15 @@ def _classify_acp_command(
                 f"ACP binary not found at {_BIN_PATH}. "
                 "Place a claude-agent-acp binary in src/vaultspec_a2a/bin/."
             )
-        return [str(_BIN_PATH)], {
-            "runtime_authority": "package_bin",
-            "command_origin": "package_bin",
-            "command_kind": "bun_binary",
-            "command_executable": _BIN_PATH.name,
-            "command_target": str(_BIN_PATH),
-            "acp_backend": "binary",
-        }
+        return ProviderCommand(
+            argv=(str(_BIN_PATH),),
+            runtime_authority="package_bin",
+            command_origin="package_bin",
+            command_kind="bun_binary",
+            command_executable=_BIN_PATH.name,
+            command_target=str(_BIN_PATH),
+            acp_backend=BINARY_BACKEND,
+        )
     # default: "node"
     root = (
         settings.capsule_assets_root
@@ -377,99 +462,92 @@ def _classify_acp_command(
     if node_executable is None:
         raise ConfigError(
             "Node.js runtime not found on this service's PATH, so the Claude ACP "
-            f"entry point {claude_acp_entry()} cannot be launched. Install the Node "
+            f"entry point {entry} cannot be launched. Install the Node "
             "version named by .node-version and make it reachable from the "
             "service environment."
         )
-    return [node_executable, str(claude_acp_entry())], {
-        "runtime_authority": "project_local",
-        "command_origin": "project_node_modules_entry",
-        "command_kind": "node_entry",
-        "command_executable": Path(node_executable).name,
-        "command_target": str(claude_acp_entry()),
-        "acp_backend": "node",
-    }
+    return ProviderCommand(
+        argv=(node_executable, str(entry)),
+        runtime_authority="project_local",
+        command_origin="project_node_modules_entry",
+        command_kind="node_entry",
+        command_executable=Path(node_executable).name,
+        command_target=str(entry),
+        acp_backend=NODE_BACKEND,
+    )
 
 
-def _classify_codex_command() -> tuple[list[str], dict[str, str]]:
-    """Return the ``codex app-server`` command plus bounded runtime metadata.
+# The system-CLI lanes and the subcommand that serves each: Codex is a non-ACP
+# JSON-RPC ``app-server``; Kimi speaks ACP natively through ``kimi acp``.
+_SYSTEM_CLI_SUBCOMMANDS: dict[Provider, str] = {
+    Provider.CODEX: "app-server",
+    Provider.KIMI: "acp",
+}
 
-    Codex is a non-ACP JSON-RPC subprocess. Resolution prefers the codex
-    executable on PATH; the bare-name ``fallback_cli_name`` origin (no resolved
-    path) is what ``classify_provider_command`` treats as unresolvable.
+#: Every lane launched as a native subprocess: exactly the lanes
+#: :func:`classify_provider_command` classifies.
+COMMAND_LANES: frozenset[Provider] = ACP_BACKEND_LANES | frozenset(
+    _SYSTEM_CLI_SUBCOMMANDS
+)
+
+
+def _classify_system_cli_command(
+    provider: Provider, *, search_path: str | None = None
+) -> ProviderCommand:
+    """Return a system-CLI lane's command, resolved from this service's PATH.
+
+    Raises:
+        ConfigError: No trusted search location holds the lane's CLI. The lane
+            is then unavailable, which is the honest answer: a command naming
+            the CLI by bare name would be resolved by the child rather than
+            here, from the agent's own workspace outwards.
     """
-    system_codex = resolve_provider_cli_executable(Provider.CODEX)
-    if system_codex:
-        return [system_codex, "app-server"], {
-            "runtime_authority": "system_cli",
-            "command_origin": "system_path_executable",
-            "command_kind": "codex_cli",
-            "command_executable": Path(system_codex).name,
-            "command_target": system_codex,
-        }
-    return ["codex", "app-server"], {
-        "runtime_authority": "system_cli",
-        "command_origin": "fallback_cli_name",
-        "command_kind": "codex_cli",
-        "command_executable": "codex",
-        "command_target": "codex",
-    }
-
-
-def _classify_kimi_command() -> tuple[list[str], dict[str, str]]:
-    """Return the ``kimi acp`` command plus bounded runtime metadata.
-
-    Kimi speaks ACP natively (``kimi acp`` is a stdio ACP server). Resolution
-    prefers the installed Kimi Code executable on PATH. The bare-name
-    ``fallback_cli_name`` origin is treated as unresolvable by readiness and
-    catalog registration.
-    """
-    system_kimi = resolve_provider_cli_executable(Provider.KIMI)
-    if system_kimi:
-        return [system_kimi, "acp"], {
-            "runtime_authority": "system_cli",
-            "command_origin": "system_path_executable",
-            "command_kind": "kimi_cli",
-            "command_executable": Path(system_kimi).name,
-            "command_target": system_kimi,
-        }
-    return ["kimi", "acp"], {
-        "runtime_authority": "system_cli",
-        "command_origin": "fallback_cli_name",
-        "command_kind": "kimi_cli",
-        "command_executable": "kimi",
-        "command_target": "kimi",
-    }
+    subcommand = _SYSTEM_CLI_SUBCOMMANDS[provider]
+    executable = resolve_provider_cli_executable(provider, search_path=search_path)
+    if not executable:
+        raise ConfigError(
+            f"The {provider.value} CLI is not installed where this service can "
+            f"resolve it, so the {provider.value} lane cannot be launched. "
+            f"Install it and make it reachable from the service environment."
+        )
+    return ProviderCommand(
+        argv=(executable, subcommand),
+        runtime_authority="system_cli",
+        command_origin="system_path_executable",
+        command_kind=f"{provider.value}_cli",
+        command_executable=Path(executable).name,
+        command_target=executable,
+    )
 
 
 def classify_provider_command(
-    provider: Provider, *, backend: str | None = None
-) -> dict[str, str]:
+    provider: Provider,
+    *,
+    backend: AcpBackend | None = None,
+    search_path: str | None = None,
+) -> ProviderCommand:
     """Resolve a subprocess provider's launch command without instantiating it.
 
-    Returns the command metadata for a genuinely resolvable command and raises
-    when it cannot be resolved. ``_classify_acp_command`` raises when the Claude
-    ACP entry point is missing, and bare-name command fallbacks are treated as
-    unresolvable rather than silently accepted.
+    The one classification of a lane's launch: the returned command carries
+    what resolution established, so no caller looks the binary up a second
+    time, and its launcher is always an absolute path.
+
+    *search_path* names the trusted search locations explicitly for a system-CLI
+    lane instead of reading this service's own, so a caller can state which
+    machine locations are trusted rather than arranging an ambient environment
+    to imply it. It has no effect on the ACP lanes, whose assets are owned.
 
     Raises:
-        ValueError: The provider has no resolvable subprocess command.
-        ConfigError: The Claude ACP entry point/binary does not exist.
+        ValueError: The provider has no subprocess command.
+        ConfigError: The lane's launcher does not exist - a missing Claude ACP
+            entry point or packaged binary, or an unresolvable system CLI.
     """
-    if provider in (Provider.CLAUDE, Provider.ZAI):
+    if provider in ACP_BACKEND_LANES:
         # Z.ai launches the same claude-agent-acp wrapper as Claude; only the
         # injected auth env differs.
-        resolved_backend = backend if backend is not None else settings.acp_backend
-        _, meta = _classify_acp_command(resolved_backend)
-        return meta
-    if provider == Provider.CODEX:
-        _, meta = _classify_codex_command()
-        if meta.get("command_origin") == "fallback_cli_name":
-            raise ValueError("Codex CLI not resolvable: 'codex' not found on PATH.")
-        return meta
-    if provider == Provider.KIMI:
-        _, meta = _classify_kimi_command()
-        if meta.get("command_origin") == "fallback_cli_name":
-            raise ValueError("Kimi Code CLI not resolvable: 'kimi' not found on PATH.")
-        return meta
+        return _classify_acp_command(
+            backend if backend is not None else settings.acp_backend
+        )
+    if provider in _SYSTEM_CLI_SUBCOMMANDS:
+        return _classify_system_cli_command(provider, search_path=search_path)
     raise ValueError(f"provider {provider.value} has no subprocess command to classify")

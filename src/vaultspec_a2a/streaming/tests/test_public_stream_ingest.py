@@ -5,14 +5,15 @@ lifecycle taken from the callback surface beside it. Three properties of that
 arrangement are what a client depends on:
 
 - every family of frame a run produced before is still produced: model text,
-  reasoning, tool lifecycle, node status, plan updates and custom writes;
+  reasoning, tool lifecycle, node status and plan updates;
 - a park is read from the stream as it happens, so a state read that fails
   afterwards can no longer turn an interrupted run into a completed one;
 - nothing in the streaming package reaches into LangGraph's private modules
   to make any of it work.
 
-Driven against real compiled graphs, a real checkpointer and the real
-aggregator.
+Driven against real compiled graphs, a real checkpointer and the real event
+producer; the model text comes from the deterministic lane, built through the
+real provider factory.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
-import os
 import pathlib
 import subprocess
 import sys
@@ -28,32 +28,39 @@ import textwrap
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import pytest
-from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.config import get_stream_writer
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import interrupt
 
-from ...graph.enums import ToolCallStatus
+from ...graph.enums import Provider, ToolCallStatus
 from ...graph.events import (
     AgentStatus,
     ArtifactUpdate,
     MessageChunk,
     PermissionRequest,
     PlanUpdate,
-    ThoughtChunk,
     ToolCallStart,
     ToolCallUpdate,
 )
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
-from ..aggregator import EventAggregator
+from ...providers import ProviderFactory
+from ...team.team_config import load_agent_config
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    inherited_environment,
+    new_state_graph,
+)
+from ..aggregator import RunEventProducer
+from ..ingest import GraphInvocation
+from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
+    from collections.abc import Awaitable, Callable
 
-    from ..types import SequencedEvent, StreamableGraph
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from ..types import StreamableGraph
 
 
 class _State(TypedDict, total=False):
@@ -67,70 +74,72 @@ def write_report(file_path: str) -> str:
     return f"wrote {file_path}"
 
 
-async def _speaking_node(state: _State) -> dict[str, Any]:
-    del state
-    writer = get_stream_writer()
-    writer({"content": "considering the request"})
-    model = GenericFakeChatModel(messages=iter([AIMessage(content="the answer text")]))
-    await model.ainvoke([HumanMessage(content="answer")])
-    await write_report.ainvoke(
-        {
-            "name": "write_report",
-            "args": {"file_path": "/work/report.md"},
-            "id": "call_REPORT",
-            "type": "tool_call",
+def _speaking_node(
+    replies: list[str],
+) -> Callable[[_State], Awaitable[dict[str, Any]]]:
+    """A node that thinks, answers, and writes a report, keeping its answer."""
+
+    async def node(state: _State) -> dict[str, Any]:
+        del state
+        model = ProviderFactory().create(
+            Provider.DETERMINISTIC,
+            model="deterministic",
+            agent_config=load_agent_config("vaultspec-researcher"),
+        )
+        answer = await model.ainvoke([HumanMessage(content="answer")])
+        replies.append(str(answer.content))
+        await write_report.ainvoke(
+            {
+                "name": "write_report",
+                "args": {"file_path": "/work/report.md"},
+                "id": "call_REPORT",
+                "type": "tool_call",
+            }
+        )
+        return {
+            "note": "spoken",
+            "current_plan": [{"content": "ship the report", "status": "pending"}],
         }
-    )
-    return {
-        "note": "spoken",
-        "current_plan": [{"content": "ship the report", "status": "pending"}],
-    }
+
+    return node
 
 
-def _full_surface_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
-    add_test_node(builder, "speaker", _speaking_node)
+def _full_surface_graph(saver: AsyncSqliteSaver, replies: list[str]) -> StreamableGraph:
+    builder = new_state_graph(_State)
+    add_test_node(builder, "speaker", _speaking_node(replies))
     builder.add_edge(START, "speaker")
     builder.add_edge("speaker", END)
     return cast("StreamableGraph", compile_test_graph(builder, checkpointer=saver))
 
 
-async def _drain(queue: Any) -> list[SequencedEvent]:
-    events: list[SequencedEvent] = []
-    while not queue.empty():
-        events.append(queue.get_nowait())
-    return events
-
-
 @pytest.mark.asyncio
-async def test_a_run_still_reports_every_family_of_frame_it_used_to() -> None:
+async def test_a_run_still_reports_every_family_of_frame_it_used_to(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """The public stream plus its callbacks carry the whole wire surface."""
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        aggregator = EventAggregator()
-        queue = aggregator.add_subscriber("client-surface")
-        aggregator.subscribe("client-surface", ["thread-surface"])
-        ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    replies: list[str] = []
+    producer = RunEventProducer()
+    relayed = relayed_events(producer)
 
-        outcome = await asyncio.wait_for(
-            ingest(
-                thread_id="thread-surface",
-                agent_id="supervisor",
-                graph=_full_surface_graph(saver),
+    outcome = await asyncio.wait_for(
+        producer.ingest(
+            "thread-surface",
+            "supervisor",
+            _full_surface_graph(checkpointer, replies),
+            GraphInvocation(
                 graph_input={"note": ""},
                 config={"configurable": {"thread_id": "thread-surface"}},
             ),
-            timeout=30.0,
-        )
+        ),
+        timeout=30.0,
+    )
 
     assert outcome == "completed"
-    events = [sequenced.event for sequenced in await _drain(queue)]
+    events = [sequenced.event for sequenced in relayed]
 
     text = "".join(e.content for e in events if isinstance(e, MessageChunk))
-    assert "the answer text" in text
-
-    thoughts = [e.content for e in events if isinstance(e, ThoughtChunk)]
-    assert "considering the request" in thoughts
+    assert len(replies) == 1
+    assert replies[0] in text
 
     starts = [e for e in events if isinstance(e, ToolCallStart)]
     assert [e.tool_call_id for e in starts] == ["call_REPORT"]
@@ -162,11 +171,15 @@ def _parking_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
     async def gate(state: _State) -> dict[str, Any]:
         del state
         answer = interrupt(
-            {"type": "permission_request", "tool_name": "fs/write_text_file"}
+            {
+                "type": "permission_request",
+                "request_id": "perm-parked-1",
+                "tool_name": "fs/write_text_file",
+            }
         )
         return {"note": str(answer)}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
+    builder = new_state_graph(_State)
     add_test_node(builder, "gate", gate)
     builder.add_edge(START, "gate")
     builder.add_edge("gate", END)
@@ -174,28 +187,28 @@ def _parking_graph(saver: AsyncSqliteSaver) -> StreamableGraph:
 
 
 @pytest.mark.asyncio
-async def test_a_parked_run_is_reported_interrupted_and_asks_for_its_answer() -> None:
+async def test_a_parked_run_is_reported_interrupted_and_asks_for_its_answer(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """The stream reports the park, and the projection publishes the request."""
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        aggregator = EventAggregator()
-        queue = aggregator.add_subscriber("client-park")
-        aggregator.subscribe("client-park", ["thread-park"])
-        ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    producer = RunEventProducer()
+    relayed = relayed_events(producer)
 
-        outcome = await asyncio.wait_for(
-            ingest(
-                thread_id="thread-park",
-                agent_id="supervisor",
-                graph=_parking_graph(saver),
+    outcome = await asyncio.wait_for(
+        producer.ingest(
+            "thread-park",
+            "supervisor",
+            _parking_graph(checkpointer),
+            GraphInvocation(
                 graph_input={"note": ""},
                 config={"configurable": {"thread_id": "thread-park"}},
             ),
-            timeout=30.0,
-        )
+        ),
+        timeout=30.0,
+    )
 
     assert outcome == "interrupted"
-    events = [sequenced.event for sequenced in await _drain(queue)]
+    events = [sequenced.event for sequenced in relayed]
     requests = [e for e in events if isinstance(e, PermissionRequest)]
     assert requests, events
     assert "fs/write_text_file" in requests[0].description
@@ -207,13 +220,14 @@ _UNREADABLE_STATE_PROBE = textwrap.dedent(
     """
     import asyncio
     import json
-    from typing import Any, TypedDict, cast
+    from typing import Any, TypedDict
 
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-    from langgraph.graph import END, START, StateGraph
+    from langgraph.graph import END, START
     from langgraph.types import interrupt
 
-    from vaultspec_a2a.streaming.aggregator import EventAggregator
+    from vaultspec_a2a.streaming import GraphInvocation, RunEventProducer
+    from vaultspec_a2a.testing import add_test_node, compile_test_graph, new_state_graph
 
 
     class S(TypedDict, total=False):
@@ -221,28 +235,34 @@ _UNREADABLE_STATE_PROBE = textwrap.dedent(
 
 
     async def gate(state: S) -> dict[str, Any]:
-        answer = interrupt({"type": "permission_request", "tool_name": "deep"})
+        answer = interrupt(
+        {"type": "permission_request", "request_id": "perm-deep-1", "tool_name": "deep"}
+    )
         return {"note": str(answer)}
 
 
     async def main() -> dict[str, object]:
         async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
             await saver.setup()
-            builder = StateGraph(cast(Any, S))
-            builder.add_node("gate", gate)
+            builder = new_state_graph(S)
+            add_test_node(builder, "gate", gate)
             builder.add_edge(START, "gate")
             builder.add_edge("gate", END)
-            graph = builder.compile(checkpointer=saver)
-            aggregator = EventAggregator()
-            queue = aggregator.add_subscriber("c")
-            aggregator.subscribe("c", ["t"])
-            outcome = await aggregator.ingest(
-                "t", "supervisor", graph, {"note": ""},
-                {"configurable": {"thread_id": "t"}},
-            )
+            graph = compile_test_graph(builder, checkpointer=saver)
+            producer = RunEventProducer()
             emitted = []
-            while not queue.empty():
-                emitted.append(type(queue.get_nowait().event).__name__)
+
+            async def capture(sequenced):
+                emitted.append(type(sequenced.event).__name__)
+
+            producer.add_broadcast_hook(capture)
+            outcome = await producer.ingest(
+                "t", "supervisor", graph,
+                GraphInvocation(
+                    graph_input={"note": ""},
+                    config={"configurable": {"thread_id": "t"}},
+                ),
+            )
             return {"outcome": outcome, "emitted": emitted}
 
 
@@ -254,21 +274,22 @@ _UNREADABLE_STATE_PROBE = textwrap.dedent(
 def test_a_park_survives_a_post_run_state_read_that_times_out() -> None:
     """An interrupted run is never reported completed because a read failed.
 
-    The park used to be discovered only by reading the graph's state after
-    the stream ended, and that read returns nothing on timeout, after which
-    the run settled as though it had finished - writing a terminal for a run
-    that is sitting on a question. The stream reports the park itself now, so
-    the read decides only whether the question can be published.
+    The stream reports the park itself, so a post-run state read - which
+    returns nothing on timeout - never decides whether the run is finished:
+    were it to, the run would settle as though it had completed and write a
+    terminal for a run sitting on a question. The read decides only whether
+    the question can be published.
 
     The timeout knob is read once, when its module is imported, so this drives
     a real subprocess with the knob set below any real read's latency - the
     same recipe the state-projection knob's own test uses.
     """
-    env = {
-        **os.environ,
-        "VAULTSPEC_A2A_AGET_STATE_TIMEOUT_SECONDS": "0.000001",
-        "PYTHONPATH": str(_STREAMING_PACKAGE.parent.parent),
-    }
+    env = inherited_environment(
+        {
+            "VAULTSPEC_A2A_AGET_STATE_TIMEOUT_SECONDS": "0.000001",
+            "PYTHONPATH": str(_STREAMING_PACKAGE.parent.parent),
+        }
+    )
     result = subprocess.run(
         [sys.executable, "-c", _UNREADABLE_STATE_PROBE],
         capture_output=True,

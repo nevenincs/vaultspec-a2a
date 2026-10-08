@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import runpy
 import shutil
-from contextlib import aclosing
+from contextlib import aclosing, contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -22,10 +23,9 @@ from vaultspec_a2a.desktop.native_isolation import (
     NativeLaunchAuthority,
     NativeWorkspaceAuthority,
 )
-from vaultspec_a2a.providers._codex_protocol import _CodexProtocolError
-from vaultspec_a2a.providers._provider_catalog_cache import DEFAULT_FAILURE_TTL
 from vaultspec_a2a.providers.codex_chat_model import CodexChatModel
 from vaultspec_a2a.providers.provider_catalog import (
+    DEFAULT_FAILURE_TTL,
     AuthenticationState,
     CatalogStatus,
     HealthState,
@@ -108,20 +108,42 @@ def _processes(inputs: _Inputs) -> tuple[psutil.Process, ...]:
     return tuple(owned)
 
 
-def _released(
-    inputs: _Inputs,
-    model: CodexChatModel,
-    processes: tuple[psutil.Process, ...] = (),
-) -> None:
-    assert not model.active_native_control_targets()
+def _released(inputs: _Inputs, processes: tuple[psutil.Process, ...] = ()) -> None:
     homes = inputs.authority.app_home.path / "tmp/homes"
     assert not tuple(homes.glob("vaultspec-codex-home-*"))
     assert all(not process.is_running() for process in processes)
 
 
-async def _active(model: CodexChatModel, task: asyncio.Task[Any]) -> None:
+class _TurnStarted(logging.Handler):
+    """Notes the lane's own log line, emitted once the provider accepts a turn."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.INFO)
+        self.started = False
+
+    @override
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.getMessage() == "Codex turn started":
+            self.started = True
+
+
+@contextmanager
+def _observed_turn_start() -> Generator[_TurnStarted]:
+    lane_logger = logging.getLogger(CodexChatModel.__module__)
+    turn = _TurnStarted()
+    level = lane_logger.level
+    lane_logger.addHandler(turn)
+    lane_logger.setLevel(logging.INFO)
+    try:
+        yield turn
+    finally:
+        lane_logger.removeHandler(turn)
+        lane_logger.setLevel(level)
+
+
+async def _active(turn: _TurnStarted, task: asyncio.Task[Any]) -> None:
     async with asyncio.timeout(30):
-        while not model.active_native_control_targets():
+        while not turn.started:
             if task.done():
                 await task
                 pytest.fail("real provider ended before the lifecycle control")
@@ -148,7 +170,7 @@ async def test_completed_stream_preserves_content_usage_and_final_chunk(
                 final |= chunk.chunk_position == "last"
     assert "stream-qualified" in content
     assert usage and final
-    _released(inputs, model)
+    _released(inputs)
 
 
 @pytest.mark.asyncio
@@ -158,27 +180,27 @@ async def test_live_stream_closes_across_tasks_before_return(inputs: _Inputs) ->
         async with asyncio.timeout(120):
             while not (await asyncio.wait_for(anext(stream), timeout=60)).content:
                 pass
-        assert model.active_native_control_targets()
         processes = _processes(inputs)
-    _released(inputs, model, processes)
+    _released(inputs, processes)
 
 
 @pytest.mark.asyncio
 async def test_cancelling_a_real_invocation_joins_cleanup(inputs: _Inputs) -> None:
     model = inputs.model()
-    task = asyncio.create_task(model.ainvoke([HumanMessage(content=_LONG_PROMPT)]))
-    try:
-        await _active(model, task)
-        processes = _processes(inputs)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(task, timeout=30)
-        _released(inputs, model, processes)
-    finally:
-        if not task.done():
+    with _observed_turn_start() as turn:
+        task = asyncio.create_task(model.ainvoke([HumanMessage(content=_LONG_PROMPT)]))
+        try:
+            await _active(turn, task)
+            processes = _processes(inputs)
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
-                await task
+                await asyncio.wait_for(task, timeout=30)
+            _released(inputs, processes)
+        finally:
+            if not task.done():
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
 
 
 class _InlineContentObserver(AsyncCallbackHandler):
@@ -212,39 +234,14 @@ async def test_repeated_cancellation_in_a_streaming_callback_joins_cleanup(
     )
     try:
         await asyncio.wait_for(observer.content_seen.wait(), timeout=120)
-        assert model.active_native_control_targets()
         processes = _processes(inputs)
         task.cancel()
         asyncio.get_running_loop().call_soon(task.cancel)
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(task, timeout=30)
-        _released(inputs, model, processes)
+        _released(inputs, processes)
     finally:
         observer.release.set()
-        if not task.done():
-            task.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await task
-
-
-@pytest.mark.asyncio
-async def test_exact_provider_interruption_settles_before_cleanup(
-    inputs: _Inputs,
-) -> None:
-    model = inputs.model()
-    task = asyncio.create_task(model.ainvoke([HumanMessage(content=_LONG_PROMPT)]))
-    try:
-        await _active(model, task)
-        thread_id, turn_id = model.active_native_control_targets()[0]
-        processes = _processes(inputs)
-        result = await model.execute_native_control(
-            "interrupt", thread_id=thread_id, turn_id=turn_id
-        )
-        assert result.outcome == "completed"
-        with pytest.raises(_CodexProtocolError, match="interrupted"):
-            await asyncio.wait_for(task, timeout=30)
-        _released(inputs, model, processes)
-    finally:
         if not task.done():
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
@@ -263,12 +260,9 @@ async def test_closing_one_stream_preserves_another_on_the_same_model(
             async with asyncio.timeout(120):
                 while not (await anext(first)).content:
                     pass
-                first_keys = set(model.active_native_control_targets())
                 first_processes = _processes(inputs)
                 while not (await anext(second)).content:
                     pass
-            second_keys = set(model.active_native_control_targets()) - first_keys
-            assert len(second_keys) == 1
             first_pids = {process.pid for process in first_processes}
             second_processes = tuple(
                 process
@@ -276,10 +270,9 @@ async def test_closing_one_stream_preserves_another_on_the_same_model(
                 if process.pid not in first_pids
             )
             assert second_processes
-        assert set(model.active_native_control_targets()) == second_keys
         assert all(not process.is_running() for process in first_processes)
         assert all(process.is_running() for process in second_processes)
-    _released(inputs, model, first_processes + second_processes)
+    _released(inputs, first_processes + second_processes)
 
 
 @pytest.mark.asyncio
@@ -295,7 +288,7 @@ async def test_disabled_streaming_fallback_completes_and_cleans_up(
         ) as stream:
             content = "".join([str(chunk.content) async for chunk in stream])
     assert "fallback-qualified" in content
-    _released(inputs, model)
+    _released(inputs)
 
 
 @pytest.mark.asyncio
@@ -309,9 +302,8 @@ async def test_beta_event_stream_close_joins_the_provider(inputs: _Inputs) -> No
             async for text in stream.text:
                 if text:
                     break
-        assert model.active_native_control_targets()
         processes = _processes(inputs)
-    _released(inputs, model, processes)
+    _released(inputs, processes)
 
 
 @pytest.mark.asyncio
@@ -327,13 +319,12 @@ async def test_cancellation_of_beta_stream_closure_still_joins_cleanup(
             async for text in stream.text:
                 if text:
                     break
-        assert model.active_native_control_targets()
         processes = _processes(inputs)
         task = asyncio.create_task(stream.aclose())
         asyncio.get_running_loop().call_soon(task.cancel)
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(task, timeout=30)
-        _released(inputs, model, processes)
+        _released(inputs, processes)
     finally:
         await stream.aclose()
 
@@ -380,11 +371,10 @@ async def test_public_binding_close_joins_real_provider(
         async with asyncio.timeout(120):
             while not (await asyncio.wait_for(anext(stream), timeout=60)).content:
                 pass
-        assert model.active_native_control_targets()
         processes = _processes(inputs)
         if kind in {"listeners", "composed"}:
             assert len(listener_started) == 1
-    _released(inputs, model, processes)
+    _released(inputs, processes)
 
 
 @pytest.mark.asyncio
@@ -395,14 +385,13 @@ async def test_cancelling_public_binding_closure_joins_cleanup(inputs: _Inputs) 
         async with asyncio.timeout(120):
             while not (await anext(stream)).content:
                 pass
-        assert model.active_native_control_targets()
         processes = _processes(inputs)
         task = asyncio.create_task(stream.aclose())
         asyncio.get_running_loop().call_soon(task.cancel)
         asyncio.get_running_loop().call_soon(task.cancel)
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(task, timeout=30)
-        _released(inputs, model, processes)
+        _released(inputs, processes)
     finally:
         await stream.aclose()
 
@@ -457,7 +446,7 @@ async def test_public_binding_preserves_work_callbacks_and_merging(
     assert observer.completions == 1
     assert {"bound-tag", "call-tag"}.issubset(observer.tags)
     assert observer.stop == ["call-stop"]
-    _released(inputs, model)
+    _released(inputs)
 
 
 @pytest.mark.asyncio
@@ -477,9 +466,8 @@ async def test_public_binding_preserves_bound_beta_version_and_close(
             async for text in stream.text:
                 if text:
                     break
-        assert model.active_native_control_targets()
         processes = _processes(inputs)
-    _released(inputs, model, processes)
+    _released(inputs, processes)
 
 
 @pytest.mark.asyncio
@@ -502,9 +490,9 @@ async def test_beta_stream_completion_preserves_resource_and_callbacks(
         assert "events-qualified" in text
         assert message.usage_metadata is not None
         assert observer.completions == 1
-        _released(inputs, model)
+        _released(inputs)
     assert observer.completions == 1
-    _released(inputs, model)
+    _released(inputs)
 
 
 @pytest.mark.asyncio

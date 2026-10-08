@@ -48,28 +48,20 @@ dependencies = [
   # than copied, so the runtime refuses exactly what the framework refuses. No
   # upper bound: the framework moves and this service moves with it.
   "vaultspec-core>=0.3.2",
-  "websockets>=16.0",
   "alembic>=1.15.1",
   "click>=8.1",
   "langsmith>=0.14.2",
 ]
 
   [project.optional-dependencies]
-  # The locked PostgreSQL server profile. PostgreSQL-dependent checks use a
-  # task-owned environment, then run without mutating or resolving it during pytest:
-  #   $env:UV_PROJECT_ENVIRONMENT = "$PWD/tmp/s04-server-env"
-  #   uv sync --locked --no-default-groups --extra server --group tooling
-  #   uv run --no-sync python -m pytest \
-  #     src/vaultspec_a2a/control/tests/test_sync_url_derivation.py
-  # Keep these drivers out of both the base dependencies and the `freeze` group. The
-  # dashboard binary is SQLite-only, and its PyInstaller spec separately excludes the
-  # same modules so a contaminated build environment cannot pull them into the artifact.
-  server = [
-    "asyncpg>=0.30.0",
-    "langgraph-checkpoint-postgres>=3.1.2,<4",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
-    "psycopg[binary,pool]>=3.2.9",
-  ]
+  # The OTLP gRPC trace and metric exporter. Optional by design: telemetry probes
+  # for it at startup and, when it is absent or unusable, keeps the SDK running
+  # without export, so a base install starts cleanly with no collector and no
+  # gRPC native closure. The development environment selects this extra so the
+  # exporter-gated tests run; `just test-clean-base` proves the base-only path.
+  # The desktop binary is frozen from the base dependencies plus the `freeze`
+  # group, so it ships without the exporter.
+  otlp = ["opentelemetry-exporter-otlp-proto-grpc>=1.39.1"]
   # Semantic search over the vault and the codebase. NOT a runtime dependency of
   # the gateway: no module here imports `vaultspec_rag` or `torch`, and the presets
   # that use it name `vaultspec-rag` as an out-of-process MCP SERVER rather than
@@ -130,7 +122,7 @@ tooling = [
   "packaging>=25.0",
   "prek>=0.3.2",
   # Module length and the class-shape design limits ruff has no rule for
-  # (C0302, R0902, R0904, R0916). Everything else pylint would report is
+  # (C0302, R0904, R0916). Everything else pylint would report is
   # already covered by ruff and stays disabled in [tool.pylint].
   "pylint>=4.0",
   "pytest>=9.0.2",
@@ -144,12 +136,12 @@ tooling = [
   "pytest-xdist>=3.8",
   # Cyclomatic complexity and the Maintainability Index, used as a LIBRARY by
   # dev/health/report.py - the numbers are radon's own, with no command output
-  # parsed in between, so the gate and the health report cannot disagree.
+  # parsed in between.
   #
   # The usual CLI gate built on radon, `xenon`, is deliberately absent: it reads
   # pyproject.toml through configparser, which reads this project's legitimate
   # `log_cli_format` ("%(asctime)s ...") as broken interpolation and crashes
-  # before scanning anything. `dev.health --gate` enforces the same ceiling.
+  # before scanning anything. Ruff's C901 gates cyclomatic complexity instead.
   "radon>=6.0.1",
   "ruff>=0.15.2",
   # Pinned like actionlint-py because it ships the binary. actionlint
@@ -163,10 +155,6 @@ tooling = [
   # without these its calls type as Unknown.
   "types-jsonschema>=4.26",
   "ty>=0.0.15",
-  # Dead-code detection. Advisory: it infers reachability it cannot always see,
-  # so a finding is a lead to confirm rather than a verdict.
-  "vulture>=2.16",
-  "websockets>=16.0",
   "zstandard>=0.25.0",
 ]
 # The frozen-binary build closure: PyInstaller. vaultspec-core, which the binary
@@ -209,7 +197,7 @@ packages = ["src/vaultspec_a2a"]
 # Production package data retained by this denylist:
 #   - database/migrations/**  — Alembic scripts, env.py, and script.py.mako
 #     resolved from installed package resources (see database/migrate.py).
-#   - team/presets/{agents,teams}/**  — product agent and team presets; mock and
+#   - team/presets/{agents,teams}/**  — product agent and team presets; the
 #     deterministic certification variants remain available only in source and
 #     native integration test environments.
 #   - context/presets/**  — bundled authoring rule corpus.
@@ -238,32 +226,43 @@ exclude = [
   "src/vaultspec_a2a/service_tests/**",
   "src/vaultspec_a2a/acceptance",
   "src/vaultspec_a2a/acceptance/**",
-  "src/vaultspec_a2a/team/presets/mock",
-  "src/vaultspec_a2a/team/presets/mock/**",
-  "src/vaultspec_a2a/team/presets/agents/mock-*.toml",
-  "src/vaultspec_a2a/team/presets/agents/*-mock.toml",
-  "src/vaultspec_a2a/team/presets/teams/mock-*.toml",
-  "src/vaultspec_a2a/team/presets/teams/*-mock.toml",
   "src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research-deterministic.toml",
-  # Certification-only lanes that the mock-* patterns above do not match by
-  # name. Every one is a scripted fixture - forced failure, a bridge-free
-  # provider-condition probe, and the in-process scenarios that drive a tool
-  # call, a supervised permission pause, and a cancellation window - so they
-  # belong with the other certification variants: available in source and
-  # native integration tests, absent from a product wheel. The agent halves are listed beside
-  # their teams because a scenario agent is no more shippable than the scenario
-  # that names it.
+  "src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research-clarify.toml",
+  # Certification-only fixtures, each scripted: a completing coder, a passing
+  # review loop, a forced failure, a bridge-free provider-condition probe, and
+  # the in-process scenarios that drive a supervised permission pause, a
+  # cancellation window, a relay burst, supervisor routing, an endless
+  # generation loop, a turn held until its test releases it, a scripted
+  # supervisor, a reviewer that never passes and research branches that ask
+  # before they report - so they belong with the other certification variants:
+  # available in source and native integration tests, absent from a product
+  # wheel. The agent halves are listed beside their teams because a scenario
+  # agent is no more shippable than the scenario that names it.
+  "src/vaultspec_a2a/team/presets/teams/deterministic-success-single.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-passing-loop.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-coder-success.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-passing-reviewer.toml",
   "src/vaultspec_a2a/team/presets/teams/deterministic-failure.toml",
   "src/vaultspec_a2a/team/presets/teams/provider-condition-probe.toml",
   "src/vaultspec_a2a/team/presets/teams/deterministic-cancel-window.toml",
   "src/vaultspec_a2a/team/presets/teams/deterministic-permission-pause.toml",
-  "src/vaultspec_a2a/team/presets/teams/deterministic-tool-call.toml",
-  "src/vaultspec_a2a/team/presets/agents/deterministic-failure.toml",
   "src/vaultspec_a2a/team/presets/agents/deterministic-cancel-window.toml",
   "src/vaultspec_a2a/team/presets/agents/deterministic-permission-pause.toml",
-  "src/vaultspec_a2a/team/presets/agents/deterministic-tool-call.toml",
   "src/vaultspec_a2a/team/presets/teams/deterministic-relay-burst.toml",
   "src/vaultspec_a2a/team/presets/agents/deterministic-relay-burst.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-supervisor-routing.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-looping.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-looping.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-hold-then-complete.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-hold-then-complete.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-scripted-supervisor.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-research-revising-review.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-revising-loop.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-revising-doc-reviewer.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-revising-reviewer.toml",
+  "src/vaultspec_a2a/team/presets/teams/deterministic-research-branches.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-branch-researcher.toml",
+  "src/vaultspec_a2a/team/presets/agents/deterministic-path-writer.toml",
 ]
 
   [tool.hatch.build.targets.wheel.force-include]
@@ -319,7 +318,7 @@ markers = [
   "core: marks Layer 1 + Layer 1.5 tests — pure domain, zero infrastructure (run with '-m core')",
   "middleware: marks middleware-layer tests — protocol adapters + infra services, no orchestration deps (run with '-m middleware')",
   "unit: marks pure unit tests across all layers — no I/O, no database, no HTTP (run with '-m unit')",
-  "service: marks Layer 3 certification tests — most require Docker compose services, though some members are engine-free and run fully in-process. Run with pytest -m service.",
+  "service: marks Layer 3 certification tests — most drive the native gateway, worker and real provider or engine processes, though some members are engine-free and run fully in-process. Run with pytest -m service.",
   "resource(key, shared=False): declares a contended real resource this test uses; drives scheduling groups, machine-global leases, and timeout backstops (vaultspec_a2a.testing).",
 ]
 testpaths = ["src/vaultspec_a2a"]
@@ -387,6 +386,10 @@ target-version = "py313"
       "pydantic_settings.BaseSettings",
       "vaultspec_a2a.control.settings_base.ProjectSettings",
     ]
+    # LangGraph resolves the TeamState annotation of a node or route function at
+    # runtime, so that import must stay at module scope. Ruff matches a relative
+    # import by its spelling, so each depth that imports it is listed.
+    exempt-modules = ["typing", "..thread.state", "...thread.state"]
 
   [tool.ruff.format]
   indent-style = "space"
@@ -400,8 +403,6 @@ known_first_party = ["vaultspec_a2a"]
   opentelemetry-exporter-otlp-proto-grpc = "opentelemetry"
   opentelemetry-instrumentation-fastapi = "opentelemetry"
   opentelemetry-sdk = "opentelemetry"
-  # The server extra's psycopg[pool] is what installs psycopg_pool.
-  psycopg = ["psycopg", "psycopg_pool"]
   pytest-asyncio = "pytest_asyncio"
 
   [tool.deptry.per_rule_ignores]
@@ -419,11 +420,6 @@ known_first_party = ["vaultspec_a2a"]
     # aiosqlite is loaded as the SQLAlchemy async driver via the URL scheme
     # "sqlite+aiosqlite://..." — never imported directly.
     "aiosqlite",
-    # Uvicorn loads websockets as its protocol backend.
-    "websockets",
-    # The server profile loads PostgreSQL drivers through SQLAlchemy URLs.
-    "asyncpg",
-    "psycopg",
     # The RAG profile provisions its MCP service out of process.
     "vaultspec-rag",
     # langsmith is the LangGraph/LangChain tracing backend, activated at runtime
@@ -528,7 +524,7 @@ executionEnvironments = [
 max-complexity = 15
 
 # ── Module length and class design ───────────────────────────────────────────
-# pylint runs ONLY for the four limits ruff has no rule for. Everything else it
+# pylint runs ONLY for the three limits ruff has no rule for. Everything else it
 # would report is already covered by ruff, so enabling more would mean two
 # tools disagreeing about the same finding.
 [tool.pylint.main]
@@ -542,7 +538,6 @@ py-version = "3.13"
 disable = ["all"]
 enable = [
   "too-many-lines",               # C0302 - module length
-  "too-many-instance-attributes", # R0902
   "too-many-public-methods",      # R0904
   "too-many-boolean-expressions", # R0916
 ]
@@ -552,21 +547,8 @@ enable = [
 max-module-lines = 1000
 
 [tool.pylint.design]
-max-attributes = 7      # R0902 default
 max-bool-expr = 5       # R0916 default
 max-public-methods = 20 # R0904 default
-
-# ── Dead code ────────────────────────────────────────────────────────────────
-# Advisory. vulture infers reachability it cannot always see - a name reached
-# only through a registry, a plugin lookup, or a framework callback reads as
-# dead - so a finding here is a lead to confirm, never a verdict.
-[tool.vulture]
-exclude = ["*/tests/*", "*/service_tests/*"]
-paths = ["src/vaultspec_a2a"]
-# The tool's own default. Raising it to 80 would hide the whole class of
-# genuinely-unused imports and variables this scan exists to surface.
-min_confidence = 60
-sort_by_size = true
 
 # ── Security ─────────────────────────────────────────────────────────────────
 # Advisory. This project spawns provider CLIs and loads drivers by URL scheme

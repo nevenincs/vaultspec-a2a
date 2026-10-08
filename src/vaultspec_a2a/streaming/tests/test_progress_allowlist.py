@@ -15,7 +15,7 @@ from typing import cast
 
 import pytest
 
-from ...graph.enums import ServerEventType
+from ...graph.enums import ServerEventType, StreamFrameKind
 from ..sse_frames import (
     ALWAYS_SAFE_KEYS,
     MAX_PROGRESS_CONTENT_CHARS,
@@ -329,23 +329,14 @@ def test_each_catalogued_lifecycle_field_survives(
 # ---------------------------------------------------------------------------
 
 # The frame kinds the SSE transport synthesises itself instead of projecting from
-# a domain event, so they carry no ``ServerEventType`` discriminator and cannot be
-# derived from that enum. Each has a real producer: ``stream_snapshot``,
-# ``thread_terminal`` and ``stream_rejected`` are yielded by
+# a domain event are ``StreamFrameKind`` members. Each has a real producer:
+# ``stream_snapshot``, ``thread_terminal`` and ``stream_rejected`` are yielded by
 # ``api.thread_stream._stream_thread_events`` (all driven live by
 # ``api/tests/test_thread_stream.py``, ``api/tests/test_stream_slot_release.py``
 # and ``api/tests/test_stream_attachment_order.py``), and ``progress_dropped`` is
 # emitted both as the over-cap sentinel - proven by the test below rather than
-# taken on trust - and as the backpressure resynchronization notice. A name
-# belongs in this set only when a producer can be pointed at.
-_TRANSPORT_FRAME_KINDS = frozenset(
-    {
-        "stream_snapshot",
-        "thread_terminal",
-        "stream_rejected",
-        "progress_dropped",
-    }
-)
+# taken on trust - and as the backpressure resynchronization notice. A member
+# belongs in that enum only when a producer can be pointed at.
 
 
 def test_the_over_cap_sentinel_really_emits_its_transport_frame_kind() -> None:
@@ -383,12 +374,13 @@ def test_the_catalog_enumerates_exactly_the_frame_kinds_that_can_be_produced() -
     emitted.
 
     Both sides are derived, not listed: the projected kinds come from the live
-    ``ServerEvent`` discriminator enum, and the transport kinds from the set
-    above, whose members each name a producer.
+    ``ServerEventType`` enum, and the transport kinds from
+    ``StreamFrameKind``, whose members each name a producer.
     """
     projected = {kind.value for kind in ServerEventType}
+    transport = {kind.value for kind in StreamFrameKind}
 
-    assert set(PROGRESS_CATALOG) == projected | _TRANSPORT_FRAME_KINDS
+    assert set(PROGRESS_CATALOG) == projected | transport
 
 
 # ---------------------------------------------------------------------------
@@ -423,7 +415,7 @@ def test_metadata_never_survives_any_catalogued_type(frame_type: str) -> None:
 
 
 def test_metadata_never_survives_an_uncatalogued_type() -> None:
-    """The type that used to pass ``metadata`` verbatim no longer does."""
+    """An uncatalogued type never passes ``metadata`` through verbatim."""
     frame = enforce_progress_allowlist(
         {
             "type": "some_future_event",

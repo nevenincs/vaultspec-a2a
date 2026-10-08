@@ -18,7 +18,7 @@ from ..utils.async_cleanup import complete_cleanup
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["cancel_owned_tasks", "run_independent_cleanups"]
+__all__ = ["CleanupStep", "cancel_owned_tasks", "run_independent_cleanups"]
 
 # A named cleanup step. The callable may be sync or async and may return any
 # value; an awaitable result is awaited and any other return is ignored, so a
@@ -28,12 +28,19 @@ CleanupStep = tuple[str, Callable[[], object]]
 
 
 async def cancel_owned_tasks(
-    tasks: Iterable[asyncio.Task[None]], *, timeout: float = 15.0
+    tasks: Iterable[asyncio.Task[object]],
+    *,
+    timeout: float = 15.0,
+    reraise: bool = False,
 ) -> None:
     """Cancel owned handlers, bounding the join even if a handler resists it.
 
     Callers retain task references and stop resource admission before this call.
     A surviving callback is reported, allowing independent OS releases to run.
+    A task that failed on its own, rather than by this cancellation, is logged.
+    With *reraise* that failure is raised instead, for a caller whose task's own
+    failure is the diagnosis: a stream drain that refused its output budget has
+    reaped the child, and the read failure that followed is only its symptom.
     """
     owned = set(tasks)
     if not owned:
@@ -41,11 +48,18 @@ async def cancel_owned_tasks(
     for task in owned:
         task.cancel()
     done, pending = await asyncio.wait(owned, timeout=timeout)
-    for task in done:
-        if not task.cancelled() and (exc := task.exception()) is not None:
-            logger.warning("Provider task failed during teardown", exc_info=exc)
+    failures = [
+        exc
+        for task in done
+        if not task.cancelled() and (exc := task.exception()) is not None
+    ]
+    raised = failures.pop() if reraise and failures and not pending else None
+    for exc in failures:
+        logger.warning("Provider task failed during teardown", exc_info=exc)
     if pending:
         raise TimeoutError(f"{len(pending)} provider task(s) resisted cancellation")
+    if raised is not None:
+        raise raised
 
 
 async def run_independent_cleanups(*steps: CleanupStep) -> list[tuple[str, Exception]]:

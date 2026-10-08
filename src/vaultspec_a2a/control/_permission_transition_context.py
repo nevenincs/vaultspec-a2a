@@ -14,7 +14,8 @@ from ._permission_response_contract import (
 )
 
 if TYPE_CHECKING:
-    from ..database import PermissionRequestModel, ThreadModel, ThreadWriteExpectation
+    from ..database import ThreadModel
+    from ..thread import ThreadWriteExpectation
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,10 +40,6 @@ class PermissionTransitionContext:
         return self.response.notes
 
     @property
-    def permission(self) -> PermissionRequestModel:
-        return self.authorized.permission
-
-    @property
     def thread_record(self) -> ThreadModel:
         return self.authorized.thread_record
 
@@ -57,10 +54,6 @@ class PermissionTransitionContext:
     @property
     def is_locally_respondable(self) -> bool:
         return self.decision.is_locally_respondable
-
-    @property
-    def permission_description(self) -> str:
-        return self.decision.permission_description
 
     @property
     def replay_approval_status(self) -> str | None:
@@ -80,7 +73,6 @@ class PermissionDecision:
     """Decision derived from the current permission and selected option."""
 
     is_locally_respondable: bool
-    permission_description: str
     replay_approval_status: str | None
     verdict: str
     submitted_approval_status: str | None
@@ -107,7 +99,6 @@ def permission_transition_context(
         write_expectation=write_expectation,
         decision=PermissionDecision(
             is_locally_respondable=is_locally_respondable,
-            permission_description=permission.description,
             replay_approval_status=replay_approval_status,
             verdict=decision_verdict,
             submitted_approval_status=submitted_approval_status,

@@ -1,49 +1,49 @@
-"""Development containers expose local trace and deterministic provider fixtures."""
+"""The development container exposes the local trace fixture."""
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
-import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-INTEGRATION_COMPOSE = REPO_ROOT / "service" / "docker-compose.integration.yml"
+from ..testing import inherited_environment
+from .harness import COMPOSE_FILE, REPO_ROOT, resolve_docker_executable
 
-
-def _load_compose(path: Path) -> dict[str, Any]:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+if TYPE_CHECKING:
+    from ..conftest import ExternalPrerequisiteRule
 
 
-def _resolve_docker() -> str:
-    resolved = shutil.which("docker") or shutil.which("docker.exe")
-    if resolved is None:
-        raise FileNotFoundError("Docker CLI not found in PATH")
-    return resolved
+@pytest.fixture
+def docker(external_prerequisite: ExternalPrerequisiteRule) -> str:
+    """The Docker executable, once the rule has confirmed compose answers."""
+    external_prerequisite("docker")
+    return resolve_docker_executable()
 
 
 @pytest.mark.parametrize("ui_port", ["", "26686"])
 @pytest.mark.parametrize("otlp_port", ["", "24317"])
-def test_resolved_integration_jaeger_boundary(ui_port: str, otlp_port: str) -> None:
+def test_resolved_integration_jaeger_boundary(
+    docker: str, ui_port: str, otlp_port: str
+) -> None:
     """Host certification retains loopback ingestion and querying at custom ports."""
     result = subprocess.run(
         [
-            _resolve_docker(),
+            docker,
             "compose",
             "--env-file",
             os.devnull,
             "-f",
-            str(INTEGRATION_COMPOSE),
+            str(COMPOSE_FILE),
             "config",
             "--format",
             "json",
         ],
-        env={**os.environ, "JAEGER_UI_PORT": ui_port, "JAEGER_OTLP_PORT": otlp_port},
+        env=inherited_environment(
+            {"JAEGER_UI_PORT": ui_port, "JAEGER_OTLP_PORT": otlp_port}
+        ),
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -58,34 +58,30 @@ def test_resolved_integration_jaeger_boundary(ui_port: str, otlp_port: str) -> N
     assert all(port["host_ip"] == "127.0.0.1" for port in ports)
     assert all(port["protocol"] == "tcp" for port in ports)
     assert "http://localhost:13133/status" in services["jaeger"]["healthcheck"]["test"]
-    assert set(services) == {"jaeger", "vidaimock"}
-    assert services["vidaimock"]["ports"][0]["host_ip"] == "127.0.0.1"
+    assert set(services) == {"jaeger"}
 
 
-@pytest.mark.parametrize(
-    "variable", ["JAEGER_UI_PORT", "JAEGER_OTLP_PORT", "VIDAIMOCK_PORT"]
-)
+@pytest.mark.parametrize("variable", ["JAEGER_UI_PORT", "JAEGER_OTLP_PORT"])
 @pytest.mark.parametrize("value", ["0.0.0.0:26686", "[::]:26686"])
-def test_fixture_rejects_host_address_override(variable: str, value: str) -> None:
+def test_fixture_rejects_host_address_override(
+    docker: str, variable: str, value: str
+) -> None:
     """A port override cannot restore wildcard publication through short syntax."""
     result = subprocess.run(
         [
-            _resolve_docker(),
+            docker,
             "compose",
             "--env-file",
             os.devnull,
             "-f",
-            str(INTEGRATION_COMPOSE),
+            str(COMPOSE_FILE),
             "config",
             "--format",
             "json",
         ],
-        env={
-            **os.environ,
-            "JAEGER_UI_PORT": "",
-            "JAEGER_OTLP_PORT": "",
-            variable: value,
-        },
+        env=inherited_environment(
+            {"JAEGER_UI_PORT": "", "JAEGER_OTLP_PORT": "", variable: value}
+        ),
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -94,11 +90,3 @@ def test_fixture_rejects_host_address_override(variable: str, value: str) -> Non
     )
     assert result.returncode != 0, result.stdout
     assert "invalid" in result.stderr.lower(), result.stderr
-
-
-def test_integration_vidaimock_service_present() -> None:
-    """Integration compose includes VidaiMock for provider certification."""
-    doc = _load_compose(INTEGRATION_COMPOSE)
-    assert "vidaimock" in doc["services"], (
-        "integration compose must declare a vidaimock service"
-    )

@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ..control.config import Settings
+from ..control.state_layout import DISCOVERY_RECORD
 from ..desktop.profile import (
     DesktopProfile,
     DesktopProfileError,
@@ -173,4 +174,6 @@ def test_discovery_path_matches_the_discovery_authority(tmp_path: Path) -> None:
     from ..lifecycle.discovery import service_json_path
 
     home = (tmp_path / "app-home").resolve()
-    assert derive_state_paths(home).discovery_path == service_json_path(home)
+    discovery_path = derive_state_paths(home).discovery_path
+    assert discovery_path == service_json_path(home)
+    assert discovery_path == home / DISCOVERY_RECORD

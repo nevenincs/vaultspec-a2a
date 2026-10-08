@@ -10,8 +10,6 @@ this decides what the turn is allowed to do.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NoReturn, cast
@@ -20,9 +18,11 @@ from langgraph.config import get_config
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Interrupt, interrupt
 
-from ...control.permission_dispatch import answered_permission_request
+from ...thread import InterruptType, canonical_digest
+from ...thread.errors import PermissionDeniedError
+from ...thread.resume_values import PermissionAnswer
 from ...thread.state import read_untrusted_state_value
-from ..acp_options import option_id_of, valid_option_ids
+from ..acp_options import is_remembering, valid_option_ids
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -46,13 +46,8 @@ def _permission_request_id(tool_name: str, tool_input: dict[str, Any]) -> str:
     another tool, or the same tool with other arguments - names a different one.
     """
     namespace = get_config().get("configurable", {}).get("checkpoint_ns", "")
-    canonical = json.dumps(
-        [namespace, tool_name, tool_input],
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return f"perm-{hashlib.sha256(canonical.encode()).hexdigest()[:32]}"
+    digest = canonical_digest([namespace, tool_name, tool_input], default=str)
+    return f"perm-{digest[:32]}"
 
 
 def _offered_options(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -63,14 +58,10 @@ def _offered_options(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
     and nothing here can retract it. The provider rung answers such a choice
     with the once-only option anyway, so offering it would promise a persistence
     the system deliberately never performs. A request offering nothing else
-    keeps its options, so the run is never left without an answer to give.
+    keeps its options: narrowing it to nothing would turn a question a person
+    could still answer into a refusal, which is a decision this is not making.
     """
-    once = [
-        option
-        for option in options
-        if not str(option.get("kind", "")).endswith("_always")
-        and "always" not in (option_id_of(option) or "").lower()
-    ]
+    once = [option for option in options if not is_remembering(option)]
     return once or options
 
 
@@ -138,10 +129,21 @@ class _PermissionRequest:
     tool_input: dict[str, Any]
     offered: list[dict[str, Any]]
 
+    @property
+    def answerable(self) -> bool:
+        """Whether this request offers an option a human could pick.
+
+        An option a later layer cannot name is no option: an answer is addressed
+        to an option id, and a request offering none can be given no answer at
+        all. Parking on one suspends the run on a question with no reachable
+        reply, which is why such a request is refused here instead.
+        """
+        return bool(valid_option_ids(self.offered))
+
     def payload(self) -> dict[str, Any]:
         """The interrupt payload this request suspends the run on."""
         return {
-            "type": "permission_request",
+            "type": InterruptType.PERMISSION_REQUEST.value,
             "request_id": self.request_id,
             "tool_name": self.tool_name,
             "tool_input": self.tool_input,
@@ -160,11 +162,11 @@ class _AnswerReading:
     """
 
     option: str | None = None
-    learned: tuple[str, str] | None = None
+    learned: PermissionAnswer | None = None
 
 
 def _read_permission_answer(
-    answered: tuple[str, str] | None, request: _PermissionRequest
+    answered: PermissionAnswer | None, request: _PermissionRequest
 ) -> _AnswerReading:
     """Judge one handed-back value against the call actually being made.
 
@@ -181,24 +183,23 @@ def _read_permission_answer(
             request.tool_name,
         )
         return _AnswerReading()
-    answered_request, option_id = answered
-    if answered_request != request.request_id:
+    if answered.request_id != request.request_id:
         _logger.warning(
             "Permission answer names request %r, not the %r call now being "
             "made; asking again",
-            answered_request,
+            answered.request_id,
             request.tool_name,
         )
-        return _AnswerReading(learned=(answered_request, option_id))
-    if option_id not in valid_option_ids(request.offered):
+        return _AnswerReading(learned=answered)
+    if answered.option_id not in valid_option_ids(request.offered):
         _logger.warning(
             "Permission answer for the %r call chose option %r, which it "
             "does not offer; asking again",
             request.tool_name,
-            option_id,
+            answered.option_id,
         )
         return _AnswerReading()
-    return _AnswerReading(option=option_id)
+    return _AnswerReading(option=answered.option_id)
 
 
 def permission_callback_for(
@@ -255,6 +256,17 @@ def permission_callback_for(
             tool_input=tool_input,
             offered=_offered_options(options),
         )
+        if not request.answerable:
+            # Refused here, where the call is, rather than parked. A park would
+            # suspend the run on a question nothing downstream could answer, and
+            # the layers between here and the human used to keep it answerable by
+            # inventing an option - which decides a permission question by
+            # fabrication. The rung that called this turns the raise into its
+            # own lane's refusal and the turn continues without the tool.
+            raise PermissionDeniedError(
+                f"the {tool_name!r} call offers no option a human could pick, "
+                "so it cannot be put to one"
+            )
         already = _answered_option(
             {**answers, **learned}, request.request_id, request.offered
         )
@@ -264,7 +276,7 @@ def permission_callback_for(
         payload = request.payload()
         while True:
             reading = _read_permission_answer(
-                answered_permission_request(interrupt(payload)), request
+                PermissionAnswer.from_resume_value(interrupt(payload)), request
             )
             if reading.option is not None:
                 return reading.option
@@ -274,6 +286,6 @@ def permission_callback_for(
             if answers_reach_the_node:
                 _park_on(payload)
             if reading.learned is not None:
-                learned[reading.learned[0]] = reading.learned[1]
+                learned[reading.learned.request_id] = reading.learned.option_id
 
     return permission_callback

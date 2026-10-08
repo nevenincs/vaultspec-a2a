@@ -15,11 +15,17 @@ from ..desktop._filesystem_authority import (
     assert_directory_authority,
     resolve_directory_authority,
 )
+from ..desktop._platform_acl import harden_credential_path
 from ..desktop.native_isolation import NativeLaunchAuthority, NativeWorkspaceAuthority
 from ..desktop.profile import derive_state_paths
+from ..utils import ProcessContainmentError
 from ..utils.async_cleanup import complete_cleanup
-from ..utils.process import ProcessContainmentError
 from ._acp_types import require_workspace_root
+from ._factory_commands import (
+    ANTHROPIC_AUTH_TOKEN_ENV,
+    CLAUDE_CONFIG_DIR_ENV,
+    CLAUDE_OAUTH_TOKEN,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator, Mapping
@@ -27,6 +33,15 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
     from ..desktop._filesystem_authority import DirectoryAuthority
+
+__all__ = [
+    "bind_model_native_workspace",
+    "capture_native_workspace",
+    "prepare_acp_role",
+    "prepare_native_version_probe",
+    "require_native_workspace",
+    "role_environment",
+]
 
 
 @runtime_checkable
@@ -80,8 +95,9 @@ def require_native_workspace(
 
 def role_environment(authority: NativeLaunchAuthority) -> dict[str, str]:
     """Provider configuration resolves only within this prepared home."""
-    home = str(authority.home.path)
-    return {"HOME": home, "USERPROFILE": home, "CLAUDE_CONFIG_DIR": home}
+    environment = authority.home_environment()
+    home = environment["HOME"]
+    return {**environment, "USERPROFILE": home, CLAUDE_CONFIG_DIR_ENV: home}
 
 
 def _new_home(authority: NativeWorkspaceAuthority) -> DirectoryAuthority:
@@ -93,7 +109,7 @@ def _new_home(authority: NativeWorkspaceAuthority) -> DirectoryAuthority:
         Path(tempfile.mkdtemp(prefix="vaultspec-native-home-", dir=root))
     )
     try:
-        created.path.chmod(0o700)
+        harden_credential_path(created.path)
     except OSError:
         _remove_home(created)
         raise
@@ -142,9 +158,9 @@ async def prepare_acp_role(
     else:
         raise ProcessContainmentError("native Claude managed policy is not qualified")
     if provider == "claude":
-        selected = environment.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+        selected = environment.get(CLAUDE_OAUTH_TOKEN.env_name, "")
     elif provider == "zai":
-        selected = environment.get("ANTHROPIC_AUTH_TOKEN", "")
+        selected = environment.get(ANTHROPIC_AUTH_TOKEN_ENV, "")
     else:
         raise ProcessContainmentError(
             "native provider role preparation is not qualified"

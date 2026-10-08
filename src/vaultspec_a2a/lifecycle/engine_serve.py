@@ -3,9 +3,9 @@
 The engine binary itself is never modified, so its
 adoption is wrapper-based: this core registers a registry record for the band
 port, launches the ``vaultspec serve --no-seat`` engine on that port, heartbeats
-the record while the engine runs, and deregisters on owned shutdown. ``scripts/
-engine_serve.py`` is the thin ``procs.toml`` entrypoint that delegates here; the
-logic lives in the package so the data-safety boundary below is unit tested.
+the record while the engine runs, and deregisters on owned shutdown. ``procs.toml``
+launches it as ``python -m vaultspec_a2a.lifecycle.engine_serve``; the logic lives
+in the package so the data-safety boundary below is unit tested.
 
 Data-safety boundary: the engine opens its data store RELATIVE TO ITS PROCESS
 CWD. An unset or wrong workspace would seat that store in the wrapper's inherited
@@ -22,9 +22,9 @@ on cwd alone.
 from __future__ import annotations
 
 import argparse
-import asyncio
 import contextlib
 import logging
+import os
 import shlex
 import signal
 import subprocess
@@ -34,8 +34,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..utils._process_tree import detached_spawn_kwargs
-from ..utils.process import ProcessContainment, ProcessContainmentError
+from ..utils import (
+    ProcessContainment,
+    ProcessContainmentError,
+    reap_contained,
+    spawn_contained,
+)
 from .boot import render_command
 from .procs_config import load_procs_config
 from .registration import (
@@ -53,7 +57,6 @@ if TYPE_CHECKING:
 __all__ = [
     "EngineSeatError",
     "engine_command",
-    "main",
     "resolve_data_seat",
     "serve",
 ]
@@ -61,6 +64,7 @@ __all__ = [
 _ROLE = "engine-dev"
 _DEFAULT_SERVE_CMD = "vaultspec serve --no-seat --port {port}"
 _HEARTBEAT_SECONDS = 15.0
+_CONTAINMENT_REFUSED_EXIT = 126
 logger = logging.getLogger(__name__)
 
 
@@ -92,21 +96,57 @@ def resolve_data_seat(raw: str) -> str:
     return str(path)
 
 
+def _split_command_template(template: str) -> list[str]:
+    r"""Split an operator's command string by THIS host's quoting rules.
+
+    The template is written by whoever configured it, in the shell they are
+    sitting in, so the host decides what its characters mean. POSIX mode reads a
+    backslash as an escape, which silently eats the separators of an ordinary
+    Windows path: ``C:\engine\engine.exe`` becomes ``C:engineengine.exe``, a path
+    that does not exist, and the launch fails as a missing binary with nothing
+    naming the cause.
+
+    Windows therefore splits in non-POSIX mode, which keeps backslashes literal.
+    That mode retains the quote characters inside the token it produced, so a
+    matching surrounding pair is removed here: quotes are the shell's way of
+    joining a path that contains spaces into one word, never part of the path, and
+    a binary name carrying them is as unopenable as one missing its separators.
+    """
+    if os.name != "nt":
+        return shlex.split(template)
+    return [_unquoted(token) for token in shlex.split(template, posix=False)]
+
+
+def _unquoted(token: str) -> str:
+    """Strip one matching pair of surrounding quotes from a non-POSIX token."""
+    for quote in ('"', "'"):
+        if len(token) >= 2 and token.startswith(quote) and token.endswith(quote):
+            return token[1:-1]
+    return token
+
+
 def engine_command(port: int, workspace: str) -> list[str]:
     """The engine launch command with ``{port}``/``{workspace}`` substituted.
 
-    Shell-splits the configured ``engine_serve_cmd`` template, then delegates token
-    substitution to the lifecycle's :func:`render_command` (the single substitution
-    implementation - no parallel copy). Threading ``{workspace}`` lets a template
-    seat the data store explicitly (``--scope {workspace}`` /
-    ``--data-dir {workspace}/engine-data``) instead of relying on cwd alone; the
-    ``{python}`` token render_command also resolves is simply absent from engine
-    templates.
+    Splits the configured ``engine_serve_cmd`` template by the host's own quoting
+    rules (:func:`_split_command_template`), then delegates token substitution to
+    the lifecycle's :func:`render_command` (the single substitution implementation
+    - no parallel copy). Substituting AFTER the split is what lets a workspace
+    path containing spaces stay one argument: the operator cannot usefully quote a
+    placeholder, so rendering the whole template first would tear the seat they
+    supplied into separate arguments.
+
+    Threading ``{workspace}`` lets a template seat the data store explicitly
+    (``--scope {workspace}`` / ``--data-dir {workspace}/engine-data``) instead of
+    relying on cwd alone; the ``{python}`` token render_command also resolves is
+    simply absent from engine templates.
     """
     from ..control.config import settings
 
     template = settings.engine_serve_cmd or _DEFAULT_SERVE_CMD
-    return render_command(shlex.split(template), port=port, workspace=workspace)
+    return render_command(
+        _split_command_template(template), port=port, workspace=workspace
+    )
 
 
 def _heartbeat(record: ProcRecord | None, stop: threading.Event) -> None:
@@ -120,9 +160,11 @@ def serve(*, port: int, name: str | None, workspace: str) -> int:
     """Validate the data seat, register, launch the engine in the seat, and serve.
 
     Returns the engine's exit code, ``2`` when the data seat is ambiguous (refused
-    before any registration or launch), or ``127`` when the engine binary cannot be
-    launched. The engine is spawned with ``cwd`` set to the validated seat, so its
-    cwd-relative data store can never land in the wrapper's inherited cwd.
+    before any registration or launch), ``126`` when the engine cannot be admitted
+    to its OS containment (it is killed rather than served), or ``127`` when the
+    engine binary cannot be launched. The engine is spawned with ``cwd`` set to the
+    validated seat, so its cwd-relative data store can never land in the wrapper's
+    inherited cwd.
     """
     try:
         seat = resolve_data_seat(workspace)
@@ -203,18 +245,20 @@ def _wait_engine_child(
 ) -> int:
     containment = ProcessContainment.create()
     process: subprocess.Popen[bytes] | None = None
-    flags = detached_spawn_kwargs()
     try:
-        process = subprocess.Popen(
-            command,
-            cwd=seat,
-            creationflags=flags.creationflags,
-            start_new_session=flags.start_new_session,
-        )
         try:
-            containment.assign(process.pid)
-        except ProcessContainmentError:
-            logger.warning("Engine containment assignment failed", exc_info=True)
+            # The new console process group is what lets a stop request reach
+            # the engine as ``CTRL_BREAK_EVENT``.
+            process = spawn_contained(
+                command, containment, cwd=seat, new_process_group=True
+            )
+        except ProcessContainmentError as exc:
+            print(
+                "engine-serve: refusing to run the engine outside its "
+                f"containment: {exc}",
+                file=sys.stderr,
+            )
+            return _CONTAINMENT_REFUSED_EXIT
         try:
             while request.signum is None:
                 try:
@@ -228,8 +272,12 @@ def _wait_engine_child(
             return 130
     finally:
         try:
-            if process is not None:
-                asyncio.run(_reap_engine_child(process, containment))
+            if process is not None and not reap_contained(
+                process, containment, term_timeout=10.0, kill_timeout=5.0
+            ):
+                raise ProcessContainmentError(
+                    f"Engine process tree {process.pid} did not terminate"
+                )
         finally:
             containment.close()
 
@@ -245,19 +293,6 @@ def _request_engine_stop(process: subprocess.Popen[bytes]) -> None:
         logger.warning("Engine did not stop gracefully; escalating tree cleanup")
 
 
-async def _reap_engine_child(
-    process: subprocess.Popen[bytes], containment: ProcessContainment
-) -> None:
-    try:
-        reaped = await containment.terminate(term_timeout=10.0, kill_timeout=5.0)
-        if not reaped:
-            raise ProcessContainmentError(
-                f"Engine process tree {process.pid} did not terminate"
-            )
-    finally:
-        await asyncio.to_thread(process.wait, 5.0)
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Register and serve the engine.")
     parser.add_argument("--port", type=int, required=True)
@@ -270,3 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     return serve(port=args.port, name=args.name, workspace=args.workspace)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

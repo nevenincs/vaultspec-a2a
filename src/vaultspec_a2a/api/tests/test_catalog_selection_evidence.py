@@ -27,8 +27,15 @@ import httpx
 import pytest
 
 from ...database import get_thread
+from ...providers.provider_catalog import SELECTION_SCHEMA_VERSION
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    async_catalog_run_fields,
+    async_run_start_body,
+    serve_on_loopback,
+)
+from ..schemas.provider_catalog import PROVIDER_CATALOG_PATH
 from .conftest import SessionFactory, make_app
-from .test_gateway_live import _PRESET, _live_server, _run_fields
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -42,7 +49,7 @@ async def test_frozen_selection_survives_real_gateway_restart(
 
     Evidence: restart durably reproduces the frozen execution authority and
     does not re-dispatch. A first app freezes and persists the explicit
-    selection; a SECOND app instance - fresh aggregator, circuit breaker, and
+    selection; a SECOND app instance - fresh relay hub, circuit breaker, and
     worker, but the same durable DB and checkpointer - serves run-status with
     the byte-identical freeze and dispatches nothing. The second instance
     never consults a catalog on this path, which is the drift-immunity claim
@@ -51,17 +58,17 @@ async def test_frozen_selection_survives_real_gateway_restart(
     """
     app1, _agg1, _worker1, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app1) as base1,
+        serve_on_loopback(app1) as base1,
         httpx.AsyncClient(base_url=base1, timeout=10.0) as client1,
     ):
         start = await client1.post(
             "/v1/runs",
             json={
                 "run_id": "evidence-restart",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "go",
                 "autonomous": True,
-                **await _run_fields(client1),
+                **await async_catalog_run_fields(client1),
             },
         )
         assert start.status_code == 201, start.text
@@ -72,7 +79,7 @@ async def test_frozen_selection_survives_real_gateway_restart(
     # Second gateway instance on the SAME durable stores: a genuine restart.
     app2, _agg2, worker2, _cp2 = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app2) as base2,
+        serve_on_loopback(app2) as base2,
         httpx.AsyncClient(base_url=base2, timeout=10.0) as client2,
     ):
         status = await client2.get("/v1/runs/evidence-restart")
@@ -101,14 +108,14 @@ async def test_launch_freezes_the_served_catalog_entry(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        fields = await _run_fields(client)
+        fields = await async_catalog_run_fields(client)
         selection = cast("dict[str, Any]", fields["selection"])
         metadata = cast("dict[str, Any]", fields["metadata"])
         catalog = await client.get(
-            "/v1/provider-catalog",
+            PROVIDER_CATALOG_PATH,
             params={"workspace_root": metadata["workspace_root"]},
         )
         assert catalog.status_code == 200, catalog.text
@@ -129,7 +136,7 @@ async def test_launch_freezes_the_served_catalog_entry(
             "/v1/runs",
             json={
                 "run_id": "evidence-catalog-binding",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "go",
                 "autonomous": True,
                 **fields,
@@ -156,10 +163,10 @@ async def test_run_start_refuses_every_retired_selection_surface_before_dispatch
     """Retired policy, provider and mode inputs never reach construction."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        current = await _run_fields(client)
+        current = await async_catalog_run_fields(client)
         cases: tuple[tuple[str, tuple[str, ...], str, object, str, str | None], ...] = (
             (
                 "profile-id",
@@ -248,7 +255,7 @@ async def test_run_start_refuses_every_retired_selection_surface_before_dispatch
                 "/v1/runs",
                 json={
                     "run_id": f"retired-selection-{label}",
-                    "team_preset": _PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "go",
                     "autonomous": True,
                     **fields,
@@ -280,17 +287,17 @@ async def test_validation_errors_remain_actionable_without_reflecting_input(
     """The bounded 422 retains type, field location and a safe message."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        fields = await _run_fields(client)
+        fields = await async_catalog_run_fields(client)
         selection = cast("dict[str, Any]", fields["selection"])
         selection["schema_version"] = 2
         response = await client.post(
             "/v1/runs",
             json={
                 "run_id": "invalid-current-schema",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "go",
                 **fields,
             },
@@ -327,22 +334,19 @@ async def test_run_start_persists_no_secrets_in_db_row(
     token_value = "tok-secret-coder-value"
     bearer_value = "bearer-secret-value"
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
             "/v1/runs",
-            json={
-                "run_id": "evidence-no-secrets",
-                "team_preset": _PRESET,
-                "message": "go",
-                "autonomous": True,
-                "actor_tokens": {
-                    "tokens": {"coder": token_value},
-                    "engine_bearer": bearer_value,
-                },
-                **await _run_fields(client),
-            },
+            json=await async_run_start_body(
+                client,
+                "evidence-no-secrets",
+                team_preset=DEFAULT_TEAM_PRESET,
+                tokens={"coder": token_value},
+                message="go",
+                engine_bearer=bearer_value,
+            ),
         )
         assert start.status_code == 201, start.text
         run_id = start.json()["run_id"]
@@ -354,7 +358,10 @@ async def test_run_start_persists_no_secrets_in_db_row(
 
     # The frozen selection record is persisted (restart reads it) ...
     persisted = json.loads(raw_metadata)
-    assert persisted["provider_catalog_selection"]["schema_version"] == 1
+    assert (
+        persisted["provider_catalog_selection"]["schema_version"]
+        == SELECTION_SCHEMA_VERSION
+    )
     assert persisted["provider_catalog_selection"]["roles"]
     # ... but no token, bearer, or credential material appears in the DB row.
     lowered = raw_metadata.lower()

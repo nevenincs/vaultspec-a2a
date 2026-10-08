@@ -1,8 +1,10 @@
 """Domain event dataclasses for the graph orchestration layer.
 
 These are plain ``@dataclass`` types (NOT Pydantic) that represent the
-aggregator's output in domain terms.  A separate adapter in ``api/`` translates
-them into wire-protocol schemas for WebSocket delivery.
+worker's event-producer output in domain terms.  The worker serializes them with
+``ipc.serializers.sequenced_to_dict`` for relay to the gateway, which projects
+each relayed frame onto the stream's per-event field catalog in
+``streaming.sse_frames`` before delivery.
 
 Core never imports from ``api.schemas`` — the dependency arrow points outward.
 """
@@ -36,7 +38,7 @@ __all__ = [
 
 @dataclass
 class DomainEvent:
-    """Base class for all domain events emitted by the aggregator."""
+    """Base class for all domain events emitted by the worker's event producer."""
 
     thread_id: str
     agent_id: str

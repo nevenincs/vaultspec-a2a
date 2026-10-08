@@ -9,13 +9,15 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import asyncio
 
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..providers.factory import ProviderFactory
-    from ..streaming.aggregator import EventAggregator
+    from ..streaming import RunEventProducer
     from .catalog_store import RunCatalogStore
     from .graph_lifecycle import GraphCacheKey, RegisteredCompiledGraph
     from .ipc import WorkerBridge
     from .token_store import RunTokenStore
+
+__all__ = ["GraphLifecyclePorts", "GraphLifecycleState"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,7 +26,7 @@ class GraphLifecyclePorts:
 
     checkpointer: Checkpointer
     bridge: WorkerBridge
-    aggregator: EventAggregator
+    producer: RunEventProducer
     token_store: RunTokenStore
     catalog_store: RunCatalogStore
     provider_factory: ProviderFactory

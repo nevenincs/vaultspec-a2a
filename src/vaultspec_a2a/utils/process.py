@@ -6,69 +6,83 @@ import asyncio
 import contextlib
 import logging
 import os
+import shlex
 import subprocess
 import sys
-from typing import Any, TypedDict
+from concurrent.futures import ThreadPoolExecutor
+from typing import IO, TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
 from ._process_tree import (
-    CREATE_SUSPENDED as _CREATE_SUSPENDED,
-)
-from ._process_tree import (
-    JOB_BASIC_INFO_CLASS as _JOBOBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS,
-)
-from ._process_tree import (
-    JOB_EXTENDED_INFO_CLASS as _JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
-)
-from ._process_tree import (
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE as _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-)
-from ._process_tree import (
-    JOB_PROCESS_ID_LIST_CLASS as _JOBOBJECT_BASIC_PROCESS_ID_LIST_CLASS,
-)
-from ._process_tree import (
-    POLL_INTERVAL as _POLL_INTERVAL,
-)
-from ._process_tree import (
-    PROBE_DECODE_ERRORS as _PROBE_DECODE_ERRORS,
-)
-from ._process_tree import (
-    PROBE_ENCODING as _PROBE_ENCODING,
-)
-from ._process_tree import (
-    PROCESS_SET_QUOTA as _PROCESS_SET_QUOTA,
-)
-from ._process_tree import (
-    PROCESS_TERMINATE as _PROCESS_TERMINATE,
-)
-from ._process_tree import (
-    PS_TIMEOUT as _PS_TIMEOUT,
-)
-from ._process_tree import (
-    TH32CS_SNAPTHREAD as _TH32CS_SNAPTHREAD,
-)
-from ._process_tree import (
-    THREAD_SUSPEND_RESUME as _THREAD_SUSPEND_RESUME,
-)
-from ._process_tree import (
-    pid_in_tree as _pid_in_tree,
-)
-from ._process_tree import (
-    win_kernel32 as _win_kernel32,
+    POLL_INTERVAL,
+    descendant_pids,
+    process_group_members,
+    win_kernel32,
 )
 from .async_cleanup import complete_cleanup
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+
+    #: Reads POSIX process-group liveness; defaults to :func:`_posix_group_is_live`.
+    #: A real-behavior test can install its own wrapper through
+    #: :meth:`ProcessContainment.create` instead of patching the module function.
+    GroupProbe = Callable[[int], bool | None]
 
 __all__ = [
     "ProcessContainment",
     "ProcessContainmentError",
+    "reap_contained",
+    "spawn_contained",
+    "spawn_contained_async",
 ]
 
 logger = logging.getLogger(__name__)
 
+# Windows Job Object constants (winnt.h). A job created with
+# KILL_ON_JOB_CLOSE terminates every assigned process when the job is terminated
+# OR when the last handle to it is closed, so an owner that crashes still reaps
+# the whole contained tree.
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_JOBOBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9  # JobObjectExtendedLimitInformation
+_JOBOBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS = 1  # JobObjectBasicAccountingInformation
+_JOBOBJECT_BASIC_PROCESS_ID_LIST_CLASS = 3  # JobObjectBasicProcessIdList
+_CREATE_SUSPENDED = 0x00000004
+_TH32CS_SNAPTHREAD = 0x00000004
+_THREAD_SUSPEND_RESUME = 0x0002
 
-class _SpawnKwargs(TypedDict, total=False):
-    """The only platform-specific ``Popen`` keyword this facade supplies."""
+# How long a root whose admission was refused may take to die once its exact
+# handle is killed. A Windows root has run no instruction by then.
+_ADMISSION_REAP_TIMEOUT = 5.0
 
-    start_new_session: bool
+# A POSIX root's containment is the session and process group it leads from
+# exec; a Windows root is admitted to its Job instead.
+_CONTAINED_NEW_SESSION = sys.platform != "win32"
+
+
+class _ContainedSpawnOptions(TypedDict, total=False):
+    """The ``Popen`` keywords a contained spawn forwards to its root."""
+
+    cwd: str | os.PathLike[str] | None
+    env: Mapping[str, str] | None
+    stdin: int | IO[Any] | None
+    stdout: int | IO[Any] | None
+    stderr: int | IO[Any] | None
+    # Windows: lead a new console process group, so ``CTRL_BREAK_EVENT`` can
+    # address the root and a console Ctrl+C does not. A POSIX root always leads
+    # its own group.
+    new_process_group: bool
+
+
+class _AsyncSpawnRequired(TypedDict):
+    # The reader buffer bound for the root's pipes.
+    limit: int
+
+
+class _AsyncContainedSpawnOptions(
+    _AsyncSpawnRequired, _ContainedSpawnOptions, total=False
+):
+    # Run through the platform shell, so launcher shims such as ``.cmd`` resolve.
+    shell: bool
 
 
 def _posix_group_is_live(pgid: int) -> bool | None:
@@ -81,101 +95,20 @@ def _posix_group_is_live(pgid: int) -> bool | None:
         return False
     except PermissionError:
         pass
-    if sys.platform != "linux":
-        return _ps_group_is_live(pgid)
-    try:
-        entries = os.listdir("/proc")
-    except OSError:
-        return _ps_group_is_live(pgid)
-    return _proc_group_has_live_member(entries, pgid)
+    members = process_group_members(pgid)
+    return None if members is None else bool(members)
 
 
-def _proc_group_has_live_member(entries: list[str], pgid: int) -> bool | None:
-    uncertain = False
-    for entry in entries:
-        if not entry.isdigit():
-            continue
-        live = _proc_group_member_is_live(int(entry), pgid)
-        if live:
-            return True
-        uncertain = uncertain or live is None
-    return None if uncertain else False
-
-
-def _proc_group_member_is_live(pid: int, pgid: int) -> bool | None:
-    if sys.platform == "win32":
-        return None
-    try:
-        if os.getpgid(pid) != pgid:
-            return False
-        with open(f"/proc/{pid}/stat", encoding="ascii", errors="replace") as fh:
-            fields = fh.read().rpartition(")")[2].split()
-    except (FileNotFoundError, ProcessLookupError):
-        return False
-    except OSError:
-        return None
-    if len(fields) < 3 or not fields[2].isdigit():
-        return None
-    return int(fields[2]) == pgid and fields[0] not in {"Z", "X"}
-
-
-def _ps_group_is_live(pgid: int) -> bool | None:
-    """Use the macOS/POSIX process table with a bounded, reaped probe."""
-    try:
-        completed = subprocess.run(
-            ["ps", "-A", "-o", "pgid=,stat="],
-            capture_output=True,
-            text=True,
-            encoding=_PROBE_ENCODING,
-            errors=_PROBE_DECODE_ERRORS,
-            timeout=_PS_TIMEOUT,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0 or not completed.stdout.strip():
-        return None
-    uncertain = False
-    for line in completed.stdout.splitlines():
-        fields = line.split()
-        if len(fields) != 2 or not fields[0].isdigit():
-            uncertain = True
-        elif int(fields[0]) == pgid and fields[1][0] not in {"Z", "X"}:
-            return True
-    return None if uncertain else False
-
-
-def _posix_group_process_ids(pgid: int | None) -> tuple[int, ...] | None:
-    """Return a safe diagnostic snapshot of live members in an owned group."""
-    if pgid is None or sys.platform == "win32":
-        return None
-    if sys.platform != "linux":
-        return None
-    try:
-        entries = os.listdir("/proc")
-    except OSError:
-        return None
-    pids: list[int] = []
-    uncertain = False
-    for entry in entries:
-        if not entry.isdigit():
-            continue
-        pid = int(entry)
-        live = _proc_group_member_is_live(pid, pgid)
-        if live is True:
-            pids.append(pid)
-        elif live is None:
-            uncertain = True
-    return None if uncertain else tuple(sorted(pids))
-
-
-async def _await_posix_group_gone(pgid: int, *, timeout: float) -> bool:
+async def _await_posix_group_gone(
+    pgid: int, *, timeout: float, probe: GroupProbe = _posix_group_is_live
+) -> bool:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     empty_observations = 0
     while True:
-        # ps is bounded, but may still block for seconds on a busy host.
-        if await asyncio.to_thread(_posix_group_is_live, pgid) is False:
+        # The membership read scans the host's process table, which may block
+        # for a while on a busy host.
+        if await asyncio.to_thread(probe, pgid) is False:
             empty_observations += 1
             if empty_observations == 2:
                 return True
@@ -184,7 +117,7 @@ async def _await_posix_group_gone(pgid: int, *, timeout: float) -> bool:
         remaining = deadline - loop.time()
         if remaining <= 0:
             return False
-        await asyncio.sleep(min(_POLL_INTERVAL, remaining))
+        await asyncio.sleep(min(POLL_INTERVAL, remaining))
 
 
 def _win_job_structures() -> tuple[Any, int]:
@@ -257,30 +190,33 @@ class ProcessContainment:
       last handle (e.g. on owner crash) also reaps the job. No ``taskkill /T``
       parent-pid discovery.
 
-    Lifecycle: :meth:`create` builds the containment, :meth:`spawn_kwargs` feeds
-    the spawn call, and :meth:`terminate` reaps the tree with bounded escalation.
-    POSIX :meth:`assign` records the group established at exec. Windows owners
-    that require containment before the first instruction create the root
-    suspended and call :meth:`assign_suspended_process`. An unassigned
-    containment owns no process identity; its caller must retain and reap the
-    spawned process rather than treating this object as authority for it.
+    Lifecycle: :meth:`create` builds the containment, :func:`spawn_contained`
+    starts the root inside it before the root's first instruction, and
+    :meth:`terminate` reaps the tree with bounded escalation. A containment that
+    owns no process identity reports an empty tree, so terminating one that has
+    already been reaped is a no-op; :func:`spawn_contained` never hands back a
+    live root without one.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, group_probe: GroupProbe | None = None) -> None:
         self._pid: int | None = None
         self._pgid: int | None = None
         self._job: Any | None = None  # Windows job HANDLE (ctypes c_void_p)
-        self._assigned = False
         self._termination_task: asyncio.Task[bool] | None = None
+        self._group_probe: GroupProbe = group_probe or _posix_group_is_live
 
     @classmethod
-    def create(cls) -> ProcessContainment:
+    def create(cls, *, group_probe: GroupProbe | None = None) -> ProcessContainment:
         """Build a containment; on Windows this creates the KILL_ON_JOB_CLOSE job.
 
         A Windows job-creation failure is fatal to containment and raises; POSIX
-        needs no OS object until a pid is assigned.
+        needs no OS object until :func:`spawn_contained` admits its root.
+
+        ``group_probe`` overrides the POSIX group-liveness read
+        (:func:`_posix_group_is_live` by default); a real-behavior test installs
+        its own wrapper here instead of patching the module function.
         """
-        self = cls()
+        self = cls(group_probe=group_probe)
         if sys.platform == "win32":
             self._job = self._create_win_job()
         return self
@@ -292,7 +228,7 @@ class ProcessContainment:
         import ctypes
         from ctypes import wintypes
 
-        kernel32 = _win_kernel32()
+        kernel32 = win_kernel32()
         kernel32.CreateJobObjectW.restype = wintypes.HANDLE
         kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
         job = kernel32.CreateJobObjectW(None, None)
@@ -319,104 +255,47 @@ class ProcessContainment:
             raise
         return job
 
-    def spawn_kwargs(self) -> _SpawnKwargs:
-        """Return spawn kwargs that seat the root in its containment at spawn.
+    def admit(self, process: subprocess.Popen[bytes]) -> None:
+        """Bind the exact root :func:`spawn_contained` started, then let it run.
 
-        POSIX seats the root in a new session/process group at fork; Windows
-        assigns after spawn (see :meth:`assign`), so it contributes no spawn-time
-        kwargs here.
+        The admission step of :func:`spawn_contained` and its async form, which
+        are the only callers: a root started any other way is not suspended, so
+        it would run instructions before this binds it.
+
+        Windows assigns the ``CREATE_SUSPENDED`` root to the Job through the
+        process handle ``Popen`` retains - never a reopened numeric pid, so an
+        exit/reuse race cannot seat an unrelated process - and only then resumes
+        its single initial thread through documented Tool Help and thread APIs,
+        so no instruction or descendant creation occurs outside the Job. A
+        failure leaves the root suspended or Job-owned for the caller to reap
+        through the same retained handle.
+
+        A POSIX root was already seated by ``start_new_session`` at exec and only
+        needs its process group recorded: as the session leader, its group id is
+        its pid.
         """
-        if sys.platform == "win32":
-            return {}
-        return {"start_new_session": True}
-
-    def assign(self, pid: int) -> None:
-        """Bind *pid* to the containment before the root does descendant work.
-
-        POSIX records the new process group (its id equals the session leader's
-        pid). Windows assigns the process to the job. A Windows assignment failure
-        raises :class:`ProcessContainmentError`; an ownership caller must reap the
-        exact retained process and fail the spawn.
-        """
+        pid = process.pid
         if sys.platform != "win32":
             if pid <= 1 or pid == os.getpid():
                 raise ProcessContainmentError("Refusing to contain the cleanup owner")
             try:
                 isolated = os.getpgid(pid) == pid and os.getsid(pid) == pid
             except ProcessLookupError:
-                # A short-lived root can exit before assignment; the spawn still
+                # A short-lived root can exit before admission; the spawn still
                 # established its group, which may retain live descendants.
                 isolated = True
             if not isolated:
                 raise ProcessContainmentError(
                     "Process was not spawned in a new session"
                 )
-            # start_new_session made the child a session/group leader: pgid == pid.
             self._pid = pid
             self._pgid = pid
-            self._assigned = True
-            return
-        import ctypes
-        from ctypes import wintypes
-
-        if self._job is None:
-            raise ProcessContainmentError("Windows containment has no job object")
-        # This pid-only entry point is for roots already running. Owners that must
-        # establish containment before the first instruction use
-        # ``assign_suspended_process`` and retain the Popen process handle.
-        kernel32 = _win_kernel32()
-        kernel32.OpenProcess.restype = wintypes.HANDLE
-        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
-        handle = kernel32.OpenProcess(
-            _PROCESS_TERMINATE | _PROCESS_SET_QUOTA, False, pid
-        )
-        if not handle:
-            raise ProcessContainmentError(
-                f"could not open process {pid} to assign it to the job: "
-                f"{ctypes.WinError(ctypes.get_last_error())}"
-            )
-        try:
-            self._assign_win_handle(pid, handle)
-        finally:
-            kernel32.CloseHandle(handle)
-
-    def assign_process(self, process: subprocess.Popen[bytes]) -> None:
-        """Bind the exact retained ``Popen`` identity to this containment.
-
-        Windows uses the process handle owned by ``Popen`` rather than reopening
-        its numeric pid, so an exit/reuse race cannot seat an unrelated process.
-        POSIX uses the isolated process group established at spawn.
-        """
-        if sys.platform != "win32":
-            self.assign(process.pid)
             return
         handle = getattr(process, "_handle", None)
         if handle is None:
             raise ProcessContainmentError("Popen has no retained Windows handle")
-        self._assign_win_handle(process.pid, handle)
-
-    def assign_suspended_process(self, process: subprocess.Popen[bytes]) -> None:
-        """Atomically admit a Windows ``CREATE_SUSPENDED`` root, then run it.
-
-        Assignment uses the exact process handle retained by ``Popen``. The only
-        initial thread is resumed through documented Tool Help and thread APIs
-        after Job membership succeeds, so no provider instruction or descendant
-        creation can occur outside the Job. A failure leaves the root suspended or
-        Job-owned for the caller to reap through the same retained handle.
-
-        POSIX roots are already seated by ``start_new_session`` at exec and only
-        need their process group recorded.
-        """
-        if sys.platform != "win32":
-            self.assign_process(process)
-            return
-        self.assign_process(process)
-        self._resume_suspended_win_process(process.pid)
-
-    @staticmethod
-    def suspended_creation_flag() -> int:
-        """Return the Windows flag used with :meth:`assign_suspended_process`."""
-        return _CREATE_SUSPENDED if sys.platform == "win32" else 0
+        self._assign_win_handle(pid, handle)
+        self._resume_suspended_win_process(pid)
 
     @staticmethod
     def _resume_suspended_win_process(pid: int) -> None:
@@ -436,7 +315,7 @@ class ProcessContainment:
                 ("dwFlags", wintypes.DWORD),
             )
 
-        kernel32 = _win_kernel32()
+        kernel32 = win_kernel32()
         kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
         kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
         snapshot = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
@@ -503,7 +382,7 @@ class ProcessContainment:
         import ctypes
         from ctypes import wintypes
 
-        kernel32 = _win_kernel32()
+        kernel32 = win_kernel32()
         kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
         kernel32.AssignProcessToJobObject.argtypes = (
             wintypes.HANDLE,
@@ -515,12 +394,6 @@ class ProcessContainment:
                 f"{ctypes.WinError(ctypes.get_last_error())}"
             )
         self._pid = pid
-        self._assigned = True
-
-    @property
-    def assigned(self) -> bool:
-        """Whether a root pid is bound to this containment."""
-        return self._assigned
 
     def is_quiescent(self) -> bool | None:
         """Return whether the owned tree is empty, or ``None`` if unknowable.
@@ -531,16 +404,15 @@ class ProcessContainment:
         """
         if self._pid is None:
             return True
-        if not self._assigned:
-            return None
         if sys.platform == "win32":
             if self._job is None:
                 return None
-            return self._win_active_processes(_win_kernel32()) == 0
+            return self._win_active_processes(win_kernel32()) == 0
         pgid = self._pgid
         if pgid is None:
             return None
-        return not _posix_group_is_live(pgid)
+        live = self._group_probe(pgid)
+        return None if live is None else not live
 
     async def terminate(
         self, *, term_timeout: float = 10.0, kill_timeout: float = 5.0
@@ -549,9 +421,9 @@ class ProcessContainment:
 
         POSIX escalates ``killpg`` SIGTERM -> (wait ``term_timeout``) -> SIGKILL
         (wait ``kill_timeout``) over the owned process group. Windows terminates
-        the job. An unassigned containment is empty and cannot establish that an
-        independently retained root was reaped; ownership callers must handle
-        that root through their retained process identity.
+        the job. A containment that owns no process identity, including one a
+        previous call already reaped, is empty and returns ``True``, so a repeat
+        call is idempotent.
 
         A failed POSIX reap retains its group for a later retry. Windows always
         closes the kill-on-close handle as the last termination backstop; if job
@@ -575,7 +447,6 @@ class ProcessContainment:
         if result:
             # A successfully emptied group can later reuse its numeric identity.
             self._pid = self._pgid = None
-            self._assigned = False
         return result
 
     async def _terminate_owned(
@@ -583,10 +454,6 @@ class ProcessContainment:
     ) -> bool:
         if self._pid is None:
             return True
-        if not self._assigned:
-            raise ProcessContainmentError(
-                f"Process {self._pid} is not assigned to this containment"
-            )
         if sys.platform == "win32":
             return await self._terminate_win_job(kill_timeout=kill_timeout)
         return await self._terminate_posix_group(
@@ -624,7 +491,7 @@ class ProcessContainment:
                 return False
             if active == 0:
                 return True
-            await asyncio.sleep(_POLL_INTERVAL)
+            await asyncio.sleep(POLL_INTERVAL)
         return self._win_active_processes(kernel32) == 0
 
     def _win_active_processes(self, kernel32: Any) -> int | None:
@@ -676,12 +543,14 @@ class ProcessContainment:
         Job Object membership; POSIX names the isolated process group, whose
         members are the owned tree by construction.
         """
-        if self._pid is None or not self._assigned:
+        if self._pid is None:
             return "owned_pids=unassigned"
         if sys.platform == "win32":
-            pids = self._win_job_process_ids(_win_kernel32())
+            pids = self._win_job_process_ids(win_kernel32())
+        elif self._pgid is None:
+            pids = None
         else:
-            pids = _posix_group_process_ids(self._pgid)
+            pids = process_group_members(self._pgid)
         if pids is None:
             return "owned_pids=unknown"
         return "owned_pids=" + ",".join(str(pid) for pid in pids)
@@ -694,12 +563,12 @@ class ProcessContainment:
         and a descendant of the retained launcher root. POSIX has no launcher
         hop here, so only the exact spawned root is valid.
         """
-        if self._pid is None or not self._assigned or pid <= 1:
+        if self._pid is None or pid <= 1:
             return False
         if sys.platform != "win32":
             return pid == self._pid
-        pids = self._win_job_process_ids(_win_kernel32())
-        return bool(pids and pid in pids and _pid_in_tree(self._pid, pid) is True)
+        pids = self._win_job_process_ids(win_kernel32())
+        return bool(pids and pid in pids and pid in descendant_pids(self._pid))
 
     def _query_job_pid_list(
         self, kernel32: Any, size: int, header_size: int, pointer_size: int
@@ -778,20 +647,24 @@ class ProcessContainment:
         pgid = self._pgid
         if pgid is None or pgid != self._pid or pgid <= 1 or pgid == os.getpgrp():
             raise ProcessContainmentError("Refusing to signal an unowned process group")
-        # Confirm an empty snapshot before returning: the /proc walk can
+        # Confirm an empty snapshot before returning: the membership scan can
         # transiently miss a member while the root exits and is reparented.
         if (
-            await asyncio.to_thread(_posix_group_is_live, pgid) is False
-            and await asyncio.to_thread(_posix_group_is_live, pgid) is False
+            await asyncio.to_thread(self._group_probe, pgid) is False
+            and await asyncio.to_thread(self._group_probe, pgid) is False
         ):
             return True
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGTERM)
-        if await _await_posix_group_gone(pgid, timeout=term_timeout):
+        if await _await_posix_group_gone(
+            pgid, timeout=term_timeout, probe=self._group_probe
+        ):
             return True
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGKILL)
-        return await _await_posix_group_gone(pgid, timeout=kill_timeout)
+        return await _await_posix_group_gone(
+            pgid, timeout=kill_timeout, probe=self._group_probe
+        )
 
     def close(self) -> None:
         """Release the OS containment handle; idempotent.
@@ -804,7 +677,225 @@ class ProcessContainment:
             return
         import ctypes
 
-        kernel32 = _win_kernel32()
+        kernel32 = win_kernel32()
         if not kernel32.CloseHandle(self._job):
             raise ctypes.WinError(ctypes.get_last_error())
         self._job = None
+
+
+def _contained_creationflags(*, new_process_group: bool) -> int:
+    """Return the creation flags that hold a Windows root until its admission."""
+    if sys.platform != "win32":
+        return 0
+    flags = _CREATE_SUSPENDED
+    if new_process_group:
+        flags |= subprocess.CREATE_NEW_PROCESS_GROUP
+    return flags
+
+
+def _unreaped_root_error(pid: int) -> ProcessContainmentError:
+    return ProcessContainmentError(
+        f"Process {pid} could not be reaped after its containment admission failed"
+    )
+
+
+def spawn_contained(
+    argv: Sequence[str],
+    containment: ProcessContainment,
+    **popen: Unpack[_ContainedSpawnOptions],
+) -> subprocess.Popen[bytes]:
+    """Start *argv* inside *containment* before it runs a single instruction.
+
+    The one way to start an owned process. Windows creates the root suspended,
+    assigns the handle ``Popen`` retains to the Job Object, then resumes it;
+    POSIX seats it in a new session and process group at exec. Every descendant
+    the root starts is therefore inside the tree
+    :meth:`ProcessContainment.terminate` reaps.
+
+    A failed spawn releases *containment* and raises. A refused admission kills
+    the exact retained root, releases *containment* and raises, so no caller
+    ever holds an owned process outside its containment.
+    """
+    try:
+        process = subprocess.Popen(
+            list(argv),
+            stdin=popen.get("stdin"),
+            stdout=popen.get("stdout"),
+            stderr=popen.get("stderr"),
+            cwd=popen.get("cwd"),
+            env=popen.get("env"),
+            creationflags=_contained_creationflags(
+                new_process_group=popen.get("new_process_group", False)
+            ),
+            start_new_session=_CONTAINED_NEW_SESSION,
+        )
+    except BaseException:
+        containment.close()
+        raise
+    try:
+        containment.admit(process)
+    except BaseException as admission_error:
+        try:
+            _reap_unadmitted_root(process, containment)
+        except BaseException as cleanup_error:
+            logger.exception(
+                "Could not reap process %d after its admission was refused",
+                process.pid,
+            )
+            raise admission_error from cleanup_error
+        raise
+    return process
+
+
+def _reap_unadmitted_root(
+    process: subprocess.Popen[bytes], containment: ProcessContainment
+) -> None:
+    """Kill the exact retained root whose admission failed, then release.
+
+    A Windows root was created suspended, so it has started nothing and is the
+    complete tree; closing the kill-on-close Job also fells it if admission had
+    already seated it. The retained handle, never a reopened pid, is the target.
+    """
+    try:
+        process.kill()
+        try:
+            process.wait(timeout=_ADMISSION_REAP_TIMEOUT)
+        except subprocess.TimeoutExpired as exc:
+            raise _unreaped_root_error(process.pid) from exc
+    finally:
+        containment.close()
+
+
+async def spawn_contained_async(
+    argv: Sequence[str],
+    containment: ProcessContainment,
+    **popen: Unpack[_AsyncContainedSpawnOptions],
+) -> asyncio.subprocess.Process:
+    """The asyncio form of :func:`spawn_contained`, with the same guarantees."""
+    stdin = popen.get("stdin")
+    stdout = popen.get("stdout")
+    stderr = popen.get("stderr")
+    creationflags = _contained_creationflags(
+        new_process_group=popen.get("new_process_group", False)
+    )
+    try:
+        if popen.get("shell", False):
+            process = await asyncio.create_subprocess_shell(
+                subprocess.list2cmdline(argv)
+                if sys.platform == "win32"
+                else shlex.join(argv),
+                stdin=stdin,
+                stdout=stdout,
+                stderr=stderr,
+                limit=popen["limit"],
+                cwd=popen.get("cwd"),
+                env=popen.get("env"),
+                creationflags=creationflags,
+                start_new_session=_CONTAINED_NEW_SESSION,
+            )
+        else:
+            process = await asyncio.create_subprocess_exec(
+                argv[0],
+                *argv[1:],
+                stdin=stdin,
+                stdout=stdout,
+                stderr=stderr,
+                limit=popen["limit"],
+                cwd=popen.get("cwd"),
+                env=popen.get("env"),
+                creationflags=creationflags,
+                start_new_session=_CONTAINED_NEW_SESSION,
+            )
+    except BaseException:
+        containment.close()
+        raise
+    try:
+        containment.admit(_retained_popen(process))
+    except BaseException as admission_error:
+        try:
+            await _reap_unadmitted_root_async(process, containment)
+        except BaseException as cleanup_error:
+            logger.exception(
+                "Could not reap process %d after its admission was refused",
+                process.pid,
+            )
+            raise admission_error from cleanup_error
+        raise
+    return process
+
+
+def _retained_popen(
+    process: asyncio.subprocess.Process,
+) -> subprocess.Popen[bytes]:
+    """Return the exact ``Popen`` retained by asyncio's subprocess transport."""
+    transport = getattr(process, "_transport", None)
+    popen = (
+        transport.get_extra_info("subprocess")
+        if transport is not None and hasattr(transport, "get_extra_info")
+        else None
+    )
+    if not isinstance(popen, subprocess.Popen):
+        raise ProcessContainmentError(
+            f"Process {process.pid} has no retained subprocess handle"
+        )
+    return cast("subprocess.Popen[bytes]", popen)
+
+
+async def _reap_unadmitted_root_async(
+    process: asyncio.subprocess.Process, containment: ProcessContainment
+) -> None:
+    """The asyncio form of :func:`_reap_unadmitted_root`; also closes the pipes."""
+    try:
+        # The transport kills the exact Popen it retains.
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=_ADMISSION_REAP_TIMEOUT)
+        except TimeoutError as exc:
+            raise _unreaped_root_error(process.pid) from exc
+    finally:
+        containment.close()
+        transport = getattr(process, "_transport", None)
+        if transport is not None:
+            transport.close()
+
+
+def reap_contained(
+    process: subprocess.Popen[Any],
+    containment: ProcessContainment,
+    *,
+    term_timeout: float = 10.0,
+    kill_timeout: float = 5.0,
+) -> bool:
+    """Reap *process*'s whole tree through *containment*, from any calling context.
+
+    *process* was started inside *containment* by :func:`spawn_contained`, which
+    held every descendant from the root's first instruction, so a root that
+    already exited is no obstacle: what it left running is still reaped, and no
+    kill is ever aimed at a recycled pid. The root's handle is then waited on.
+    *term_timeout* and *kill_timeout* are the graceful and forced phases. Returns
+    ``True`` once the tree is gone and the root reaped; a repeat call after that
+    is a no-op.
+
+    Called from a thread that is itself running an event loop, ``asyncio.run``
+    would refuse and leave the tree alive, so the reap then runs on a thread
+    with a loop of its own.
+    """
+
+    def _terminate() -> bool:
+        return asyncio.run(
+            containment.terminate(term_timeout=term_timeout, kill_timeout=kill_timeout)
+        )
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        reaped = _terminate()
+    else:
+        with ThreadPoolExecutor(max_workers=1) as reaper:
+            reaped = reaper.submit(_terminate).result()
+    try:
+        process.wait(timeout=kill_timeout)
+    except subprocess.TimeoutExpired:
+        return False
+    return reaped

@@ -14,35 +14,31 @@ branch - so the researcher is asserted specifically, not just a generic worker.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from langchain_core.messages import HumanMessage
 
+from ....testing import simulator_command
 from ..._compiler_research import _make_research_producer
-from ...nodes.worker import create_worker_node
+from ...nodes.worker import WorkerNodeOptions, create_worker_node
 
 if TYPE_CHECKING:
-    from ....thread.state import TeamState
+    from pathlib import Path
 
-SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
-PYTHON_EXE = sys.executable
+    from ....thread.state import TeamState
 
 
 def _recording_model(record_file: Path, tmp_path: Path):
     from ....providers.acp_chat_model import AcpChatModel
 
     return AcpChatModel(
-        command=[
-            PYTHON_EXE,
-            str(SIMULATOR_PATH),
+        command=simulator_command(
             "--response",
             "done",
             "--record-session-new",
             str(record_file),
-        ],
+        ),
         # Armed run: an env auth token so config-home isolation engages, which the
         # harness-armed spawn assertion now requires. Production-faithful - a real
         # armed run always carries its lane token.
@@ -86,8 +82,9 @@ async def test_worker_node_advertises_declared_harness_server(tmp_path: Path) ->
         model=_recording_model(record_file, tmp_path),
         system_prompt="You are the synthesist.",
         name="synthesis",
-        role="synthesist",
-        harness_mcp_servers=["vaultspec-rag"],
+        options=WorkerNodeOptions(
+            role="synthesist", harness_mcp_servers=["vaultspec-rag"]
+        ),
     )
 
     result = await node(_state())
@@ -135,9 +132,9 @@ async def test_autonomous_worker_leaves_composed_rag_tools_to_the_rung(
         model=_recording_model(record_file, tmp_path),
         system_prompt="You are the synthesist.",
         name="synthesis",
-        role="synthesist",
-        harness_mcp_servers=["vaultspec-rag"],
-        autonomous=True,
+        options=WorkerNodeOptions(
+            role="synthesist", harness_mcp_servers=["vaultspec-rag"], autonomous=True
+        ),
     )
 
     await node(_state())
@@ -168,9 +165,9 @@ async def test_supervised_worker_does_not_auto_permit_harness_tools(
         model=_recording_model(record_file, tmp_path),
         system_prompt="You are the synthesist.",
         name="synthesis",
-        role="synthesist",
-        harness_mcp_servers=["vaultspec-rag"],
-        autonomous=False,
+        options=WorkerNodeOptions(
+            role="synthesist", harness_mcp_servers=["vaultspec-rag"], autonomous=False
+        ),
     )
 
     await node(_state())
@@ -234,8 +231,7 @@ async def test_no_harness_declaration_advertises_no_extra_server(
         model=_recording_model(record_file, tmp_path),
         system_prompt="You are the synthesist.",
         name="synthesis",
-        role="synthesist",
-        harness_mcp_servers=None,
+        options=WorkerNodeOptions(role="synthesist", harness_mcp_servers=None),
     )
 
     await node(_state())

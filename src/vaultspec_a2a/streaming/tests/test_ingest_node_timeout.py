@@ -1,6 +1,6 @@
 """A node that outruns its own run budget fails the run and names itself.
 
-Driven through a real compiled LangGraph graph and the real aggregator ingest:
+Driven through a real compiled LangGraph graph and the real producer ingest:
 the node's ``TimeoutPolicy`` is enforced by LangGraph, and the classification
 under test is what ingest reports once LangGraph raises.
 """
@@ -8,21 +8,20 @@ under test is what ingest reports once LangGraph raises.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import pytest
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import TimeoutPolicy
 
-from ...graph.compiler import _add_node
 from ...graph.events import ErrorOccurred
-from ...graph.tests._state_graph_helpers import compile_test_graph
-from ..aggregator import EventAggregator
+from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ..aggregator import RunEventProducer
+from ..ingest import GraphInvocation
+from ._relay_capture import relayed_events
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
-
-    from ..types import SequencedEvent, StreamableGraph
+    from ..types import StreamableGraph
 
 
 class _State(TypedDict):
@@ -36,8 +35,8 @@ async def _outlasting_node(state: _State) -> dict[str, str]:
 
 
 def _graph_with_node_budget(run_timeout: float) -> StreamableGraph:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
-    _add_node(
+    builder = new_state_graph(_State)
+    add_test_node(
         builder,
         "slow_author",
         _outlasting_node,
@@ -50,26 +49,23 @@ def _graph_with_node_budget(run_timeout: float) -> StreamableGraph:
 
 @pytest.mark.asyncio
 async def test_a_node_timeout_fails_the_run_naming_the_node_and_limit() -> None:
-    aggregator = EventAggregator()
-    queue = aggregator.add_subscriber("client-node-timeout")
-    aggregator.subscribe("client-node-timeout", ["thread-node-timeout"])
-    ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    producer = RunEventProducer()
+    events = relayed_events(producer)
 
     outcome = await asyncio.wait_for(
-        ingest(
-            thread_id="thread-node-timeout",
-            agent_id="supervisor",
-            graph=_graph_with_node_budget(0.2),
-            graph_input={"note": ""},
-            config={"configurable": {"thread_id": "thread-node-timeout"}},
+        producer.ingest(
+            "thread-node-timeout",
+            "supervisor",
+            _graph_with_node_budget(0.2),
+            GraphInvocation(
+                graph_input={"note": ""},
+                config={"configurable": {"thread_id": "thread-node-timeout"}},
+            ),
         ),
         timeout=10.0,
     )
 
     assert outcome == "failed"
-    events: list[SequencedEvent] = []
-    while not queue.empty():
-        events.append(queue.get_nowait())
     errors = [s.event for s in events if isinstance(s.event, ErrorOccurred)]
     assert errors, "a timed-out node must surface an error event"
     error = errors[-1]
@@ -77,4 +73,4 @@ async def test_a_node_timeout_fails_the_run_naming_the_node_and_limit() -> None:
     assert error.recoverable is True
     assert "'slow_author'" in error.message
     assert "run timeout" in error.message
-    assert aggregator.take_failure_reason("thread-node-timeout") == error.message
+    assert producer.take_failure_reason("thread-node-timeout") == error.message

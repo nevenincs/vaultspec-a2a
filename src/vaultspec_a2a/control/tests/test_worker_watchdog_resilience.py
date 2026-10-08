@@ -22,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import subprocess
 import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, override
@@ -31,9 +30,9 @@ import pytest
 
 from ...control._worker_health import WorkerLiveness, WorkerState
 from ...control.circuit_breaker import WorkerCircuitBreaker
-from ...control.config import settings
 from ...control.worker_management import LazyWorkerSpawner, WorkerWatchdog
-from ...testing.ports import free_port
+from ...testing import adopted_spawner, free_port, settings_override
+from ...utils import ProcessContainment, spawn_contained
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -79,46 +78,30 @@ def _captured() -> Generator[list[logging.LogRecord]]:
 
 
 @contextlib.contextmanager
-def _fast_polling() -> Generator[None]:
-    """Shorten the watchdog poll interval; a real attribute swap, restored after."""
-    original = settings.watchdog_poll_interval_seconds
-    settings.watchdog_poll_interval_seconds = _POLL
-    try:
-        yield
-    finally:
-        settings.watchdog_poll_interval_seconds = original
-
-
-@contextlib.contextmanager
-def _runtime_home(home: Path) -> Generator[None]:
-    """Point the machine-global runtime directory at *home*; a real swap, restored.
-
-    The watchdog derives the worker's stderr log path from this setting, so a
-    test that needs to fault that real path does it inside its own tree instead
-    of the developer's A2A home.
-    """
-    original = settings.a2a_home
-    settings.a2a_home = home
-    try:
-        yield
-    finally:
-        settings.a2a_home = original
-
-
-def _crashed_owned_watchdog() -> tuple[WorkerWatchdog, WorkerState, LazyWorkerSpawner]:
+def _crashed_owned_watchdog() -> Generator[
+    tuple[WorkerWatchdog, WorkerState, LazyWorkerSpawner]
+]:
     """A watchdog over an OWNED worker process that has already exited.
 
     The shape that sends a tick down the recovery path: the gateway holds the
     process handle and may restart it, and the handle's process is really dead,
     so ``_process_crashed`` is true from the first tick without any simulation.
+    An owned worker is always started inside its containment, so this one is
+    too; the containment outlives the root it reaps around.
     """
-    crashed = subprocess.Popen([sys.executable, "-c", "raise SystemExit(3)"])
+    containment = ProcessContainment.create()
+    crashed = spawn_contained(
+        [sys.executable, "-c", "raise SystemExit(3)"], containment
+    )
     crashed.wait(timeout=30)
     port = free_port()
     spawner = LazyWorkerSpawner(
-        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=True
+        worker_url=f"http://127.0.0.1:{port}",
+        worker_port=port,
+        auto_spawn=True,
+        internal_token=None,
     )
-    spawner.replace_process(crashed)
+    spawner.replace_process(crashed, containment)
     worker_state = WorkerState()
     breaker = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30)
     watchdog = WorkerWatchdog(
@@ -127,7 +110,10 @@ def _crashed_owned_watchdog() -> tuple[WorkerWatchdog, WorkerState, LazyWorkerSp
         worker_state,
         SimpleNamespace(worker_liveness=WorkerLiveness()),
     )
-    return watchdog, worker_state, spawner
+    try:
+        yield watchdog, worker_state, spawner
+    finally:
+        containment.close()
 
 
 def _unsupervised_watchdog(
@@ -140,11 +126,7 @@ def _unsupervised_watchdog(
     as a status transition without any process being spawned.
     """
     port = free_port()
-    spawner = LazyWorkerSpawner(
-        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=False
-    )
-    # The real production method that marks an adopted worker: spawned, no handle.
-    spawner.replace_process(None)
+    spawner = adopted_spawner(f"http://127.0.0.1:{port}", port)
     worker_state = WorkerState()
     breaker = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30)
     app_state = SimpleNamespace(
@@ -186,7 +168,7 @@ async def _await_status(state: WorkerState, expected: str, *, timeout: float) ->
 
 @pytest.mark.asyncio
 async def test_a_raising_tick_does_not_end_the_watchdog(tmp_path: Path) -> None:
-    """The defect: one raising tick used to be the last tick.
+    """One raising tick is not the last tick.
 
     The fault is injected where the docstring above says a tick is most likely
     to suffer one - on the recovery path - and by a real filesystem condition
@@ -200,13 +182,20 @@ async def test_a_raising_tick_does_not_end_the_watchdog(tmp_path: Path) -> None:
     that is still polling can notice, so the later transition proves the loop
     outlived the failures rather than merely that the task object still exists.
     """
-    with _runtime_home(tmp_path):
-        watchdog, worker_state, spawner = _crashed_owned_watchdog()
+    # The watchdog derives the worker's stderr log path from the A2A home, so the
+    # fault is placed inside this test's own tree instead of the developer's home.
+    with (
+        settings_override(a2a_home=tmp_path),
+        _crashed_owned_watchdog() as (watchdog, worker_state, spawner),
+    ):
         stderr_log = spawner.stderr_log_path
         assert stderr_log is not None, "an auto-spawning spawner owns a stderr log"
         stderr_log.mkdir(parents=True)
 
-        with _captured() as records, _fast_polling():
+        with (
+            _captured() as records,
+            settings_override(watchdog_poll_interval_seconds=_POLL),
+        ):
             task = asyncio.create_task(watchdog.run())
             try:
                 # Wait for a tick to actually fail before asserting anything
@@ -254,7 +243,7 @@ async def test_cancellation_remains_the_quiet_way_to_stop_the_watchdog() -> None
     """
     watchdog, worker_state, _app_state = _unsupervised_watchdog(None)
 
-    with _fast_polling():
+    with settings_override(watchdog_poll_interval_seconds=_POLL):
         task = asyncio.create_task(watchdog.run())
         assert await _await_status(worker_state, "down", timeout=15.0), (
             "the watchdog never ran a healthy tick"
@@ -271,43 +260,30 @@ async def test_a_restart_cycle_that_raises_still_stamps_the_cooldown() -> None:
     """A raising cycle must leave a cooldown stamp, or containment becomes a spin.
 
     Keeping the loop alive across a raising tick is only safe if a persistently
-    failing recovery is still rate-limited. The stamp used to be written after
-    the restart returned, so a cycle that raised skipped it and the gate saw no
-    prior cycle - the next poll would retry at the poll interval instead of the
-    cooldown. Here a real restart cycle is entered against a real crashed worker
+    failing recovery is still rate-limited. The stamp is written even when the
+    restart raises: were it written only after the restart returned, a cycle that
+    raised would skip it and the gate would see no prior cycle - the next poll
+    would retry at the poll interval instead of the cooldown. Here a real restart
+    cycle is entered against a real crashed worker
     and cancelled during its real backoff sleep, which is the shutdown-mid-restart
     case as well as the general raise.
     """
-    crashed = subprocess.Popen([sys.executable, "-c", "raise SystemExit(3)"])
-    crashed.wait(timeout=30)
-    port = free_port()
-    spawner = LazyWorkerSpawner(
-        worker_url=f"http://127.0.0.1:{port}", worker_port=port, auto_spawn=True
-    )
     # An owned worker that has already exited: the commonest restart trigger.
-    spawner.replace_process(crashed)
-    worker_state = WorkerState()
-    breaker = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30)
-    watchdog = WorkerWatchdog(
-        spawner,
-        breaker,
-        worker_state,
-        SimpleNamespace(worker_liveness=WorkerLiveness()),
-    )
-    assert watchdog._restart_cooldown_elapsed() is True, (
-        "a watchdog that has never restarted should not be gated"
-    )
+    with _crashed_owned_watchdog() as (watchdog, worker_state, _spawner):
+        assert watchdog._restart_cooldown_elapsed() is True, (
+            "a watchdog that has never restarted should not be gated"
+        )
 
-    with _fast_polling():
-        task = asyncio.create_task(watchdog.run())
-        # The tick detects the crash and enters the restart cycle, which opens
-        # with a backoff sleep far longer than this wait - so cancelling below
-        # lands inside the cycle rather than after it.
-        entered = await _await_status(worker_state, "restarting", timeout=15.0)
-        assert entered, "the watchdog never entered a restart cycle"
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        with settings_override(watchdog_poll_interval_seconds=_POLL):
+            task = asyncio.create_task(watchdog.run())
+            # The tick detects the crash and enters the restart cycle, which
+            # opens with a backoff sleep far longer than this wait - so
+            # cancelling below lands inside the cycle rather than after it.
+            entered = await _await_status(worker_state, "restarting", timeout=15.0)
+            assert entered, "the watchdog never entered a restart cycle"
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     assert watchdog._last_restart_cycle_ts is not None, (
         "a restart cycle that raised left no cooldown stamp; the next poll would "

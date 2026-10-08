@@ -1,8 +1,8 @@
-"""Service discovery and heartbeat for the resident gateway (R8).
+"""Service discovery and heartbeat for the resident gateway.
 
 The A2A gateway publishes ``service.json`` at the root of its state home - by
 default ``.vault/data/agents`` in the project it serves - so the engine can
-attach to it under the attach-never-own discipline. The record adopts the R8
+attach to it under the attach-never-own discipline. The record adopts the
 ``ServiceInfo`` contract: ``port`` required; optional ``pid``, a non-secret
 ``handoff_reference``, and ``last_heartbeat`` (ms-epoch). The bearer lives in
 the referenced owner-restricted file, never in discovery. The producer refreshes the
@@ -26,14 +26,13 @@ from __future__ import annotations
 import json
 import os
 import secrets
-import socket
 import stat
 import subprocess
 import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import BinaryIO, TypedDict, Unpack, cast, override
+from typing import TYPE_CHECKING, BinaryIO, Literal, TypedDict, Unpack, cast, override
 
 import httpx
 
@@ -48,14 +47,9 @@ from ..desktop._filesystem_authority import (
     create_anonymous_file,
     create_private_file,
     directory_lease,
-    open_shared_read_descriptor,
-    path_is_link_like,
     publish_no_replace,
+    read_private_file,
     resolve_directory_authority,
-)
-from ..desktop._platform_acl import (
-    confirm_opened_secret,
-    unfollowed_read_flags,
 )
 from ..desktop._platform_acl import (
     harden_credential_path as _harden_credential_path,
@@ -63,45 +57,43 @@ from ..desktop._platform_acl import (
 from ..desktop._platform_acl import (
     restrict_windows_file as _restrict_windows_file,
 )
+from ..desktop.credentials import MAX_CREDENTIAL_BYTES
+from ..utils import path_is_link_like
+from ..utils._process_tree import pid_is_live, process_start_identity
 from ..utils.atomic_write import atomic_write_text
-from ..utils.coercion import coerce_int
-from ._desktop_discovery_record_parts import (
-    DesktopDiscoveryRecordOptions,
-    DesktopRecordEndpoint,
-    DesktopRecordIdentity,
-    DesktopRecordProcess,
-    DesktopRecordProtocol,
-    DesktopRecordState,
-    bind_desktop_record_fields,
-    required_desktop_record_field,
-)
+from ..utils.coercion import coerce_int, coerce_object_mapping
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "DESKTOP_DISCOVERY_VERSION",
     "DESKTOP_PROTOCOL_MAX",
     "HEARTBEAT_REFRESH_SECONDS",
-    "DesktopDiscoveryState",
     "DiscoveryState",
     "another_resident_is_live",
     "classify_desktop_discovery",
     "classify_discovery",
-    "is_pid_alive",
-    "port_has_listener",
+    "health_payload_ready",
     "probe_health",
     "read_resident_service",
+    "recorded_resident_is_live",
     "remove_service_json_if_owned",
     "service_json_path",
     "write_desktop_discovery",
     "write_service_json",
 ]
 
-# Producer refresh cadence (R8): well under the 120s consumer staleness window so
+# Producer refresh cadence: well under the 120s consumer staleness window so
 # a live service never reads as stale between writes.
 HEARTBEAT_REFRESH_SECONDS = 15
 
 
 class DiscoveryState(StrEnum):
-    """Attach-never-own classification of a discovery file (R8)."""
+    """Attach-never-own, filesystem-only classification of a discovery file.
+
+    Shared by the service record and the versioned desktop record.
+    """
 
     FRESH = "fresh"
     STALE = "stale"
@@ -111,13 +103,21 @@ class DiscoveryState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ServiceInfo:
-    """A parsed discovery record plus its validated local handoff credential."""
+    """A parsed discovery record plus its validated local handoff credential.
+
+    ``start_fingerprint`` is the kernel start stamp of the process the record
+    names, so a reader can tell the publishing process from an unrelated one
+    that has since inherited its pid. It is ``None`` for a record published
+    before this field existed, or on a platform without a cheap start-time
+    source; a reader then rests on pid-liveness alone.
+    """
 
     port: int
     pid: int | None = None
     last_heartbeat: int | None = None
     service_token: str | None = None
     handoff_reference: str | None = None
+    start_fingerprint: str | None = None
 
     @override
     def __repr__(self) -> str:
@@ -126,8 +126,41 @@ class ServiceInfo:
         return (
             f"ServiceInfo(port={self.port}, pid={self.pid}, "
             f"last_heartbeat={self.last_heartbeat}, service_token={token}, "
-            f"handoff_reference={self.handoff_reference!r})"
+            f"handoff_reference={self.handoff_reference!r}, "
+            f"start_fingerprint={self.start_fingerprint!r})"
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _RecordedResident:
+    """The process identity a discovery record published, for the liveness rule."""
+
+    pid: int
+    start_fingerprint: str | None
+
+
+def recorded_resident_is_live(info: ServiceInfo) -> bool:
+    """Whether the process that published *info* is provably still running.
+
+    Both halves of the record's process identity, judged by the one liveness
+    rule this package owns
+    (:func:`~vaultspec_a2a.lifecycle.singleton.recorded_process_is_live`): a pid
+    that is gone is dead, and a live pid carrying a different start fingerprint
+    is a REUSED pid now belonging to an unrelated process, never the resident the
+    record names. A record naming no pid names no process to be live.
+
+    This is the half of the resident clause the listener claim cannot supply.
+    Ownership of the recorded endpoint says who may receive a credential; this
+    says whether the record still describes anyone at all, which is what keeps a
+    stop verb from felling the stranger that inherited a crashed resident's pid.
+    """
+    from .singleton import recorded_process_is_live
+
+    if info.pid is None:
+        return False
+    return recorded_process_is_live(
+        _RecordedResident(pid=info.pid, start_fingerprint=info.start_fingerprint)
+    )
 
 
 def service_json_path(a2a_home: Path) -> Path:
@@ -136,7 +169,11 @@ def service_json_path(a2a_home: Path) -> Path:
 
 
 def _read_handoff_credential(discovery_path: Path, reference: object) -> str | None:
-    """Read only this discovery record's regular, owner-restricted token file."""
+    """Read only this discovery record's regular, owner-restricted token file.
+
+    The file carries the gateway's service token, so it is held to the attach
+    credential's size bound.
+    """
     if not isinstance(reference, str) or not reference:
         return None
     candidate = Path(reference)
@@ -145,44 +182,13 @@ def _read_handoff_credential(discovery_path: Path, reference: object) -> str | N
         expected = authority.path / HANDOFF_CREDENTIAL
         if candidate != expected or path_is_link_like(candidate):
             return None
-        with directory_lease(authority) as leased:
-            return _read_leased_credential(leased, expected)
+        raw = read_private_file(expected, max_bytes=MAX_CREDENTIAL_BYTES)
     except (OSError, subprocess.SubprocessError):
         return None
-
-
-def _read_leased_credential(leased: DirectoryAuthority, expected: Path) -> str | None:
-    """Read one verified token while holding its parent directory authority."""
-    if path_is_link_like(expected):
-        return None
-    if os.name == "posix":
-        if leased.dir_fd is None or not hasattr(os, "O_NOFOLLOW"):
-            return None
-        descriptor = os.open(
-            HANDOFF_CREDENTIAL, unfollowed_read_flags(), dir_fd=leased.dir_fd
-        )
-        named = os.stat(HANDOFF_CREDENTIAL, dir_fd=leased.dir_fd, follow_symlinks=False)
-    else:
-        # DELETE sharing keeps a credential read from blocking publication.
-        descriptor = open_shared_read_descriptor(expected)
-        named = expected.stat(follow_symlinks=False)
     try:
-        opened = os.fstat(descriptor)
-        if not confirm_opened_secret(descriptor, named=named, path=expected):
-            return None
-        with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
-            descriptor = -1
-            token = handle.read().strip()
-        assert_directory_authority(leased)
-        named_after = expected.stat(follow_symlinks=False)
-        if path_is_link_like(expected) or (
-            named_after.st_dev,
-            named_after.st_ino,
-        ) != (opened.st_dev, opened.st_ino):
-            return None
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
+        token = raw.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return None
     return token or None
 
 
@@ -307,19 +313,21 @@ def _service_info(info: dict[str, object], discovery_path: Path) -> ServiceInfo 
         return None
     reference = info.get("handoff_reference")
     token = _read_handoff_credential(discovery_path, reference)
+    fingerprint = info.get("start_fingerprint")
     return ServiceInfo(
         port=port,
         pid=coerce_int(info.get("pid")),
         last_heartbeat=coerce_int(info.get("last_heartbeat")),
         service_token=token,
         handoff_reference=reference if isinstance(reference, str) else None,
+        start_fingerprint=fingerprint if isinstance(fingerprint, str) else None,
     )
 
 
 def classify_discovery(
     path: Path, *, now_ms: int | None = None
 ) -> tuple[DiscoveryState, ServiceInfo | None]:
-    """Classify a discovery file filesystem-only (no pid or /health probe, R8).
+    """Classify a discovery file filesystem-only (no pid or /health probe).
 
     ``ABSENT`` when the file is missing, ``MALFORMED`` when it is unreadable or
     lacks a valid ``port``, ``STALE`` when a present heartbeat is beyond the
@@ -342,41 +350,8 @@ def classify_discovery(
 
 
 def read_resident_service(a2a_home: Path) -> tuple[DiscoveryState, ServiceInfo | None]:
-    """Hot-path, filesystem-only discovery of the resident gateway (R8)."""
+    """Hot-path, filesystem-only discovery of the resident gateway."""
     return classify_discovery(service_json_path(a2a_home))
-
-
-def is_pid_alive(pid: int | None) -> bool:
-    """Return ``True`` when *pid* is a live process on this machine.
-
-    The lifecycle spelling of the package's single liveness probe, adding this
-    layer's ``None`` handling (an unrecorded pid is not alive) on top of
-    :func:`vaultspec_a2a.utils.process.pid_is_live`, which owns the platform
-    contract: an ``OpenProcess`` exit-code query on Windows, and on POSIX a
-    signal-0 probe that discounts an unreaped zombie.
-    """
-    from ..utils._process_tree import pid_is_live
-
-    if pid is None:
-        return False
-    return pid_is_live(pid)
-
-
-def port_has_listener(port: int, *, timeout: float) -> bool:
-    """Return ``True`` when a loopback ``connect`` to *port* is accepted.
-
-    The single connect-probe primitive for the lifecycle package: a successful
-    ``connect_ex`` to ``127.0.0.1:port`` proves a live listener is accepting there.
-    It is the ONLY reliable "is this port taken" signal on Windows, where a plain
-    ``bind`` succeeds even when another process already serves the port (no
-    ``SO_EXCLUSIVEADDRUSE``); a caller that must also catch a bound-but-not-yet-
-    listening port pairs this with a bind-probe. *timeout* is required rather than
-    defaulted because a readiness poll (fast) and a liveness check (patient) want
-    different budgets.
-    """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(timeout)
-        return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
 def _harden_record_parent(parent: Path) -> None:
@@ -408,6 +383,7 @@ class _ServiceWriteOptional(TypedDict, total=False):
     service_token: str | None
     now_ms: int | None
     allow_tokenless: bool
+    start_fingerprint: str | None
 
 
 class _ServiceWriteArgs(_ServiceWriteOptional):
@@ -420,6 +396,14 @@ def write_service_json(path: Path, **kwargs: Unpack[_ServiceWriteArgs]) -> None:
 
     Writes to a sibling temp file then ``os.replace`` so a concurrent reader
     never observes a partially written record.
+
+    The record carries the start fingerprint of the pid it names, so a reader can
+    tell this resident from an unrelated process that later inherits its pid.
+    It is read for *pid* rather than taken from this process, because a publisher
+    may record a pid other than its own and the two identities must not be mixed;
+    a caller holding a fingerprint already may pass *start_fingerprint* instead.
+    A pid whose identity cannot be read publishes none, and a reader then rests
+    on pid-liveness alone.
 
     A publication without *service_token* is destructive rather than inert: it
     strips the handoff reference from the record and unlinks the credential
@@ -445,9 +429,13 @@ def write_service_json(path: Path, **kwargs: Unpack[_ServiceWriteArgs]) -> None:
             "unauthenticated; pass allow_tokenless=True to un-publish on purpose"
         )
     _harden_record_parent(path.parent)
+    fingerprint = kwargs.get("start_fingerprint")
+    if fingerprint is None:
+        fingerprint = process_start_identity(pid)
     record: dict[str, object] = {
         "port": port,
         "pid": pid,
+        "start_fingerprint": fingerprint,
         "last_heartbeat": now_ms if now_ms is not None else int(time.time() * 1000),
     }
     credential_path = path.parent.resolve(strict=True) / HANDOFF_CREDENTIAL
@@ -466,29 +454,54 @@ def write_service_json(path: Path, **kwargs: Unpack[_ServiceWriteArgs]) -> None:
     atomic_write_text(path, json.dumps(record))
 
 
-def probe_health(base_url: str, *, timeout: float = 2.0) -> dict[str, object] | None:
-    """Probe ``GET /health`` on a resident gateway (lifecycle-only, R8).
+def probe_health(
+    base_url: str,
+    *,
+    timeout: float = 2.0,
+    headers: Mapping[str, str] | None = None,
+) -> dict[str, object] | None:
+    """Probe ``GET /health`` on a gateway or worker (lifecycle-only).
 
-    Returns the parsed health body on a real ``200``, else ``None``. Reserved for
-    lifecycle/ops callers; never used on the filesystem-only discovery hot path.
+    Returns the parsed health body on a real ``200``, else ``None``. *headers*
+    carries a credential only for a caller that already established who owns the
+    listener. Reserved for lifecycle/ops callers; never used on the
+    filesystem-only discovery hot path.
     """
     try:
-        resp = httpx.get(f"{base_url.rstrip('/')}/health", timeout=timeout)
+        resp = httpx.get(
+            f"{base_url.rstrip('/')}/health", headers=headers, timeout=timeout
+        )
     except httpx.HTTPError:
         return None
     if resp.status_code != 200:
         return None
     try:
-        body = resp.json()
+        body: object = resp.json()
     except ValueError:
         return None
-    return cast("dict[str, object]", body) if isinstance(body, dict) else None
+    return coerce_object_mapping(body)
+
+
+def health_payload_ready(
+    body: Mapping[str, object] | None, role: Literal["gateway", "worker"]
+) -> bool:
+    """Whether a decoded ``/health`` *body* proves the *role* server is ready.
+
+    The body must name the role it came from, so one server's answer never reads
+    as the other's readiness. Gateway readiness is its public ``ready`` fact;
+    worker readiness is its private ``status`` fact.
+    """
+    if body is None or body.get("service") != role:
+        return False
+    if role == "gateway":
+        return body.get("ready") is True
+    return body.get("status") == "ok"
 
 
 def another_resident_is_live(a2a_home: Path, *, health_timeout: float = 2.0) -> bool:
     """Return ``True`` when a different, live resident gateway already holds the file.
 
-    Single-resident semantics (R8): the record must be ``FRESH``, its pid must be
+    Single-resident semantics: the record must be ``FRESH``, its pid must be
     a live process, and its ``/health`` must answer ``200``. A crashed or stale
     record (dead pid, old heartbeat, no answer) is NOT a live resident — it is
     reclaimable — so this returns ``False`` and the caller may start and overwrite.
@@ -496,7 +509,7 @@ def another_resident_is_live(a2a_home: Path, *, health_timeout: float = 2.0) -> 
     state, info = read_resident_service(a2a_home)
     if state is not DiscoveryState.FRESH or info is None:
         return False
-    if not is_pid_alive(info.pid):
+    if info.pid is None or not pid_is_live(info.pid):
         return False
     base_url = f"http://127.0.0.1:{info.port}"
     return probe_health(base_url, timeout=health_timeout) is not None
@@ -544,7 +557,7 @@ def _remove_handoff_credential(discovery_path: Path) -> None:
 # ---------------------------------------------------------------------------
 #
 # The desktop profile publishes a richer, versioned discovery record than the
-# R8 Compose record above. It never carries a bearer value: the attach
+# service record above. It never carries a bearer value: the attach
 # credential lives in an owner-ACL-protected file that the record only
 # *references* by path. The desktop gateway acquires the runtime singleton and
 # binds its listener before publishing this record; a contender validates it
@@ -565,16 +578,7 @@ DESKTOP_PROTOCOL_MAX = 1
 _DESKTOP_PROFILE = "desktop"
 
 
-class DesktopDiscoveryState(StrEnum):
-    """Filesystem-only classification of a versioned desktop discovery record."""
-
-    FRESH = "fresh"
-    STALE = "stale"
-    MALFORMED = "malformed"
-    ABSENT = "absent"
-
-
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class DesktopDiscoveryRecord:
     """A parsed versioned desktop discovery record. Carries no credential value.
 
@@ -583,129 +587,18 @@ class DesktopDiscoveryRecord:
     ``None`` on platforms without a cheap process start-time source.
     """
 
-    _identity: DesktopRecordIdentity
-    _protocol: DesktopRecordProtocol
-    _process: DesktopRecordProcess
-    _endpoint: DesktopRecordEndpoint
-    _state: DesktopRecordState
-
-    def __init__(
-        self,
-        *args: object,
-        **options: Unpack[DesktopDiscoveryRecordOptions],
-    ) -> None:
-        values = bind_desktop_record_fields(args, options)
-        object.__setattr__(
-            self,
-            "_identity",
-            DesktopRecordIdentity(
-                version=cast(
-                    "int", required_desktop_record_field("version", values[0])
-                ),
-                profile=cast(
-                    "str", required_desktop_record_field("profile", values[1])
-                ),
-                generation=cast(
-                    "str", required_desktop_record_field("generation", values[2])
-                ),
-                owner=cast("str", required_desktop_record_field("owner", values[10])),
-            ),
-        )
-        object.__setattr__(
-            self,
-            "_protocol",
-            DesktopRecordProtocol(
-                protocol_min=cast(
-                    "int",
-                    required_desktop_record_field("protocol_min", values[3]),
-                ),
-                protocol_max=cast(
-                    "int",
-                    required_desktop_record_field("protocol_max", values[4]),
-                ),
-            ),
-        )
-        object.__setattr__(
-            self,
-            "_process",
-            DesktopRecordProcess(
-                pid=cast("int", required_desktop_record_field("pid", values[5])),
-                start_fingerprint=cast(
-                    "str | None",
-                    required_desktop_record_field("start_fingerprint", values[6]),
-                ),
-            ),
-        )
-        object.__setattr__(
-            self,
-            "_endpoint",
-            DesktopRecordEndpoint(
-                host=cast("str", required_desktop_record_field("host", values[7])),
-                port=cast("int", required_desktop_record_field("port", values[8])),
-            ),
-        )
-        object.__setattr__(
-            self,
-            "_state",
-            DesktopRecordState(
-                last_heartbeat=cast(
-                    "int",
-                    required_desktop_record_field("last_heartbeat", values[9]),
-                ),
-                credential_reference=cast(
-                    "str | None",
-                    required_desktop_record_field("credential_reference", values[11]),
-                ),
-            ),
-        )
-
-    @property
-    def version(self) -> int:
-        return self._identity.version
-
-    @property
-    def profile(self) -> str:
-        return self._identity.profile
-
-    @property
-    def generation(self) -> str:
-        return self._identity.generation
-
-    @property
-    def protocol_min(self) -> int:
-        return self._protocol.protocol_min
-
-    @property
-    def protocol_max(self) -> int:
-        return self._protocol.protocol_max
-
-    @property
-    def pid(self) -> int:
-        return self._process.pid
-
-    @property
-    def start_fingerprint(self) -> str | None:
-        return self._process.start_fingerprint
-
-    @property
-    def host(self) -> str:
-        return self._endpoint.host
-
-    @property
-    def port(self) -> int:
-        return self._endpoint.port
-
-    @property
-    def last_heartbeat(self) -> int:
-        return self._state.last_heartbeat
-
-    @property
-    def owner(self) -> str:
-        return self._identity.owner
-
-    @property
-    def credential_reference(self) -> str | None:
-        return self._state.credential_reference
+    version: int
+    profile: str
+    generation: str
+    protocol_min: int
+    protocol_max: int
+    pid: int
+    start_fingerprint: str | None
+    host: str
+    port: int
+    last_heartbeat: int
+    owner: str
+    credential_reference: str | None
 
     @property
     def base_url(self) -> str:
@@ -820,46 +713,28 @@ def _parse_desktop_record(info: dict[str, object]) -> DesktopDiscoveryRecord | N
 
 def classify_desktop_discovery(
     path: Path, *, now_ms: int | None = None
-) -> tuple[DesktopDiscoveryState, DesktopDiscoveryRecord | None]:
+) -> tuple[DiscoveryState, DesktopDiscoveryRecord | None]:
     """Classify a desktop discovery file filesystem-only (no pid or /health probe).
 
     ``ABSENT`` when the file is missing, ``MALFORMED`` when it is unreadable or is
     not a valid versioned desktop record, ``STALE`` when its heartbeat is beyond
-    the freshness window, and ``FRESH`` otherwise. As with the Compose classifier,
-    a ``FRESH`` result still warrants a process-liveness probe via
-    :func:`desktop_record_process_is_live` before it is trusted as a live resident.
+    the freshness window, and ``FRESH`` otherwise. A ``FRESH`` result still
+    warrants a process-liveness probe via
+    :func:`~vaultspec_a2a.lifecycle.singleton.recorded_process_is_live` before it is
+    trusted as a live resident.
     """
     if not path.exists():
-        return DesktopDiscoveryState.ABSENT, None
+        return DiscoveryState.ABSENT, None
     info = read_service_json(path)
     if info is None:
-        return DesktopDiscoveryState.MALFORMED, None
+        return DiscoveryState.MALFORMED, None
     record = _parse_desktop_record(info)
     if record is None:
-        return DesktopDiscoveryState.MALFORMED, None
+        return DiscoveryState.MALFORMED, None
     now = now_ms if now_ms is not None else int(time.time() * 1000)
     if not heartbeat_is_fresh(info, now):
-        return DesktopDiscoveryState.STALE, record
-    return DesktopDiscoveryState.FRESH, record
-
-
-def desktop_record_process_is_live(record: DesktopDiscoveryRecord) -> bool:
-    """Return ``True`` when the record's recorded gateway process is still alive.
-
-    Pid-liveness is the primary signal; the singleton's start fingerprint is the
-    pid-reuse guard. Delegates to the runtime singleton's process-liveness
-    authority so "prove this recorded process dead" has exactly one definition.
-    """
-    from .singleton import process_start_fingerprint
-
-    if not is_pid_alive(record.pid):
-        return False
-    if record.start_fingerprint is None:
-        return True
-    current = process_start_fingerprint(record.pid)
-    if current is None:
-        return True
-    return current == record.start_fingerprint
+        return DiscoveryState.STALE, record
+    return DiscoveryState.FRESH, record
 
 
 class _DesktopWriteOptional(TypedDict, total=False):

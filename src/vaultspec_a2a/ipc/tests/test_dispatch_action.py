@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -38,3 +39,24 @@ def test_narrows_each_dispatch_action_to_its_wire_literal(
 def test_rejects_a_non_dispatch_control_action() -> None:
     with pytest.raises(ValueError, match="not a dispatch action"):
         to_dispatch_action(ControlActionType.PERMISSION_REQUEST_CREATED)
+
+
+def test_a_cancel_dispatch_carries_no_recursion_budget() -> None:
+    """Cancel never enters the graph, so it is the one dispatch with no budget."""
+    request = DispatchRequest(action="cancel", thread_id="t1", recursion_limit=None)
+    assert request.recursion_limit is None
+    assert request.requires_graph_receipt is False
+
+
+@pytest.mark.parametrize("action", ["ingest", "resume"])
+def test_a_graph_running_dispatch_without_a_recursion_budget_is_refused(
+    action: Literal["ingest", "resume"],
+) -> None:
+    """Ingest and resume both enter the graph and must carry their budget."""
+    with pytest.raises(ValueError, match="recursion_limit"):
+        DispatchRequest(
+            action=action,
+            thread_id="t1",
+            workspace_root=str(Path.cwd()),
+            recursion_limit=None,
+        )

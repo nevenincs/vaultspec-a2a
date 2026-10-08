@@ -1,4 +1,4 @@
-"""Admission and cleanup for a newly spawned worker process."""
+"""Readiness and cleanup for a newly spawned worker process."""
 
 from __future__ import annotations
 
@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING
 
 from ..utils.async_cleanup import complete_cleanup
 from ._worker_health import (
-    _build_worker_restart_detail,
-    _tcp_port_ready,
+    build_worker_restart_detail,
     worker_ready_and_ours,
 )
 from ._worker_process_stop import _stop_worker_tree
@@ -21,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from ..utils.process import ProcessContainment
+    from ..utils import ProcessContainment
 
 __all__ = [
     "WorkerReadySpec",
@@ -39,14 +38,15 @@ class WorkerReadySpec:
     generation: int
     worker_command: Sequence[str]
     stderr_log_path: Path
+    internal_token: str | None
 
 
 async def _await_worker_ready(
     process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None,
+    containment: ProcessContainment,
     spec: WorkerReadySpec,
 ) -> subprocess.Popen[bytes] | None:
-    """Seat the spawned worker in its containment and wait for it to be ours.
+    """Wait for the contained worker to answer as ours, reaping it on failure.
 
     Returns the handle once the worker at *worker_url* answers as this gateway's,
     or ``None`` when it exited early or never became ready - reaping the tree in
@@ -70,21 +70,15 @@ async def _await_worker_ready(
 
 async def _await_worker_ready_inner(
     process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None,
+    containment: ProcessContainment,
     spec: WorkerReadySpec,
 ) -> subprocess.Popen[bytes] | None:
-    """Seat and poll the worker; see :func:`_await_worker_ready` for the guard."""
+    """Poll the worker; see :func:`_await_worker_ready` for the guard."""
     worker_url = spec.worker_url
     worker_port = spec.worker_port
     generation = spec.generation
     worker_command = spec.worker_command
     stderr_log_path = spec.stderr_log_path
-    if containment is not None:
-        # Assign the worker to its containment before it boots far enough to spawn
-        # any descendant (provider roots, MCP bridges). A worker this gateway owns
-        # is not admitted without durable tree authority: otherwise a descendant
-        # created during cooperative exit can outlive a root that exits first.
-        containment.assign_process(process)
     logger.info(
         "Worker process spawned (PID %d) via `%s` with stderr at %s",
         process.pid,
@@ -107,7 +101,7 @@ async def _await_worker_ready_inner(
         # a failed spawn, never as ready off the foreign worker still answering on
         # the port - so the liveness check leads the readiness check.
         if process.poll() is not None:
-            detail = _build_worker_restart_detail(
+            detail = build_worker_restart_detail(
                 returncode=process.returncode,
                 stderr_log_path=stderr_log_path,
             )
@@ -124,12 +118,19 @@ async def _await_worker_ready_inner(
             await _reap_unready_worker(process, containment)
             return None
 
-        # Ready only when OUR worker answers: the port being open and healthy is not
-        # enough when a foreign orphan can squat a shared band port, so readiness
-        # requires the responding worker to declare THIS gateway as its target.
-        if await _tcp_port_ready(
-            "127.0.0.1", worker_port
-        ) and await worker_ready_and_ours(worker_url, current_generation=generation):
+        # Ready only when OUR worker answers: the port being open and healthy is
+        # not enough when a foreign orphan can squat a shared band port, so
+        # readiness requires the listener to sit inside the tree of the process
+        # we just spawned - the narrowest root that can be ours - before the
+        # credentialed probe is sent at all, and then requires the responding
+        # worker to declare THIS gateway as its target.
+        if await worker_ready_and_ours(
+            worker_url,
+            worker_port,
+            current_generation=generation,
+            internal_token=spec.internal_token,
+            owner_pid=process.pid,
+        ):
             elapsed = asyncio.get_event_loop().time() - started
             logger.info(
                 "Worker ready at %s (PID %d) in %.1fs",
@@ -161,7 +162,7 @@ async def _await_worker_ready_inner(
 
 async def _reap_unready_worker(
     process: subprocess.Popen[bytes],
-    containment: ProcessContainment | None,
+    containment: ProcessContainment,
 ) -> None:
     """Reap a worker that spawned but never became ready, tree and all.
 
@@ -172,11 +173,7 @@ async def _reap_unready_worker(
     unidentified occupant, so an incomplete reap here wedges the band rather
     than merely leaking a process.
 
-    An assigned Job Object or process group is authoritative for the tree. If
-    assignment failed before authority was recorded, cleanup suspends the exact
-    retained ``Popen`` identity, retains its descendants with creation guards,
-    and terminates only those identities before waiting the root handle.
-
-    Either way the handle is waited afterwards so no zombie is left on POSIX.
+    The worker's Job Object or process group is authoritative for the tree, and
+    the handle is waited afterwards so no zombie is left on POSIX.
     """
     await complete_cleanup(_stop_worker_tree(process, containment, term_timeout=5.0))

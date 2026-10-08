@@ -33,18 +33,19 @@ import contextlib
 import getpass
 import json
 import os
-import sys
 import time
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
-from typing import NoReturn, TypeGuard, cast
+from typing import TYPE_CHECKING, NoReturn, Protocol, TypeGuard, cast
 
 from ..control.state_layout import seal_state_home, state_layout
+from ..utils._process_tree import pid_is_live, process_start_identity
 from ..utils.atomic_write import atomic_write_text
 from ..utils.file_lock import open_lock_file, release_lock, try_lock
-from .discovery import is_pid_alive
 from .registry import now_ms
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 __all__ = [
     "SINGLETON_RECORD_VERSION",
@@ -59,7 +60,6 @@ __all__ = [
     "clear_active_singleton",
     "current_process_fingerprint",
     "default_owner",
-    "process_start_fingerprint",
     "recorded_process_is_live",
     "set_active_singleton",
     "singleton_record_path",
@@ -158,74 +158,26 @@ def default_owner() -> str:
     return "desktop"
 
 
-def process_start_fingerprint(pid: int) -> str | None:
-    """Return a stable start-time fingerprint for *pid*, or ``None`` if unavailable.
+def current_process_fingerprint() -> str | None:
+    """Return this process's own start fingerprint (``None`` when unavailable).
 
     The fingerprint guards pid reuse: a recorded pid that is live again but was
     started later carries a different fingerprint, so a dead recorded process is not
-    mistaken for a live one. Windows reads the process creation ``FILETIME``; Linux
-    reads ``starttime`` from ``/proc/<pid>/stat``. Platforms without a cheap source
-    (notably macOS) return ``None``, and callers degrade to pid-liveness alone.
+    mistaken for a live one. It is the kernel's clock-independent start stamp, so a
+    recorded value stays comparable across clock adjustments. Platforms without one
+    (notably macOS) return ``None``, and readers degrade to pid-liveness alone.
     """
-    if pid <= 0:
-        return None
-    if sys.platform == "win32":
-        return _windows_start_fingerprint(pid)
-    if sys.platform.startswith("linux"):
-        return _linux_start_fingerprint(pid)
-    return None
+    return process_start_identity(os.getpid())
 
 
-def _windows_start_fingerprint(pid: int) -> str | None:
-    if sys.platform != "win32":
-        return None
-    import ctypes
-    from ctypes import wintypes
+class _RecordedProcess(Protocol):
+    """A durable record naming the process that wrote it."""
 
-    process_query = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
-    kernel32 = ctypes.windll.kernel32
-    handle = kernel32.OpenProcess(process_query, False, pid)
-    if not handle:
-        return None
-    try:
-        creation = wintypes.FILETIME()
-        exit_time = wintypes.FILETIME()
-        kernel_time = wintypes.FILETIME()
-        user_time = wintypes.FILETIME()
-        ok = kernel32.GetProcessTimes(
-            handle,
-            ctypes.byref(creation),
-            ctypes.byref(exit_time),
-            ctypes.byref(kernel_time),
-            ctypes.byref(user_time),
-        )
-        if not ok:
-            return None
-        return f"{creation.dwHighDateTime}:{creation.dwLowDateTime}"
-    finally:
-        kernel32.CloseHandle(handle)
+    @property
+    def pid(self) -> int: ...
 
-
-def _linux_start_fingerprint(pid: int) -> str | None:
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-    except OSError:
-        return None
-    # comm (field 2) is wrapped in parentheses and may itself contain spaces and
-    # parentheses, so split after the final ')': the remaining fields start at the
-    # process state (field 3). starttime is field 22 -> index 19 of that tail.
-    close = stat.rfind(")")
-    if close == -1:
-        return None
-    tail = stat[close + 2 :].split()
-    if len(tail) < 20:
-        return None
-    return tail[19]
-
-
-def current_process_fingerprint() -> str | None:
-    """Return this process's own start fingerprint (``None`` when unavailable)."""
-    return process_start_fingerprint(os.getpid())
+    @property
+    def start_fingerprint(self) -> str | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,7 +263,7 @@ def _parse_record(record: dict[str, object]) -> SingletonRecord | None:
     )
 
 
-def recorded_process_is_live(record: SingletonRecord) -> bool:
+def recorded_process_is_live(record: _RecordedProcess) -> bool:
     """Return ``True`` when the record's recorded process is provably still alive.
 
     Pid-liveness is the primary signal; the start fingerprint is a pid-reuse guard.
@@ -319,11 +271,11 @@ def recorded_process_is_live(record: SingletonRecord) -> bool:
     reused pid belonging to an unrelated process reads as dead. When either side
     cannot produce a fingerprint the check degrades to pid-liveness alone.
     """
-    if not is_pid_alive(record.pid):
+    if not pid_is_live(record.pid):
         return False
     if record.start_fingerprint is None:
         return True
-    current = process_start_fingerprint(record.pid)
+    current = process_start_identity(record.pid)
     if current is None:
         return True
     return current == record.start_fingerprint

@@ -76,7 +76,7 @@ def build_migration_config(
         database_url: Full SQLAlchemy URL, e.g.
             ``sqlite+aiosqlite:///path/to/vaultspec.db``.
         sqlite_busy_timeout_ms: Optional configured SQLite lock-wait budget for
-            the migration engine. Ignored by non-SQLite backends.
+            the migration engine.
     """
     script_location = migration_script_location()
     cfg = Config()

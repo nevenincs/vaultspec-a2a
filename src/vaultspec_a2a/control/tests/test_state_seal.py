@@ -11,33 +11,35 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
 
 from ...cli.service import setup_service
 from ...lifecycle.singleton import acquire_singleton
-from ...testing import armed_environment
-from ..config import Settings
+from ...testing import armed_environment, build_settings
 from ..settings_base import PROJECT_ROOT_ENV
-from ..state_layout import SEAL_FILE, UnsafeStateHomeError, seal_state_home
+from ..state_layout import (
+    SEAL_FILE,
+    StateLayout,
+    UnsafeStateHomeError,
+    seal_state_home,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from ..config import Settings
+
 _GIT = shutil.which("git")
-
-
-class _SettingsEnvFileFactory(Protocol):
-    def __call__(self, *, _env_file: Path | None) -> Settings: ...
 
 
 def _settings_for(project: Path, home: str | None = None) -> Settings:
     with armed_environment(
         **{PROJECT_ROOT_ENV: str(project), "VAULTSPEC_A2A_HOME": home}
     ):
-        return cast("_SettingsEnvFileFactory", Settings)(_env_file=None)
+        return build_settings(env_file=None)
 
 
 def _git_repository(tmp_path: Path) -> Path:
@@ -192,8 +194,9 @@ def test_an_existing_home_holding_only_a2a_state_is_sealed(tmp_path: Path) -> No
     home = project / "legacy-home"
     (home / "state").mkdir(parents=True)
     (home / "state" / "vaultspec.db").write_bytes(b"")
-    (home / "service.json").write_text("{}", encoding="utf-8")
-    (home / "service.json.4242.tmp").write_text("{}", encoding="utf-8")
+    discovery = StateLayout(home).discovery_path
+    discovery.write_text("{}", encoding="utf-8")
+    discovery.with_name(f"{discovery.name}.4242.tmp").write_text("{}", encoding="utf-8")
 
     seal_state_home(home)
 

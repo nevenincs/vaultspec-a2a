@@ -1,264 +1,92 @@
-"""Central Event Aggregator — composition root.
+"""The worker's event producer - composition root of a run's event stream.
 
-Thin facade that delegates to focused sub-modules:
+:class:`RunEventProducer` turns a running graph into the domain events a worker
+relays to its gateway. It composes the focused sub-modules:
 
-- ``subscribers.SubscriberManager`` — client connection state
-- ``buffering.BufferingManager`` — chunk batching + debounce
-- ``emitters.EventEmitters`` — event emission + state tracking
-- ``ingest.IngestManager`` — graph consumption lifecycle
+- ``ingest.IngestManager`` - graph consumption lifecycle
+- ``emitters.EventEmitters`` - event construction and pending permissions
+- ``buffering.BufferingManager`` - chunk batching and debounce
+- ``emitters.BroadcastChannel`` - ordering numbers and the relay hooks
+- ``_run_state.RunLiveState`` - the run's agent, tool-call and node state
 
-This module declares ``EventAggregator`` and nothing else. ``SequencedEvent`` and
-``StreamableGraph`` moved to ``types`` in the decomposition and are imported here
-only to annotate the aggregator; they are not re-published, so the decomposition
-is what callers see rather than the shape it replaced.
+The gateway side of the stream is :class:`vaultspec_a2a.streaming.RelayHub`.
 """
 
-import asyncio
+import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, TypedDict, Unpack, cast
 
-from langgraph.types import Command
-
-from ..graph.enums import AgentLifecycleState, ToolCallStatus, ToolKind
-from ..graph.events import DomainEvent, PermissionRequest
+from ..graph.enums import AgentLifecycleState, ProviderCondition
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
-from ..providers import ProviderCondition
-from ._run_callbacks import RunLifecycleCallbacks
+from ._run_state import RunLiveState
 from .buffering import BufferingManager
-from .emitters import EventEmitters
+from .emitters import BroadcastChannel, EventEmitters
 from .ingest import GraphInvocation, IngestManager, IngestRequest
-from .subscribers import AllocationSink, RunSequenceAllocator, SubscriberManager
-from .transformer import project_run_progress
+from .node_metadata import node_metadata_from_graph
 from .types import SequencedEvent, StreamableGraph
 
-__all__ = ["EventAggregator"]
+logger = logging.getLogger(__name__)
+
+__all__ = ["RunEventProducer"]
 
 
-class _ToolCallStartOptions(TypedDict, total=False):
-    kind: ToolKind
-    input_args: dict[str, Any] | None
+class RunEventProducer:
+    """The worker's event producer: ingest, emission, buffering and relay hooks.
 
-
-class _ToolCallUpdateOptions(TypedDict, total=False):
-    status: ToolCallStatus | None
-    title: str | None
-    content: list[dict[str, str | None]] | None
-
-
-class _PermissionRequestOptional(TypedDict, total=False):
-    tool_call: str | None
-    tool_kind: ToolKind | None
-
-
-class _PermissionRequestOptions(_PermissionRequestOptional):
-    thread_id: str
-    agent_id: str
-    request_id: str
-    description: str
-    options: list[dict[str, str]]
-
-
-class _ArtifactUpdateOptions(TypedDict, total=False):
-    append: bool
-    last_chunk: bool
-
-
-class _IngestOptions(TypedDict, total=False):
-    graph_input: dict[str, Any] | Command[Any] | None
-    config: dict[str, Any]
-    on_graph_started: Callable[[], Awaitable[None]] | None
-    context: object | None
-    control: object | None
-
-
-def _validate_ingest_arguments(
-    args: tuple[object, ...], options: _IngestOptions
-) -> None:
-    unknown = set(options).difference(
-        {"graph_input", "config", "on_graph_started", "context", "control"}
-    )
-    if unknown:
-        unexpected = next(iter(unknown))
-        raise TypeError(
-            "EventAggregator.ingest() got an unexpected keyword argument "
-            f"{unexpected!r}"
-        )
-    if len(args) > 2:
-        raise TypeError(
-            "EventAggregator.ingest() takes 5 positional arguments but "
-            f"{len(args) + 4} were given"
-        )
-    if args and "graph_input" in options:
-        raise TypeError(
-            "EventAggregator.ingest() got multiple values for argument 'graph_input'"
-        )
-    if len(args) > 1 and "config" in options:
-        raise TypeError(
-            "EventAggregator.ingest() got multiple values for argument 'config'"
-        )
-
-
-class EventAggregator:  # pylint: disable=too-many-public-methods
-    """Central event bus — composition root delegating to sub-components.
-
-    Preserves the exact same public API as the pre-decomposition monolith.
-    All callers continue to work unchanged. The public method count reflects
-    that stable facade; implementation state lives in composed managers.
+    Exposes only the operations the worker calls; everything else is reached
+    on the composed manager that owns it. It holds no subscriber queue and
+    allocates no number a stream is identified by: every event leaves through
+    the broadcast hooks, and the gateway numbers it on arrival.
     """
 
     def __init__(self, telemetry: TelemetryHook | None = None) -> None:
-        _tel: TelemetryHook | NullTelemetryHook = telemetry or NullTelemetryHook()
-        self._telemetry = _tel
-        self._subscribers_mgr = SubscriberManager(self._telemetry)
-        self._emitters = EventEmitters(
-            self._subscribers_mgr,
-            cast("BufferingManager", None),  # set below after buffering init
-            self._telemetry,
+        self._telemetry: TelemetryHook | NullTelemetryHook = (
+            telemetry or NullTelemetryHook()
         )
-        self._buffering = BufferingManager(
-            self._subscribers_mgr,
-            self._telemetry,
-            self._emitters.next_sequence,
-        )
-        # Wire up the circular reference: emitters needs buffering
-        self._emitters.bind_buffering(self._buffering)
+        self._channel = BroadcastChannel(self._telemetry)
+        self._state = RunLiveState()
+        self._buffering = BufferingManager(self._channel, self._telemetry)
+        self._emitters = EventEmitters(self._channel, self._buffering, self._state)
         self._ingest = IngestManager(self._emitters, self._buffering, self._telemetry)
 
-    @property
-    def emitters(self) -> EventEmitters:
-        """Expose the underlying emitters for callers wiring interrupt detection."""
-        return self._emitters
-
-    # -- Sequence management (delegates to emitters) --------------------
-
-    def get_sequence(self, thread_id: str) -> int:
-        return self._emitters.get_sequence(thread_id)
-
-    def advance_sequence(self, thread_id: str) -> int:
-        return self._emitters.advance_sequence(thread_id)
-
-    def sequence_count(self) -> int:
-        return self._emitters.sequence_count()
-
-    def prune_sequences(self, active_thread_ids: set[str]) -> int:
-        return self._emitters.prune_sequences(active_thread_ids)
-
-    # -- Subscriber management (delegates to subscribers) ---------------
-
-    def add_subscriber(self, client_id: str) -> asyncio.Queue[SequencedEvent]:
-        return self._subscribers_mgr.add_subscriber(client_id)
-
-    def get_subscriber_queue(
-        self, client_id: str
-    ) -> asyncio.Queue[SequencedEvent] | None:
-        return self._subscribers_mgr.get_subscriber_queue(client_id)
-
-    def remove_subscriber(self, client_id: str) -> None:
-        self._subscribers_mgr.remove_subscriber(client_id)
-
-    def take_dropped_count(self, client_id: str) -> int:
-        return self._subscribers_mgr.take_dropped_count(client_id)
-
-    def subscribe(self, client_id: str, thread_ids: list[str]) -> None:
-        self._subscribers_mgr.subscribe(client_id, thread_ids)
-
-    def unsubscribe(self, client_id: str, thread_ids: list[str]) -> None:
-        self._subscribers_mgr.unsubscribe(client_id, thread_ids)
+    # -- Relay and run state --------------------------------------------
 
     def add_broadcast_hook(
         self, hook: Callable[[SequencedEvent], Awaitable[None]]
     ) -> None:
-        self._subscribers_mgr.add_broadcast_hook(hook)
-
-    def subscriber_count(self) -> int:
-        return self._subscribers_mgr.subscriber_count()
-
-    def subscription_count(self) -> int:
-        return self._subscribers_mgr.subscription_count()
-
-    def get_subscriptions(self, client_id: str) -> frozenset[str]:
-        return self._subscribers_mgr.get_subscriptions(client_id)
-
-    def get_active_thread_ids(self) -> list[str]:
-        return self._subscribers_mgr.get_active_thread_ids()
-
-    def clear_thread_state(self, thread_id: str) -> None:
-        """Purge all in-memory aggregator state scoped to ``thread_id``."""
-        self._subscribers_mgr.remove_thread(thread_id)
-        self._buffering.clear_thread_state(thread_id)
-        self._ingest.clear_thread_state(thread_id)
-        self._emitters.clear_thread_state(thread_id)
-
-    def discard_run_replay(self, thread_id: str) -> None:
-        """Drop the retained frames a DELETED run's recorder still holds.
-
-        Called by the delete path only, and separately from
-        :meth:`clear_thread_state`, which a terminal also calls while the
-        frames it holds are still waiting to be written.
-        """
-        self._subscribers_mgr.discard_run_replay(thread_id)
-
-    def relay_payload(self, thread_id: str, payload: object) -> None:
-        """Fan out a pre-serialized payload to all subscribers of ``thread_id``.
-
-        Worker run events enter the public progress edge here. Each is projected
-        through the positive progress DTO before it reaches a subscriber queue, so
-        prompts, document and artifact bodies, edit diffs, and raw provider
-        payloads are dropped at the relay seam - a first enforcement the encode
-        boundary independently repeats.
-
-        Call :meth:`prepare_run` for the run first: this path is synchronous and
-        cannot establish a number it has never read.
-        """
-        self._subscribers_mgr.enqueue_payload(thread_id, project_run_progress(payload))
-
-    async def prepare_run(self, thread_id: str) -> None:
-        """Establish *thread_id*'s event numbering before relaying its frames."""
-        await self._subscribers_mgr.prepare_run(thread_id)
-
-    def bind_sequence_allocator(
-        self,
-        allocator: RunSequenceAllocator | None,
-        *,
-        sink: AllocationSink | None = None,
-    ) -> None:
-        """Seat the authority that numbers this process's outgoing frames."""
-        self._subscribers_mgr.bind_sequence_allocator(allocator, sink=sink)
-
-    @property
-    def sequence_allocator(self) -> RunSequenceAllocator | None:
-        """The seated numbering authority, or ``None`` where none is bound."""
-        return self._subscribers_mgr.sequence_allocator
+        """Register a hook every produced event is handed to (the worker relay)."""
+        self._channel.add_hook(hook)
 
     def register_graph(self, thread_id: str, graph: StreamableGraph) -> None:
-        self._subscribers_mgr.register_graph(thread_id, graph)
-
-    def get_node_summaries(self, thread_id: str) -> list[dict[str, str]]:
-        return self._subscribers_mgr.get_node_summaries(thread_id)
-
-    def remove_node_metadata(self, thread_id: str) -> None:
-        self._subscribers_mgr.remove_node_metadata(thread_id)
-
-    # -- Buffering (delegates to buffering) -----------------------------
-
-    async def buffer_message_chunk(
-        self,
-        thread_id: str,
-        agent_id: str,
-        content: str,
-        message_id: str,
-    ) -> None:
-        await self._buffering.buffer_message_chunk(
-            thread_id, agent_id, content, message_id
+        """Cache a compiled graph's per-node team-status metadata for one run."""
+        self._state.record_node_metadata(thread_id, node_metadata_from_graph(graph))
+        logger.debug(
+            "register_graph: cached metadata for %d nodes on %s",
+            len(self._state.get_node_metadata(thread_id)),
+            thread_id,
         )
 
-    async def flush_chunk_buffer(self, thread_id: str) -> None:
-        await self._buffering.flush_chunk_buffer(thread_id)
+    def prune_sequences(self, active_thread_ids: set[str]) -> None:
+        """Drop the ordering counters and tool-call state of runs not executing."""
+        self._channel.prune(active_thread_ids)
+        self._state.prune_tool_calls(active_thread_ids)
 
-    # -- Event emission (delegates to emitters) -------------------------
+    def prune_stale_permissions(
+        self, max_age_seconds: float | None = None, *, held_thread_ids: set[str]
+    ) -> int:
+        """Drop aged pending permissions of runs *held_thread_ids* does not name."""
+        return self._emitters.prune_stale_permissions(
+            max_age_seconds, held_thread_ids=held_thread_ids
+        )
 
-    async def emit(self, event: DomainEvent) -> None:
-        await self._emitters.emit(event)
+    def clear_thread_state(self, thread_id: str) -> None:
+        """Purge all in-memory producer state scoped to ``thread_id``."""
+        self._channel.forget(thread_id)
+        self._state.clear_thread_state(thread_id)
+        self._emitters.expire_thread_permissions(thread_id)
+        self._buffering.clear_thread_state(thread_id)
+        self._ingest.clear_thread_state(thread_id)
+
+    # -- Event emission -------------------------------------------------
 
     async def emit_agent_status(
         self,
@@ -268,133 +96,10 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         state: AgentLifecycleState,
         detail: str | None = None,
     ) -> None:
+        """Emit an agent lifecycle state transition event."""
         await self._emitters.emit_agent_status(
             thread_id, agent_id, node_name, state, detail
         )
-
-    async def emit_message_chunk(
-        self,
-        thread_id: str,
-        agent_id: str,
-        content: str,
-        message_id: str,
-        finish_reason: str | None = None,
-    ) -> None:
-        await self._emitters.emit_message_chunk(
-            thread_id, agent_id, content, message_id, finish_reason
-        )
-
-    async def emit_thought_chunk(
-        self,
-        thread_id: str,
-        agent_id: str,
-        content: str,
-        message_id: str,
-    ) -> None:
-        await self._emitters.emit_thought_chunk(
-            thread_id, agent_id, content, message_id
-        )
-
-    async def emit_tool_call_start(
-        self,
-        thread_id: str,
-        agent_id: str,
-        tool_call_id: str,
-        title: str,
-        **options: Unpack[_ToolCallStartOptions],
-    ) -> None:
-        kind = options.get("kind", ToolKind.OTHER)
-        input_args = options.get("input_args")
-        await self._emitters.emit_tool_call_start(
-            thread_id=thread_id,
-            agent_id=agent_id,
-            tool_call_id=tool_call_id,
-            title=title,
-            kind=kind,
-            input_args=input_args,
-        )
-
-    async def emit_tool_call_update(
-        self,
-        thread_id: str,
-        agent_id: str,
-        tool_call_id: str,
-        **options: Unpack[_ToolCallUpdateOptions],
-    ) -> None:
-        await self._emitters.emit_tool_call_update(
-            thread_id=thread_id,
-            agent_id=agent_id,
-            tool_call_id=tool_call_id,
-            status=options.get("status"),
-            title=options.get("title"),
-            content=options.get("content"),
-        )
-
-    async def emit_permission_request(
-        self,
-        **options: Unpack[_PermissionRequestOptions],
-    ) -> None:
-        await self._emitters.emit_permission_request(
-            thread_id=options["thread_id"],
-            agent_id=options["agent_id"],
-            request_id=options["request_id"],
-            description=options["description"],
-            options=options["options"],
-            tool_call=options.get("tool_call"),
-            tool_kind=options.get("tool_kind"),
-        )
-
-    def resolve_permission(self, request_id: str) -> None:
-        self._emitters.resolve_permission(request_id)
-
-    def expire_thread_permissions(self, thread_id: str) -> int:
-        return self._emitters.expire_thread_permissions(thread_id)
-
-    def prune_stale_permissions(self, max_age_seconds: float = 300.0) -> int:
-        return self._emitters.prune_stale_permissions(max_age_seconds)
-
-    def get_pending_permissions(
-        self,
-        thread_id: str | None = None,
-    ) -> list[PermissionRequest]:
-        return self._emitters.get_pending_permissions(thread_id)
-
-    def get_agent_states(self, thread_id: str) -> dict[str, AgentLifecycleState]:
-        return self._emitters.get_agent_states(thread_id)
-
-    def get_tool_call_states(self, thread_id: str) -> dict[str, dict[str, str]]:
-        return self._emitters.get_tool_call_states(thread_id)
-
-    def sync_worker_event(
-        self,
-        thread_id: str,
-        payload: dict[str, Any],
-    ) -> None:
-        self._emitters.sync_worker_event(thread_id, payload)
-
-    async def emit_artifact_update(
-        self,
-        thread_id: str,
-        artifact_id: str,
-        filename: str,
-        content: str,
-        **options: Unpack[_ArtifactUpdateOptions],
-    ) -> None:
-        await self._emitters.emit_artifact_update(
-            thread_id=thread_id,
-            artifact_id=artifact_id,
-            filename=filename,
-            content=content,
-            append=options.get("append", False),
-            last_chunk=options.get("last_chunk", True),
-        )
-
-    async def emit_plan_update(
-        self,
-        thread_id: str,
-        entries: list[dict[str, str]],
-    ) -> None:
-        await self._emitters.emit_plan_update(thread_id, entries)
 
     async def emit_error(
         self,
@@ -404,44 +109,13 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         recoverable: bool = True,
         agent_id: str | None = None,
     ) -> None:
+        """Emit a server-side error notification."""
         await self._emitters.emit_error(thread_id, code, message, recoverable, agent_id)
 
-    async def emit_team_status(
-        self,
-        thread_id: str,
-        agents: list[dict[str, Any]],
-        active_thread_ids: list[str] | None = None,
-    ) -> None:
-        await self._emitters.emit_team_status(thread_id, agents, active_thread_ids)
-
-    # -- LangGraph stream processing (delegates to transformer/ingest) ---
-
-    async def process_stream_frame(
-        self,
-        namespace: tuple[str, ...],
-        mode: str,
-        payload: object,
-        thread_id: str,
-        agent_id: str,
-    ) -> None:
-        """Project one ``(namespace, mode, payload)`` graph stream frame."""
-        from .transformer import StreamFrame
-
-        await self._ingest.project_frame(
-            StreamFrame(namespace=namespace, mode=mode, payload=payload),
-            thread_id=thread_id,
-            agent_id=agent_id,
-        )
-
-    def run_lifecycle_callbacks(
-        self, thread_id: str, agent_id: str
-    ) -> RunLifecycleCallbacks:
-        """The tool and model-completion handler a run seats in its config."""
-        return self._ingest.run_lifecycle_callbacks(thread_id, agent_id)
-
-    # -- Ingest (delegates to ingest manager) ---------------------------
+    # -- Ingest ---------------------------------------------------------
 
     def cancel_thread(self, thread_id: str) -> None:
+        """Ask ``thread_id``'s ingest to stop, including one not yet started."""
         self._ingest.cancel_thread(thread_id)
 
     def take_failure_reason(self, thread_id: str) -> str | None:
@@ -457,39 +131,13 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         thread_id: str,
         agent_id: str,
         graph: StreamableGraph,
-        *args: object,
-        **options: Unpack[_IngestOptions],
+        invocation: GraphInvocation,
+        *,
+        on_graph_started: Callable[[], Awaitable[None]] | None = None,
     ) -> str:
-        _validate_ingest_arguments(args, options)
-        if args:
-            graph_input = cast("dict[str, Any] | Command[Any] | None", args[0])
-        elif "graph_input" in options:
-            graph_input = options["graph_input"]
-        else:
-            raise TypeError(
-                "EventAggregator.ingest() missing required argument 'graph_input'"
-            )
-        if len(args) > 1:
-            config = cast("dict[str, Any]", args[1])
-        elif "config" in options:
-            config = options["config"]
-        else:
-            raise TypeError(
-                "EventAggregator.ingest() missing required argument 'config'"
-            )
+        """Consume one graph run and return the outcome it settled on."""
         return await self._ingest.ingest(
-            IngestRequest(
-                thread_id,
-                agent_id,
-                graph,
-                GraphInvocation(
-                    graph_input,
-                    config,
-                    options.get("context"),
-                    options.get("control"),
-                ),
-                options.get("on_graph_started"),
-            )
+            IngestRequest(thread_id, agent_id, graph, invocation, on_graph_started)
         )
 
     # -- Shutdown -------------------------------------------------------
@@ -498,6 +146,5 @@ class EventAggregator:  # pylint: disable=too-many-public-methods
         """Cancel all tasks and clear state."""
         await self._buffering.shutdown()
         await self._ingest.shutdown()
-        await self._subscribers_mgr.shutdown_allocation_sink()
-        self._subscribers_mgr.clear()
-        self._emitters.clear()
+        self._channel.clear()
+        self._state.clear()

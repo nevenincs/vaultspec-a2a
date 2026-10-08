@@ -4,7 +4,7 @@ Exercises the ``provisioned_workspace`` fixture (the adoption of the provision
 verb in the service fixtures) against the real harness verifier - a genuine
 ``vaultspec-core install`` under the fixture, no doubles. This is the fixture
 adoption called for ("the service fixtures call it"), proven at the
-service-test layer independently of the compose stack.
+service-test layer independently of the service stack.
 """
 
 from __future__ import annotations

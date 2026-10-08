@@ -18,46 +18,39 @@ from typing import TYPE_CHECKING
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...database import create_thread
-from ...database.models import Base, ThreadExecutionStateModel, ThreadModel
-from ...database.session import begin_write_transaction, configure_sqlite_engine
+from ...conftest import SqlitePosture
+from ...database import (
+    ThreadExecutionStateModel,
+    ThreadModel,
+    begin_write_transaction,
+    create_thread,
+)
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ..event_handlers import _handle_execution_state_event
 from ..thread_service import archive_thread
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 _THREAD_ID = "relay-contention-run"
 
 
-@pytest_asyncio.fixture
-async def sessions(
-    tmp_path: Path,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'relay.db'}")
-    configure_sqlite_engine(engine)
-    try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-        factory = async_sessionmaker(
-            engine, class_=AsyncSession, expire_on_commit=False
+pytestmark = pytest.mark.sqlite_engine(SqlitePosture.APPLICATION)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _running_thread(session_factory: async_sessionmaker[AsyncSession]) -> None:
+    """Seed the one running thread both contending writers relay to."""
+    async with session_factory() as db:
+        await create_thread(
+            db,
+            write_authority=make_test_write_authority(),
+            thread_id=_THREAD_ID,
+            status=ThreadStatus.RUNNING,
         )
-        async with factory() as db:
-            await create_thread(
-                db,
-                write_authority=make_test_write_authority(),
-                thread_id=_THREAD_ID,
-                status=ThreadStatus.RUNNING,
-            )
-            await db.commit()
-        yield factory
-    finally:
-        await engine.dispose()
+        await db.commit()
 
 
 def _projection(checkpoint_id: str) -> dict[str, object]:
@@ -71,9 +64,9 @@ def _projection(checkpoint_id: str) -> dict[str, object]:
 
 @pytest.mark.asyncio
 async def test_execution_state_relay_waits_out_a_concurrent_writer(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    async with sessions() as sibling:
+    async with session_factory() as sibling:
         await begin_write_transaction(sibling)
         await sibling.execute(select(ThreadModel.id))
         sibling_thread = await sibling.get(ThreadModel, _THREAD_ID)
@@ -86,7 +79,7 @@ async def test_execution_state_relay_waits_out_a_concurrent_writer(
             _handle_execution_state_event(
                 _THREAD_ID,
                 _projection("checkpoint-1"),
-                session_factory=sessions,
+                session_factory=session_factory,
             )
         )
         await asyncio.sleep(0.3)
@@ -96,7 +89,7 @@ async def test_execution_state_relay_waits_out_a_concurrent_writer(
         await asyncio.wait_for(relay, timeout=5.0)
 
     assert time.monotonic() - started >= 0.3
-    async with sessions() as db:
+    async with session_factory() as db:
         projection = await db.get(ThreadExecutionStateModel, _THREAD_ID)
         thread = await db.get(ThreadModel, _THREAD_ID)
     assert projection is not None
@@ -110,7 +103,7 @@ async def test_execution_state_relay_waits_out_a_concurrent_writer(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("run_id", ["missing-run", _THREAD_ID])
 async def test_a_refused_archive_releases_the_write_lock_before_returning(
-    sessions: async_sessionmaker[AsyncSession], run_id: str
+    session_factory: async_sessionmaker[AsyncSession], run_id: str
 ) -> None:
     """A refusal writes nothing, so it must not keep the lock while its session lives.
 
@@ -119,13 +112,13 @@ async def test_a_refused_archive_releases_the_write_lock_before_returning(
     still held the write lock, the sibling would wait out the whole busy timeout
     instead of committing at once.
     """
-    async with sessions() as db:
+    async with session_factory() as db:
         result = await archive_thread(db, run_id)
         assert not result.archived
         assert not db.in_transaction()
 
         async def _sibling_write() -> None:
-            async with sessions() as sibling:
+            async with session_factory() as sibling:
                 await begin_write_transaction(sibling)
                 sibling_thread = await sibling.get(ThreadModel, _THREAD_ID)
                 assert sibling_thread is not None
@@ -137,19 +130,19 @@ async def test_a_refused_archive_releases_the_write_lock_before_returning(
 
 @pytest.mark.asyncio
 async def test_concurrent_execution_state_relays_all_persist(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     await asyncio.gather(
         *(
             _handle_execution_state_event(
                 _THREAD_ID,
                 _projection(f"checkpoint-{index}"),
-                session_factory=sessions,
+                session_factory=session_factory,
             )
             for index in range(8)
         )
     )
-    async with sessions() as db:
+    async with session_factory() as db:
         projection = await db.get(ThreadExecutionStateModel, _THREAD_ID)
     assert projection is not None
     assert projection.checkpoint_id is not None

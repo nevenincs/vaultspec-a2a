@@ -22,15 +22,14 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast, override
 
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import Command, interrupt
 
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
-from ..aggregator import EventAggregator
+from ...testing import add_test_node, compile_test_graph, new_state_graph
+from ..aggregator import RunEventProducer
+from ..ingest import GraphInvocation
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
-
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.base import (
         ChannelVersions,
@@ -90,7 +89,7 @@ def _two_step_graph(saver: AsyncSqliteSaver, log: list[str]) -> StreamableGraph:
         log.append("node:second")
         return {"note": "second"}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
+    builder = new_state_graph(_State)
     add_test_node(builder, "first", first)
     add_test_node(builder, "second", second)
     builder.add_edge(START, "first")
@@ -100,25 +99,27 @@ def _two_step_graph(saver: AsyncSqliteSaver, log: list[str]) -> StreamableGraph:
 
 
 @pytest.mark.asyncio
-async def test_ingest_commits_each_superstep_before_the_next_one_starts() -> None:
+async def test_ingest_commits_each_superstep_before_the_next_one_starts(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     log: list[str] = []
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as base:
-        saver = _TimedSqliteSaver(base.conn, log)
-        await saver.setup()
-        graph = _two_step_graph(saver, log)
-        aggregator = EventAggregator()
-        ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    saver = _TimedSqliteSaver(checkpointer.conn, log)
+    await saver.setup()
+    graph = _two_step_graph(saver, log)
+    producer = RunEventProducer()
 
-        outcome = await asyncio.wait_for(
-            ingest(
-                thread_id="thread-durability",
-                agent_id="supervisor",
-                graph=graph,
+    outcome = await asyncio.wait_for(
+        producer.ingest(
+            "thread-durability",
+            "supervisor",
+            graph,
+            GraphInvocation(
                 graph_input={"note": ""},
                 config={"configurable": {"thread_id": "thread-durability"}},
             ),
-            timeout=30.0,
-        )
+        ),
+        timeout=30.0,
+    )
 
     assert outcome == "completed"
     assert "node:first" in log
@@ -131,7 +132,13 @@ async def test_ingest_commits_each_superstep_before_the_next_one_starts() -> Non
 def _gated_graph(saver: AsyncSqliteSaver, log: list[str]) -> StreamableGraph:
     async def gate(state: _State) -> dict[str, str]:
         del state
-        answer = interrupt({"type": "permission_request", "tool_name": "probe"})
+        answer = interrupt(
+            {
+                "type": "permission_request",
+                "request_id": "probe-permission",
+                "tool_name": "probe",
+            }
+        )
         log.append("node:gate")
         return {"note": str(answer)}
 
@@ -140,7 +147,7 @@ def _gated_graph(saver: AsyncSqliteSaver, log: list[str]) -> StreamableGraph:
         log.append("node:after")
         return {"note": "after"}
 
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _State))
+    builder = new_state_graph(_State)
     add_test_node(builder, "gate", gate)
     add_test_node(builder, "after", after)
     builder.add_edge(START, "gate")
@@ -150,7 +157,9 @@ def _gated_graph(saver: AsyncSqliteSaver, log: list[str]) -> StreamableGraph:
 
 
 @pytest.mark.asyncio
-async def test_a_resume_commits_its_superstep_before_the_next_one_starts() -> None:
+async def test_a_resume_commits_its_superstep_before_the_next_one_starts(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """A resumed turn persists on the same terms as the turn that parked.
 
     A resume is where checkpoint-first recovery matters most: the run already
@@ -159,36 +168,32 @@ async def test_a_resume_commits_its_superstep_before_the_next_one_starts() -> No
     """
     log: list[str] = []
     config = {"configurable": {"thread_id": "thread-durability-resume"}}
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as base:
-        saver = _TimedSqliteSaver(base.conn, log)
-        await saver.setup()
-        graph = _gated_graph(saver, log)
-        aggregator = EventAggregator()
-        ingest = cast("Callable[..., Coroutine[Any, Any, str]]", aggregator.ingest)
+    saver = _TimedSqliteSaver(checkpointer.conn, log)
+    await saver.setup()
+    graph = _gated_graph(saver, log)
+    producer = RunEventProducer()
 
-        parked = await asyncio.wait_for(
-            ingest(
-                thread_id="thread-durability-resume",
-                agent_id="supervisor",
-                graph=graph,
-                graph_input={"note": ""},
-                config=config,
-            ),
-            timeout=30.0,
-        )
-        assert parked == "interrupted"
-        log.append("--resumed--")
+    parked = await asyncio.wait_for(
+        producer.ingest(
+            "thread-durability-resume",
+            "supervisor",
+            graph,
+            GraphInvocation(graph_input={"note": ""}, config=config),
+        ),
+        timeout=30.0,
+    )
+    assert parked == "interrupted"
+    log.append("--resumed--")
 
-        resumed = await asyncio.wait_for(
-            ingest(
-                thread_id="thread-durability-resume",
-                agent_id="supervisor",
-                graph=graph,
-                graph_input=Command(resume="allow_once"),
-                config=config,
-            ),
-            timeout=30.0,
-        )
+    resumed = await asyncio.wait_for(
+        producer.ingest(
+            "thread-durability-resume",
+            "supervisor",
+            graph,
+            GraphInvocation(graph_input=Command(resume="allow_once"), config=config),
+        ),
+        timeout=30.0,
+    )
 
     assert resumed == "completed"
     resume_log = log[log.index("--resumed--") :]

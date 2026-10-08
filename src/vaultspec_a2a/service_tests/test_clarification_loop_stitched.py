@@ -62,34 +62,31 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-from pydantic import TypeAdapter, ValidationError
 
 from ..acceptance.tests._harness import certified_gateway
 from ..authoring.discovery import resolve_engine_with_retry
-from ..control.config import setting_env, settings
 from ..team.team_config import load_team_config
-from ..testing.tests._support.catalog_selection import (
-    NoSelectableLaneError,
-    in_process_selection,
-)
-from ..testing.tests._support.payloads import (
+from ..testing import (
+    ProgressDeadline,
+    fetch_provider_catalog,
+    is_terminal,
     json_object,
     json_object_list,
+    read_frames_until,
     required_bool,
     required_text,
-)
-from ._provider_catalog_live import (
-    LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON,
-    live_provider_catalog_selector_is_configured,
+    role_tokens,
     selection_from_served_catalog,
+    text_list,
+    wait_for,
 )
 
 if TYPE_CHECKING:
@@ -98,16 +95,11 @@ if TYPE_CHECKING:
     from ..acceptance.tests._harness import CertifiedGateway
     from ..api.schemas.gateway import ProviderCatalogSelection
     from ..conftest import ExternalPrerequisiteRule
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
 
 # The preset that declares a questionnaire. Its questions are read from the
 # preset itself below, never restated here.
 _CLARIFY_PRESET = "vaultspec-adr-research-clarify"
-
-# Every role the document-authoring topology runs needs an actor token at
-# run-start; the roster is derived from the preset so a role added tomorrow is
-# carried automatically rather than falling behind a hardcoded list.
-_ENGINE_BEARER = "bearer"
 
 # A document-authoring preset is refused at the eligibility gate without a target
 # feature tag, before the graph is ever compiled. Naming it here keeps the run
@@ -121,22 +113,10 @@ _FEATURE_TAG = "clarification-loop"
 # documents move through the engine's proposal path rather than the filesystem.
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 
-# The ENGINE's discovery record, which is NOT a2a's own gateway record: the
-# engine publishes .vault/data/engine-data/service.json in the project, while
-# .vault/data/agents/service.json is this product's gateway record. Naming the
-# wrong one sends a reader to a file that exists, looks healthy, and has nothing
-# to do with the missing substrate.
-_ENGINE_RECORD = settings.engine_discovery_path
-_SUPPLY_ENGINE = (
-    f"start the vaultspec engine so it publishes {_ENGINE_RECORD} "
-    f"(or point {setting_env('engine_service_json')} at a live record)"
-)
-
 _WORKER_READY_BUDGET_SECONDS = "120"
 
 _PARK_BUDGET = 180.0
 _RESUME_BUDGET = 300.0
-_TEXT_LIST = TypeAdapter(list[str])
 type ContinuationOutcome = tuple[str, str, httpx.Response]
 
 
@@ -156,12 +136,7 @@ def _required_object(body: JsonObject, field: str, *, at: str) -> JsonObject:
 def _optional_text_list(body: JsonObject, field: str, *, at: str) -> list[str]:
     """Read an optional list of text values without accepting malformed options."""
     value = body.get(field)
-    if value is None:
-        return []
-    try:
-        return _TEXT_LIST.validate_python(value, strict=True)
-    except ValidationError as exc:
-        raise AssertionError(f"{at}.{field} was not a text list: {value!r}") from exc
+    return [] if value is None else text_list(value, at=f"{at}.{field}")
 
 
 # ---------------------------------------------------------------------------
@@ -169,12 +144,11 @@ def _optional_text_list(body: JsonObject, field: str, *, at: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _require_substrates() -> None:
-    """Skip, naming the substrate, when the loop cannot honestly run.
+def _require_engine(rule: ExternalPrerequisiteRule) -> None:
+    """Report, naming the substrate, when the loop cannot honestly run.
 
     Only ONE substrate is needed. The preset runs the in-process deterministic
-    provider, so no model container is involved - the tape corpus carries no
-    turns for this topology's document roles anyway, and depending on a container
+    provider, so no model container is involved, and depending on a container
     would narrow the lane on the hosts least able to run one.
     """
     # The bounded poll production itself uses at this decision point, not a
@@ -184,23 +158,19 @@ def _require_substrates() -> None:
     # goes is indistinguishable from a pass that comes and goes. A genuinely dead
     # engine still skips - it simply has to be dead for the whole window.
     if resolve_engine_with_retry(attempts=3, delay_seconds=2.0) is None:
-        pytest.skip(
-            "no reachable engine: a document-authoring preset builds its "
-            "authoring submitter at graph-compile time and fails closed without "
-            f"one, so this loop cannot run. To supply it: {_SUPPLY_ENGINE}"
+        rule.absent(
+            "loopback-stack",
+            "no discovery record resolved to a healthy authoring engine: a "
+            "document-authoring preset builds its authoring submitter at "
+            "graph-compile time and fails closed without one",
         )
 
 
 def _require_codex_substrates(rule: ExternalPrerequisiteRule) -> None:
     """Require the engine plus an authenticated real Codex command lane."""
     rule("codex-cli")
-    if not (Path.home() / ".codex" / "auth.json").is_file():
-        rule.absent("codex-cli", "no ~/.codex/auth.json; run 'codex login'")
-    if resolve_engine_with_retry(attempts=3, delay_seconds=2.0) is None:
-        rule.absent(
-            "loopback-stack",
-            "no discovery record resolved to a healthy authoring engine",
-        )
+    rule("codex-credential")
+    _require_engine(rule)
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +198,11 @@ def _declared_questions() -> list[JsonObject]:
 
 
 def _required_roles() -> list[str]:
+    """Every role the document-authoring topology runs, each needing a token.
+
+    Derived from the preset so a role added tomorrow is carried automatically
+    rather than falling behind a hardcoded list.
+    """
     return [worker.agent_id for worker in load_team_config(_CLARIFY_PRESET).workers]
 
 
@@ -240,24 +215,25 @@ def _await_parked(
     gateway: CertifiedGateway, run_id: str, *, budget: float
 ) -> JsonObject:
     """Poll the authoritative snapshot until a questionnaire is disclosed."""
-    deadline = time.monotonic() + budget
-    last: JsonObject = {}
-    while time.monotonic() < deadline:
-        response = gateway.status(run_id)
-        if response.status_code == 200:
-            last = _response_object(response, at="run-status while awaiting park")
-            if last.get("pending_clarification"):
-                return last
-            if last.get("status") in {"failed", "cancelled", "error"}:
-                raise AssertionError(
-                    f"run {run_id} settled {last.get('status')!r} before it ever "
-                    f"parked for its question; snapshot: {last}"
-                )
-        time.sleep(1.0)
-    raise AssertionError(
-        f"run {run_id} never disclosed a pending clarification within "
-        f"{budget:.0f}s; last snapshot: {last or 'never readable'}"
+
+    def _parked(body: JsonObject) -> bool:
+        if body.get("pending_clarification"):
+            return True
+        if is_terminal(body):
+            raise AssertionError(
+                f"run {run_id} settled {body.get('status')!r} before it ever "
+                f"parked for its question; snapshot: {body}"
+            )
+        return False
+
+    parked = gateway.wait_for_status(
+        run_id,
+        _parked,
+        timeout=budget,
+        interval=1.0,
+        label=f"run {run_id} (awaiting a pending clarification)",
     )
+    return json_object(parked, at="run-status while awaiting park")
 
 
 def _transcript_tail(gateway: CertifiedGateway, run_id: str, *, keep: int = 4) -> str:
@@ -332,38 +308,41 @@ def _await_resumed_past_fan_out(
     loop is broken" while the clarification loop had in fact worked perfectly.
     The narrower claim is the true one.
     """
-    deadline = time.monotonic() + budget
-    last: JsonObject = {}
-    while time.monotonic() < deadline:
-        response = gateway.status(run_id)
-        if response.status_code == 200:
-            last = _response_object(response, at="run-status while awaiting resume")
-            if not last.get("pending_clarification") and _has_synthesis_turn(
-                gateway, run_id
-            ):
-                return last
-            if last.get("status") in {"failed", "cancelled", "error"}:
-                topology = _required_object(
-                    last, "topology", at="failed run-status after clarification answer"
-                )
-                raise AssertionError(
-                    f"run {run_id} settled {last.get('status')!r} after the answer "
-                    f"instead of advancing.\n"
-                    f"semantic_phase={last.get('semantic_phase')!r} "
-                    f"pause_cause={topology.get('pause_cause')!r} "
-                    f"degraded={last.get('degraded_reasons')}\n"
-                    f"transcript tail: {_transcript_tail(gateway, run_id)}"
-                )
-        time.sleep(1.0)
-    raise AssertionError(
-        f"run {run_id} did not advance past the research fan-out within "
-        f"{budget:.0f}s of being answered - the resume did not reach the graph. "
-        f"last snapshot: {last or 'never readable'}"
+
+    def _advanced(body: JsonObject) -> bool:
+        if not body.get("pending_clarification") and _has_synthesis_turn(
+            gateway, run_id
+        ):
+            return True
+        if is_terminal(body):
+            topology = _required_object(
+                body, "topology", at="settled run-status after clarification answer"
+            )
+            raise AssertionError(
+                f"run {run_id} settled {body.get('status')!r} after the answer "
+                f"instead of advancing.\n"
+                f"semantic_phase={body.get('semantic_phase')!r} "
+                f"pause_cause={topology.get('pause_cause')!r} "
+                f"degraded={body.get('degraded_reasons')}\n"
+                f"transcript tail: {_transcript_tail(gateway, run_id)}"
+            )
+        return False
+
+    advanced = gateway.wait_for_status(
+        run_id,
+        _advanced,
+        timeout=budget,
+        interval=1.0,
+        label=(
+            f"run {run_id} (advancing past the research fan-out after being "
+            "answered - the resume did not reach the graph)"
+        ),
     )
+    return json_object(advanced, at="run-status while awaiting resume")
 
 
-def _read_frame(lines: Iterable[str], *, wanted: str, deadline: float) -> JsonObject:
-    """Return the first SSE frame whose ``type`` matches, or raise at *deadline*.
+def _read_frame(lines: Iterable[str], *, wanted: str, timeout: float) -> JsonObject:
+    """Return the first SSE frame whose ``type`` matches, or raise after *timeout*.
 
     The failure message is deliberately specific about what has ALREADY been
     established by the time this runs: the park is asserted from ``run-status``
@@ -372,63 +351,26 @@ def _read_frame(lines: Iterable[str], *, wanted: str, deadline: float) -> JsonOb
     the park - an emission or relay gap, which is a product defect rather than a
     timing artefact of this test.
     """
-    buffer: list[str] = []
-    seen: list[str] = []
-    for raw in lines:
-        line = raw.rstrip("\r")
-        if line.startswith("data: "):
-            buffer.append(line.removeprefix("data: "))
-            continue
-        if line == "" and buffer:
-            decoded: object = json.loads("".join(buffer))
-            payload = json_object(decoded, at="clarification SSE frame")
-            buffer = []
-            kind = str(payload.get("type") or payload.get("event_type") or "<untyped>")
-            if kind not in seen:
-                seen.append(kind)
-            if payload.get("type") == wanted:
-                return payload
-        if time.monotonic() > deadline:
-            break
-    raise AssertionError(
-        f"no {wanted!r} frame reached a subscriber attached BEFORE the park, "
-        f"though run-status has already confirmed the run parked. This is an "
-        f"emission or relay gap, not a missed park and not a subscribe race. "
-        f"Frame types actually seen on the stream: {seen or ['<none>']}"
-    )
+    try:
+        frames = read_frames_until(
+            lines, lambda frame: frame.get("type") == wanted, timeout=timeout
+        )
+    except AssertionError as exc:
+        raise AssertionError(
+            f"no {wanted!r} frame reached a subscriber attached BEFORE the park, "
+            "though run-status has already confirmed the run parked. This is an "
+            "emission or relay gap, not a missed park and not a subscribe race. "
+            f"{exc}"
+        ) from exc
+    return frames[-1]
 
 
 def _served_catalog(gateway: CertifiedGateway) -> JsonObject:
     """Read the gateway's own served catalog for the run's workspace."""
     with gateway.client(timeout=120.0) as client:
-        response = client.get(
-            "/v1/provider-catalog",
-            params={"workspace_root": str(_WORKSPACE_ROOT)},
-        )
-    assert response.status_code == 200, response.text
-    return json_object(response.json(), at="served provider catalog")
-
-
-def _served_in_process_selection(gateway: CertifiedGateway) -> JsonObject:
-    """Resolve the served in-process lane's selection, or skip naming the gap.
-
-    The loop's ONE substitution is the model, and under the explicit-selection
-    contract the substitution is expressed as a selection naming the served
-    in-process lane - the freeze wins outright at compilation, so a selection
-    naming any other served lane would hand every document role to a real
-    external provider. Refusing a billable lane is the shared mechanism's own
-    guarantee; what is local here is the skip, because a loop that cannot express
-    its substitution has nothing honest left to assert.
-    """
-    try:
-        return in_process_selection(
-            _served_catalog(gateway),
-            prefer_provider_id="deterministic",
-        )
-    except NoSelectableLaneError as exc:
-        pytest.skip(
-            f"the loop's deterministic model substitution cannot be selected "
-            f"without freezing a real external provider: {exc}"
+        return json_object(
+            fetch_provider_catalog(client, str(_WORKSPACE_ROOT)),
+            at="served provider catalog",
         )
 
 
@@ -438,26 +380,27 @@ def _start_document_run(
     *,
     selection: JsonObject,
 ) -> httpx.Response:
-    """Start a run on the declaring preset with a token for every declared role."""
-    body: JsonObject = {
-        "team_preset": _CLARIFY_PRESET,
-        "stage": "start",
-        "run_id": run_id,
-        "message": "Plan a right-side monitor panel.",
-        "autonomous": True,
-        "feature_tag": _FEATURE_TAG,
-        "selection": selection,
-        "metadata": {
-            "feature_tag": _FEATURE_TAG,
-            "workspace_root": str(_WORKSPACE_ROOT),
-        },
-        "actor_tokens": {
-            "tokens": {role: f"tok-{role}" for role in _required_roles()},
-            "engine_bearer": _ENGINE_BEARER,
-        },
-    }
-    with gateway.client(timeout=90.0) as client:
-        return client.post("/v1/runs", json=body)
+    """Start a run on the declaring preset with a token for every declared role.
+
+    The target feature rides in the run metadata, which run-start reads when the
+    request names no top-level feature.
+    """
+
+    def served(_workspace: str) -> JsonObject:
+        return selection
+
+    verbs = replace(
+        gateway.runs,
+        team_preset=_CLARIFY_PRESET,
+        workspace_root=str(_WORKSPACE_ROOT),
+        selection=served,
+        tokens=role_tokens(_required_roles()),
+    )
+    return verbs.start(
+        run_id,
+        message="Plan a right-side monitor panel.",
+        metadata={"feature_tag": _FEATURE_TAG},
+    )
 
 
 def _history_state(gateway: CertifiedGateway, run_id: str) -> JsonObject:
@@ -579,9 +522,10 @@ def _replay_codex_continuation(
     winning_key: str,
 ) -> JsonObject:
     """Poll the idempotent continuation until durable application is visible."""
-    replay_body: JsonObject = {}
-    replay_deadline = time.monotonic() + 90.0
-    while time.monotonic() < replay_deadline:
+    last: JsonObject = {}
+
+    def _applied() -> JsonObject | None:
+        nonlocal last
         with gateway.client(timeout=60.0) as client:
             replay = client.post(
                 f"/v1/runs/{run_id}/clarifications/{request_id}/respond",
@@ -589,11 +533,15 @@ def _replay_codex_continuation(
                 headers={"Idempotency-Key": winning_key},
             )
         assert replay.status_code == 200, replay.text
-        replay_body = _response_object(replay, at="replayed Codex continuation")
-        if replay_body.get("applied") is True:
-            break
-        time.sleep(0.5)
-    assert replay_body.get("applied") is True, replay_body
+        last = _response_object(replay, at="replayed Codex continuation")
+        return last if last.get("applied") is True else None
+
+    replay_body = wait_for(
+        _applied,
+        deadline=ProgressDeadline(idle_window_s=90.0),
+        interval_s=0.5,
+        stalled=lambda: f"continuation never applied: {last}",
+    )
     assert replay_body.get("action_status") == "applied"
     return replay_body
 
@@ -629,9 +577,10 @@ def _assert_codex_continuation_applied(
 
 def test_clarification_loop_parks_discloses_answers_and_resumes(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """One run: park, disclose, nudge, answer over HTTP, and genuinely resume."""
-    _require_substrates()
+    _require_engine(external_prerequisite)
     expected_questions = _declared_questions()
 
     run_id = f"clarify-stitch-{uuid.uuid4().hex[:12]}"
@@ -640,7 +589,9 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
         VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
         started = _start_document_run(
-            gateway, run_id, selection=_served_in_process_selection(gateway)
+            gateway,
+            run_id,
+            selection=gateway.served_in_process_selection(str(_WORKSPACE_ROOT)),
         )
         assert started.status_code == 201, started.text
 
@@ -673,7 +624,7 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
             frame = _read_frame(
                 response.iter_lines(),
                 wanted="clarification_pending",
-                deadline=time.monotonic() + 90.0,
+                timeout=90.0,
             )
 
         assert frame["thread_id"] == run_id
@@ -720,6 +671,7 @@ def test_clarification_loop_parks_discloses_answers_and_resumes(
 
 def test_answering_a_question_the_run_is_not_parked_on_is_refused(
     tmp_path: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> None:
     """The scoping check holds across the real boundary, not just in-process.
 
@@ -728,7 +680,7 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
     performs, and it must precede any dispatch: the run stays parked on its own
     questionnaire afterwards.
     """
-    _require_substrates()
+    _require_engine(external_prerequisite)
 
     run_id = f"clarify-scope-{uuid.uuid4().hex[:12]}"
     with certified_gateway(
@@ -736,7 +688,9 @@ def test_answering_a_question_the_run_is_not_parked_on_is_refused(
         VAULTSPEC_A2A_WORKER_READY_TIMEOUT_SECONDS=_WORKER_READY_BUDGET_SECONDS,
     ) as gateway:
         started = _start_document_run(
-            gateway, run_id, selection=_served_in_process_selection(gateway)
+            gateway,
+            run_id,
+            selection=gateway.served_in_process_selection(str(_WORKSPACE_ROOT)),
         )
         assert started.status_code == 201, started.text
 
@@ -796,13 +750,10 @@ def test_concurrent_continuations_elect_one_all_low_codex_winner(
     proof to five independent research turns.
     """
     _require_codex_substrates(external_prerequisite)
-    if not live_provider_catalog_selector_is_configured():
-        pytest.skip(
-            "no explicit live catalog selection is configured for this "
-            "billable Codex election; set "
-            + ", ".join(LIVE_PROVIDER_CATALOG_SELECTION_ENVIRON)
-            + " from the currently served catalog"
-        )
+    external_prerequisite(
+        "provider-catalog-live-selection",
+        "this billable Codex election needs an explicit live catalog selection",
+    )
 
     run_id = f"clarify-codex-load-{uuid.uuid4().hex[:12]}"
     markers = [

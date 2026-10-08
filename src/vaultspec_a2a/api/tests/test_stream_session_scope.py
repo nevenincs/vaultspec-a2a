@@ -9,15 +9,20 @@ that buffers the whole response can never reproduce.
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import httpx
 import pytest
 
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
+from ...testing import (
+    ProgressDeadline,
+    seed_live_thread,
+    serve_on_loopback,
+    wait_until_async,
+)
+from ._relay_events import progress_event, relay_events
 from .conftest import make_app
-from .test_gateway_live import _live_server, _seed_live_thread
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -35,23 +40,23 @@ class _CheckedOutPool(Protocol):
     def checkedout(self) -> int: ...
 
 
-async def _wait_for_subscribers(aggregator: EventAggregator, expected: int) -> None:
-    for _ in range(500):
-        if aggregator.subscriber_count() >= expected:
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError(
-        f"only {aggregator.subscriber_count()} of {expected} viewers attached"
+async def _wait_for_subscribers(aggregator: RelayHub, expected: int) -> None:
+    await wait_until_async(
+        lambda: aggregator.subscriber_count() >= expected,
+        deadline=ProgressDeadline(idle_window_s=5.0),
+        interval_s=0.01,
+        stalled=lambda: (
+            f"only {aggregator.subscriber_count()} of {expected} viewers attached"
+        ),
     )
 
 
 async def _wait_for_idle_pool(pool: _CheckedOutPool) -> None:
-    for _ in range(500):
-        if pool.checkedout() == 0:
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError(
-        f"{pool.checkedout()} pooled connections are still checked out"
+    await wait_until_async(
+        lambda: pool.checkedout() == 0,
+        deadline=ProgressDeadline(idle_window_s=5.0),
+        interval_s=0.01,
+        stalled=lambda: f"{pool.checkedout()} pooled connections are still checked out",
     )
 
 
@@ -63,21 +68,22 @@ async def test_attached_viewers_hold_no_pooled_connection(
 ) -> None:
     """Every viewer's connection is back in the pool before its first frame.
 
-    Three viewers used to mean three connections checked out for the duration -
-    the pool has fifteen, so about fifteen viewers stalled run-start, run-status,
-    cancel and the event relay on the same engine. The count is read while the
+    A viewer holds no connection for the duration of its stream: the pool has
+    fifteen, so if each viewer kept one, about fifteen viewers would stall
+    run-start, run-status, cancel and the event relay on the same engine. The
+    count is read while the
     streams are demonstrably open, proven by the subscriber registrations rather
     than by a sleep.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
-    run_id, _receipt = await _seed_live_thread(session_factory, title="pool")
+    run_id, _receipt = await seed_live_thread(session_factory, title="pool")
 
     pool = engine.sync_engine.pool
     assert isinstance(pool, _CheckedOutPool)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         streams = [
@@ -134,38 +140,18 @@ async def test_a_resuming_viewer_hands_its_replay_connection_back(
     above fixed. The count is read after the replayed frames have arrived, so
     the read is demonstrably finished rather than not yet started.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
-    run_id, _receipt = await _seed_live_thread(session_factory, title="resume-pool")
+    run_id, _receipt = await seed_live_thread(session_factory, title="resume-pool")
 
     pool = engine.sync_engine.pool
     assert isinstance(pool, _CheckedOutPool)
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        relayed = await client.post(
-            "/internal/events/batch",
-            json={
-                "events": [
-                    {
-                        "thread_id": run_id,
-                        "ts": float(index),
-                        "payload": {
-                            "type": "agent_status",
-                            "event_type": "agent_status",
-                            "thread_id": run_id,
-                            "agent_id": "coder",
-                            "state": "working",
-                            "sequence": index,
-                        },
-                    }
-                    for index in (1, 2)
-                ]
-            },
-        )
-        assert relayed.status_code == 200, relayed.text
+        await relay_events(client, [progress_event(run_id, index) for index in (1, 2)])
 
         async with client.stream(
             "GET", f"/v1/runs/{run_id}/stream", headers={"Last-Event-ID": "-"}

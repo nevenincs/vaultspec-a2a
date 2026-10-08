@@ -5,8 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..providers import ProviderCondition
-from ..thread.enums import ControlActionType
+from ..graph.enums import ProviderCondition
 from ..thread.failure_evidence import (
     GraphFailureEvidence,
     failure_detail_fingerprint,
@@ -23,7 +22,6 @@ __all__ = [
     "_EXECUTOR_CONDITION",
     "_INGEST_GUARDS",
     "_RESUME_GUARDS",
-    "_SLOT_OWNING_ACTIONS",
     "DispatchCapacityReservation",
     "_GuardWording",
     "failure_evidence",
@@ -136,10 +134,6 @@ _RESUME_GUARDS = _GuardWording(
 # The floor is what keeps such a run from carrying no condition at all.
 _EXECUTOR_CONDITION = ProviderCondition.UNKNOWN
 
-# The two dispatch actions that take the thread's ingest slot. A failure in
-# either is that dispatch's own to settle; a cancel or an unrecognised action
-# never held the slot, so a held slot there belongs to a concurrent run.
-_SLOT_OWNING_ACTIONS = frozenset({ControlActionType.INGEST, ControlActionType.RESUME})
 CAPACITY_ACCEPTED = "accepted"
 CAPACITY_THREAD_ACTIVE = "thread_active"
 CAPACITY_FULL = "capacity_full"

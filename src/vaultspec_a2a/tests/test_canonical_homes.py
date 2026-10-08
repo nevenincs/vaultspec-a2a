@@ -81,7 +81,7 @@ def _declaring_modules(pattern: str) -> list[str]:
             "ACP option-id kind heuristic",
             r"def _map_acp_option_kind",
             1,
-            "streaming/types.py, private on purpose",
+            "graph/acp_options.py, private on purpose",
             "While it was public a second consumer chose it over the resolver "
             "and classified a declared denial as an approval. It is the "
             "resolver's last resort, not a peer that can be selected instead.",
@@ -112,7 +112,7 @@ def _declaring_modules(pattern: str) -> list[str]:
             "process-tree kill escalation",
             r'"taskkill",',
             1,
-            "utils/process.py",
+            "utils/_process_tree.py",
             "The Windows escalation was implemented twice, once sync and once "
             "async, with both copies independently choosing the same two "
             "timeout budgets. A kill escalation is the last thing that should "
@@ -121,9 +121,9 @@ def _declaring_modules(pattern: str) -> list[str]:
         ),
         (
             "POSIX descendant snapshot",
-            r"def posix_descendant_pids\(",
+            r"def descendant_pids\(",
             1,
-            "utils/process.py",
+            "utils/_process_tree.py",
             "The row above pins the escalation by its WINDOWS argv, so a second "
             "copy written for POSIX alone would carry no taskkill literal and "
             "pass it. This pins the other half. The snapshot is the load-bearing "
@@ -145,9 +145,9 @@ def _declaring_modules(pattern: str) -> list[str]:
             "declarations, and a further pair in authoring/discovery.py the "
             "original sweep missed. All narrow an already-parsed value to a "
             "string-keyed dict, returning None rather than raising. Distinct on "
-            "purpose from `_json_object(encoded: str)` in "
-            "control/event_handlers.py, the STRING-decode sibling that calls "
-            "``validate_json`` rather than ``validate_python``.",
+            "purpose from `decode_json_object(encoded: str | None)` in the same "
+            "module, the TEXT-decode sibling that calls ``validate_json`` rather "
+            "than ``validate_python``.",
         ),
         (
             "strict object-list narrower",
@@ -160,6 +160,33 @@ def _declaring_modules(pattern: str) -> list[str]:
             "separate from the RAISING `_decode_json_list` in "
             "control/projection.py, which signals a broken internal invariant "
             "rather than degrading untrusted input.",
+        ),
+        (
+            "interrupt-type discriminator",
+            r"class InterruptType\(StrEnum\):",
+            1,
+            "thread/enums.py",
+            "The `type` discriminator every parked interrupt payload carries. "
+            "The worker's tool-permission rung, the supervisor's plan gate, "
+            "the document phase gates and the clarification node each write "
+            "one member's `.value` into the checkpointed payload, because the "
+            "checkpoint serializer does not round-trip enum members. A second "
+            "declaration would let two producers, or a producer and a reader, "
+            "disagree on which strings the discriminator can hold.",
+        ),
+        (
+            "transport-frame kind discriminator",
+            r"class StreamFrameKind\(StrEnum\):",
+            1,
+            "graph/enums.py",
+            "The discriminator for progress-stream frames the stream mints "
+            "about ITSELF - where a run stood at attachment, why a stream was "
+            "refused, what a viewer lost - rather than about a graph event. "
+            "Consumed by streaming/sse_frames.transport_frame and the "
+            "gateway's stream route. It sits beside ServerEventType rather "
+            "than inside it, because that vocabulary's serializer dispatches "
+            "on ServerEventType and a member here has no domain event to "
+            "dispatch from; a second declaration would blur that split.",
         ),
     ],
 )

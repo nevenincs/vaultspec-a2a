@@ -74,6 +74,17 @@ class WorkerCircuitBreaker:
             self._state = "half_open"
         return self._state
 
+    @property
+    def shut_out(self) -> bool:
+        """Whether the circuit admits no dispatch at all right now.
+
+        A read that reserves nothing, for a caller deciding whether a BATCH of
+        deliveries is worth starting at all: ``pre_dispatch`` would answer the
+        same question but would consume the single half-open probe one of those
+        deliveries is entitled to.
+        """
+        return self.state == "open"
+
     def pre_dispatch(self) -> DispatchAdmission | None:
         """Reserve the right to dispatch, admitting one half-open probe at a time.
 

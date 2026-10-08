@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-import threading
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING
@@ -25,7 +24,8 @@ from ...protocols.mcp.authoring_stdio import (
     ENV_RUN_ID,
 )
 from ...protocols.mcp.tools.authoring_bridge import LOGICAL_CALL_ID_META_KEY
-from ...testing.tests._support.http_handlers import JsonReplyHandler
+from ...testing import JsonReplyHandler, serve_handler
+from ...utils import bearer_matches
 from ._engine_peer import reply_health_proof, write_engine_record
 from .test_dispatch_injection import _CATALOG
 
@@ -59,7 +59,7 @@ def _handler(state: _Rotation) -> type[JsonReplyHandler]:
             if self.path.endswith("/agent-tools/execute"):
                 state.execute.append(body)
                 state.actors.append(self.headers.get("x-authoring-actor-token"))
-            if self.headers.get("Authorization") != f"Bearer {state.bearer}":
+            if not bearer_matches(self.headers.get("Authorization"), state.bearer):
                 self._reply(401, {"error": "Unauthorized"})
                 return
             if self.path.endswith("/v1/sessions"):
@@ -96,34 +96,31 @@ async def test_stdio_refresh_preserves_identity_and_discovery_authority(
     tmp_path: Path, secure_engine_dir: Path, scenario: str
 ) -> None:
     state = _Rotation(secure_engine_dir / "service.json")
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(state))
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    write_engine_record(state.record, server.server_port, _BOOT)
-    if scenario in {"connection_rotation", "untrusted_record"}:
-        state.bearer = _FRESH
-        state.rotate_after_session = False
-        write_engine_record(state.record, server.server_port, _FRESH)
-    if scenario == "actor_rejection":
-        state.rotate_after_session = False
-        state.actor_rejection = True
-    roots = [str(secure_engine_dir if scenario == "untrusted_record" else tmp_path)]
-    params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "vaultspec_a2a.protocols.mcp.authoring_stdio"],
-        env={
-            ENV_BASE_URL: f"http://127.0.0.1:{server.server_port}",
-            ENV_BEARER: _BOOT,
-            ENV_ACTOR_TOKEN: "refresh-actor",
-            ENV_RUN_ID: "refresh-run",
-            ENV_CATALOG_JSON: json.dumps(_CATALOG),
-            ENV_JOURNAL_PATH: str(tmp_path / "calls.db"),
-            ENV_REFRESH_RECORD: str(state.record),
-            ENV_REFRESH_ROOTS_JSON: json.dumps(roots),
-        },
-    )
-    log = tmp_path / "bridge.log"
-    try:
+    with serve_handler(_handler(state)) as port:
+        write_engine_record(state.record, port, _BOOT)
+        if scenario in {"connection_rotation", "untrusted_record"}:
+            state.bearer = _FRESH
+            state.rotate_after_session = False
+            write_engine_record(state.record, port, _FRESH)
+        if scenario == "actor_rejection":
+            state.rotate_after_session = False
+            state.actor_rejection = True
+        roots = [str(secure_engine_dir if scenario == "untrusted_record" else tmp_path)]
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "vaultspec_a2a.protocols.mcp.authoring_stdio"],
+            env={
+                ENV_BASE_URL: f"http://127.0.0.1:{port}",
+                ENV_BEARER: _BOOT,
+                ENV_ACTOR_TOKEN: "refresh-actor",
+                ENV_RUN_ID: "refresh-run",
+                ENV_CATALOG_JSON: json.dumps(_CATALOG),
+                ENV_JOURNAL_PATH: str(tmp_path / "calls.db"),
+                ENV_REFRESH_RECORD: str(state.record),
+                ENV_REFRESH_ROOTS_JSON: json.dumps(roots),
+            },
+        )
+        log = tmp_path / "bridge.log"
         with log.open("w", encoding="utf-8") as errlog:
             async with Client(stdio_client(params, errlog=errlog)) as client:
                 if scenario == "concurrent_rotation":
@@ -159,7 +156,3 @@ async def test_stdio_refresh_preserves_identity_and_discovery_authority(
         diagnostics = log.read_text(encoding="utf-8")
         assert _BOOT not in diagnostics and _FRESH not in diagnostics
         assert "refresh-actor" not in diagnostics
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5.0)

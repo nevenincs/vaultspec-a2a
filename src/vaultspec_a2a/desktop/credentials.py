@@ -5,7 +5,7 @@ its own owner-restricted file beneath the application home's credentials directo
 
 * **attach control** - created by the dashboard, read by the gateway, presented on
   every versioned control verb, product application programming interface (API)
-  call, event WebSocket, and terminal settlement callback.
+  call, event stream, and terminal settlement callback.
 * **ownership capability** - created by the dashboard and bound to the install
   receipt, read by the gateway, additionally required on receipt-bound lifecycle
   operations such as administrative shutdown. Discovery never references it.
@@ -22,23 +22,19 @@ exception argument.
 
 from __future__ import annotations
 
-import os
 import secrets
-import stat
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from ..utils import path_is_link_like
 from ..utils.atomic_write import atomic_write_text
-from ._platform_acl import (
-    confirm_opened_secret,
-    credential_file_is_owner_restricted,
-    harden_credential_path,
-    unfollowed_read_flags,
-)
+from ._filesystem_authority import PrivateFileError, read_private_file
+from ._platform_acl import harden_credential_path
 
 __all__ = [
     "ATTACH_CREDENTIAL_NAME",
+    "MAX_CREDENTIAL_BYTES",
     "OWNERSHIP_CAPABILITY_NAME",
     "WORKER_IPC_CREDENTIAL_NAME",
     "CredentialError",
@@ -58,7 +54,7 @@ WORKER_IPC_CREDENTIAL_NAME = "worker-ipc.cred"
 # charset admits the URL-safe and hex token alphabets this product mints without
 # admitting whitespace or control characters that would signal a malformed file.
 _MIN_CREDENTIAL_CHARS = 16
-_MAX_CREDENTIAL_BYTES = 4096
+MAX_CREDENTIAL_BYTES = 4096
 _ALLOWED_CHARS = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-+/="
 )
@@ -135,41 +131,16 @@ def _validate_token(text: str, *, plane: CredentialPlane) -> str:
 def _read_owner_restricted_secret(path: Path, *, plane: CredentialPlane) -> str:
     """Read one owner-restricted credential file fail-closed and return its token.
 
-    Enforces, in order: a regular non-link file, owner-restriction (POSIX mode and
-    ownership or the Windows private DACL), a bounded size, and a well-formed token.
-    The file is opened without following a symlink so a swapped link cannot redirect
-    the read, and the opened descriptor's identity is confirmed to match the
-    validated name.
+    The file is read through the private-file reader, which owns every
+    filesystem refusal: a leased real parent, a regular non-link singly linked
+    file, owner-restriction (POSIX mode and ownership or the Windows private
+    DACL), the size bound, and a descriptor confirmed to be the file inspected
+    by name. This plane adds only the UTF-8 decode and the token shape.
     """
     try:
-        named = path.lstat()
-    except OSError as exc:
-        raise CredentialError(
-            f"{plane.value} credential file is not accessible"
-        ) from exc
-    if not stat.S_ISREG(named.st_mode):
-        raise CredentialError(f"{plane.value} credential file is not a regular file")
-    if not credential_file_is_owner_restricted(path):
-        raise CredentialError(f"{plane.value} credential file is not owner-restricted")
-    if named.st_size > _MAX_CREDENTIAL_BYTES:
-        raise CredentialError(f"{plane.value} credential file exceeds its size bound")
-
-    try:
-        descriptor = os.open(path, unfollowed_read_flags())
-    except OSError as exc:
-        raise CredentialError(
-            f"{plane.value} credential file cannot be opened"
-        ) from exc
-    try:
-        if not confirm_opened_secret(descriptor, named=named, path=path):
-            raise CredentialError(
-                f"{plane.value} credential file changed identity while opening"
-            )
-        raw = os.read(descriptor, _MAX_CREDENTIAL_BYTES + 1)
-    finally:
-        os.close(descriptor)
-    if len(raw) > _MAX_CREDENTIAL_BYTES:
-        raise CredentialError(f"{plane.value} credential file exceeds its size bound")
+        raw = read_private_file(path, max_bytes=MAX_CREDENTIAL_BYTES)
+    except PrivateFileError as exc:
+        raise CredentialError(f"{plane.value} credential file {exc.reason}") from exc
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -212,7 +183,7 @@ def create_worker_ipc_credential(credentials_dir: Path) -> str:
     paths = credential_paths(directory)
     secret = secrets.token_hex(_WORKER_IPC_ENTROPY_BYTES)
     target = paths.worker_ipc_path
-    if target.is_symlink() or target.is_junction():
+    if path_is_link_like(target):
         raise CredentialError("worker_ipc credential path is a link")
 
     # Published through the project's audited write-and-rename, which is the only

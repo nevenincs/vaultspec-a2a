@@ -1,10 +1,15 @@
-"""Session-scoped service harness for the deterministic certification stack."""
+"""Session-scoped service harness for the deterministic certification stack.
+
+What is specific to the service tier lives here: the Compose-managed fixture
+services, the fixed native gateway and worker profile they certify, and the
+diagnostics a failed session leaves behind. Spawning, death-aware readiness,
+tree reaping, log tails and the run-start verb are the shared primitives of
+:mod:`vaultspec_a2a.testing`, composed rather than re-implemented.
+"""
 
 from __future__ import annotations
 
-import contextlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -12,27 +17,43 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 import httpx
-from sqlalchemy.engine import make_url
 
 from ..control.config import settings
-from ..lifecycle.manager import tree_kill
-from ..testing.ports import free_port
-from ..testing.tests._support.catalog_selection import (
+from ..testing import (
+    GatewayBootError,
     NoSelectableLaneError,
-    in_process_selection,
+    RunVerbs,
+    WatchedProcess,
+    armed_lane_environment,
+    await_gateway_ready,
+    await_ready,
+    fetch_in_process_selection,
+    free_port,
+    gateway_process_env,
+    inherited_environment,
+    log_tail,
+    prune_stale_dirs,
+    reap_process,
+    spawn_logged,
 )
-from ..tests.gateway_boot import GatewayBootError
-from ..utils._process_tree import detached_spawn_kwargs
+from ..utils import bearer_header
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-# A process this harness owns, its label, and the log it writes: enough to fail
-# a readiness wait with the exit code and the tail that explain the death.
-_WatchedProcess = tuple[str, "subprocess.Popen[str]", Path]
+__all__ = [
+    "COMPOSE_FILE",
+    "INTERNAL_TOKEN",
+    "REPO_ROOT",
+    "RUNTIME_ROOT",
+    "ServiceStack",
+    "build_service_stack",
+    "resolve_docker_executable",
+    "unstarted_service_stack",
+]
 
 
 class _PermissionResponseOptions(TypedDict, total=False):
@@ -53,13 +74,13 @@ RUNTIME_ROOT = settings.a2a_home / "runtime" / "service-tests"
 # The worker interprocess-communication token the harness gives its production
 # worker. It is the single source: injected into the worker env and presented on
 # the harness's own worker probes, which the gated worker surface now requires.
-_INTERNAL_TOKEN = "vaultspec-integration-token"
+INTERNAL_TOKEN = "vaultspec-integration-token"
 # The engine-facing /v1 bearer this harness gives its gateway. The whole /v1
 # router sits behind the attach gate, so without presenting this every call the
 # harness makes - create, list, state, cancel - is a 401 and no service test can
 # reach the surface it exists to certify.
 #
-# Deliberately NOT _INTERNAL_TOKEN: that is the worker IPC secret, and the two
+# Deliberately NOT INTERNAL_TOKEN: that is the worker IPC secret, and the two
 # planes must never alias ("never shared with worker IPC or embedded in
 # discovery"). Configuring it explicitly is also what makes it knowable here at
 # all - left unset the gateway mints a per-process credential the harness has no
@@ -68,23 +89,20 @@ _GATEWAY_SERVICE_TOKEN = "vaultspec-integration-gateway-token"
 
 
 def _compose_env(ports: dict[str, int], project_name: str) -> dict[str, str]:
-    env = os.environ.copy()
-    env.update(
+    return inherited_environment(
         {
             "COMPOSE_PROJECT_NAME": project_name,
             "COMPOSE_DISABLE_ENV_FILE": "1",
             "VAULTSPEC_A2A_PORT": str(ports["gateway"]),
             "VAULTSPEC_A2A_WORKER_PORT": str(ports["worker"]),
-            "VIDAIMOCK_PORT": str(ports["vidaimock"]),
             "JAEGER_UI_PORT": str(ports["jaeger_ui"]),
             "JAEGER_OTLP_PORT": str(ports["jaeger_otlp"]),
         }
     )
-    return env
 
 
 def _compose_base_command(project_name: str) -> list[str]:
-    docker = _resolve_docker_executable()
+    docker = resolve_docker_executable()
     return [
         docker,
         "compose",
@@ -95,7 +113,7 @@ def _compose_base_command(project_name: str) -> list[str]:
     ]
 
 
-def _resolve_docker_executable() -> str:
+def resolve_docker_executable() -> str:
     """Resolve Docker from PATH only."""
     for candidate in ("docker", "docker.exe"):
         resolved = shutil.which(candidate)
@@ -123,100 +141,13 @@ def _run_compose(
     )
 
 
-def _spawn_process(
-    *args: str,
-    env: dict[str, str],
-    log_path: Path,
-) -> tuple[subprocess.Popen[str], Any]:
-    log_file = log_path.open("w", encoding="utf-8", buffering=1)
-    # The canonical detach flags, not a local Windows-only flag: teardown here
-    # goes exclusively through tree_kill's pid-tree walk (see _stop_process),
-    # which discovers descendants by OS process relationship rather than by
-    # process-group membership, so detaching into a POSIX session on the way in
-    # costs nothing on the way out. It is a deliberate convergence with the
-    # gateway/worker children spawned elsewhere in this test tier (e.g.
-    # ``tests.gateway_boot.spawn_gateway(new_session=True)``), not an accident:
-    # this site previously left POSIX unconsidered, isolating the child from a
-    # stray SIGINT delivered to the harness's own foreground process group.
-    flags = detached_spawn_kwargs()
-    proc = subprocess.Popen(
-        args,
-        cwd=REPO_ROOT,
-        env=env,
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-        text=True,
-        creationflags=flags.creationflags,
-        start_new_session=flags.start_new_session,
-    )
-    return proc, log_file
+# The tail of a native process's log a session's diagnostics preserve: wider
+# than a readiness failure quotes, because this is read after the fact.
+_DIAGNOSTIC_LOG_TAIL_BYTES = 20000
 
 
-_ERROR_LOG_TAIL_CHARS = 4000
-_DIAGNOSTIC_LOG_TAIL_CHARS = 20000
-
-
-def _log_tail(log_path: Path, *, limit: int = _ERROR_LOG_TAIL_CHARS) -> str:
-    """Return the last *limit* characters of *log_path*, or ``""``."""
-    try:
-        return log_path.read_text(encoding="utf-8", errors="replace")[-limit:]
-    except OSError:
-        return ""
-
-
-def _log_tail_suffix(watch: Sequence[_WatchedProcess]) -> str:
-    """Render the watched processes' log tails for a failure message."""
-    parts = [
-        f"\n--- {name} log tail ---\n{tail}"
-        for name, _proc, log_path in watch
-        if (tail := _log_tail(log_path))
-    ]
-    return "".join(parts)
-
-
-def _wait_for(
-    label: str,
-    probe: Callable[[], bool],
-    *,
-    timeout: float = 120.0,
-    interval: float = 1.0,
-    watch: Sequence[_WatchedProcess] = (),
-) -> None:
-    """Poll *probe* until it passes, failing fast on a dead watched process.
-
-    Supplying *watch* makes the wait DEATH-AWARE: a child that exits before the
-    probe passes fails immediately with its exit code and log tail rather than
-    burning the whole deadline — the bind-race signature, and the reason the
-    shared gateway-boot poll checks liveness every iteration. Waits with no
-    owning process (the compose-managed services, whose lifecycle Docker owns)
-    pass no *watch* and keep the plain deadline behaviour, because there is no
-    exit status to consult.
-    """
-    deadline = time.monotonic() + timeout
-    last_error: Exception | None = None
-    while time.monotonic() < deadline:
-        for name, proc, log_path in watch:
-            if proc.poll() is not None:
-                raise GatewayBootError(
-                    f"{label}: {name} exited before readiness "
-                    f"(exit {proc.returncode})"
-                    f"{_log_tail_suffix([(name, proc, log_path)])}"
-                )
-        try:
-            if probe():
-                return
-        except Exception as exc:  # pragma: no cover - diagnostic path
-            last_error = exc
-        time.sleep(interval)
-    raise TimeoutError(
-        f"Timed out waiting for {label}"
-        + (f": {last_error}" if last_error is not None else "")
-        + _log_tail_suffix(watch)
-    )
-
-
-RETAINED_RUNTIME_DIRS = 5
-"""How many service-test runtime directories to keep before evicting the oldest.
+_RETAINED_RUNTIME_DIRS = 5
+"""How many earlier service-test runtime directories survive beside the current one.
 
 Deleting a run's directory outright would destroy the compose logs and session
 summary the harness writes precisely so a failed run can be diagnosed after the
@@ -225,67 +156,19 @@ unbounded accumulation in the operator's machine-global home.
 """
 
 
-def sweep_stale_runtime_dirs(
-    *, keep: Path | None = None, root: Path | None = None
-) -> list[Path]:
-    """Evict all but the most recent service-test runtime directories.
-
-    Args:
-        keep: A directory to retain regardless of age - the caller's own run.
-        root: Directory to sweep; defaults to the machine-global runtime root.
-            Taking it as a parameter keeps the sweep testable against a real
-            temporary tree without reassigning module state.
-
-    Returns:
-        The directories removed.
-    """
-    search_root = root if root is not None else RUNTIME_ROOT
-    try:
-        candidates = [entry for entry in search_root.iterdir() if entry.is_dir()]
-    except OSError:
-        return []
-    # Name breaks ties so several directories sharing one filesystem timestamp
-    # tick evict deterministically rather than in arbitrary order.
-    ordered = sorted(
-        candidates, key=lambda entry: (entry.stat().st_mtime, entry.name), reverse=True
-    )
-    removed: list[Path] = []
-    for stale in ordered[RETAINED_RUNTIME_DIRS:]:
-        if keep is not None and stale == keep:
-            continue
-        shutil.rmtree(stale, ignore_errors=True)
-        if not stale.exists():
-            removed.append(stale)
-    return removed
-
-
 @dataclass(slots=True)
 class ServiceStack:
     """Owns native services and their Docker development fixtures for a session."""
 
     project_name: str
     ports: dict[str, int]
-    postgres_url: str | None = field(default=None, repr=False)
     started_at: float = field(default_factory=time.time)
     runtime_dir: Path = field(init=False)
     artifacts: dict[str, Any] = field(default_factory=dict)
-    _gateway_proc: subprocess.Popen[str] | None = field(
-        default=None, init=False, repr=False
-    )
-    _worker_proc: subprocess.Popen[str] | None = field(
-        default=None, init=False, repr=False
-    )
-    _gateway_log: Any | None = field(default=None, init=False, repr=False)
+    _gateway_proc: WatchedProcess | None = field(default=None, init=False, repr=False)
+    _worker_proc: WatchedProcess | None = field(default=None, init=False, repr=False)
     _gateway_log_name: str = field(default="gateway.log", init=False, repr=False)
-    _worker_log: Any | None = field(default=None, init=False, repr=False)
-    _mock_paused: bool = field(default=False, init=False, repr=False)
     _stopped: bool = field(default=False, init=False, repr=False)
-    # One served selection per (workspace, preset). The first catalog read on a
-    # gateway builds it cold across every registered lane, so it is paid once per
-    # session rather than once per run.
-    _selection_cache: dict[str, dict[str, Any]] = field(
-        default_factory=dict, init=False, repr=False
-    )
 
     def __post_init__(self) -> None:
         # Resolve only. Creating the directory here meant constructing a stack -
@@ -298,7 +181,9 @@ class ServiceStack:
     def _ensure_runtime_dir(self) -> None:
         """Create the runtime directory at the point something will write to it."""
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        sweep_stale_runtime_dirs(keep=self.runtime_dir)
+        prune_stale_dirs(
+            RUNTIME_ROOT, kept_newest=_RETAINED_RUNTIME_DIRS, keep=self.runtime_dir
+        )
 
     @property
     def gateway_url(self) -> str:
@@ -309,12 +194,17 @@ class ServiceStack:
         return f"http://127.0.0.1:{self.ports['worker']}"
 
     @property
-    def vidaimock_url(self) -> str:
-        return f"http://127.0.0.1:{self.ports['vidaimock']}"
-
-    @property
     def jaeger_url(self) -> str:
         return f"http://127.0.0.1:{self.ports['jaeger_ui']}"
+
+    @property
+    def hold_gate(self) -> Path:
+        """The gate this stack's hold-then-complete turns wait on.
+
+        Hand it to :func:`vaultspec_a2a.testing.lanes.held_turns` to hold a run
+        mid-turn on the real worker for the length of a block.
+        """
+        return self.runtime_dir / "hold-then-complete.gate"
 
     def record(self, name: str, payload: Any) -> None:
         self.artifacts[name] = payload
@@ -326,7 +216,7 @@ class ServiceStack:
         return httpx.Client(
             base_url=self.gateway_url,
             timeout=timeout,
-            headers={"Authorization": f"Bearer {_GATEWAY_SERVICE_TOKEN}"},
+            headers=bearer_header(_GATEWAY_SERVICE_TOKEN),
         )
 
     def gateway_client(self, *, timeout: float | None = 10.0) -> httpx.Client:
@@ -340,55 +230,28 @@ class ServiceStack:
         return httpx.Client(
             base_url=self.worker_url,
             timeout=10.0,
-            headers={"Authorization": f"Bearer {_INTERNAL_TOKEN}"},
+            headers=bearer_header(INTERNAL_TOKEN),
         )
 
     def _jaeger_client(self) -> httpx.Client:
         return httpx.Client(base_url=self.jaeger_url, timeout=10.0)
 
-    def _vidaimock_client(self) -> httpx.Client:
-        return httpx.Client(base_url=self.vidaimock_url, timeout=10.0)
-
-    def _gateway_http_ready(self) -> bool:
-        with self._client(timeout=5.0) as client:
-            resp = client.get("/health")
-            return resp.status_code == 200
-
-    def _watched(self, *names: str) -> list[_WatchedProcess]:
+    def _watched(self, *names: str) -> list[WatchedProcess]:
         """Return the named harness-owned processes that are currently spawned.
 
-        Only processes this harness holds a ``Popen`` for are watchable; the
-        compose-managed services are deliberately absent, since Docker owns
-        their lifecycle and there is no local exit status to read.
+        Only processes this harness spawned are watchable; the compose-managed
+        services are deliberately absent, since Docker owns their lifecycle and
+        there is no local exit status to read.
         """
-        owned: dict[str, subprocess.Popen[str] | None] = {
-            "gateway": self._gateway_proc,
-            "worker": self._worker_proc,
-        }
-        return [
-            (
-                name,
-                proc,
-                self.runtime_dir
-                / (self._gateway_log_name if name == "gateway" else f"{name}.log"),
-            )
-            for name in names
-            if (proc := owned[name]) is not None
-        ]
+        owned = {"gateway": self._gateway_proc, "worker": self._worker_proc}
+        return [watched for name in names if (watched := owned[name]) is not None]
 
     def start(self) -> None:
-        """Bring the deterministic compose stack online and wait for readiness."""
+        """Bring the deterministic service stack online and wait for readiness."""
         self._ensure_runtime_dir()
         try:
             self._start_infra()
-            self._start_gateway()
-            _wait_for(
-                "gateway HTTP readiness",
-                self._gateway_http_ready,
-                timeout=120.0,
-                interval=1.0,
-                watch=self._watched("gateway"),
-            )
+            self.start_gateway()
             self._start_worker()
             self._wait_for_process_health(
                 self.worker_health,
@@ -409,50 +272,29 @@ class ServiceStack:
             self.project_name,
             "up",
             "-d",
-            "--build",
-            "vidaimock",
             "jaeger",
             ports=self.ports,
         )
 
-    def _local_env(self) -> dict[str, str]:
-        env = os.environ.copy()
-        if self.postgres_url is None:
-            database_url = (
-                f"sqlite+aiosqlite:///{(self.runtime_dir / 'service.db').as_posix()}"
-            )
-            backend = "sqlite"
-        else:
-            database_url = (
-                make_url(self.postgres_url)
-                .set(drivername="postgresql+asyncpg", query={})
-                .render_as_string(hide_password=False)
-            )
-            backend = "postgres"
+    def _local_env(self, *, auto_spawn_worker: bool = False) -> dict[str, str]:
+        env = gateway_process_env(
+            gateway_port=self.ports["gateway"],
+            worker_port=self.ports["worker"],
+            auto_spawn_worker=auto_spawn_worker,
+            serve_in_process_lanes=True,
+        )
+        database_url = (
+            f"sqlite+aiosqlite:///{(self.runtime_dir / 'service.db').as_posix()}"
+        )
         env.update(
             {
-                "VAULTSPEC_A2A_ENVIRONMENT": "production",
                 "VAULTSPEC_A2A_DATABASE_URL": database_url,
-                "VAULTSPEC_A2A_DATABASE_BACKEND": backend,
-                "VAULTSPEC_A2A_CHECKPOINT_BACKEND": backend,
                 "VAULTSPEC_A2A_GATEWAY_URL": self.gateway_url,
                 "VAULTSPEC_A2A_WORKER_URL": self.worker_url,
                 "VAULTSPEC_A2A_WORKER_HOST": "127.0.0.1",
-                "VAULTSPEC_A2A_WORKER_PORT": str(self.ports["worker"]),
-                "VAULTSPEC_A2A_PORT": str(self.ports["gateway"]),
-                "VAULTSPEC_A2A_INTERNAL_TOKEN": _INTERNAL_TOKEN,
+                "VAULTSPEC_A2A_INTERNAL_TOKEN": INTERNAL_TOKEN,
                 "VAULTSPEC_A2A_GATEWAY_TOKEN": _GATEWAY_SERVICE_TOKEN,
-                "VAULTSPEC_A2A_AUTO_SPAWN_WORKER": "false",
                 "VAULTSPEC_A2A_INSTALL_ROOT": str(REPO_ROOT),
-                "VAULTSPEC_A2A_MOCK_API_BASE": self.vidaimock_url,
-                # Arm the in-process lanes. This stack has no provider
-                # credentials, and a run now has to present a selection naming a
-                # lane the gateway reports selectable - so without this the
-                # catalog offers nothing selectable at all and every run here is
-                # unstartable. The mock lane additionally needs a tape server,
-                # which VAULTSPEC_A2A_MOCK_API_BASE above supplies, so both
-                # in-process lanes are served and the mock presets can select their own.
-                "VAULTSPEC_A2A_SERVE_IN_PROCESS_LANES": "true",
                 "OTEL_EXPORTER_OTLP_ENDPOINT": (
                     f"http://127.0.0.1:{self.ports['jaeger_otlp']}"
                 ),
@@ -466,90 +308,92 @@ class ServiceStack:
                 "OTEL_SDK_DISABLED": "false",
             }
         )
-        if self.postgres_url is not None:
-            env["VAULTSPEC_A2A_CHECKPOINT_DATABASE_URL"] = self.postgres_url
-            env["VAULTSPEC_A2A_POSTGRES_REQUIRED"] = "true"
+        # Arm the in-process lanes. This stack has no provider credentials, and a
+        # run has to present a selection naming a lane the gateway reports
+        # selectable - so without this the catalog offers nothing selectable and
+        # every run here is unstartable. The worker is spawned with the same
+        # arming, and with it the hold gate its held turns wait on.
+        env.update(armed_lane_environment(hold_gate=self.hold_gate))
         return env
+
+    def spawn_native(
+        self,
+        factory: str,
+        *,
+        port: int,
+        env: dict[str, str],
+        log_name: str,
+    ) -> WatchedProcess:
+        """Spawn the production ASGI *factory* under uvicorn on *port*.
+
+        Detached, so a stray interrupt aimed at the harness's own foreground
+        group never reaches it; its output lands in *log_name* under this run's
+        directory, where readiness failures and diagnostics read it back, and
+        the log's stem names it in a readiness failure.
+        """
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        return spawn_logged(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                factory,
+                "--factory",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
+            name=Path(log_name).stem,
+            env=env,
+            log_path=self.runtime_dir / log_name,
+            cwd=REPO_ROOT,
+            detached=True,
+        )
 
     def _start_worker(self) -> None:
         if self._worker_proc is not None:
             return
-        self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        proc, log_file = _spawn_process(
-            sys.executable,
-            "-m",
-            "uvicorn",
+        self._worker_proc = self.spawn_native(
             "vaultspec_a2a.worker.app:create_worker_app",
-            "--factory",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(self.ports["worker"]),
+            port=self.ports["worker"],
             env=self._local_env(),
-            log_path=self.runtime_dir / "worker.log",
+            log_name="worker.log",
         )
-        self._worker_proc = proc
-        self._worker_log = log_file
 
-    def _start_gateway(self) -> None:
+    def start_gateway(
+        self, *, auto_spawn_worker: bool = False, log_name: str | None = None
+    ) -> None:
+        """Spawn this stack's gateway over its stores and wait until it answers.
+
+        With *auto_spawn_worker* the gateway owns a worker it spawns on demand,
+        instead of the one this harness starts beside it. *log_name* replaces the
+        log the gateway writes to, which diagnostics then read back.
+        """
         if self._gateway_proc is not None:
-            return
-        proc, log_file = _spawn_process(
-            sys.executable,
-            "-m",
-            "uvicorn",
+            raise RuntimeError("gateway is already running")
+        if log_name is not None:
+            self._gateway_log_name = log_name
+        self._gateway_proc = self.spawn_native(
             "vaultspec_a2a.api.app:create_app",
-            "--factory",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(self.ports["gateway"]),
-            env=self._local_env(),
-            log_path=self.runtime_dir / self._gateway_log_name,
+            port=self.ports["gateway"],
+            env=self._local_env(auto_spawn_worker=auto_spawn_worker),
+            log_name=self._gateway_log_name,
         )
-        self._gateway_proc = proc
-        self._gateway_log = log_file
-
-    def _stop_process(self, proc: subprocess.Popen[str] | None) -> None:
-        if proc is None or proc.poll() is not None:
-            return
-        # Reuse the lifecycle tree-kill: a bare terminate/kill orphans grandchildren
-        # on Windows (no taskkill /T), stranding e.g. an engine the process spawned.
-        tree_kill(proc.pid, timeout=30.0)
-        with contextlib.suppress(Exception):
-            proc.wait(timeout=30.0)
+        await_gateway_ready(self.gateway_url, self._gateway_proc, timeout=120.0)
 
     def crash_gateway(self) -> None:
         """Kill this stack's gateway while leaving its worker and stores running."""
         if self._gateway_proc is None:
             raise RuntimeError("gateway is not running")
-        self._stop_process(self._gateway_proc)
+        reap_process(self._gateway_proc)
         self._gateway_proc = None
-        if self._gateway_log is not None:
-            self._gateway_log.close()
-            self._gateway_log = None
         self._gateway_log_name = "gateway-restarted.log"
 
     def restart_gateway(self) -> None:
         """Start the same gateway profile over this stack's durable stores."""
-        if self._gateway_proc is not None:
-            raise RuntimeError("gateway is already running")
-        self._start_gateway()
+        self.start_gateway()
         self.wait_for_ready()
-
-    def pause_mock_service(self) -> None:
-        """Hold model replies while a real worker retains its active turn."""
-        if self._mock_paused:
-            raise RuntimeError("mock service is already paused")
-        _run_compose(self.project_name, "pause", "vidaimock", ports=self.ports)
-        self._mock_paused = True
-
-    def resume_mock_service(self) -> None:
-        """Release a held model reply after the gateway has been killed."""
-        if not self._mock_paused:
-            raise RuntimeError("mock service is not paused")
-        _run_compose(self.project_name, "unpause", "vidaimock", ports=self.ports)
-        self._mock_paused = False
 
     def _wait_for_process_health(
         self,
@@ -557,35 +401,25 @@ class ServiceStack:
         *,
         label: str,
         timeout: float,
-        watch: Sequence[_WatchedProcess] = (),
+        watch: Sequence[WatchedProcess] = (),
     ) -> None:
-        _wait_for(
-            label,
+        await_ready(
             lambda: probe().get("status") == "ok",
+            what=label,
+            watch=watch,
             timeout=timeout,
             interval=1.0,
-            watch=watch,
         )
 
     def stop(self) -> None:
-        """Capture diagnostics and tear the compose stack down."""
+        """Capture diagnostics and tear the service stack down."""
         if self._stopped:
             self.record("teardown", {"status": "already_stopped"})
             return
         self._stopped = True
-        if self._mock_paused:
-            try:
-                self.resume_mock_service()
-            except Exception as exc:
-                self.record("mock-unpause-error", {"error": repr(exc)})
-        self._stop_process(self._gateway_proc)
-        self._stop_process(self._worker_proc)
-        if self._gateway_log is not None:
-            self._gateway_log.close()
-            self._gateway_log = None
-        if self._worker_log is not None:
-            self._worker_log.close()
-        self._worker_log = None
+        for process in (self._gateway_proc, self._worker_proc):
+            if process is not None:
+                reap_process(process)
         self._gateway_proc = None
         self._worker_proc = None
         diagnostics_error: Exception | None = None
@@ -662,7 +496,7 @@ class ServiceStack:
         ):
             if proc_path.exists():
                 (self.runtime_dir / f"{name}-tail.txt").write_text(
-                    _log_tail(proc_path, limit=_DIAGNOSTIC_LOG_TAIL_CHARS),
+                    log_tail(proc_path, limit=_DIAGNOSTIC_LOG_TAIL_BYTES),
                     encoding="utf-8",
                 )
 
@@ -673,7 +507,6 @@ class ServiceStack:
             "ports": self.ports,
             "gateway_url": self.gateway_url,
             "worker_url": self.worker_url,
-            "vidaimock_url": self.vidaimock_url,
             "jaeger_url": self.jaeger_url,
             "started_at": self.started_at,
             "artifacts": self.artifacts,
@@ -691,7 +524,6 @@ class ServiceStack:
             self.record("health", health)
             self.worker_health()
             self.jaeger_services()
-            self.vidaimock_health()
             checks = health.get("checks", {})
             return (
                 health.get("status") == "ok"
@@ -704,12 +536,12 @@ class ServiceStack:
 
         # The aggregate probe spans both owned processes, so either dying is a
         # fast failure rather than a 180s burn ending in a bare timeout.
-        _wait_for(
-            "gateway readiness",
+        await_ready(
             _probe,
+            what="service stack",
+            watch=self._watched("gateway", "worker"),
             timeout=180.0,
             interval=2.0,
-            watch=self._watched("gateway", "worker"),
         )
         return self.health()
 
@@ -735,37 +567,6 @@ class ServiceStack:
             resp.raise_for_status()
             payload = resp.json()
             self.record("jaeger-services", payload)
-            return payload
-
-    def vidaimock_health(self) -> dict[str, Any]:
-        """Exercise the deterministic provider route before certifying ready."""
-        with self._vidaimock_client() as client:
-            probes = {
-                "mock_coder_human": {
-                    "path": "/mock-coder-human/v1/chat/completions",
-                    "body": {
-                        "model": "mock-coder-human",
-                        "messages": [{"role": "user", "content": "health probe"}],
-                        "stream": False,
-                    },
-                },
-                "vaultspec_supervisor": {
-                    "path": "/vaultspec-supervisor/v1/chat/completions",
-                    "body": {
-                        "model": "vaultspec-supervisor",
-                        "messages": [{"role": "user", "content": "health probe"}],
-                        "stream": False,
-                    },
-                },
-            }
-            payload: dict[str, Any] = {}
-            for name, probe in probes.items():
-                path = str(probe["path"])
-                body = cast("dict[str, Any]", probe["body"])
-                resp = client.post(path, json=body)
-                resp.raise_for_status()
-                payload[name] = resp.json()
-            self.record("vidaimock-health", payload)
             return payload
 
     def jaeger_traces(
@@ -801,42 +602,25 @@ class ServiceStack:
         catalog served FOR THIS WORKSPACE, so it has to name a lane this gateway
         actually reports selectable, at that lane's current revision.
 
-        The lane is chosen to match what the preset is FOR. These presets run the
-        in-process lanes - the mock lane replays a tape, the deterministic lane
-        answers from fixed role-keyed content - and picking anything else would
-        change what the test exercises. So an external lane is never selected
-        here even when one is available: on a developer machine with a real
-        provider session this would otherwise quietly send certification traffic
-        to a billable lane, which is a worse failure than not running.
+        The lane is chosen to match what the preset is FOR. Every preset this
+        stack runs is a deterministic scenario, keyed by its agents on the
+        deterministic lane, and picking anything else would change what the test
+        exercises. So an external lane is never selected here even when one is
+        available: on a developer machine with a real provider session this
+        would otherwise quietly send certification traffic to a billable lane,
+        which is a worse failure than not running.
         """
-        cache_key = f"{workspace_root}|{team_preset}"
-        cached = self._selection_cache.get(cache_key)
-        if cached is not None:
-            return dict(cached)
-
-        # A first read builds the catalog cold, probing every registered lane.
-        with self._client(timeout=240.0) as client:
-            resp = client.get(
-                "/v1/provider-catalog", params={"workspace_root": workspace_root}
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-
-        # The lane the preset is pinned to, so a mock preset keeps replaying its
-        # tape rather than being answered by the deterministic lane. Refusing a
-        # non-in-process lane is the mechanism's own guarantee now, not this
-        # file's: it will not hand back a billable lane even if one is the only
-        # selectable thing this stack serves.
+        # Refusing a non-in-process lane is the mechanism's own guarantee: it
+        # will not hand back a billable lane even if one is the only selectable
+        # thing this stack serves. The choice is cached because the first catalog
+        # read on a gateway builds it cold across every registered lane.
         try:
-            selection = in_process_selection(payload, prefer_provider_id="mock")
+            with self._client() as client:
+                return fetch_in_process_selection(client, workspace_root, cache=True)
         except NoSelectableLaneError as exc:
             raise GatewayBootError(
                 f"a {team_preset!r} run cannot present a valid selection: {exc}"
             ) from exc
-        self._selection_cache[cache_key] = selection
-        # Copied per call so a caller mutating its body cannot reach the cache
-        # and silently change what every later run in the session selects.
-        return dict(selection)
 
     def create_thread(
         self,
@@ -860,28 +644,26 @@ class ServiceStack:
         # Path-safe by construction: run ids reach the filesystem, and the
         # schema pattern refuses anything else.
         run_id = f"svc-{uuid.uuid4().hex}"
-        meta: dict[str, Any] = dict(metadata) if metadata else {}
-        workspace_root = str(meta.get("workspace_root") or self.runtime_dir)
+        workspace_root = str((metadata or {}).get("workspace_root") or self.runtime_dir)
         Path(workspace_root).mkdir(parents=True, exist_ok=True)
-        meta["workspace_root"] = workspace_root
-
-        body: dict[str, Any] = {
-            "message": initial_message,
-            "team_preset": team_preset,
-            "run_id": run_id,
-            "selection": self.catalog_selection(workspace_root, team_preset),
-            "metadata": meta,
-        }
-        if title is not None:
-            body["title"] = title
-        if autonomous is not None:
-            body["autonomous"] = autonomous
-        with self._client(timeout=30.0) as client:
-            resp = client.post("/v1/runs", json=body)
-            resp.raise_for_status()
-            payload = resp.json()
-            self.record("last-create-thread", payload)
-            return payload
+        verbs = RunVerbs(
+            base_url=self.gateway_url,
+            authorization=bearer_header(_GATEWAY_SERVICE_TOKEN)["Authorization"],
+            team_preset=team_preset,
+            workspace_root=workspace_root,
+            selection=lambda workspace: self.catalog_selection(workspace, team_preset),
+        )
+        resp = verbs.start(
+            run_id,
+            message=initial_message,
+            metadata=metadata,
+            title=title,
+            autonomous=autonomous,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        self.record("last-create-thread", payload)
+        return payload
 
     def list_threads(self, *, status: str | None = None) -> dict[str, Any]:
         """List every run, including terminal ones, via the history reading.
@@ -914,28 +696,6 @@ class ServiceStack:
             payload = resp.json()
             self.record(f"thread-state:{thread_id}", payload)
             return payload["state"]
-
-    def send_message(
-        self,
-        thread_id: str,
-        *,
-        content: str,
-        idempotency_key: str,
-        agent_id: str | None = None,
-    ) -> dict[str, Any]:
-        body: dict[str, Any] = {"content": content}
-        if agent_id is not None:
-            body["agent_id"] = agent_id
-        with self._client(timeout=30.0) as client:
-            resp = client.post(
-                f"/v1/runs/{thread_id}/messages",
-                json=body,
-                headers={"Idempotency-Key": idempotency_key},
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-            self.record(f"send-message:{thread_id}", payload)
-            return payload
 
     def respond_permission(
         self,
@@ -979,15 +739,22 @@ class ServiceStack:
             return payload
 
 
-def build_service_stack(*, postgres_url: str | None = None) -> ServiceStack:
+def build_service_stack() -> ServiceStack:
     ports = {
         "gateway": free_port(),
         "worker": free_port(),
-        "vidaimock": free_port(),
         "jaeger_ui": free_port(),
         "jaeger_otlp": free_port(),
     }
     project_name = f"vaultspec-service-tests-{uuid.uuid4().hex[:8]}"
-    return ServiceStack(
-        project_name=project_name, ports=ports, postgres_url=postgres_url
-    )
+    return ServiceStack(project_name=project_name, ports=ports)
+
+
+def unstarted_service_stack(project_name: str) -> ServiceStack:
+    """A stack built to inspect its wiring, never started.
+
+    Its ports are placeholders nothing listens on, and construction creates
+    nothing on disk, so it can be built freely.
+    """
+    ports = {"gateway": 18000, "worker": 18001, "jaeger_ui": 16686, "jaeger_otlp": 4317}
+    return ServiceStack(project_name=project_name, ports=ports)

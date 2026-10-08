@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 TICK_SECONDS = 0.01
 
 if TYPE_CHECKING:
-    from ...database.checkpoints import Checkpointer
+    from ...database import Checkpointer
     from ...worker.ipc import WorkerBridge
 
 
@@ -83,8 +83,13 @@ async def _compile_measured_graph(
     from uuid import uuid4
 
     from ...ipc.schemas import DispatchRequest
-    from ...streaming.aggregator import EventAggregator
+    from ...streaming import RunEventProducer
     from ...team.team_config import load_team_config
+    from ...testing import (
+        DEFAULT_REQUIRED_ROLE,
+        DEFAULT_TEAM_PRESET,
+        deterministic_model_assignment,
+    )
     from ...thread.executable_graph import freeze_graph_definition
     from ...worker.catalog_store import RunCatalogStore
     from ...worker.graph_lifecycle import GraphLifecycleManager
@@ -93,9 +98,12 @@ async def _compile_measured_graph(
     lifecycle = GraphLifecycleManager(
         checkpointer=checkpointer,
         bridge=bridge,
-        aggregator=EventAggregator(),
+        producer=RunEventProducer(),
         token_store=RunTokenStore(),
         catalog_store=RunCatalogStore(),
+    )
+    model_assignment = deterministic_model_assignment(
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace)
     )
     await asyncio.sleep(0.1)
     started = heartbeat.begin_window()
@@ -103,28 +111,16 @@ async def _compile_measured_graph(
         DispatchRequest(
             action="ingest",
             thread_id=f"loop-responsiveness-{uuid4().hex[:8]}",
-            agent_id="mock-coder-success",
+            agent_id=DEFAULT_REQUIRED_ROLE,
             content="probe",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             graph_definition=freeze_graph_definition(
-                load_team_config("mock-success-single", workspace_root=workspace),
+                load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
                 workspace_root=workspace,
             ),
             workspace_root=str(workspace),
             recursion_limit=10,
-            model_assignment={
-                "mock-coder-success": {
-                    "schema_version": 1,
-                    "provider": "mock",
-                    "execution_mode": "in-process-mock",
-                    "catalog_revision": "test-revision",
-                    "entry_id": "mock-high",
-                    "model_name": "mock-high",
-                    "controls": [],
-                    "fallbacks": [],
-                    "provenance": {"selection_source": "team_selection"},
-                }
-            },
+            model_assignment=model_assignment,
         )
     )
     compile_finished = time.monotonic()
@@ -147,7 +143,7 @@ async def _run_compile(
     """
     from uuid import uuid4
 
-    from ...database.checkpoints import open_checkpointer
+    from ...database import open_checkpointer
     from ...worker.ipc import WorkerBridge
 
     checkpointer_context = open_checkpointer()

@@ -1,11 +1,11 @@
 """Run discovery, state, history, and lifecycle read endpoints."""
 
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from typing import Annotated, Any, Literal
 
-import httpx
 from fastapi import (
+    APIRouter,
     Depends,
     Header,
     HTTPException,
@@ -14,17 +14,12 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...context.metadata import ThreadMetadata
+from ...control._thread_metadata import run_lease_binding, run_lease_id
 from ...control._worker_health import worker_liveness
-from ...control.cancel_service import (
-    CancelRuntime,
-    cancel_thread,
-    raise_for_cancel_failure,
-)
-from ...control.config import settings
+from ...control.action_lease import RUN_NOT_FOUND
 from ...control.run_discovery_service import discover_active_runs
 from ...control.team_service import build_team_status
 from ...control.thread_listing import list_threads_service
@@ -34,44 +29,37 @@ from ...control.thread_service import (
 )
 from ...control.thread_state_service import (
     capture_thread_state,
-    derive_run_authoring_ids,
     derive_run_semantic_context,
     project_semantic_phase,
 )
 from ...database import (
+    Checkpointer,
+    TokenUsageTotals,
     get_db,
     get_permission_logs_by_thread,
-    get_thread_metadata,
     resolve_session_factory,
+    sum_cost_by_role,
+    sum_cost_by_thread,
 )
-from ...database.checkpoints import Checkpointer
-from ...database.run_event_repository import retained_high_water_mark
-from ...domain_config import domain_config
-from ...providers import ProviderCondition
-from ...streaming.aggregator import EventAggregator
-from ...thread.clarification import (
-    pending_clarification,
-)
+from ...streaming import RelayHub, catalog_json_schema
 from ...thread.constants import (
+    MAX_DISCOVERY_RESULTS,
     MAX_FEATURE_TAG_LENGTH,
     MAX_WORKSPACE_ROOT_LENGTH,
 )
 from ...thread.enums import (
-    TERMINAL_STATUSES,
     ApprovalStatus,
     PermissionRequestStatus,
     RepairStatus,
     ThreadStatus,
     TranscriptAvailability,
 )
+from ...thread.snapshots import ThreadStateSnapshot
 from .._replay_writer_seat import replay_writer_seat
-from .._utils import trace_headers
+from .._stream_replay import run_stream_resumability
 from ..dependencies import (
-    get_aggregator,
     get_checkpointer,
-    get_circuit_breaker,
-    get_worker_client,
-    get_worker_spawner,
+    get_relay_hub,
 )
 from ..schemas.gateway import (
     ActiveRunRecord,
@@ -80,7 +68,6 @@ from ..schemas.gateway import (
     RoleState,
     RunAgentSummary,
     RunArchiveResponse,
-    RunCancelResponse,
     RunDeleteResponse,
     RunHistoryResponse,
     RunPendingPermission,
@@ -88,10 +75,11 @@ from ..schemas.gateway import (
     RunStatusResponse,
     RunSummariesResponse,
     RunSummaryRecord,
+    RunTokenUsage,
+    RunUsage,
     TeamStatusV1Response,
     TopologyPosition,
 )
-from ..schemas.snapshots import ThreadStateSnapshot
 from ..thread_stream import (
     ThreadStreamRequest,
     build_thread_stream_response,
@@ -101,14 +89,15 @@ from ..workspace import require_existing_workspace_root
 from .gateway import (
     _modern_frozen_disclosure,
     _optional_enum,
-    _persisted_lease_binding,
-    _persisted_lease_id,
-    _read_persisted_team_selection,
-    admission_gate,
-    router,
 )
 
 logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
+
+# The run-history state is the Layer-1 snapshot itself. The projection steps
+# assemble it from durable strings and live dicts, so it is validated on its way
+# out: enums resolve, nested blocks take their declared shape, and the declared
+# bounds hold, whatever a step assigned.
+_THREAD_STATE_ADAPTER = TypeAdapter(ThreadStateSnapshot)
 
 
 class _ActiveRunsOptions(BaseModel):
@@ -122,62 +111,17 @@ class _ActiveRunsOptions(BaseModel):
         default=None, min_length=1, max_length=MAX_FEATURE_TAG_LENGTH
     )
     status: ThreadStatus | None = Query(default=None)
-    limit: int = Query(default=50, ge=1, le=100)
+    limit: int = Query(default=50, ge=1, le=MAX_DISCOVERY_RESULTS)
     offset: int = Query(default=0, ge=0)
 
 
-@dataclass(frozen=True, slots=True)
-class _CancelEndpointDependencies:
-    """Injected resources needed by the cancel service."""
-
-    db: AsyncSession
-    runtime: CancelRuntime
-
-
-def _get_cancel_endpoint_dependencies(
-    db: AsyncSession = Depends(get_db),
-    worker_client: httpx.AsyncClient = Depends(get_worker_client),
-    circuit_breaker: Any = Depends(get_circuit_breaker),
-    worker_spawner: Any = Depends(get_worker_spawner),
-) -> _CancelEndpointDependencies:
-    """Group cancel's service dependencies without changing their providers."""
-    return _CancelEndpointDependencies(
-        db=db,
-        runtime=CancelRuntime(
-            circuit_breaker,
-            worker_spawner,
-            worker_client,
-            domain_config.graph_recursion_limit,
-            trace_headers(),
-        ),
-    )
-
-
-__all__ = ["_active_role", "snapshot_to_wire"]
+__all__ = ["_active_role", "register"]
 
 # ---------------------------------------------------------------------------
 # active-run discovery
 # ---------------------------------------------------------------------------
 
 
-@router.get(
-    "/runs",
-    # Serialization is left to the two explicit returns below: a single response
-    # model - even a union one - would re-serialize the discovery reading through
-    # a shape it does not own, and that response is certified byte for byte. The
-    # ``responses`` entry restores what turning the model off would otherwise
-    # cost: the documented 200 schema a generated client reads.
-    response_model=None,
-    responses={
-        200: {
-            "model": ActiveRunsResponse | RunSummariesResponse,
-            "description": (
-                "The discovery reading for ``state=active`` and the wider "
-                "history reading for ``state=all``."
-            ),
-        }
-    },
-)
 async def active_runs_endpoint(
     request: Request,
     options: Annotated[_ActiveRunsOptions, Query()],
@@ -292,79 +236,36 @@ def _active_role(next_nodes: list[str], agents: list[Any]) -> str | None:
     return None
 
 
-async def _stream_is_resumable(app: Any, db: AsyncSession, run_id: str) -> bool:
-    """Whether this run's stream can be resumed from the id its frames carry.
-
-    Both halves of the posture, because either alone misreports it. The
-    switch governs the whole mechanism; the retained rows say whether THIS
-    run has a window behind it, which a run that has produced nothing - or
-    one whose window has expired - does not. The writer's unflushed ring
-    counts as retained: a resume taken in that interval reads it, so
-    answering false there would understate a capability the stream has.
-
-    Probed on the REQUEST's own session rather than through a factory of its
-    own. This is the hottest read on the gateway and it already holds a
-    pooled connection; opening a second one beside it for an additive
-    boolean halved how many of these calls an engine could serve at once,
-    and on a small pool that is the difference between answering and waiting.
-
-    A store that cannot answer reports false, which is the safe direction:
-    a client told it cannot resume loses nothing but an optimisation, while
-    one told it can and then refused has already thrown away its position.
-    """
-    if not settings.stream_replay_enabled:
-        return False
-    writer = replay_writer_seat(app)
-    if writer is not None and writer.pending(run_id):
-        return True
-    try:
-        return (await retained_high_water_mark(db, run_id)) is not None
-    except Exception:
-        logger.warning(
-            "Could not read the replay window of run %s for run-status",
-            run_id,
-            exc_info=True,
-            extra={"thread_id": run_id, "action": "run_event_replay_failed"},
-        )
-        return False
-
-
-@router.get("/runs/{run_id}", response_model=RunStatusResponse)
 async def run_status_endpoint(
     run_id: PathSafeRunId,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
+    relay_hub: RelayHub = Depends(get_relay_hub),
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> RunStatusResponse:
     """Return the authoritative recovery snapshot for a run."""
     capture = await capture_thread_state(
-        db, thread_id=run_id, aggregator=aggregator, checkpointer=checkpointer
+        db, thread_id=run_id, relay_hub=relay_hub, checkpointer=checkpointer
     )
     if capture is None:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
 
     snapshot = capture.snapshot
-    proposal_ids, changeset_ids = derive_run_authoring_ids(capture.checkpoint_tuple)
-    semantic = derive_run_semantic_context(capture.checkpoint_tuple)
+    semantic = derive_run_semantic_context(capture.checkpoint_projection)
     semantic_phase = project_semantic_phase(
         status=snapshot.status,
         next_nodes=snapshot.next_nodes,
         repair_status=snapshot.repair_status,
     )
-    modern_frozen = _read_persisted_team_selection(capture.thread_metadata)
-
-    metadata = None
-    if capture.thread_metadata:
-        try:
-            metadata = ThreadMetadata.model_validate_json(capture.thread_metadata)
-        except ValidationError:
-            logger.warning("run status: stored metadata for %s is unreadable", run_id)
+    provenance = capture.metadata.provenance
+    lease_binding = run_lease_binding(capture.metadata.fields)
 
     return RunStatusResponse(
         run_id=snapshot.thread_id,
-        continues_run_id=metadata.continues_run_id if metadata is not None else None,
-        status=ThreadStatus(snapshot.status),
+        continues_run_id=(
+            provenance.continues_run_id if provenance is not None else None
+        ),
+        status=snapshot.status,
         semantic_phase=semantic_phase,
         feature_tag=semantic.feature_tag,
         authoring_session_id=semantic.authoring_session_id,
@@ -382,52 +283,51 @@ async def run_status_endpoint(
             )
             for agent in snapshot.agents
         ],
-        proposal_ids=proposal_ids,
-        changeset_ids=changeset_ids,
-        approval_status=_optional_enum(ApprovalStatus, snapshot.approval_status),
+        proposal_ids=capture.proposal_ids,
+        changeset_ids=capture.changeset_ids,
+        approval_status=snapshot.approval_status,
         approval_request_id=snapshot.approval_request_id,
         checkpoint_id=snapshot.checkpoint_id,
         last_sequence=snapshot.last_sequence,
         # Read beside the cursor it qualifies: last_sequence says where the
         # run's numbering stood, and this says whether that number is one the
         # stream will honour as a resumption point.
-        stream_resumable=await _stream_is_resumable(request.app, db, run_id),
+        stream_resumable=await run_stream_resumability(request.app, db, run_id),
         # From the same capture as everything else, so a queue depth is never
         # reported against a moment the run has already left. A run whose turn
         # ended with a continuation waiting is RUNNING with a quiet stream,
         # and this is the only field that distinguishes that from idle.
         queued_messages=snapshot.queued_messages,
-        repair_status=_optional_enum(RepairStatus, snapshot.repair_status),
-        execution_readiness=_optional_enum(RepairStatus, snapshot.execution_readiness),
+        repair_status=snapshot.repair_status,
+        execution_readiness=snapshot.execution_readiness,
         degraded_reasons=snapshot.degraded_reasons,
         failure_reason=snapshot.failure_reason,
         # Named explicitly beside the reason because this response is built with
         # keyword arguments rather than validated from the snapshot: nothing here
         # is dropped silently, but nothing arrives without being written either,
         # which is how the reason itself was missed when it was first persisted.
-        provider_condition=_optional_enum(
-            ProviderCondition, snapshot.provider_condition
-        ),
+        provider_condition=snapshot.provider_condition,
         # The account of an operation that did not take on a run that is still
         # alive. Its writers decline to set the failure reason precisely because
         # the run survives, so without this line their account is durable and
         # unreadable - recorded for nobody.
         repair_reason=snapshot.repair_reason,
-        frozen_assignment=_modern_frozen_disclosure(modern_frozen),
-        lease_id=_persisted_lease_id(capture.thread_metadata),
+        # From the capture, like every other field: the stored selection is
+        # digest-protected, so validating it a second time here raised over a
+        # record the capture had already judged and degraded for - and that
+        # exception cost the caller the whole response for one field.
+        frozen_assignment=_modern_frozen_disclosure(capture.frozen_selection),
+        lease_id=run_lease_id(capture.metadata.fields),
         reservation_id=(
-            binding.reservation_id
-            if (binding := _persisted_lease_binding(capture.thread_metadata))
-            is not None
-            else None
+            lease_binding.reservation_id if lease_binding is not None else None
         ),
-        # Read from the SAME capture tuple as every other field above, so
-        # a questionnaire cannot be reported against a position the run has since
-        # left. This is the authoritative disclosure a reloaded client recovers
-        # from; the progress relay only ever nudges it to look here.
-        pending_clarification=pending_clarification(
-            capture.checkpoint_tuple, thread_id=run_id
-        ),
+        # Read from the SAME capture as every other field above - the snapshot
+        # computed it once from the capture's checkpoint projection - so a
+        # questionnaire cannot be reported against a position the run has since
+        # left, nor disagree with the one run-history serves. This is the
+        # authoritative disclosure a reloaded client recovers from; the progress
+        # relay only ever nudges it to look here.
+        pending_clarification=snapshot.pending_clarification,
     )
 
 
@@ -442,7 +342,6 @@ async def run_status_endpoint(
 MAX_RESUME_CURSOR_CHARS = 160
 
 
-@router.get("/runs/{run_id}/stream")
 async def run_stream_endpoint(
     run_id: PathSafeRunId,
     request: Request,
@@ -456,7 +355,7 @@ async def run_stream_endpoint(
     # gives the connection back when this function returns, which is the last
     # moment the stream needs it.
     db: AsyncSession = Depends(get_db, scope="function"),
-    aggregator: EventAggregator = Depends(get_aggregator),
+    relay_hub: RelayHub = Depends(get_relay_hub),
     last_event_id_header: Annotated[
         str | None,
         Header(
@@ -499,62 +398,12 @@ async def run_stream_endpoint(
     return await build_thread_stream_response(
         ThreadStreamRequest(
             thread_id=run_id,
-            aggregator=aggregator,
+            relay_hub=relay_hub,
             session_factory=resolve_session_factory(request.app.state),
             resume_cursor=offered_resume_cursor(last_event_id_header, last_event_id),
             replay_writer=replay_writer_seat(request.app),
-            not_found_detail="Run not found",
         ),
         db=db,
-    )
-
-
-# ---------------------------------------------------------------------------
-# run-cancel
-# ---------------------------------------------------------------------------
-
-
-@router.post("/runs/{run_id}/cancel", response_model=RunCancelResponse)
-async def run_cancel_endpoint(
-    run_id: PathSafeRunId,
-    request: Request,
-    dependencies: _CancelEndpointDependencies = Depends(
-        _get_cancel_endpoint_dependencies
-    ),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-) -> RunCancelResponse:
-    """Cancel a run idempotently."""
-    result = await cancel_thread(
-        db=dependencies.db,
-        thread_id=run_id,
-        idempotency_key=idempotency_key,
-        runtime=dependencies.runtime,
-    )
-
-    raise_for_cancel_failure(result, resource_noun="Run")
-
-    if result.cancelled:
-        worker_liveness(request.app.state).record_contact()
-
-    # Cancellation is the drain's tool and is never itself admission-gated. When
-    # a cancel settles the run terminally here (e.g. a submitted-but-undispatched
-    # run), release it from the admission gate so a concurrent drain can quiesce;
-    # a run that only reaches CANCELLING is deliberately left for the worker's
-    # terminal event, which releases it in
-    # ``control.event_handlers._handle_terminal_event``. Both sites can fire for
-    # one run - the gate's release is an idempotent discard, so they cannot
-    # corrupt the active set.
-    if result.thread_status in TERMINAL_STATUSES:
-        await admission_gate(request.app).release(result.thread_id)
-
-    return RunCancelResponse(
-        run_id=result.thread_id,
-        status=result.thread_status,
-        cancelled=result.cancelled,
-        accepted=result.accepted,
-        applied=result.applied,
-        action_status=result.action_status,
-        idempotency_key=result.idempotency_key,
     )
 
 
@@ -570,22 +419,48 @@ _TRANSCRIPT_FAULTS: frozenset[TranscriptAvailability] = frozenset(
 )
 
 
-def snapshot_to_wire(data: Any) -> ThreadStateSnapshot:
-    """Project the domain run-state snapshot onto its wire model.
+async def _read_run_usage(db: AsyncSession, run_id: str) -> RunUsage | None:
+    """Project one run's token accounting, or ``None`` when it recorded none.
 
-    Named rather than inlined so the conversion has a single production seam a
-    parity test can drive directly. A field added to the domain snapshot but
-    absent from the wire model is dropped silently here, which is exactly the
-    kind of loss a test that re-derives the conversion cannot catch.
+    Both reads are scoped to this run and are the ONLY production readers of
+    the accounting table: the counts were written on every turn and served
+    nowhere, which is what made three sites each look like an unfinished
+    feature. The per-role split is grouped inside the same run rather than
+    aggregated by role id, because a role id is a team-preset seat and the same
+    seat appears in every run that has one.
+
+    A run with no rows is reported as no accounting at all. Serving a zeroed
+    object instead would invite a reviewer to read a structural zero as a
+    measured one, which is the same mistake that retired the priced column.
     """
-    return ThreadStateSnapshot.model_validate(asdict(data))
+    totals = await sum_cost_by_thread(db, run_id)
+    if totals is None:
+        return None
+    by_role = await sum_cost_by_role(db, run_id)
+    return RunUsage(
+        total=_token_usage(totals),
+        by_role={
+            agent_id: _token_usage(role_totals)
+            for agent_id, role_totals in by_role.items()
+        },
+    )
 
 
-@router.get("/runs/{run_id}/history", response_model=RunHistoryResponse)
+def _token_usage(totals: TokenUsageTotals) -> RunTokenUsage:
+    """Carry one summed aggregate onto the wire, breakdown nulls intact."""
+    return RunTokenUsage(
+        input_tokens=totals.input_tokens,
+        output_tokens=totals.output_tokens,
+        cache_read_tokens=totals.cache_read_tokens,
+        cache_write_tokens=totals.cache_write_tokens,
+        reasoning_tokens=totals.reasoning_tokens,
+    )
+
+
 async def run_history_endpoint(
     run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
+    relay_hub: RelayHub = Depends(get_relay_hub),
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> RunHistoryResponse:
     """Read one run whole, including a terminal or archived one.
@@ -607,15 +482,20 @@ async def run_history_endpoint(
 
     The state snapshot is embedded rather than restated, so this response cannot
     drift from the snapshot it reports.
+
+    The two durable artifacts this verb discloses that no other surface serves -
+    the settled permission decisions and the token accounting - are here for the
+    same reason: both were recorded on every run and readable nowhere, and
+    reporting the record is this verb's whole job.
     """
     capture = await capture_thread_state(
         db,
         thread_id=run_id,
-        aggregator=aggregator,
+        relay_hub=relay_hub,
         checkpointer=checkpointer,
     )
     if capture is None:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
     snapshot = capture.snapshot
 
     # A run past dispatch owes a transcript. Reporting the absence on the wire
@@ -631,28 +511,6 @@ async def run_history_endpoint(
             capture.transcript.value,
         )
 
-    # Absent metadata is stored as null OR as an empty string depending on how
-    # the run was created, and an empty string is not parseable JSON - so the
-    # guard is truthiness, not "is not None".
-    #
-    # Unparseable metadata is reported as absent rather than failing the read.
-    # Not defensive padding: the stored blob and the metadata model genuinely
-    # disagree today - a run started without a workspace root persists metadata
-    # the model rejects as incomplete - and this is the WIDE read, whose job is
-    # to report the record, not to enforce a schema on it. Failing here would
-    # cost a caller the whole transcript over one unrelated field. The
-    # disagreement is queued as its own finding.
-    metadata_json = await get_thread_metadata(db, run_id)
-    metadata: ThreadMetadata | None = None
-    if metadata_json:
-        try:
-            metadata = ThreadMetadata.model_validate_json(metadata_json)
-        except ValidationError:
-            logger.warning(
-                "run history: stored metadata for %s does not satisfy the "
-                "metadata model; reporting it absent",
-                run_id,
-            )
     # The settled counterpart to the snapshot's PENDING permissions. A gate leaves
     # the pending list as soon as it is answered, and a terminal run expires
     # whatever was still outstanding, so a decision a human actually made was
@@ -662,8 +520,8 @@ async def run_history_endpoint(
 
     return RunHistoryResponse(
         run_id=run_id,
-        state=snapshot_to_wire(snapshot),
-        metadata=metadata,
+        state=_THREAD_STATE_ADAPTER.validate_python(asdict(snapshot)),
+        metadata=capture.metadata.provenance,
         transcript_available=capture.transcript is TranscriptAvailability.AVAILABLE,
         transcript_status=capture.transcript,
         permission_decisions=[
@@ -676,6 +534,7 @@ async def run_history_endpoint(
             )
             for decision in decisions
         ],
+        usage=await _read_run_usage(db, run_id),
     )
 
 
@@ -684,7 +543,6 @@ async def run_history_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/runs/{run_id}/archive", response_model=RunArchiveResponse)
 async def run_archive_endpoint(
     run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
@@ -698,7 +556,7 @@ async def run_archive_endpoint(
     """
     result = await archive_thread(db, run_id)
     if result.not_found:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
     if not result.archived:
         raise HTTPException(status_code=409, detail=result.error_detail)
     return RunArchiveResponse(run_id=run_id)
@@ -709,10 +567,9 @@ async def run_archive_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/team/status", response_model=TeamStatusV1Response)
 async def team_status_endpoint(
     request: Request,
-    aggregator: EventAggregator = Depends(get_aggregator),
+    relay_hub: RelayHub = Depends(get_relay_hub),
     db: AsyncSession = Depends(get_db),
 ) -> TeamStatusV1Response:
     """Report the team's live operational projection.
@@ -724,7 +581,7 @@ async def team_status_endpoint(
     """
     status = await build_team_status(
         db=db,
-        aggregator=aggregator,
+        relay_hub=relay_hub,
         heartbeat_threads=worker_liveness(request.app.state).active_threads,
     )
     return TeamStatusV1Response(
@@ -757,28 +614,10 @@ async def team_status_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.delete(
-    "/runs/{run_id}",
-    status_code=204,
-    response_model=None,
-    responses={
-        200: {
-            "model": RunDeleteResponse,
-            "description": (
-                "Deleted, but cleanup was abandoned over permanently "
-                "unremovable state; the body names the kinds left behind."
-            ),
-        },
-        204: {"description": "Deleted; every store was cleaned."},
-        404: {"description": "No such run."},
-        409: {"description": "The run's lifecycle state refuses deletion."},
-        503: {"description": "Cleanup is unfinished but resumable; retry."},
-    },
-)
 async def run_delete_endpoint(
     run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
+    relay_hub: RelayHub = Depends(get_relay_hub),
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> Response:
     """Delete a run through the durable cross-store deletion saga.
@@ -795,7 +634,7 @@ async def run_delete_endpoint(
     """
     result = await delete_thread_service(db, run_id, checkpointer=checkpointer)
     if result.not_found:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail=RUN_NOT_FOUND)
     if result.error_detail is not None:
         raise HTTPException(status_code=409, detail=result.error_detail)
     if result.cleanup_incomplete:
@@ -803,12 +642,12 @@ async def run_delete_endpoint(
             status_code=503,
             detail="Run deletion is in progress; retry to complete cleanup.",
         )
-    aggregator.clear_thread_state(run_id)
+    relay_hub.clear_thread_state(run_id)
     # The run's thread is gone, so a progress frame still held for it can
     # never become a row: its insert would reference a thread that no longer
     # exists. Held rather than dropped, it refused this gateway's every later
     # write of that run and offered a deleted run's frames to a resume.
-    aggregator.discard_run_replay(run_id)
+    relay_hub.discard_run_replay(run_id)
     if result.abandoned_kinds:
         body = RunDeleteResponse(
             run_id=run_id,
@@ -816,3 +655,86 @@ async def run_delete_endpoint(
         )
         return JSONResponse(status_code=200, content=body.model_dump(mode="json"))
     return Response(status_code=204)
+
+
+def register(router: APIRouter) -> None:
+    """Mount the run discovery, state, history, and lifecycle read verbs."""
+    router.get(
+        "/runs",
+        # Serialization is left to the two explicit returns below: a single response
+        # model - even a union one - would re-serialize the discovery reading through
+        # a shape it does not own, and that response is certified byte for byte. The
+        # ``responses`` entry restores what turning the model off would otherwise
+        # cost: the documented 200 schema a generated client reads.
+        response_model=None,
+        responses={
+            200: {
+                "model": ActiveRunsResponse | RunSummariesResponse,
+                "description": (
+                    "The discovery reading for ``state=active`` and the wider "
+                    "history reading for ``state=all``."
+                ),
+            }
+        },
+    )(active_runs_endpoint)
+    router.get("/runs/{run_id}", response_model=RunStatusResponse)(run_status_endpoint)
+    router.get(
+        "/runs/{run_id}/stream",
+        # Declared rather than inferred. FastAPI reads the handler's return
+        # annotation, which is a response CLASS and carries no body shape, so
+        # it published an empty ``application/json`` schema for a route that
+        # serves ``text/event-stream`` - telling a generated client to parse
+        # one JSON object and stop.
+        response_class=StreamingResponse,
+        response_model=None,
+        responses={
+            200: {
+                "description": (
+                    "The run's progress stream. Each event's data is one "
+                    "progress frame; the frame kind is on the SSE 'event' "
+                    "line and in the body under both kind keys. A frame whose "
+                    "replay is retained carries an 'id' a reconnect may offer "
+                    "back as Last-Event-ID. Frames are non-authoritative: "
+                    "reconcile run state from run-status."
+                ),
+                # Generated from the one frame catalog the encoder projects
+                # every outgoing frame onto, so the published shape cannot
+                # describe a frame the service does not serve.
+                "content": {"text/event-stream": {"schema": catalog_json_schema()}},
+            },
+            404: {"description": "No such run."},
+            503: {
+                "description": (
+                    "Gateway service token is not configured, or the gateway "
+                    "is at its progress-stream connection limit; retry later."
+                )
+            },
+        },
+    )(run_stream_endpoint)
+    router.get("/runs/{run_id}/history", response_model=RunHistoryResponse)(
+        run_history_endpoint
+    )
+    router.post("/runs/{run_id}/archive", response_model=RunArchiveResponse)(
+        run_archive_endpoint
+    )
+    router.get("/team/status", response_model=TeamStatusV1Response)(
+        team_status_endpoint
+    )
+    router.delete(
+        "/runs/{run_id}",
+        status_code=204,
+        response_model=None,
+        responses={
+            200: {
+                "model": RunDeleteResponse,
+                "description": (
+                    "Deleted, but cleanup was abandoned over permanently "
+                    "unremovable state; the body names the kinds left behind."
+                ),
+            },
+            204: {"description": "Deleted; every store was cleaned."},
+            404: {"description": "No such run."},
+            409: {"description": "The run's lifecycle state refuses deletion."},
+            503: {"description": "Cleanup is unfinished but resumable; retry."},
+        },
+    )(run_delete_endpoint)

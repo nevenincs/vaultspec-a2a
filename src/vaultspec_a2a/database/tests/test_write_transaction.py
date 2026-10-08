@@ -17,29 +17,23 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from ..session import begin_write_transaction, configure_sqlite_engine
+from ...conftest import SqlitePosture
+from ..session import begin_write_transaction
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
-    from pathlib import Path
-
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
-@pytest_asyncio.fixture
-async def sessions(
-    runtime_dir: Path,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(f"sqlite+aiosqlite:///{runtime_dir / 'writes.db'}")
-    configure_sqlite_engine(engine)
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(text("CREATE TABLE rows (id INTEGER PRIMARY KEY)"))
-        yield async_sessionmaker(engine, expire_on_commit=False)
-    finally:
-        await engine.dispose()
+pytestmark = pytest.mark.sqlite_engine(SqlitePosture.APPLICATION)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _rows_table(session_factory: async_sessionmaker[AsyncSession]) -> None:
+    """Give the store the bare table these proofs contend over."""
+    async with session_factory() as db:
+        await db.execute(text("CREATE TABLE rows (id INTEGER PRIMARY KEY)"))
+        await db.commit()
 
 
 async def _commit_row(session: AsyncSession) -> float:
@@ -49,16 +43,16 @@ async def _commit_row(session: AsyncSession) -> float:
     return time.monotonic() - started
 
 
-async def _row_count(sessions: async_sessionmaker[AsyncSession]) -> int:
-    async with sessions() as session:
+async def _row_count(session_factory: async_sessionmaker[AsyncSession]) -> int:
+    async with session_factory() as session:
         return (await session.execute(text("SELECT count(*) FROM rows"))).scalar_one()
 
 
 @pytest.mark.asyncio
 async def test_deferred_read_then_write_fails_on_a_sibling_commit(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    async with sessions() as reader, sessions() as sibling:
+    async with session_factory() as reader, session_factory() as sibling:
         await reader.execute(text("SELECT count(*) FROM rows"))
         await _commit_row(sibling)
 
@@ -73,9 +67,9 @@ async def test_deferred_read_then_write_fails_on_a_sibling_commit(
 
 @pytest.mark.asyncio
 async def test_write_transaction_makes_a_sibling_wait_instead_of_failing(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    async with sessions() as writer, sessions() as sibling:
+    async with session_factory() as writer, session_factory() as sibling:
         await begin_write_transaction(writer)
         await writer.execute(text("SELECT count(*) FROM rows"))
 
@@ -88,14 +82,14 @@ async def test_write_transaction_makes_a_sibling_wait_instead_of_failing(
         waited = await asyncio.wait_for(contender, timeout=5.0)
 
     assert waited >= 0.3
-    assert await _row_count(sessions) == 2
+    assert await _row_count(session_factory) == 2
 
 
 @pytest.mark.asyncio
 async def test_write_mode_ends_with_its_transaction(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    async with sessions() as session, sessions() as sibling:
+    async with session_factory() as session, session_factory() as sibling:
         await begin_write_transaction(session)
         await session.execute(text("INSERT INTO rows DEFAULT VALUES"))
         await session.commit()
@@ -106,14 +100,14 @@ async def test_write_mode_ends_with_its_transaction(
         await asyncio.wait_for(_commit_row(sibling), timeout=1.0)
         await session.rollback()
 
-    assert await _row_count(sessions) == 2
+    assert await _row_count(session_factory) == 2
 
 
 @pytest.mark.asyncio
 async def test_write_transaction_refuses_a_session_already_in_a_transaction(
-    sessions: async_sessionmaker[AsyncSession],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    async with sessions() as session:
+    async with session_factory() as session:
         await session.execute(text("SELECT count(*) FROM rows"))
         with pytest.raises(RuntimeError, match="none open"):
             await begin_write_transaction(session)

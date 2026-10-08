@@ -7,27 +7,60 @@ Create Date: 2026-08-03
 
 from __future__ import annotations
 
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any, override
+
 import sqlalchemy as sa
 from alembic import op
 
-# Alembic loads version scripts by SCRIPT LOCATION rather than importing them
-# as package members, so a relative import would raise "attempted relative
-# import with no known parent package" — the same constraint documented in
-# ``env.py``. The custom type is imported rather than re-spelled as concrete
-# per-dialect types so the migrated schema and ``Base.metadata`` cannot drift.
-from vaultspec_a2a.database.models import (  # absolute-import-ok
-    MONEY_SCALE,
-    MoneyAmount,
-)
+if TYPE_CHECKING:
+    from sqlalchemy.engine.interfaces import Dialect
+    from sqlalchemy.types import TypeEngine
 
 revision = "0014"
 down_revision = "0013"
 branch_labels = None
 depends_on = None
 
-#: Integer units per dollar in the SQLite representation. Mirrors
-#: ``MoneyAmount``'s scaling so the migration and the type cannot disagree.
-_UNITS_PER_DOLLAR = 10**MONEY_SCALE
+#: Decimal places this revision keeps for a monetary amount, frozen here.
+#: Ten places resolve to 1e-10 USD, below the cheapest single priceable token.
+_MONEY_SCALE = 10
+
+#: Integer units per dollar in the SQLite representation. Derived from the
+#: frozen scale, so the rewrite below and the column type cannot disagree.
+_UNITS_PER_DOLLAR = 10**_MONEY_SCALE
+
+
+class MoneyAmount(sa.types.TypeDecorator[Decimal]):
+    """The exact-decimal column type this revision installs, frozen in place.
+
+    A deliberate copy of what ``database.models`` declared when this revision
+    shipped, and NOT an import of whatever it declares now. A revision states
+    the schema at ONE moment in the chain: importing the live type would let a
+    later model change silently rewrite DDL that every existing store has
+    already replayed, and would break this script outright the day the symbol
+    is deleted. The duplication is the migration framework's rule rather than a
+    defect, so the duplication guard exempts it.
+
+    Only the DDL rendering is load-bearing here. This revision rewrites the
+    stored amounts in SQL rather than through the ORM, so no value is ever
+    bound or loaded through this type; the bind and result processors the live
+    type carried are therefore no part of what the schema froze.
+    """
+
+    impl = sa.Numeric
+    cache_ok = True
+
+    @override
+    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
+        """Render scaled-integer storage, as the original type did.
+
+        SQLite has no decimal type and SQLAlchemy's plain ``Numeric`` copes by
+        round-tripping through ``float``, so the amount is stored as an exact
+        integer count of 1e-``_MONEY_SCALE`` dollar units instead.
+        """
+        return dialect.type_descriptor(sa.BigInteger())
+
 
 #: Back-fill marker used only when downgrading restores the NOT NULL lane
 #: columns. Bracketed so it cannot be confused with a real provider or model

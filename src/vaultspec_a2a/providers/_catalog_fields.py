@@ -19,23 +19,29 @@ both under one name. A REQUIRED field is structural - its absence means the
 payload is not the shape the lane believes it is, so discovery refuses. An
 OPTIONAL field is decoration, and a provider that omits it must not lose the
 whole catalog.
+
+The read bounds live here for the same reason. Every lane holds
+provider-controlled bytes in memory for one catalog read - a JSON-RPC frame, an
+HTTP body, a CLI listing - and the ceiling on that read is one decision, not one
+per transport.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
+from ..thread import canonical_digest, sha256_hex
 from .provider_catalog import MAX_DISPLAY_LENGTH, MAX_TEXT_LENGTH
 
 if TYPE_CHECKING:
-    from ._json_contract import JsonValue
+    from ._json_contract import JsonObject, JsonValue
     from ._stdio_rpc import ProtocolErrorFactory
     from .provider_catalog import ModelCatalogEntry, ProviderCatalogKey
 
 __all__ = [
+    "MAX_DISCOVERY_FRAMES",
+    "MAX_DISCOVERY_READ_BYTES",
     "CatalogFieldReader",
     "display_label",
     "display_text",
@@ -44,6 +50,15 @@ __all__ = [
     "optional_description",
     "optional_text",
 ]
+
+# The most provider-controlled bytes one discovery read may hold: a single
+# JSON-RPC frame, a model-list body, or a retained CLI listing. The refusals that
+# enforce it name it as one MiB.
+MAX_DISCOVERY_READ_BYTES: Final = 1_048_576
+
+# How many frames a discovery lane reads while waiting for one response; a reply
+# that has not arrived within them is refused as absent.
+MAX_DISCOVERY_FRAMES: Final = 64
 
 
 def optional_text(value: JsonValue | None) -> str | None:
@@ -89,8 +104,7 @@ def local_id(namespace: str, provider_value: str) -> str:
     either part - concatenating them directly would let one namespace forge an
     identifier belonging to another.
     """
-    encoded = f"{namespace}\0{provider_value}".encode()
-    return hashlib.sha256(encoded).hexdigest()[:32]
+    return sha256_hex(f"{namespace}\0{provider_value}".encode())[:32]
 
 
 def model_list_revision(
@@ -111,8 +125,7 @@ def model_list_revision(
         "execution_mode": key.execution_mode,
         "models": [model.provider_value for model in models],
     }
-    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_digest(payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,3 +146,31 @@ class CatalogFieldReader:
                 f"catalog field {field!r} exceeds {MAX_TEXT_LENGTH} characters"
             )
         return text
+
+    def required_objects(
+        self, value: JsonValue | None, *, field: str, limit: int
+    ) -> tuple[JsonObject, ...]:
+        """Return *value* as at most *limit* provider objects, or refuse."""
+        if not isinstance(value, list):
+            raise self.protocol_error(f"catalog field {field!r} must be a list")
+        if len(value) > limit:
+            raise self.protocol_error(f"catalog field {field!r} exceeds {limit} items")
+        objects = tuple(item for item in value if isinstance(item, dict))
+        if len(objects) != len(value):
+            raise self.protocol_error(
+                f"catalog field {field!r} contains a non-object item"
+            )
+        return objects
+
+    def optional_objects(
+        self, value: JsonValue | None, *, field: str, limit: int
+    ) -> tuple[JsonObject, ...]:
+        """Read a list the provider may omit; an absent list is empty.
+
+        Absence is the only leniency. A present value that is not a bounded list
+        of objects is still refused, because it means the payload is not the
+        shape the lane believes it is.
+        """
+        if value is None:
+            return ()
+        return self.required_objects(value, field=field, limit=limit)

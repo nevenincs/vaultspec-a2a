@@ -108,14 +108,16 @@ def test_supported_provider_and_exact_mode_inventories_are_current_only() -> Non
         "codex",
         "deterministic",
         "kimi",
-        "mock",
         "openai",
         "zai",
         "zhipu",
     )
     factory = ProviderFactory()
     external = tuple(
-        registration.key for registration in factory.catalog_registrations(Path.cwd())
+        registration.key
+        for registration in factory.catalog_registrations(
+            Path.cwd(), serve_in_process_lanes=False
+        )
     )
     assert external == (
         ProviderCatalogKey("antigravity", "antigravity-cli"),
@@ -132,9 +134,7 @@ def test_supported_provider_and_exact_mode_inventories_are_current_only() -> Non
             Path.cwd(), serve_in_process_lanes=True
         )
     )
-    assert armed == external + served_in_process_lanes(
-        armed=True, mock_api_base=settings.mock_api_base
-    )
+    assert armed == external + served_in_process_lanes(armed=True)
     assert all(
         "gemini" not in f"{key.provider_id}/{key.execution_mode}" for key in armed
     )

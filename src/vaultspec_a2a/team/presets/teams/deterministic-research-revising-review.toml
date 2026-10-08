@@ -1,0 +1,42 @@
+[team]
+id           = "deterministic-research-revising-review"
+display_name = "Deterministic Research (revising review)"
+description  = """
+Scripted research_adr scenario: the inner document reviewer requests revision of
+every draft, so each document phase spends its whole revision budget and then
+hands the draft to its human gate. Every other role answers with the in-process
+deterministic provider's role content.
+
+Runs on the in-process deterministic provider, so it needs no credential and no
+network.
+"""
+
+[team.topology]
+type  = "research_adr"
+order = []
+
+[team.permissions]
+auto_approve = false
+
+[team.persona]
+directive = "Run the in-process deterministic document phases under a reviewer that never passes."
+
+[team.graph]
+step_timeout_seconds = 600
+run_timeout_seconds  = 30000
+recursion_limit      = 50
+
+[[team.workers]]
+agent_id = "vaultspec-researcher"
+
+[[team.workers]]
+agent_id = "vaultspec-synthesist"
+
+[[team.workers]]
+agent_id = "vaultspec-adr-author"
+
+[[team.workers]]
+agent_id = "vaultspec-plan-author"
+
+[[team.workers]]
+agent_id = "deterministic-revising-doc-reviewer"

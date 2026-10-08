@@ -10,6 +10,7 @@ from langgraph.checkpoint.base.id import uuid6
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START
 
+from ...testing import add_test_node, compile_test_graph, new_state_graph
 from ..state import (
     TeamState,
     append_artifacts,
@@ -18,11 +19,8 @@ from ..state import (
     merge_unique_strs,
     replace_plan,
 )
-from ._graph_helpers import add_node, compile_graph, new_builder
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from langchain_core.runnables import RunnableConfig
 
 # ---------------------------------------------------------------------------
@@ -201,9 +199,7 @@ class TestReplacePlan:
         assert result == new
 
     def test_empty_new_clears_plan(self) -> None:
-        """An empty list explicitly clears the plan
-        (T12 fix — was silently discarded).
-        """
+        """An empty list explicitly clears the plan instead of being discarded."""
         old = [{"step": "research", "status": "done", "agent": "planner"}]
         result = replace_plan(old, [])
         assert result == []
@@ -270,7 +266,7 @@ class TestStateJsonRoundTrip:
         }
         # Strip messages before JSON check (LangGraph handles these)
         serializable = {k: v for k, v in state.items() if k != "messages"}
-        # T3: actually verify the JSON round-trip produces valid output
+        # Actually verify the JSON round-trip produces valid output
         result = json.dumps(serializable)
         assert isinstance(result, str)
         parsed = json.loads(result)
@@ -312,8 +308,6 @@ class TestTeamStateStructure:
             "pipeline_phase",
             "vault_index",
             "validation_errors",
-            # task queue pointer
-            "current_task_id",
             # authoring proposal references
             "authoring_session_id",
             "authoring_changeset_ids",
@@ -321,6 +315,7 @@ class TestTeamStateStructure:
             # plan approval gate
             "approval_status",
             "approval_request_id",
+            "plan_approvals_asked",
             # tool permission gate
             "permission_answers",
             # document phase machine
@@ -332,7 +327,6 @@ class TestTeamStateStructure:
             # mid-run clarification
             "clarification_request",
             "clarification_request_id",
-            "clarification_answers",
             "clarification_resolution_receipts",
             # workspace root path
             "workspace_root",
@@ -359,7 +353,7 @@ class TestUndeclaredCheckpointKeys:
     @pytest.mark.asyncio
     async def test_retired_key_in_a_persisted_checkpoint_never_reaches_a_node(
         self,
-        tmp_path: "Path",
+        checkpointer: AsyncSqliteSaver,
     ) -> None:
         seen: list[dict[str, Any]] = []
 
@@ -367,62 +361,60 @@ class TestUndeclaredCheckpointKeys:
             seen.append(dict(state))
             return {"active_agent": "probe"}
 
-        builder = new_builder()
-        add_node(builder, "probe", probe)
+        builder = new_state_graph()
+        add_test_node(builder, "probe", probe)
         builder.add_edge(START, "probe")
         builder.add_edge("probe", END)
 
-        db = tmp_path / "checkpoints.sqlite"
-        async with AsyncSqliteSaver.from_conn_string(str(db)) as saver:
-            graph = compile_graph(builder, checkpointer=saver)
-            config: RunnableConfig = {
-                "configurable": {"thread_id": "retired-key-thread"},
-            }
-            await graph.ainvoke(
-                {
-                    "messages": [HumanMessage(content="start")],
-                    "active_agent": "start",
-                    "thread_id": "retired-key-thread",
-                    "artifacts": [],
-                    "current_plan": [],
-                    "token_usage": {},
-                },
-                config,
-            )
+        graph = compile_test_graph(builder, checkpointer=checkpointer)
+        config: RunnableConfig = {
+            "configurable": {"thread_id": "retired-key-thread"},
+        }
+        await graph.ainvoke(
+            {
+                "messages": [HumanMessage(content="start")],
+                "active_agent": "start",
+                "thread_id": "retired-key-thread",
+                "artifacts": [],
+                "current_plan": [],
+                "token_usage": {},
+            },
+            config,
+        )
 
-            # Forge the pre-retirement row: a real checkpoint whose persisted
-            # channel_values carry a key the current schema no longer declares.
-            stored = await saver.aget_tuple(config)
-            assert stored is not None
-            original = stored.checkpoint
-            forged = Checkpoint(
-                v=original["v"],
-                id=str(uuid6(clock_seq=-2)),
-                ts=original["ts"],
-                channel_values={
-                    **original["channel_values"],
-                    "plan_approved": True,
-                },
-                channel_versions={
-                    **original["channel_versions"],
-                    "plan_approved": "00000000000000000000000000000002.retired",
-                },
-                versions_seen=original["versions_seen"],
-                updated_channels=original["updated_channels"],
-            )
-            await saver.aput(stored.config, forged, stored.metadata or {}, {})
+        # Forge the pre-retirement row: a real checkpoint whose persisted
+        # channel_values carry a key the current schema no longer declares.
+        stored = await checkpointer.aget_tuple(config)
+        assert stored is not None
+        original = stored.checkpoint
+        forged = Checkpoint(
+            v=original["v"],
+            id=str(uuid6(clock_seq=-2)),
+            ts=original["ts"],
+            channel_values={
+                **original["channel_values"],
+                "plan_approved": True,
+            },
+            channel_versions={
+                **original["channel_versions"],
+                "plan_approved": "00000000000000000000000000000002.retired",
+            },
+            versions_seen=original["versions_seen"],
+            updated_channels=original["updated_channels"],
+        )
+        await checkpointer.aput(stored.config, forged, stored.metadata or {}, {})
 
-            reread = await saver.aget_tuple(config)
-            assert reread is not None
-            assert reread.checkpoint["channel_values"]["plan_approved"] is True
+        reread = await checkpointer.aget_tuple(config)
+        assert reread is not None
+        assert reread.checkpoint["channel_values"]["plan_approved"] is True
 
-            seen.clear()
-            # LangGraph accepts a partial state update at runtime even though the
-            # compiled graph's static input type is the full TeamState.
-            await graph.ainvoke(cast("TeamState", {"active_agent": "resumed"}), config)
-            resumed_state = seen[-1]
-            assert "plan_approved" not in resumed_state
-            assert resumed_state.get("plan_approved") is None
+        seen.clear()
+        # LangGraph accepts a partial state update at runtime even though the
+        # compiled graph's static input type is the full TeamState.
+        await graph.ainvoke(cast("TeamState", {"active_agent": "resumed"}), config)
+        resumed_state = seen[-1]
+        assert "plan_approved" not in resumed_state
+        assert resumed_state.get("plan_approved") is None
 
-            snapshot = await graph.aget_state(config)
-            assert "plan_approved" not in snapshot.values
+        snapshot = await graph.aget_state(config)
+        assert "plan_approved" not in snapshot.values

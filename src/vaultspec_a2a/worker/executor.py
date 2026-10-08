@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, cast, override
 
 from langgraph.types import Command
 
-from ..control.permission_dispatch import answered_permission_request
 from ..domain_config import domain_config
 from ..graph.run_context import RunContext
 from ..ipc.serializers import sequenced_to_dict
@@ -24,17 +23,18 @@ from ..providers.team_selection import model_assignment_digest
 # same reason: both stop a run that is not over, leaving a resumable
 # checkpoint and an open action for recovery to deliver again. Settling it as
 # FAILED instead wrote a terminal for a run nothing had failed.
-from ..streaming.ingest import INGEST_DRAINED
+from ..streaming import INGEST_DRAINED, GraphInvocation
 from ..streaming.node_metadata import node_metadata_from_graph
-from ..telemetry import ws_span
+from ..telemetry import operation_span
+from ..thread.action_receipts import receipt_channels
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
+from ..thread.resume_values import PermissionAnswer
 from ..utils.logging import log_context
 from ._authoring_close import close_authoring_session_best_effort
 from ._dispatch_contract import (
     _INGEST_GUARDS,
     _RESUME_GUARDS,
-    _SLOT_OWNING_ACTIONS,
     CAPACITY_ACCEPTED,
     CAPACITY_DRAINING,
     CAPACITY_FULL,
@@ -56,6 +56,7 @@ from .graph_lifecycle import (
     RegisteredCompiledGraph,
 )
 from .state_projection import (
+    PARKED_OUTCOME,
     PreflightDecision,
     ResumeAdmission,
     ResumeRefusal,
@@ -67,14 +68,16 @@ if TYPE_CHECKING:
 
     from opentelemetry.trace import Span
 
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ..ipc.schemas import DispatchRequest
-    from ..streaming.aggregator import EventAggregator
+    from ..streaming import RunEventProducer
     from ..streaming.types import SequencedEvent, StreamableGraph
     from ..thread.action_receipts import GraphActionReceipt
     from ._dispatch_receipts import DispatchReceiptReporter
     from ._dispatch_settlement import TerminalArbitration
+    from ._run_registry import RunScopedRegistry
     from .catalog_store import RunCatalogStore
+    from .graph_lifecycle import EngineResolver
     from .ipc import WorkerBridge
     from .token_store import RunTokenStore
 
@@ -97,7 +100,9 @@ def _invocation_config(req: DispatchRequest, *, action: str) -> dict[str, Any]:
     """
     return {
         "configurable": {"thread_id": req.thread_id},
-        "recursion_limit": _recursion_limit(req),
+        # Decided once, when the gateway accepted this dispatch, and frozen into
+        # its accepted input, so a recovered dispatch runs under the same budget.
+        "recursion_limit": req.recursion_limit,
         "run_name": f"vaultspec-a2a {action}",
         "metadata": {
             "thread_id": req.thread_id,
@@ -106,19 +111,6 @@ def _invocation_config(req: DispatchRequest, *, action: str) -> dict[str, Any]:
         },
         "tags": ["vaultspec-a2a", f"action:{action}"],
     }
-
-
-def _recursion_limit(req: DispatchRequest) -> int:
-    """The tighter of the operator's ceiling and the accepted preset's own budget.
-
-    The gateway sends the operator-wide ceiling on every dispatch; the limit a
-    preset declares rides its frozen graph definition, so a run is held to the
-    preset's budget without ever exceeding the operator's.
-    """
-    definition = req.graph_definition
-    if definition is None:
-        return req.recursion_limit
-    return min(req.recursion_limit, definition.recursion_limit)
 
 
 def _addressed_resume(resume_value: object, admission: ResumeAdmission) -> object:
@@ -145,11 +137,10 @@ def _answered_permission_update(resume_value: object) -> dict[str, Any]:
     answered instead of by the position its interrupts fall in. A resume that
     is not a tool-permission answer contributes nothing.
     """
-    answered = answered_permission_request(resume_value)
-    if answered is None:
+    answer = PermissionAnswer.from_resume_value(resume_value)
+    if answer is None:
         return {}
-    request_id, option_id = answered
-    return {"permission_answers": {request_id: option_id}}
+    return {"permission_answers": {answer.request_id: answer.option_id}}
 
 
 def _run_context(req: DispatchRequest, *, action: str) -> RunContext:
@@ -192,10 +183,7 @@ def _ingest_graph_input(
         req, is_first_ingest=preflight.is_first_ingest
     )
     graph_input["agent_descriptors"] = node_metadata_from_graph(graph)
-    graph_input["graph_action_receipts"] = {
-        req.dispatch_id: receipt.model_dump(mode="json")
-    }
-    graph_input["active_graph_action_receipt"] = receipt.model_dump(mode="json")
+    graph_input.update(receipt_channels(receipt))
     return graph_input
 
 
@@ -219,8 +207,7 @@ def _resume_command(
     return Command(
         resume=_addressed_resume(req.option_id, admission),
         update={
-            "graph_action_receipts": {req.dispatch_id: receipt.model_dump(mode="json")},
-            "active_graph_action_receipt": receipt.model_dump(mode="json"),
+            **receipt_channels(receipt),
             "agent_descriptors": node_metadata_from_graph(graph),
             "graph_definition_digest": req.require_graph_definition().digest(),
             "model_assignment_digest": model_assignment_digest(req.model_assignment),
@@ -238,6 +225,7 @@ class Executor(SettlementMixin):
         bridge: WorkerBridge,
         *,
         checkpoint_read_timeout_seconds: float | None = None,
+        engine_resolver: EngineResolver | None = None,
     ) -> None:
         self._checkpoint = CheckpointAccess(
             checkpointer=checkpointer,
@@ -265,10 +253,11 @@ class Executor(SettlementMixin):
         self._graph_lifecycle = GraphLifecycleManager(
             checkpointer=checkpointer,
             bridge=bridge,
-            aggregator=self._aggregator,
+            producer=self._producer,
             token_store=self._token_store,
             catalog_store=self._catalog_store,
             checkpoint_read_timeout_seconds=checkpoint_read_timeout_seconds,
+            engine_resolver=engine_resolver,
         )
         self._state_projector = StateProjector(
             checkpointer=checkpointer,
@@ -285,7 +274,7 @@ class Executor(SettlementMixin):
             if thread_id:
                 await _bridge_ref.send_event(thread_id, sequenced_to_dict(sequenced))
 
-        self._aggregator.add_broadcast_hook(_relay_event)
+        self._producer.add_broadcast_hook(_relay_event)
 
         self._capacity = DispatchCapacityState()
 
@@ -299,8 +288,8 @@ class Executor(SettlementMixin):
 
     @property
     @override
-    def _aggregator(self) -> EventAggregator:
-        return self._resources.aggregator
+    def _producer(self) -> RunEventProducer:
+        return self._resources.producer
 
     @property
     def _token_store(self) -> RunTokenStore:
@@ -326,7 +315,7 @@ class Executor(SettlementMixin):
 
     @property
     @override
-    def _active_ingests(self) -> dict[str, DispatchCapacityReservation]:
+    def _active_ingests(self) -> RunScopedRegistry[DispatchCapacityReservation]:
         return self._capacity.active_ingests
 
     @property
@@ -347,11 +336,6 @@ class Executor(SettlementMixin):
     @override
     def _dispatch_reservation(self) -> ContextVar[DispatchCapacityReservation | None]:
         return self._capacity.reservation
-
-    @property
-    def aggregator(self) -> EventAggregator:
-        """Return the event aggregator (for subscriber wiring, if needed)."""
-        return self._aggregator
 
     @property
     def token_store(self) -> RunTokenStore:
@@ -452,7 +436,7 @@ class Executor(SettlementMixin):
                 thread_id=thread_id,
                 generation=self._capacity.next_generation,
             )
-            self._active_ingests[thread_id] = reservation
+            self._active_ingests.register(thread_id, reservation)
             return reservation, CAPACITY_ACCEPTED
 
     @override
@@ -461,10 +445,7 @@ class Executor(SettlementMixin):
     ) -> bool:
         """Release only the exact dispatch reservation supplied by its owner."""
         async with self._ingest_lock:
-            if self._active_ingests.get(reservation.thread_id) is not reservation:
-                return False
-            self._active_ingests.pop(reservation.thread_id)
-            return True
+            return self._active_ingests.drop_held(reservation.thread_id, reservation)
 
     @override
     async def _mark_ingest_done(
@@ -473,7 +454,7 @@ class Executor(SettlementMixin):
         outcome: str,
         reservation: DispatchCapacityReservation | None = None,
     ) -> None:
-        """Release the ingest slot, untrack thread, prune aggregator.
+        """Release the ingest slot, untrack thread, prune the producer's run state.
 
         Drops the run's actor tokens only on a TERMINAL *outcome*. An
         ``"interrupted"`` ingest means the run parked at a gate and will resume -
@@ -482,25 +463,47 @@ class Executor(SettlementMixin):
         the tokens must survive park->resume and are dropped only when the run
         truly terminates (the token window closes at termination, not at an
         interrupt-park).
+
+        The same distinction decides what the permission janitor may collect: a
+        parked run is still held, so its unanswered request survives however long
+        the human it is waiting for takes.
         """
         async with self._ingest_lock:
-            active_snapshot = set(self._active_ingests).difference({thread_id})
+            parked = self._capacity.parked_threads
+            if outcome in TERMINAL_STATUSES:
+                parked.discard(thread_id)
+            elif outcome == PARKED_OUTCOME:
+                parked.add(thread_id)
+            active_snapshot = self._active_ingests.thread_ids() - {thread_id}
+            held_snapshot = active_snapshot | parked
         # Drop the run's actor tokens when its active window truly closes,
         # i.e. a terminal outcome - never on an interrupt-park that will resume.
         if outcome in TERMINAL_STATUSES:
-            self._graph_lifecycle.release_thread(thread_id)
-            self._token_store.drop(thread_id)
-            self._catalog_store.drop(thread_id)
-            self._aggregator.remove_node_metadata(thread_id)
-            self._aggregator.clear_thread_state(thread_id)
+            self._release_terminal_thread(thread_id, closes_run_window=True)
         self._bridge.untrack_thread(thread_id)
         # Prune sequences for threads that are no longer actively executing.
-        self._aggregator.prune_sequences(active_snapshot)
-        # Prune permissions older than 5 minutes regardless of thread state.
-        self._aggregator.prune_stale_permissions()
-        reservation = reservation or self._dispatch_reservation.get()
-        if reservation is not None:
-            await self.release_dispatch_capacity(reservation)
+        self._producer.prune_sequences(active_snapshot)
+        # Collect aged permission records of runs this worker no longer holds.
+        self._producer.prune_stale_permissions(held_thread_ids=held_snapshot)
+        await self._release_held_capacity(reservation)
+
+    @override
+    def _release_terminal_thread(
+        self, thread_id: str, *, closes_run_window: bool
+    ) -> None:
+        """Release what this worker holds for a run it has stopped executing.
+
+        The compiled graph and the run's stream state go every time. Its actor
+        tokens and catalog snapshot belong to the run's active window and go only
+        when this release *closes_run_window*: a dispatch refused before it ran
+        never opened that window, and the parked run it leaves behind still
+        authors with them on its next turn, which no redelivery provisions again.
+        """
+        if closes_run_window:
+            self._token_store.drop(thread_id)
+            self._catalog_store.drop(thread_id)
+        self._graph_lifecycle.release_thread(thread_id)
+        self._producer.clear_thread_state(thread_id)
 
     @override
     async def _close_authoring_session_best_effort(
@@ -512,7 +515,7 @@ class Executor(SettlementMixin):
 
     async def handle_dispatch(self, req: DispatchRequest) -> None:
         """Reserve capacity and route a direct ``DispatchRequest`` call."""
-        owns_slot = req.action in _SLOT_OWNING_ACTIONS
+        owns_slot = req.requires_graph_receipt
         reservation, refusal_reason = (
             await self._reserve_dispatch_capacity(req.thread_id)
             if owns_slot
@@ -561,7 +564,7 @@ class Executor(SettlementMixin):
                 dispatch_id=req.dispatch_id,
                 action=str(req.action),
             ):
-                async with ws_span(
+                async with operation_span(
                     f"executor.{req.action}",
                     thread_id=req.thread_id,
                     agent_id=req.agent_id or "supervisor",
@@ -620,7 +623,7 @@ class Executor(SettlementMixin):
     async def _handle_cancel(self, req: DispatchRequest) -> None:
         """Apply one cancel while holding the run's terminal arbitration lock."""
         self._pending_cancellations[req.thread_id] = req.dispatch_id
-        self._aggregator.cancel_thread(req.thread_id)
+        self._producer.cancel_thread(req.thread_id)
         # Release the run's tokens and cached catalog on the
         # TERMINAL boundary only. When an ingest is still active
         # the cancel is not yet terminal: that ingest settles
@@ -633,8 +636,7 @@ class Executor(SettlementMixin):
         async with self._ingest_lock:
             is_active = req.thread_id in self._active_ingests
         if not is_active:
-            self._token_store.drop(req.thread_id)
-            self._catalog_store.drop(req.thread_id)
+            self._release_terminal_thread(req.thread_id, closes_run_window=True)
             await self._state_projector.emit_terminal_status(
                 req.thread_id,
                 ThreadStatus.CANCELLED,
@@ -642,13 +644,10 @@ class Executor(SettlementMixin):
                     req.thread_id, outcome="no_active_work"
                 ),
             )
-            self._graph_lifecycle.release_thread(req.thread_id)
-            self._aggregator.remove_node_metadata(req.thread_id)
-            self._aggregator.clear_thread_state(req.thread_id)
 
     async def _handle_ingest(self, req: DispatchRequest) -> None:
         """Compile graph on first use and execute a new user turn."""
-        async with ws_span("executor.ingest", thread_id=req.thread_id) as span:
+        async with operation_span("executor.ingest", thread_id=req.thread_id) as span:
             try:
                 receipt = req.require_graph_action_receipt()
             except ValueError as exc:
@@ -731,7 +730,7 @@ class Executor(SettlementMixin):
                 "earlier attempt; it was not re-run",
             )
             return True
-        if outcome == "interrupted":
+        if outcome == PARKED_OUTCOME:
             logger.info(
                 "Thread %s checkpoint is paused at interrupt"
                 " — skipping ingest; awaiting resume dispatch",
@@ -739,10 +738,10 @@ class Executor(SettlementMixin):
                 extra=self._dispatch_log_extra(
                     req,
                     action="checkpoint_preflight_interrupted",
-                    outcome="interrupted",
+                    outcome=PARKED_OUTCOME,
                 ),
             )
-            span.set_attribute("pre_flight", "interrupted")
+            span.set_attribute("pre_flight", PARKED_OUTCOME)
             return True
         return False
 
@@ -800,15 +799,17 @@ class Executor(SettlementMixin):
         outcome: str = ThreadStatus.FAILED
         try:
             span.add_event(f"{action}_graph_execution_started")
-            outcome = await self._aggregator.ingest(
+            outcome = await self._producer.ingest(
                 req.thread_id,
                 req.agent_id or DEFAULT_SUPERVISOR_ID,
                 run.graph,
-                graph_input,
-                run.config,
+                GraphInvocation(
+                    graph_input=graph_input,
+                    config=run.config,
+                    context=_run_context(req, action=action),
+                    control=self._run_controls.open(req.thread_id),
+                ),
                 on_graph_started=lambda: self._emit_dispatch_application_receipt(req),
-                context=_run_context(req, action=action),
-                control=self._run_controls.open(req.thread_id),
             )
             span.set_attribute("outcome", outcome)
         except asyncio.CancelledError:
@@ -838,7 +839,7 @@ class Executor(SettlementMixin):
 
     async def _handle_resume(self, req: DispatchRequest) -> None:
         """Resume a graph from a LangGraph interrupt via ``Command(resume=...)``."""
-        async with ws_span("executor.resume", thread_id=req.thread_id) as span:
+        async with operation_span("executor.resume", thread_id=req.thread_id) as span:
             try:
                 receipt = req.require_graph_action_receipt()
             except ValueError as exc:
@@ -910,7 +911,7 @@ class Executor(SettlementMixin):
         )
         span.set_attribute("pre_flight", "refused")
         span.set_attribute("refusal", refusal.cause.value)
-        await self._aggregator.emit_error(
+        await self._producer.emit_error(
             req.thread_id,
             refusal.cause.value,
             refusal.detail,
@@ -941,7 +942,7 @@ class Executor(SettlementMixin):
         await self._run_controls.drain(reason)
 
     async def shutdown(self) -> None:
-        """Release held resources (aggregator debounce tasks, etc.)."""
-        await self._aggregator.shutdown()
+        """Release held resources (the producer's debounce tasks, etc.)."""
+        await self._producer.shutdown()
         self._pending_cancellations.clear()
         self._graph_lifecycle.clear()

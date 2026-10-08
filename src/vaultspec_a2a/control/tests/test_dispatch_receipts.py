@@ -6,22 +6,20 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from ...conftest import SqlitePosture
 from ...database import (
     create_control_action,
     create_thread,
     elect_thread_status,
     get_control_action_by_dispatch_id,
     get_thread,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
-from ...database.models import Base, RunWriteAuthority
-from ...database.session import configure_sqlite_transactions
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
+from ...testing import DEFAULT_TEAM_PRESET
+from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
 from ..accepted_input import freeze_accepted_input
@@ -33,26 +31,20 @@ from ..action_lease import (
 from ..dispatch_receipts import bind_graph_action_receipt
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
     from pathlib import Path
 
-    from ...database.thread_repository import ThreadWriteExpectation
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from ...thread import ThreadWriteExpectation
 
 
-@pytest_asyncio.fixture
-async def sessions(
-    tmp_path: Path,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'receipts.db'}")
-    configure_sqlite_transactions(engine)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    yield async_sessionmaker(engine, expire_on_commit=False)
-    await engine.dispose()
+pytestmark = pytest.mark.sqlite_engine(SqlitePosture.TRANSACTIONS)
 
 
-async def _seed(sessions: async_sessionmaker[AsyncSession]) -> ThreadWriteExpectation:
-    async with sessions() as db:
+async def _seed(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> ThreadWriteExpectation:
+    async with session_factory() as db:
         thread = await create_thread(
             db,
             thread_id="run",
@@ -75,12 +67,44 @@ async def _seed(sessions: async_sessionmaker[AsyncSession]) -> ThreadWriteExpect
     return witness
 
 
+def _resume_claim_request(
+    witness: ThreadWriteExpectation,
+    tmp_path: Path,
+    *,
+    dispatch_id: str = "resume",
+    idempotency_key: str = "resume",
+) -> ControlActionClaimRequest:
+    """The resume claim this module's receipt races repeat against *witness*."""
+    return ControlActionClaimRequest(
+        thread_id="run",
+        action_type=ControlActionType.RESUME,
+        idempotency_key=idempotency_key,
+        payload=freeze_accepted_input(
+            DispatchRequest(
+                action="resume",
+                thread_id="run",
+                option_id="yes",
+                recursion_limit=25,
+                team_preset=DEFAULT_TEAM_PRESET,
+                graph_definition=freeze_graph_definition(
+                    load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
+                    workspace_root=tmp_path,
+                ),
+            ),
+            intent={"option_id": "yes"},
+        ),
+        dispatch_id=dispatch_id,
+        write_expectation=witness,
+        recovery_timeout_seconds=60,
+    )
+
+
 @pytest.mark.asyncio
 async def test_delivery_cannot_create_missing_acceptance_evidence(
-    sessions: async_sessionmaker[AsyncSession], tmp_path: Path
+    session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
 ):
-    await _seed(sessions)
-    async with sessions() as db:
+    await _seed(session_factory)
+    async with session_factory() as db:
         bound = await bind_graph_action_receipt(
             db,
             DispatchRequest(
@@ -90,16 +114,16 @@ async def test_delivery_cannot_create_missing_acceptance_evidence(
                 content="first",
                 workspace_root=str(tmp_path),
                 recursion_limit=25,
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 graph_definition=freeze_graph_definition(
-                    load_team_config("mock-success-single", workspace_root=tmp_path),
+                    load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
                     workspace_root=tmp_path,
                 ),
             ),
         )
         assert bound.graph_action_receipt is None
         await db.commit()
-    async with sessions() as observer:
+    async with session_factory() as observer:
         action = await get_control_action_by_dispatch_id(
             observer,
             thread_id="run",
@@ -111,40 +135,16 @@ async def test_delivery_cannot_create_missing_acceptance_evidence(
 
 @pytest.mark.asyncio
 async def test_retry_preserves_original_receipt_after_state_revision(
-    sessions: async_sessionmaker[AsyncSession], tmp_path: Path
+    session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
 ):
-    witness = await _seed(sessions)
-    async with sessions() as db:
+    witness = await _seed(session_factory)
+    async with session_factory() as db:
         claim = await prepare_control_action_claim(
-            db,
-            request=ControlActionClaimRequest(
-                thread_id="run",
-                action_type=ControlActionType.RESUME,
-                idempotency_key="resume",
-                payload=freeze_accepted_input(
-                    DispatchRequest(
-                        action="resume",
-                        thread_id="run",
-                        option_id="yes",
-                        recursion_limit=25,
-                        team_preset="mock-success-single",
-                        graph_definition=freeze_graph_definition(
-                            load_team_config(
-                                "mock-success-single", workspace_root=tmp_path
-                            ),
-                            workspace_root=tmp_path,
-                        ),
-                    ),
-                    intent={"option_id": "yes"},
-                ),
-                dispatch_id="resume",
-                write_expectation=witness,
-                recovery_timeout_seconds=60,
-            ),
+            db, request=_resume_claim_request(witness, tmp_path)
         )
         assert claim.acquired
         await finalize_control_action_acceptance(db, claim)
-    async with sessions() as observer:
+    async with session_factory() as observer:
         durable = await get_control_action_by_dispatch_id(
             observer, thread_id="run", dispatch_id=claim.dispatch_id
         )
@@ -159,22 +159,22 @@ async def test_retry_preserves_original_receipt_after_state_revision(
         thread_id="run",
         option_id="yes",
         recursion_limit=25,
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=tmp_path),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
             workspace_root=tmp_path,
         ),
     )
-    async with sessions() as db:
+    async with session_factory() as db:
         bound = await bind_graph_action_receipt(db, request)
     receipt = bound.require_graph_action_receipt()
     changed = request.model_copy(update={"recursion_limit": 26})
-    async with sessions() as db:
+    async with session_factory() as db:
         refused = await bind_graph_action_receipt(db, changed)
     assert refused.graph_action_receipt is None
     assert receipt.run_revision == 1
     assert receipt.writer_generation == 2
-    async with sessions() as db:
+    async with session_factory() as db:
         thread = await get_thread(db, "run")
         assert thread is not None
         expectation = thread_write_expectation(thread)
@@ -183,36 +183,33 @@ async def test_retry_preserves_original_receipt_after_state_revision(
             "run",
             expectation=expectation,
             status=ThreadStatus.RUNNING,
-            successor=successor_thread_write_authority(
-                expectation,
-                action_type=ControlActionType.RESUME,
-                action_receipt_id=claim.dispatch_id,
-            ),
+            action_type=ControlActionType.RESUME,
+            action_receipt_id=claim.dispatch_id,
         )
         await db.commit()
-    async with sessions() as db:
+    async with session_factory() as db:
         retry = await bind_graph_action_receipt(db, request)
     assert retry.require_graph_action_receipt() == receipt
 
 
 @pytest.mark.asyncio
 async def test_identical_direct_replayer_can_install_visible_unowned_action(
-    sessions: async_sessionmaker[AsyncSession], tmp_path: Path
+    session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
 ):
-    witness = await _seed(sessions)
+    witness = await _seed(session_factory)
     dispatch = DispatchRequest(
         action="resume",
         thread_id="run",
         option_id="yes",
         recursion_limit=25,
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=tmp_path),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
             workspace_root=tmp_path,
         ),
     )
     payload = freeze_accepted_input(dispatch, intent={"option_id": "yes"})
-    async with sessions() as db:
+    async with session_factory() as db:
         await create_control_action(
             db,
             thread_id="run",
@@ -224,7 +221,7 @@ async def test_identical_direct_replayer_can_install_visible_unowned_action(
         )
         await db.commit()
 
-    async with sessions() as db:
+    async with session_factory() as db:
         claim = await prepare_control_action_claim(
             db,
             request=ControlActionClaimRequest(
@@ -243,7 +240,7 @@ async def test_identical_direct_replayer_can_install_visible_unowned_action(
         assert claim.dispatch_id == "resume-visible-before-claim"
         await finalize_control_action_acceptance(db, claim)
 
-    async with sessions() as db:
+    async with session_factory() as db:
         thread = await get_thread(db, "run")
         action = await get_control_action_by_dispatch_id(
             db, thread_id="run", dispatch_id=claim.dispatch_id
@@ -255,22 +252,22 @@ async def test_identical_direct_replayer_can_install_visible_unowned_action(
 
 @pytest.mark.asyncio
 async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
-    sessions: async_sessionmaker[AsyncSession], tmp_path: Path
+    session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
 ):
-    witness = await _seed(sessions)
+    witness = await _seed(session_factory)
     request = DispatchRequest(
         dispatch_id="resume",
         action="resume",
         thread_id="run",
         option_id="yes",
         recursion_limit=25,
-        team_preset="mock-success-single",
+        team_preset=DEFAULT_TEAM_PRESET,
         graph_definition=freeze_graph_definition(
-            load_team_config("mock-success-single", workspace_root=tmp_path),
+            load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
             workspace_root=tmp_path,
         ),
     )
-    async with sessions() as db:
+    async with session_factory() as db:
         refused = await bind_graph_action_receipt(db, request)
         assert refused.graph_action_receipt is None
         await elect_thread_status(
@@ -278,40 +275,13 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
             "run",
             expectation=witness,
             status=ThreadStatus.CANCELLED,
-            successor=successor_thread_write_authority(
-                witness,
-                action_type=ControlActionType.INGEST,
-                action_receipt_id="initial",
-            ),
+            action_type=ControlActionType.INGEST,
+            action_receipt_id="initial",
         )
         await db.commit()
-    async with sessions() as db:
+    async with session_factory() as db:
         claim = await prepare_control_action_claim(
-            db,
-            request=ControlActionClaimRequest(
-                thread_id="run",
-                action_type=ControlActionType.RESUME,
-                idempotency_key="resume",
-                payload=freeze_accepted_input(
-                    DispatchRequest(
-                        action="resume",
-                        thread_id="run",
-                        option_id="yes",
-                        recursion_limit=25,
-                        team_preset="mock-success-single",
-                        graph_definition=freeze_graph_definition(
-                            load_team_config(
-                                "mock-success-single", workspace_root=tmp_path
-                            ),
-                            workspace_root=tmp_path,
-                        ),
-                    ),
-                    intent={"option_id": "yes"},
-                ),
-                dispatch_id="resume",
-                write_expectation=witness,
-                recovery_timeout_seconds=60,
-            ),
+            db, request=_resume_claim_request(witness, tmp_path)
         )
         assert not claim.acquired
         assert not claim.authority_matches
@@ -332,36 +302,12 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("finalize", [False, True])
 async def test_requested_projection_and_receipt_share_acceptance_commit(
-    sessions: async_sessionmaker[AsyncSession], tmp_path: Path, finalize: bool
+    session_factory: async_sessionmaker[AsyncSession], tmp_path: Path, finalize: bool
 ):
-    witness = await _seed(sessions)
-    async with sessions() as db:
+    witness = await _seed(session_factory)
+    async with session_factory() as db:
         claim = await prepare_control_action_claim(
-            db,
-            request=ControlActionClaimRequest(
-                thread_id="run",
-                action_type=ControlActionType.RESUME,
-                idempotency_key="resume",
-                payload=freeze_accepted_input(
-                    DispatchRequest(
-                        action="resume",
-                        thread_id="run",
-                        option_id="yes",
-                        recursion_limit=25,
-                        team_preset="mock-success-single",
-                        graph_definition=freeze_graph_definition(
-                            load_team_config(
-                                "mock-success-single", workspace_root=tmp_path
-                            ),
-                            workspace_root=tmp_path,
-                        ),
-                    ),
-                    intent={"option_id": "yes"},
-                ),
-                dispatch_id="resume",
-                write_expectation=witness,
-                recovery_timeout_seconds=60,
-            ),
+            db, request=_resume_claim_request(witness, tmp_path)
         )
         assert claim.acquired
         row = await get_thread(db, "run")
@@ -375,9 +321,9 @@ async def test_requested_projection_and_receipt_share_acceptance_commit(
                 thread_id="run",
                 option_id="yes",
                 recursion_limit=25,
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 graph_definition=freeze_graph_definition(
-                    load_team_config("mock-success-single", workspace_root=tmp_path),
+                    load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
                     workspace_root=tmp_path,
                 ),
             ),
@@ -386,7 +332,7 @@ async def test_requested_projection_and_receipt_share_acceptance_commit(
         if finalize:
             await finalize_control_action_acceptance(db, claim)
         # Closing without finalization simulates failure before acceptance.
-    async with sessions() as observer:
+    async with session_factory() as observer:
         action = await get_control_action_by_dispatch_id(
             observer,
             thread_id="run",

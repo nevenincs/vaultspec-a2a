@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from .models import ProviderRuntimeIdentityModel
@@ -40,8 +39,8 @@ async def record_provider_runtime_identity(
 ) -> ProviderRuntimeIdentityModel:
     """Persist first evidence and refuse changed stable runtime claims.
 
-    The caller owns the surrounding transaction. Both supported backends use a
-    conflict-ignored insert so concurrent retries cannot poison that transaction.
+    The caller owns the surrounding transaction. A conflict-ignored insert keeps
+    concurrent retries from poisoning that transaction.
     The stored row is then read back and compared before the caller may commit.
     A live per-call lane may open later native sessions with new IDs; the first
     session remains recorded while every other runtime field must still match.
@@ -53,15 +52,7 @@ async def record_provider_runtime_identity(
         "execution_mode": identity.execution_mode,
         **{field: getattr(identity, field) for field in _EVIDENCE_FIELDS},
     }
-    bind = session.get_bind()
-    if bind.dialect.name == "sqlite":
-        statement = sqlite_insert(ProviderRuntimeIdentityModel).on_conflict_do_nothing()
-    elif bind.dialect.name == "postgresql":
-        statement = postgres_insert(
-            ProviderRuntimeIdentityModel
-        ).on_conflict_do_nothing()
-    else:
-        raise RuntimeError("runtime identity requires SQLite or PostgreSQL")
+    statement = sqlite_insert(ProviderRuntimeIdentityModel).on_conflict_do_nothing()
     await session.execute(statement.values(**values))
     stored = await session.get(ProviderRuntimeIdentityModel, key)
     if stored is None:

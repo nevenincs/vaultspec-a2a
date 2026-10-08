@@ -33,7 +33,7 @@ from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from ..database.compatibility import supported_migration_head
+from ..database import supported_migration_head
 
 __all__ = [
     "ComponentEntrypoint",
@@ -243,7 +243,6 @@ def component_manifest_schema() -> dict[str, object]:
 def export_component_manifest_schema() -> str:
     """Return the committed snapshot form of the manifest JSON Schema.
 
-    The snapshot is ``json.dumps(schema, indent=2)`` plus a trailing newline,
-    matching the repository's other ``schemas/*.json`` cross-repo contracts.
+    The snapshot is ``json.dumps(schema, indent=2)`` plus a trailing newline.
     """
     return json.dumps(component_manifest_schema(), indent=2) + "\n"

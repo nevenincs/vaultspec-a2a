@@ -107,7 +107,7 @@ def main() -> None:
     # and --json payloads. The serve subcommand reconfigures to the service lane
     # when it boots the gateway.
     reconfigure_console_utf8()
-    configure_logging("cli")
+    configure_logging("cli", settings=settings)
 
 
 def _acquire_desktop_singleton() -> RuntimeSingleton | None:
@@ -272,8 +272,8 @@ def desktop_serve(
 
     Seats every mutable path under the explicit application home and binds the
     capsule assets root, then re-execs ``serve`` in a freshly armed interpreter
-    so the gateway boots with the desktop settings in force. Compose and plain
-    ``serve`` invocations are unaffected; no run-control lifecycle verb is added.
+    so the gateway boots with the desktop settings in force. Plain ``serve``
+    invocations are unaffected; no run-control lifecycle verb is added.
     """
     from ..desktop.profile import DesktopProfileError
 
@@ -294,7 +294,7 @@ def _expected_route_signature() -> list[str]:
     route table off the code on disk.
     """
     from ..api.app import create_app
-    from ..api.routes._gateway_action_endpoints import route_signature
+    from ..api.routes import route_signature
 
     return route_signature(create_app())
 
@@ -356,20 +356,28 @@ def run() -> None:
 def _selection_from_catalog_record(
     record: dict[str, Any], provider_id: str, execution_mode: str, entry_id: str
 ) -> dict[str, Any]:
+    from ..api.schemas.gateway import ProviderCatalogSelection
+    from ..providers.provider_catalog import SELECTION_SCHEMA_VERSION
+
     catalog: dict[str, Any] = record.get("catalog") or {}
     entries: list[dict[str, Any]] = catalog.get("models") or []
     for entry in entries:
         if entry.get("entry_id") == entry_id:
-            return {
-                "schema_version": 1,
-                "provider_id": provider_id,
-                "execution_mode": execution_mode,
-                "catalog_revision": cast(
-                    "dict[str, Any]", catalog.get("state") or {}
-                ).get("revision"),
-                "entry_id": entry_id,
-                "controls": {},
-            }
+            revision = cast("dict[str, Any]", catalog.get("state") or {}).get(
+                "revision"
+            )
+            if not revision:
+                raise click.ClickException(
+                    f"provider {provider_id!r} in mode {execution_mode!r} serves "
+                    "no catalog revision to select against."
+                )
+            return ProviderCatalogSelection(
+                schema_version=SELECTION_SCHEMA_VERSION,
+                provider_id=provider_id,
+                execution_mode=execution_mode,
+                catalog_revision=revision,
+                entry_id=entry_id,
+            ).model_dump(mode="json")
     offered = ", ".join(str(e.get("entry_id")) for e in entries) or "(none)"
     raise click.ClickException(
         f"provider {provider_id!r} in mode {execution_mode!r} serves no entry "
@@ -395,11 +403,13 @@ def _resolve_catalog_selection(
     what the caller chose, and choosing on their behalf is how a CLI quietly
     decides what a provider charges for.
     """
+    from ..api.schemas.provider_catalog import PROVIDER_CATALOG_PATH
+
     # The catalog is resolved in the caller's project: what a lane serves is a
     # property of the workspace the run will execute in, not of the gateway.
     resp = _request(
         "GET",
-        f"{base}/v1/provider-catalog",
+        f"{base}{PROVIDER_CATALOG_PATH}",
         params={"workspace_root": workspace_root},
         timeout=_RUN_START_TIMEOUT,
     )

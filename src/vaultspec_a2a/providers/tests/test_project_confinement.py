@@ -2,7 +2,7 @@
 
 A run is bound to one project. These tests drive the production permission
 handler with the payload shapes the installed backends actually emit, and prove
-two things the handler previously did not do: it refuses a tool call whose
+two things the handler does: it refuses a tool call whose
 arguments name a project other than the run's, and under autonomy it refuses a
 call for a tool the run never declared instead of approving the first offered
 option.
@@ -17,10 +17,11 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control.config import settings
+from ...testing import request_permission_params, settings_override
 from .._acp_mcp import statically_approvable_tool_names
 from .._acp_rpc_handlers import (
     on_fs_read_text_file,
@@ -29,7 +30,9 @@ from .._acp_rpc_handlers import (
 )
 from .._acp_session import claude_session_options
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
-from .._json_contract import JsonObject, JsonValue
+
+if TYPE_CHECKING:
+    from .._json_contract import JsonObject
 
 # The read tools the harness registry declares for the search server, in the
 # qualified spelling the composed allowlist carries.
@@ -77,7 +80,6 @@ def _config(
     *,
     workspace_root: str | None,
     acp_family: str = "claude",
-    acp_backend: str | None = "claude_code",
     permission_callback: PermissionCallback | None = None,
 ) -> AcpModelConfig:
     """Build the frozen config a run of the given lane is served with."""
@@ -90,12 +92,7 @@ def _config(
         mcp_servers=[],
         use_exec=False,
         provider="anthropic",
-        runtime_authority=None,
-        acp_backend=acp_backend,
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
         allowed_tools=list(_DECLARED_READS),
         acp_family=acp_family,
@@ -110,11 +107,11 @@ async def _decide(
     options: list[JsonObject] | None = None,
 ) -> str:
     """Drive the production handler and return the option id it selected."""
-    params: JsonObject = {
-        "sessionId": ctx.session_id,
-        "toolCall": {"toolCallId": "tc-1", "title": title, "rawInput": raw_input},
-        "options": list[JsonValue](options if options is not None else _CLAUDE_OPTIONS),
-    }
+    params = request_permission_params(
+        ctx.session_id,
+        tool_call={"toolCallId": "tc-1", "title": title, "rawInput": raw_input},
+        options=options if options is not None else _CLAUDE_OPTIONS,
+    )
     response = await on_request_permission(1, params, ctx, config)
     result = response.get("result")
     assert isinstance(result, dict)
@@ -353,7 +350,7 @@ async def test_an_undeclared_server_verb_is_refused_under_autonomy(
 
     These reach the permission rung precisely BECAUSE they are undeclared - the
     CLI's static pre-approval covers only the declared reads - and the branch
-    that used to receive them approved the first offered option unconditionally.
+    that receives them must not approve the first offered option unconditionally.
     """
     bound, _ = two_projects
     config = _config(workspace_root=str(bound))
@@ -448,9 +445,7 @@ async def test_the_kimi_lane_keeps_its_proven_behaviour(
         {"optionId": "approve_for_session", "kind": "allow_always"},
         {"optionId": "reject", "kind": "reject_once"},
     ]
-    config = _config(
-        workspace_root=str(bound), acp_family="kimi", acp_backend="kimi_cli"
-    )
+    config = _config(workspace_root=str(bound), acp_family="kimi")
 
     assert (
         await _decide(
@@ -488,21 +483,23 @@ async def test_the_kimi_lane_keeps_its_proven_behaviour(
 async def test_privileged_callback_refuses_static_symlink_escape(
     two_projects: tuple[Path, Path],
     acp_session_context: AcpSessionContext,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bound, protected = two_projects
     secret = protected / "service.token"
     secret.write_text("must-not-leak", encoding="utf-8")
     escape = bound / "escape"
     escape.symlink_to(protected, target_is_directory=True)
-    monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
 
-    response = await on_fs_read_text_file(
-        1,
-        {"path": "escape/service.token", "sessionId": acp_session_context.session_id},
-        acp_session_context,
-        _config(workspace_root=str(bound)),
-    )
+    with settings_override(provider_identity_launcher=Path("/configured")):
+        response = await on_fs_read_text_file(
+            1,
+            {
+                "path": "escape/service.token",
+                "sessionId": acp_session_context.session_id,
+            },
+            acp_session_context,
+            _config(workspace_root=str(bound)),
+        )
 
     assert "error" in response
     assert "must-not-leak" not in str(response)
@@ -513,7 +510,6 @@ async def test_privileged_callback_refuses_static_symlink_escape(
 async def test_privileged_callback_refuses_replaced_workspace_root(
     two_projects: tuple[Path, Path],
     acp_session_context: AcpSessionContext,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bound, protected = two_projects
     managed = bound.parent / "managed"
@@ -522,15 +518,16 @@ async def test_privileged_callback_refuses_replaced_workspace_root(
     admitted.symlink_to(protected, target_is_directory=True)
     secret = protected / "service.token"
     secret.write_text("must-not-leak", encoding="utf-8")
-    monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
-    monkeypatch.setattr(settings, "workspace_root", managed)
 
-    response = await on_fs_read_text_file(
-        1,
-        {"path": "service.token", "sessionId": acp_session_context.session_id},
-        acp_session_context,
-        _config(workspace_root=str(admitted)),
-    )
+    with settings_override(
+        provider_identity_launcher=Path("/configured"), workspace_root=managed
+    ):
+        response = await on_fs_read_text_file(
+            1,
+            {"path": "service.token", "sessionId": acp_session_context.session_id},
+            acp_session_context,
+            _config(workspace_root=str(admitted)),
+        )
 
     assert "error" in response
     assert "must-not-leak" not in str(response)
@@ -549,7 +546,6 @@ async def test_privileged_read_stays_on_opened_parent_during_symlink_swap(
     safe.mkdir()
     (safe / "data.txt").write_text("workspace-data", encoding="utf-8")
     (protected / "data.txt").write_text("service-secret", encoding="utf-8")
-    monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
     real_open = os.open
     swapped = False
 
@@ -568,12 +564,13 @@ async def test_privileged_read_stays_on_opened_parent_during_symlink_swap(
         return real_open(path, flags, mode, dir_fd=dir_fd)
 
     monkeypatch.setattr(os, "open", swapping_open)
-    response = await on_fs_read_text_file(
-        1,
-        {"path": "safe/data.txt", "sessionId": acp_session_context.session_id},
-        acp_session_context,
-        _config(workspace_root=str(bound)),
-    )
+    with settings_override(provider_identity_launcher=Path("/configured")):
+        response = await on_fs_read_text_file(
+            1,
+            {"path": "safe/data.txt", "sessionId": acp_session_context.session_id},
+            acp_session_context,
+            _config(workspace_root=str(bound)),
+        )
 
     assert response["result"] == {"content": "workspace-data"}
     assert "service-secret" not in str(response)
@@ -592,11 +589,9 @@ async def test_privileged_write_stays_on_opened_parent_during_symlink_swap(
     safe.mkdir()
     protected_target = protected / "target.txt"
     protected_target.write_text("service-state", encoding="utf-8")
-    monkeypatch.setattr(settings, "provider_identity_launcher", Path("/configured"))
     # The privileged write re-groups the file to the agent GID; an unprivileged
     # test process can only fchown to a group it belongs to.
     assert os.name == "posix"
-    monkeypatch.setattr(settings, "provider_agent_gid", os.getgid())
     real_open = os.open
     swapped = False
 
@@ -615,16 +610,20 @@ async def test_privileged_write_stays_on_opened_parent_during_symlink_swap(
         return real_open(path, flags, mode, dir_fd=dir_fd)
 
     monkeypatch.setattr(os, "open", swapping_open)
-    response = await on_fs_write_text_file(
-        1,
-        {
-            "path": "safe/target.txt",
-            "content": "workspace-write",
-            "sessionId": acp_session_context.session_id,
-        },
-        acp_session_context,
-        _config(workspace_root=str(bound)),
-    )
+    with settings_override(
+        provider_identity_launcher=Path("/configured"),
+        provider_agent_gid=os.getgid(),
+    ):
+        response = await on_fs_write_text_file(
+            1,
+            {
+                "path": "safe/target.txt",
+                "content": "workspace-write",
+                "sessionId": acp_session_context.session_id,
+            },
+            acp_session_context,
+            _config(workspace_root=str(bound)),
+        )
 
     assert response["result"] == {}
     assert protected_target.read_text(encoding="utf-8") == "service-state"

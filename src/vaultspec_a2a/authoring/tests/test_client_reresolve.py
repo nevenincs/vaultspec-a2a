@@ -16,22 +16,24 @@ bearer never silently degrades into an infinite quiet retry.
 
 from __future__ import annotations
 
-import os
-import threading
+import contextlib
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING, override
 
 import pytest
 
-from ...testing import settings_override
-from ...testing.tests._support.http_handlers import JsonReplyHandler
+from ...testing import JsonReplyHandler, serve_handler, settings_override
 from .. import AuthoringClient
 from .._connection_proof import EngineConnectionError
 from .._envelope import AuthoringResponse
 from .._errors import AuthoringError, AuthoringTransportError
 from ..discovery import resolve_engine
-from ._engine_peer import engine_health_listener, health_proof, write_engine_record
+from ._engine_peer import (
+    engine_health_listener,
+    reply_health_proof,
+    write_engine_record,
+)
 from .test_engine_discovery_security import attacker_listener
 
 if TYPE_CHECKING:
@@ -54,7 +56,7 @@ class _EngineState:
 
 def _make_handler(state: _EngineState) -> type[JsonReplyHandler]:
     # BaseHTTPRequestHandler is listed again, redundantly - see
-    # testing/http_handlers.py's docstring for why.
+    # testing/http.py's docstring for why.
     class _Handler(JsonReplyHandler, BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -66,21 +68,8 @@ def _make_handler(state: _EngineState) -> type[JsonReplyHandler]:
             super().end_headers()
 
         def do_GET(self) -> None:
-            assert isinstance(self.server, ThreadingHTTPServer)
             if self.path == "/health":
-                self.send_response(200)
-                self.send_header(
-                    "x-vaultspec-engine-proof",
-                    health_proof(
-                        self.server.server_port,
-                        state.current_bearer,
-                        self.headers.get("x-vaultspec-engine-challenge", ""),
-                    ),
-                )
-                self.send_header("Content-Length", "0")
-                self.send_header("x-vaultspec-engine-pid", str(os.getpid()))
-                self.send_header("x-vaultspec-engine-started-ms", "1")
-                self.end_headers()
+                reply_health_proof(self, state.current_bearer)
                 return
             self._reply(404, {"error": "not found"})
 
@@ -114,7 +103,7 @@ class _LiveEngine:
     base_url: str
     port: int
     state: _EngineState
-    _server: ThreadingHTTPServer
+    _listener: contextlib.ExitStack
 
     def rotate_bearer(self, new_bearer: str, service_json: Path) -> None:
         """Simulate an engine restart: swap the accepted bearer and rewrite disk."""
@@ -122,8 +111,8 @@ class _LiveEngine:
         _write_service_json(service_json, self.port, new_bearer)
 
     def stop(self) -> None:
-        self._server.shutdown()
-        self._server.server_close()
+        """Take the engine's listener down; idempotent, so teardown may repeat it."""
+        self._listener.close()
 
 
 def _write_service_json(path: Path, port: int, bearer: str) -> None:
@@ -133,21 +122,14 @@ def _write_service_json(path: Path, port: int, bearer: str) -> None:
 @pytest.fixture
 def live_engine() -> Iterator[_LiveEngine]:
     state = _EngineState(current_bearer=_BOOT_BEARER)
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(state))
-    port = server.server_port
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    engine = _LiveEngine(
-        base_url=f"http://127.0.0.1:{port}",
-        port=port,
-        state=state,
-        _server=server,
-    )
-    try:
-        yield engine
-    finally:
-        engine.stop()
-        thread.join(timeout=5.0)
+    with contextlib.ExitStack() as listener:
+        port = listener.enter_context(serve_handler(_make_handler(state)))
+        yield _LiveEngine(
+            base_url=f"http://127.0.0.1:{port}",
+            port=port,
+            state=state,
+            _listener=listener,
+        )
 
 
 @pytest.fixture

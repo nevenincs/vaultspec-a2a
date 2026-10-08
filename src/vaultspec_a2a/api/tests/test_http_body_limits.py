@@ -12,8 +12,9 @@ from pydantic import ValidationError
 
 from ...control._worker_health import worker_liveness
 from ...control.infra_config import InfraConfig
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...testing import settings_override
+from ...utils import bearer_header
 from ...worker.app import create_worker_app
 from ..app import create_app
 
@@ -23,9 +24,8 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 _TOKEN = "body-limit-test"
-_AUTH = {"authorization": f"Bearer {_TOKEN}", "content-type": "application/json"}
+_AUTH = {**bearer_header(_TOKEN), "content-type": "application/json"}
 _ROUTES = (
-    "/internal/events",
     "/internal/events/batch",
     "/internal/heartbeat",
     "/dispatch",
@@ -41,41 +41,32 @@ def _app(path: str) -> FastAPI:
     if path == "/dispatch":
         return create_worker_app(lifespan=_no_lifespan)
     app = create_app(lifespan=_no_lifespan)
-    app.state.aggregator = EventAggregator()
+    app.state.internal_token = _TOKEN
+    app.state.relay_hub = RelayHub()
     app.state.db_session_factory = None
     return app
 
 
 def _body(path: str, size: int) -> bytes:
     payload: dict[str, object]
-    if path == "/internal/events":
-        payload = {"thread_id": "t", "payload": {"type": "token", "content": "ok"}}
-    elif path == "/internal/events/batch":
+    if path == "/internal/events/batch":
         payload = {"events": []}
     elif path == "/internal/heartbeat":
         payload = {"type": "heartbeat", "active_threads": ["t"]}
     else:
-        payload = {"action": "cancel", "thread_id": "t", "recursion_limit": 25}
+        payload = {"action": "cancel", "thread_id": "t"}
     encoded = json.dumps(payload).encode()
     assert len(encoded) <= size
     return encoded + b" " * (size - len(encoded))
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("path", _ROUTES)
-@pytest.mark.parametrize(
-    "framing",
-    ["missing", "chunked", "underreported", "malformed", "negative", "duplicate"],
-)
-async def test_internal_streamed_body_cannot_bypass_limit(
-    path: str, framing: str
-) -> None:
+async def _send_framed(
+    path: str, framing: str, *, consumed: list[int]
+) -> httpx.Response:
+    """Send one oversized body to *path* under the named Content-Length framing."""
     app = _app(path)
-    liveness = worker_liveness(app.state)
-    before = liveness.last_contact_ts
     cap = 1024 if path.endswith("/batch") else 256
     body = _body(path, cap + 1)
-    consumed: list[int] = []
 
     async def chunks() -> AsyncIterator[bytes]:
         consumed.append(1)
@@ -93,6 +84,8 @@ async def test_internal_streamed_body_cannot_bypass_limit(
         headers["content-length"] = "invalid"
     elif framing == "negative":
         headers["content-length"] = "-1"
+    elif framing == "separated":
+        headers["content-length"] = "1_2"
     with settings_override(internal_token=_TOKEN, internal_max_http_body_bytes=256):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -111,10 +104,56 @@ async def test_internal_streamed_body_cannot_bypass_limit(
                     ]
                 )
             response = await client.send(request)
+    response.extensions["app"] = app
+    return response
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", _ROUTES)
+@pytest.mark.parametrize("framing", ["missing", "chunked", "underreported"])
+async def test_internal_streamed_body_cannot_bypass_limit(
+    path: str, framing: str
+) -> None:
+    """A readable framing that under-declares is still caught by the counter."""
+    consumed: list[int] = []
+    response = await _send_framed(path, framing, consumed=consumed)
+    app = response.extensions["app"]
+    liveness = worker_liveness(app.state)
 
     assert response.status_code == 413
     assert consumed == [1, 2]
-    assert liveness.last_contact_ts == before
+    assert liveness.last_contact_ts is None
+    if path == "/dispatch":
+        assert len(app.state.dispatch_ids) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", _ROUTES)
+@pytest.mark.parametrize("framing", ["malformed", "negative", "separated", "duplicate"])
+async def test_an_unreadable_declared_length_is_a_bad_request(
+    path: str, framing: str
+) -> None:
+    """A Content-Length this layer cannot read is refused, and nothing is received.
+
+    Four ways to be unreadable, and each used to be discarded as though the
+    header were absent: a value that is not a number, a negative one that no
+    comparison against a cap could ever refuse, Python's own digit separator
+    that ``int`` accepts and HTTP does not, and two headers making different
+    claims about one body. Each left the bound resting on the stream counter
+    alone, which is the half a caller controls.
+
+    413 would be the wrong answer and 500 worse still: the request is not too
+    large and nothing failed inside the service - the framing is malformed,
+    which is a client's own fault to fix.
+    """
+    consumed: list[int] = []
+    response = await _send_framed(path, framing, consumed=consumed)
+    app = response.extensions["app"]
+
+    assert response.status_code == 400, response.text
+    assert "Content-Length" in response.json()["detail"]
+    assert consumed == [], "an unreadable declaration must be refused unread"
+    assert worker_liveness(app.state).last_contact_ts is None
     if path == "/dispatch":
         assert len(app.state.dispatch_ids) == 0
 
@@ -151,7 +190,7 @@ async def test_internal_exact_limit_body_is_accepted(path: str) -> None:
         yield body[128:]
 
     app = _app(path)
-    with settings_override(internal_token=_TOKEN, internal_max_http_body_bytes=256):
+    with settings_override(internal_max_http_body_bytes=256):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -179,7 +218,7 @@ async def test_dispatch_small_body_retains_authentication_and_validation() -> No
 async def test_body_limit_counts_utf8_bytes() -> None:
     body = json.dumps({"active_threads": ["é" * 128]}, ensure_ascii=False).encode()
     assert len(body.decode()) < 256 < len(body)
-    with settings_override(internal_token=_TOKEN, internal_max_http_body_bytes=256):
+    with settings_override(internal_max_http_body_bytes=256):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=_app("/internal/heartbeat")),
             base_url="http://test",
@@ -221,13 +260,12 @@ async def test_heartbeat_schema_bounds_preserve_liveness_on_refusal(
 ) -> None:
     app = _app("/internal/heartbeat")
     before = worker_liveness(app.state).last_contact_ts
-    with settings_override(internal_token=_TOKEN):
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        ) as client:
-            response = await client.post(
-                "/internal/heartbeat", json={"active_threads": threads}, headers=_AUTH
-            )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/heartbeat", json={"active_threads": threads}, headers=_AUTH
+        )
     assert response.status_code == 422
     assert worker_liveness(app.state).last_contact_ts == before
 

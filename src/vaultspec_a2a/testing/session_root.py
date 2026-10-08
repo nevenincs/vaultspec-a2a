@@ -43,6 +43,7 @@ from .harness_names import TEST_ENV_PREFIX
 __all__ = [
     "TEST_ROOT_NAME",
     "TestSessionSettings",
+    "prune_stale_dirs",
     "seat_test_session",
     "session_scratch_dir",
 ]
@@ -85,6 +86,9 @@ class TestSessionSettings(ProjectSettings):
     cpu_budget: int | None = Field(default=None, gt=0)
     completion_endpoint: str | None = None
     completion_owner_pid: int | None = None
+    # The file a fixture lane's hold-then-complete turn waits on, handed to the
+    # gateway or worker child a test spawns.
+    hold_gate: Path | None = None
 
 
 class SessionSeat:
@@ -99,24 +103,49 @@ class SessionSeat:
         self.procs_home = procs_home
 
 
-def _prune(sessions: Path, keep: Path) -> None:
-    # Another session starting at the same moment may be deleting these very
-    # directories, so an entry that vanishes mid-scan is skipped, never fatal:
-    # this runs at conftest import, where an error fails the whole session.
-    stamped: list[tuple[float, Path]] = []
-    for entry in sessions.iterdir():
+def prune_stale_dirs(
+    root: Path,
+    *,
+    kept_newest: int,
+    keep: Path | None = None,
+    older_than_s: float | None = None,
+) -> list[Path]:
+    """Remove all but the *kept_newest* most recent directories under *root*.
+
+    *keep* is retained regardless and does not count toward the kept set - the
+    caller's own directory. *older_than_s*, when given, spares any directory
+    modified more recently than that, however many there are. Returns the
+    directories actually removed.
+
+    Another process starting at the same moment may be deleting these very
+    directories, so an entry that vanishes mid-scan is skipped, never fatal:
+    this runs at conftest import, where an error fails the whole session.
+    """
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return []
+    stamped: list[tuple[float, str, Path]] = []
+    for entry in entries:
         if entry == keep:
             continue
         try:
             if entry.is_dir():
-                stamped.append((entry.stat().st_mtime, entry))
+                stamped.append((entry.stat().st_mtime, entry.name, entry))
         except OSError:
             continue
+    # Name breaks ties, so directories sharing one filesystem timestamp tick
+    # evict deterministically rather than in arbitrary order.
     stamped.sort(reverse=True)
     now = time.time()
-    for modified, entry in stamped[_SESSIONS_KEPT:]:
-        if now - modified > _SESSION_RETENTION_SECONDS:
-            shutil.rmtree(entry, ignore_errors=True)
+    removed: list[Path] = []
+    for modified, _name, entry in stamped[kept_newest:]:
+        if older_than_s is not None and now - modified <= older_than_s:
+            continue
+        shutil.rmtree(entry, ignore_errors=True)
+        if not entry.exists():
+            removed.append(entry)
+    return removed
 
 
 def _seat_env(field: str, value: Path, previously_seated: Path | None) -> None:
@@ -180,7 +209,12 @@ def seat_test_session(rootdir: Path) -> SessionSeat:
     seat.basetemp.parent.mkdir(parents=True, exist_ok=True)
     seat.home.mkdir(parents=True, exist_ok=True)
     seat.procs_home.mkdir(parents=True, exist_ok=True)
-    _prune(sessions, keep=root)
+    prune_stale_dirs(
+        sessions,
+        kept_newest=_SESSIONS_KEPT,
+        keep=root,
+        older_than_s=_SESSION_RETENTION_SECONDS,
+    )
     _seat_env("a2a_home", seat.home, harness.seated_home)
     _seat_env("procs_home", seat.procs_home, harness.seated_procs_home)
     fields = TestSessionSettings

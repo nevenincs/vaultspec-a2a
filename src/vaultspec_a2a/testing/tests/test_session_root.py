@@ -9,13 +9,20 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from ...control.infra_config import InfraConfig
 from ...control.settings_base import env_name
 from .. import harness_names
+from ..cli import inherited_environment
 from ..environment import armed_environment
-from ..session_root import TEST_ROOT_NAME, TestSessionSettings, seat_test_session
+from ..session_root import (
+    TEST_ROOT_NAME,
+    TestSessionSettings,
+    prune_stale_dirs,
+    seat_test_session,
+)
 
 _HOME = env_name(InfraConfig, "a2a_home")
 _PROCS = env_name(InfraConfig, "procs_home")
@@ -110,10 +117,13 @@ def test_a_nested_run_under_a_worker_marker_is_not_taken_for_a_worker(
     )
     script = tmp_path / "nested_seat.py"
     script.write_text(code.replace("; ", "\n"), encoding="utf-8")
-    environment = dict(os.environ)
-    environment["PYTEST_XDIST_WORKER"] = "gw0"
-    environment[env_name(TestSessionSettings, "session_root")] = str(tmp_path / "p")
-    environment[env_name(TestSessionSettings, "session_pid")] = "1"
+    environment = inherited_environment(
+        {
+            "PYTEST_XDIST_WORKER": "gw0",
+            env_name(TestSessionSettings, "session_root"): str(tmp_path / "p"),
+            env_name(TestSessionSettings, "session_pid"): "1",
+        }
+    )
 
     completed = subprocess.run(
         [sys.executable, str(script), str(tmp_path / "nested")],
@@ -151,11 +161,6 @@ def _seated_session(rootdir: Path, named: str) -> subprocess.CompletedProcess[st
     """Seat a session in a real child process that inherits *named* as its env file."""
     probe = rootdir / "probe.py"
     probe.write_text(_SEATED_PROBE, encoding="utf-8")
-    inherited = {
-        name: value
-        for name, value in os.environ.items()
-        if not name.startswith("VAULTSPEC_A2A_")
-    }
     return subprocess.run(
         [sys.executable, str(probe), str(rootdir)],
         capture_output=True,
@@ -163,12 +168,16 @@ def _seated_session(rootdir: Path, named: str) -> subprocess.CompletedProcess[st
         encoding="utf-8",
         timeout=300,
         check=False,
-        env={
-            **inherited,
-            "PYTHONIOENCODING": "utf-8",
-            env_name(InfraConfig, "project_root"): str(rootdir),
-            "VAULTSPEC_A2A_ENV_FILE": named,
-        },
+        env=inherited_environment(
+            {
+                **dict.fromkeys(
+                    name for name in os.environ if name.startswith("VAULTSPEC_A2A_")
+                ),
+                "PYTHONIOENCODING": "utf-8",
+                env_name(InfraConfig, "project_root"): str(rootdir),
+                "VAULTSPEC_A2A_ENV_FILE": named,
+            }
+        ),
     )
 
 
@@ -200,3 +209,34 @@ def test_a_session_survives_an_operator_settings_file_that_is_not_there(
 
     assert seated.returncode == 0, seated.stderr
     assert seated.stdout.split()[0] == "<removed>"
+
+
+def _aged_dir(root: Path, name: str, *, age_seconds: float) -> Path:
+    directory = root / name
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "session-summary.json").write_text("{}", encoding="utf-8")
+    stamp = time.time() - age_seconds
+    os.utime(directory, (stamp, stamp))
+    return directory
+
+
+def test_stale_directories_are_bounded_and_evict_oldest_first(
+    tmp_path: Path,
+) -> None:
+    """Recent post-mortems survive; older runs are reclaimed."""
+    kept_newest = 5
+    root = tmp_path / "service-tests"
+    root.mkdir()
+
+    created = [
+        _aged_dir(root, f"run-{index:03d}", age_seconds=1000 - index)
+        for index in range(kept_newest + 3)
+    ]
+
+    removed = prune_stale_dirs(root, kept_newest=kept_newest)
+
+    surviving = sorted(entry.name for entry in root.iterdir())
+    assert len(surviving) == kept_newest
+    assert len(removed) == 3
+    # The newest have the largest index because age decreases with index.
+    assert created[-1].name in surviving

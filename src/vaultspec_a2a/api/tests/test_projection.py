@@ -1,35 +1,41 @@
 """Tests for repair-aware checkpoint projection helpers."""
 
-from datetime import UTC, datetime
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.types import Interrupt
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...conftest import materialize_schema
 from ...control.projection import (
     apply_checkpoint_projection,
     apply_execution_state_projection,
     enrich_snapshot_from_durable_state,
     enrich_snapshot_from_execution_state,
     project_execution_state_model,
+    reconcile_checkpoint_permissions_with_durable_state,
 )
 from ...database import (
+    ThreadExecutionStateModel,
+    create_control_action,
     create_thread,
     record_permission_request,
     record_thread_execution_state,
-    set_thread_repair_state,
 )
-from ...database.models import ThreadExecutionStateModel
 from ...tests._write_authority import make_test_write_authority
+from ...thread.enums import (
+    ControlActionResultStatus,
+    ControlActionType,
+    DegradedReason,
+    RepairStatus,
+    ThreadStatus,
+)
 from ...thread.snapshots import (
     CheckpointProjection,
     ExecutionStateProjection,
-    ExecutionTaskData,
+    ExecutionTaskSnapshot,
     ProjectedInterrupt,
-    ThreadStateData,
+    ThreadStateSnapshot,
     project_checkpoint_tuple,
 )
 
@@ -74,6 +80,7 @@ def test_project_checkpoint_tuple_extracts_plan_approval_interrupt() -> None:
                             "feature": "auth",
                             "plan_paths": ["plan.md"],
                             "exec_worker": "vaultspec-coder",
+                            "request_id": "plan-approval-1",
                         },
                         id="interrupt-plan-1",
                     )
@@ -105,7 +112,8 @@ def test_project_checkpoint_tuple_extracts_plan_approval_interrupt() -> None:
         tzinfo=UTC,
     )
     assert len(projection.pending_interrupts) == 1
-    assert projection.pending_interrupts[0].interrupt_id == "interrupt-plan-1"
+    # The id the producer named the request by, not LangGraph's interrupt id.
+    assert projection.pending_interrupts[0].interrupt_id == "plan-approval-1"
     assert projection.pending_write_channels == ["__interrupt__"]
     assert projection.pending_write_count == 1
 
@@ -148,11 +156,17 @@ def test_project_checkpoint_tuple_surfaces_metadata_parent_and_pending_writes() 
     assert "checkpoint_history_unknown" in projection.degraded_reasons
 
 
-def test_apply_checkpoint_projection_merges_interrupt_permissions() -> None:
-    """Projected interrupts should surface as pending permissions in snapshots."""
-    snapshot = ThreadStateData(
+def test_a_checkpoint_only_permission_is_flagged_rather_than_merged() -> None:
+    """A parked permission is never built from the checkpoint alone.
+
+    The durable row is the only source of a pending permission's content, so a
+    permission the checkpoint is parked on with no row behind it contributes
+    nothing to the snapshot's pending permissions: it is flagged as an orphan
+    the respond route cannot act on, and the run is held for reconciliation.
+    """
+    snapshot = ThreadStateSnapshot(
         thread_id="thread-1",
-        status="input_required",
+        status=ThreadStatus.INPUT_REQUIRED,
         last_sequence=0,
     )
     projection = CheckpointProjection(
@@ -174,6 +188,7 @@ def test_apply_checkpoint_projection_merges_interrupt_permissions() -> None:
                 interrupt_type="permission_request",
                 payload={
                     "type": "permission_request",
+                    "request_id": "interrupt-tool-1",
                     "tool_name": "bash",
                     "options": [
                         {"optionId": "allow_once", "name": "Allow Once"},
@@ -196,14 +211,22 @@ def test_apply_checkpoint_projection_merges_interrupt_permissions() -> None:
     assert projected.pending_write_count == 1
     assert projected.history_depth == 2
     assert projected.pause_cause == "permission_request"
-    assert len(projected.pending_permissions) == 1
-    permission = projected.pending_permissions[0]
-    assert permission.request_id == "interrupt-tool-1"
-    assert permission.tool_call == "bash"
-    assert [option.option_id for option in permission.options] == [
-        "allow_once",
-        "reject_once",
-    ]
+    assert projected.pending_permissions == []
+
+    reconciled = reconcile_checkpoint_permissions_with_durable_state(
+        projected, projection
+    )
+
+    assert reconciled.pending_permissions == []
+    assert (
+        DegradedReason.CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW
+        in reconciled.degraded_reasons
+    )
+    assert reconciled.snapshot_complete is False
+    assert reconciled.repair_status == RepairStatus.NEEDS_RECONCILIATION
+    assert reconciled.execution_readiness == RepairStatus.NEEDS_RECONCILIATION
+    # No actionable permission remains, so the pause it named is withdrawn.
+    assert reconciled.pause_cause is None
 
 
 @pytest.mark.parametrize(
@@ -220,9 +243,9 @@ def test_apply_checkpoint_projection_discards_runtime_corrupt_interrupt_payload(
     interrupt_type: str,
 ) -> None:
     """A corrupt checkpoint payload cannot surface an actionable interrupt."""
-    snapshot = ThreadStateData(
+    snapshot = ThreadStateSnapshot(
         thread_id="thread-corrupt-interrupt",
-        status="input_required",
+        status=ThreadStatus.INPUT_REQUIRED,
         last_sequence=0,
     )
     projection = CheckpointProjection(
@@ -251,12 +274,12 @@ def test_apply_checkpoint_projection_merges_clarification_request() -> None:
 
     Mirrors the permission-merge test above but for the clarification
     interrupt kind, disclosed on a separate field (not pending_permissions —
-    its bounded questions do not fit the single-decision PermissionData
+    its bounded questions do not fit the single-decision PermissionSnapshot
     shape).
     """
-    snapshot = ThreadStateData(
+    snapshot = ThreadStateSnapshot(
         thread_id="thread-1",
-        status="input_required",
+        status=ThreadStatus.INPUT_REQUIRED,
         last_sequence=0,
     )
     projection = CheckpointProjection(
@@ -271,6 +294,7 @@ def test_apply_checkpoint_projection_merges_clarification_request() -> None:
                 interrupt_type="clarification_request",
                 payload={
                     "type": "clarification_request",
+                    "request_id": "interrupt-clarify-1",
                     "questions": [
                         {
                             "id": "provider",
@@ -301,9 +325,9 @@ def test_apply_checkpoint_projection_merges_clarification_request() -> None:
 
 def test_apply_checkpoint_projection_uses_later_valid_clarification_sibling() -> None:
     """A corrupt clarification interrupt must not hide a later valid sibling."""
-    snapshot = ThreadStateData(
+    snapshot = ThreadStateSnapshot(
         thread_id="thread-corrupt-clarification-sibling",
-        status="input_required",
+        status=ThreadStatus.INPUT_REQUIRED,
         last_sequence=0,
     )
     projection = CheckpointProjection(
@@ -322,6 +346,7 @@ def test_apply_checkpoint_projection_uses_later_valid_clarification_sibling() ->
                 interrupt_type="clarification_request",
                 payload={
                     "type": "clarification_request",
+                    "request_id": "interrupt-valid-clarification",
                     "questions": [
                         {
                             "id": "provider",
@@ -349,32 +374,28 @@ def test_project_execution_state_model_normalizes_latest_row() -> None:
         thread_id="thread-1",
         checkpoint_id="cp-1",
         parent_checkpoint_id="cp-0",
-        recovery_epoch=2,
         task_count=1,
         interrupt_count=1,
         next_nodes_json='["supervisor"]',
-        interrupt_types_json='["permission_request"]',
         tasks_json=(
             '[{"task_id":"task-1","name":"supervisor","path":["supervisor"],'
             '"has_error":false,"error_type":null,"interrupt_ids":["interrupt-1"],'
             '"interrupt_types":["permission_request"],"has_nested_state":false,'
             '"has_result":false}]'
         ),
-        degraded_reasons_json='["execution_state_projection_partial"]',
+        degraded_reasons_json='["execution_state_projection_timeout"]',
     )
 
     projection = project_execution_state_model(model)
 
-    assert projection.checkpoint_id == "cp-1"
-    assert projection.parent_checkpoint_id == "cp-0"
-    assert projection.recovery_epoch == 2
     assert projection.next_nodes == ["supervisor"]
-    assert projection.interrupt_types == ["permission_request"]
     assert projection.task_count == 1
     assert projection.interrupt_count == 1
-    assert projection.degraded_reasons == ["execution_state_projection_partial"]
+    assert projection.degraded_reasons == [
+        DegradedReason.EXECUTION_STATE_PROJECTION_TIMEOUT
+    ]
     assert projection.execution_tasks == [
-        ExecutionTaskData(
+        ExecutionTaskSnapshot(
             task_id="task-1",
             name="supervisor",
             path=["supervisor"],
@@ -394,11 +415,9 @@ def test_project_execution_state_model_recovers_valid_task_siblings() -> None:
         thread_id="thread-task-siblings",
         checkpoint_id="cp-task-siblings",
         parent_checkpoint_id=None,
-        recovery_epoch=0,
         task_count=2,
         interrupt_count=0,
         next_nodes_json="[]",
-        interrupt_types_json="[]",
         tasks_json=(
             '[{"task_id":"task-first","name":"first"},'
             '"not-a-task",'
@@ -418,16 +437,10 @@ def test_project_execution_state_model_recovers_valid_task_siblings() -> None:
 
 @pytest.mark.asyncio
 async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_siblings(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Durable permission-list corruption drops only unreadable option siblings."""
-    case_dir = tmp_path / "api-test-projection-permission-siblings"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as session:
+    async with session_factory() as session:
         thread = await create_thread(
             session,
             write_authority=make_test_write_authority(),
@@ -449,9 +462,9 @@ async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_sibl
         )
         await session.commit()
 
-        snapshot = ThreadStateData(
+        snapshot = ThreadStateSnapshot(
             thread_id=thread.id,
-            status=thread.status,
+            status=ThreadStatus(thread.status),
             last_sequence=0,
         )
         projected = await enrich_snapshot_from_durable_state(
@@ -465,26 +478,221 @@ async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_sibl
         option.option_id for option in projected.pending_permissions[0].options
     ] == ["allow_once", "reject_once"]
 
-    await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_enrich_snapshot_from_durable_state_degrades_a_corrupt_repair_status(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A corrupt repair_status column degrades the row instead of raising.
+
+    Nothing in the schema stops a legacy write or an out-of-band UPDATE from
+    leaving an unrecognised string in ``threads.repair_status``. One row like
+    that must not take the whole listing or run-status down with it.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-corrupt-repair-status",
+        )
+        thread.repair_status = "not-a-real-status"
+        await session.commit()
+        await session.refresh(thread)
+
+        snapshot = ThreadStateSnapshot(
+            thread_id=thread.id,
+            status=ThreadStatus(thread.status),
+            last_sequence=0,
+        )
+        projected = await enrich_snapshot_from_durable_state(
+            session,
+            thread=thread,
+            snapshot=snapshot,
+        )
+
+    assert projected.repair_status == RepairStatus.OPERATOR_INTERVENTION_REQUIRED
+    assert projected.execution_readiness == RepairStatus.OPERATOR_INTERVENTION_REQUIRED
+    assert DegradedReason.REPAIR_STATUS_UNREADABLE in projected.degraded_reasons
+
+
+@pytest.mark.asyncio
+async def test_enrich_snapshot_from_durable_state_ignores_a_corrupt_approval_column(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The durable approval answer comes from pending requests, never the column.
+
+    ``threads.approval_status`` is read as a plain string only, in the
+    terminal-residue check; a legacy or corrupt value in it must not reach an
+    enum coercion that could raise and take the read down with it.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-corrupt-approval-status",
+        )
+        thread.approval_status = "not-a-real-status"
+        await session.commit()
+        await session.refresh(thread)
+
+        snapshot = ThreadStateSnapshot(
+            thread_id=thread.id,
+            status=ThreadStatus(thread.status),
+            last_sequence=0,
+        )
+        projected = await enrich_snapshot_from_durable_state(
+            session,
+            thread=thread,
+            snapshot=snapshot,
+        )
+
+    assert projected.approval_status is None
+
+
+@pytest.mark.asyncio
+async def test_a_withheld_permission_row_is_not_also_reported_as_absent(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A durable row that offers nothing answerable is not ALSO orphaned.
+
+    The checkpoint parks on the same request id a durable row already
+    answers for; that row's content is withheld (it offers no usable
+    option), but it is not ABSENT, and CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW
+    must not claim the row never existed when the withholding reason already
+    reported the real fault.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-withheld-row",
+        )
+        await record_permission_request(
+            session,
+            request_id="withheld-1",
+            thread_id=thread.id,
+            pause_reason_type="permission_request",
+            description="Approve?",
+            allowed_options=[{"name": "Approve"}],
+            tool_call="bash",
+        )
+        await session.commit()
+
+        snapshot = ThreadStateSnapshot(
+            thread_id=thread.id,
+            status=ThreadStatus(thread.status),
+            last_sequence=0,
+        )
+        durable_permission_ids: set[str] = set()
+        snapshot = await enrich_snapshot_from_durable_state(
+            session,
+            thread=thread,
+            snapshot=snapshot,
+            durable_permission_ids=durable_permission_ids,
+        )
+
+    assert snapshot.pending_permissions == []
+    assert (
+        DegradedReason.PERMISSION_OFFERS_NO_USABLE_OPTION in snapshot.degraded_reasons
+    )
+    assert durable_permission_ids == {"withheld-1"}
+
+    projection = CheckpointProjection(
+        channel_values={},
+        config={"configurable": {"thread_id": thread.id, "checkpoint_id": "cp-1"}},
+        checkpoint_id="cp-1",
+        checkpoint_created_at=datetime(2026, 3, 9, 10, 20, tzinfo=UTC),
+        pending_interrupts=[
+            ProjectedInterrupt(
+                interrupt_id="withheld-1",
+                interrupt_type="permission_request",
+                payload={"type": "permission_request", "request_id": "withheld-1"},
+            )
+        ],
+    )
+
+    reconciled = reconcile_checkpoint_permissions_with_durable_state(
+        snapshot, projection, durable_permission_ids=durable_permission_ids
+    )
+
+    assert (
+        DegradedReason.CHECKPOINT_PERMISSION_WITHOUT_DURABLE_ROW
+        not in reconciled.degraded_reasons
+    )
+
+
+@pytest.mark.asyncio
+async def test_report_queued_messages_false_skips_the_queue_depth_read(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A caller whose served shape has no field for it skips the read.
+
+    The listing summary never had a ``queued_messages`` field to put this
+    in, so the per-row read ran for a number nothing downstream served. With
+    the flag off, the field stays at its unread default even though a real
+    continuation is waiting; with it on (the default), the real count comes
+    through.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-queued-continuation",
+        )
+        action = await create_control_action(
+            session,
+            thread_id=thread.id,
+            action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+            idempotency_key="queued-continuation-1",
+            dispatch_id="dispatch-queued-continuation-1",
+            recovery_deadline_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+        # Mutated in place after the accepted-row insert above validated the
+        # recovery deadline it shares with every dispatchable outcome - the
+        # same route the continuation-queue schema tests seed a queued row
+        # through, since create_control_action has no queue_position
+        # parameter of its own.
+        action.result_status = ControlActionResultStatus.QUEUED.value
+        action.queue_position = 1
+        await session.commit()
+
+        skipped = await enrich_snapshot_from_durable_state(
+            session,
+            thread=thread,
+            snapshot=ThreadStateSnapshot(
+                thread_id=thread.id,
+                status=ThreadStatus(thread.status),
+                last_sequence=0,
+            ),
+            report_queued_messages=False,
+        )
+        read = await enrich_snapshot_from_durable_state(
+            session,
+            thread=thread,
+            snapshot=ThreadStateSnapshot(
+                thread_id=thread.id,
+                status=ThreadStatus(thread.status),
+                last_sequence=0,
+            ),
+        )
+
+    assert skipped.queued_messages == 0
+    assert read.queued_messages == 1
 
 
 def test_apply_execution_state_projection_merges_normalized_fields() -> None:
     """Durable execution-state projection should enrich reconnect snapshots."""
-    snapshot = ThreadStateData(
+    snapshot = ThreadStateSnapshot(
         thread_id="thread-1",
-        status="running",
+        status=ThreadStatus.RUNNING,
         last_sequence=0,
     )
     projection = ExecutionStateProjection(
-        checkpoint_id="cp-1",
-        parent_checkpoint_id="cp-0",
-        recovery_epoch=1,
         task_count=1,
         interrupt_count=1,
         next_nodes=["supervisor"],
-        interrupt_types=["permission_request"],
         execution_tasks=[
-            ExecutionTaskData(
+            ExecutionTaskSnapshot(
                 task_id="task-1",
                 name="supervisor",
                 path=["supervisor"],
@@ -496,7 +704,7 @@ def test_apply_execution_state_projection_merges_normalized_fields() -> None:
                 has_result=False,
             )
         ],
-        degraded_reasons=["execution_state_projection_partial"],
+        degraded_reasons=[DegradedReason.EXECUTION_STATE_PROJECTION_TIMEOUT],
     )
 
     projected = apply_execution_state_projection(snapshot, projection)
@@ -505,21 +713,17 @@ def test_apply_execution_state_projection_merges_normalized_fields() -> None:
     assert projected.task_count == 1
     assert projected.pending_interrupt_count == 1
     assert len(projected.execution_tasks) == 1
-    assert "execution_state_projection_partial" in projected.degraded_reasons
+    assert (
+        DegradedReason.EXECUTION_STATE_PROJECTION_TIMEOUT in projected.degraded_reasons
+    )
 
 
 @pytest.mark.asyncio
 async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Checkpoint mismatch should explicitly mark execution-state projection stale."""
-    case_dir = tmp_path / "api-test-projection-db-stale"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as session:
+    async with session_factory() as session:
         thread = await create_thread(
             session, write_authority=make_test_write_authority(), thread_id="thread-1"
         )
@@ -528,19 +732,17 @@ async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
             thread_id="thread-1",
             checkpoint_id="cp-old",
             parent_checkpoint_id=None,
-            snapshot_created_at=None,
             task_count=0,
             interrupt_count=0,
             next_nodes=["supervisor"],
-            interrupt_types=[],
             tasks=[],
             degraded_reasons=[],
         )
         await session.commit()
 
-        snapshot = ThreadStateData(
+        snapshot = ThreadStateSnapshot(
             thread_id="thread-1",
-            status=thread.status,
+            status=ThreadStatus(thread.status),
             last_sequence=0,
             checkpoint_id="cp-new",
         )
@@ -555,65 +757,45 @@ async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
         assert snapshot.snapshot_complete is False
         assert "execution_state_projection_stale" in snapshot.degraded_reasons
 
-    await engine.dispose()
-
 
 @pytest.mark.asyncio
-async def test_degraded_projection_does_not_mask_recovery_epoch_staleness(
-    tmp_path: Path,
+async def test_degraded_only_projection_keeps_the_prior_lineage(
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    """A degraded-only projection must not refresh recovery_epoch on old state."""
-    case_dir = tmp_path / "api-test-projection-db-epoch"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as session:
+    """A degraded-only write must not overwrite the row's last real lineage."""
+    async with session_factory() as session:
         thread = await create_thread(
             session,
             write_authority=make_test_write_authority(),
-            thread_id="thread-epoch",
+            thread_id="thread-degraded-only",
         )
         await record_thread_execution_state(
             session,
-            thread_id="thread-epoch",
+            thread_id="thread-degraded-only",
             checkpoint_id="cp-good",
             parent_checkpoint_id=None,
-            snapshot_created_at=None,
             task_count=0,
             interrupt_count=0,
             next_nodes=["worker"],
-            interrupt_types=[],
             tasks=[],
             degraded_reasons=[],
         )
-        await set_thread_repair_state(
-            session,
-            "thread-epoch",
-            repair_status="needs_reconciliation",
-            execution_readiness="needs_reconciliation",
-            increment_recovery_epoch=True,
-        )
         await record_thread_execution_state(
             session,
-            thread_id="thread-epoch",
+            thread_id="thread-degraded-only",
             checkpoint_id=None,
             parent_checkpoint_id=None,
-            snapshot_created_at=None,
             task_count=0,
             interrupt_count=0,
             next_nodes=[],
-            interrupt_types=[],
             tasks=[],
-            degraded_reasons=["execution_state_projection_unavailable"],
+            degraded_reasons=[DegradedReason.EXECUTION_STATE_PROJECTION_UNAVAILABLE],
         )
         await session.commit()
-        await session.refresh(thread)
 
-        snapshot = ThreadStateData(
-            thread_id="thread-epoch",
-            status=thread.status,
+        snapshot = ThreadStateSnapshot(
+            thread_id="thread-degraded-only",
+            status=ThreadStatus(thread.status),
             last_sequence=0,
         )
         snapshot = await enrich_snapshot_from_execution_state(
@@ -624,55 +806,45 @@ async def test_degraded_projection_does_not_mask_recovery_epoch_staleness(
             checkpoint_id=None,
         )
 
-        projection = await session.get(ThreadExecutionStateModel, "thread-epoch")
+        projection = await session.get(
+            ThreadExecutionStateModel, "thread-degraded-only"
+        )
 
     assert projection is not None
     assert projection.checkpoint_id == "cp-good"
-    assert projection.recovery_epoch == 0
     assert snapshot.snapshot_complete is False
     assert "execution_state_projection_stale" in snapshot.degraded_reasons
-
-    await engine.dispose()
 
 
 @pytest.mark.asyncio
 async def test_unreadable_execution_state_requires_operator_intervention(
-    tmp_path: Path,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """Corrupted durable execution-state rows must fail closed on readiness."""
-    case_dir = tmp_path / "api-test-projection-db-corrupt"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    db_file = case_dir / "test.db"
-    materialize_schema(Path(db_file))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as session:
+    async with session_factory() as session:
         thread = await create_thread(
             session,
             write_authority=make_test_write_authority(),
             thread_id="thread-corrupt-execution-state",
             repair_status="healthy",
-            execution_readiness="healthy",
         )
         session.add(
             ThreadExecutionStateModel(
                 thread_id="thread-corrupt-execution-state",
                 checkpoint_id="cp-1",
                 parent_checkpoint_id=None,
-                recovery_epoch=0,
                 task_count=0,
                 interrupt_count=0,
                 next_nodes_json="{",
-                interrupt_types_json="[]",
                 tasks_json="[]",
                 degraded_reasons_json="[]",
             )
         )
         await session.commit()
 
-        snapshot = ThreadStateData(
+        snapshot = ThreadStateSnapshot(
             thread_id=thread.id,
-            status=thread.status,
+            status=ThreadStatus(thread.status),
             last_sequence=0,
         )
         snapshot = await enrich_snapshot_from_execution_state(
@@ -687,5 +859,3 @@ async def test_unreadable_execution_state_requires_operator_intervention(
     assert "execution_state_projection_unreadable" in snapshot.degraded_reasons
     assert snapshot.repair_status == "operator_intervention_required"
     assert snapshot.execution_readiness == "operator_intervention_required"
-
-    await engine.dispose()

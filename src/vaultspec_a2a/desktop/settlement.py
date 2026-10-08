@@ -15,8 +15,8 @@ terminal run is already durable, and a lost callback is reconciled by the
 dashboard's own status reconciliation, not by retrying forever here.
 
 Configuration is resolved fail-soft: when no dashboard settlement endpoint is
-configured (the Compose and development profiles, or a desktop install whose
-dashboard has not published one) the callback is simply skipped, never errored.
+configured (the development profile, or a desktop install whose dashboard has
+not published one) the callback is simply skipped, never errored.
 """
 
 from __future__ import annotations
@@ -25,6 +25,8 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from ..utils import bearer_header
 
 if TYPE_CHECKING:
     import httpx
@@ -47,7 +49,7 @@ _BACKOFF_MAX_SECONDS = 2.0
 
 
 @dataclass(frozen=True, slots=True)
-class SettlementResult:
+class _SettlementResult:
     """The bounded outcome of a terminal-settlement callback.
 
     ``delivered`` is ``True`` only on an accepted callback. ``skipped`` is ``True``
@@ -105,7 +107,7 @@ async def emit_run_settlement(
     lease_id: str,
     terminal_status: ThreadStatus,
     client: httpx.AsyncClient | None = None,
-) -> SettlementResult:
+) -> _SettlementResult:
     """Deliver one bounded, attach-authenticated terminal-settlement callback.
 
     Builds the settlement body from the run and its non-secret lease identity plus
@@ -121,7 +123,7 @@ async def emit_run_settlement(
 
     endpoint = settlement_endpoint()
     if endpoint is None:
-        return SettlementResult(
+        return _SettlementResult(
             delivered=False,
             skipped=True,
             attempts=0,
@@ -129,7 +131,7 @@ async def emit_run_settlement(
         )
     attach_credential = _resolve_attach_credential()
     if attach_credential is None:
-        return SettlementResult(
+        return _SettlementResult(
             delivered=False,
             skipped=True,
             attempts=0,
@@ -139,7 +141,7 @@ async def emit_run_settlement(
     body = TerminalSettlement(
         run_id=run_id, lease_id=lease_id, terminal_status=terminal_status
     )
-    headers = {"Authorization": f"Bearer {attach_credential}"}
+    headers = bearer_header(attach_credential)
     payload = body.model_dump(mode="json")
 
     owned_client = client is None
@@ -157,7 +159,7 @@ async def _deliver(
     payload: dict[str, object],
     headers: dict[str, str],
     run_id: str,
-) -> SettlementResult:
+) -> _SettlementResult:
     """POST the settlement with bounded, backed-off retries."""
     import httpx
 
@@ -182,7 +184,7 @@ async def _deliver(
         else:
             last_status = response.status_code
             if response.is_success:
-                return SettlementResult(
+                return _SettlementResult(
                     delivered=True,
                     skipped=False,
                     attempts=attempt,
@@ -201,7 +203,7 @@ async def _deliver(
             await asyncio.sleep(
                 min(_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)), _BACKOFF_MAX_SECONDS)
             )
-    return SettlementResult(
+    return _SettlementResult(
         delivered=False,
         skipped=False,
         attempts=_MAX_ATTEMPTS,

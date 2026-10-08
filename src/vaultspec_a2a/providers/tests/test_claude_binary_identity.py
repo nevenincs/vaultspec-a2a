@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from ...graph.enums import Provider
-from ...testing import armed_environment, settings_override
+from ...testing import armed_environment, initialize_result, settings_override
 from ...thread.errors import ConfigError
 from ...utils.enums import AcpRequestId
 from .._acp_session import initialize_session
@@ -42,20 +42,22 @@ from ..cli_resolution import (
     resolve_provider_cli_executable,
     resolve_service_executable,
 )
-from ..factory import ProviderFactory, _discover_claude_catalog
+from ..factory import ProviderFactory, _discover_claude_family_catalog
 from ..provider_catalog import CatalogStatus, HealthState, ProviderCatalogKey
 
 if TYPE_CHECKING:
+    from ...conftest import ExternalPrerequisiteRule
     from .._acp_types import AcpSessionContext
 
 
-def _service_claude() -> str:
-    """The CLI this service resolves, or skip: the coupling needs a real one."""
+@pytest.fixture
+def service_claude(external_prerequisite: ExternalPrerequisiteRule) -> str:
+    """The CLI this service resolves, or its absence: the coupling needs a real one."""
     executable = resolve_provider_cli_executable(Provider.CLAUDE)
     if executable is None:
-        pytest.fail(
-            "the Claude CLI is not installed on this host, so the two seams "
-            "cannot be compared against the binary they must agree on"
+        external_prerequisite.absent(
+            "claude-cli",
+            "the two seams cannot be compared against the binary they must agree on",
         )
     return str(Path(executable).resolve())
 
@@ -80,7 +82,9 @@ def _capsule_that_dumps_its_environment(root: Path, report: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_served_turn_pins_the_service_claude(tmp_path: Path) -> None:
+async def test_a_served_turn_pins_the_service_claude(
+    tmp_path: Path, service_claude: str
+) -> None:
     """The environment a turn's child receives names the CLI it must run."""
     model = AcpChatModel(
         command=["node", "index.js"],
@@ -91,7 +95,7 @@ async def test_a_served_turn_pins_the_service_claude(tmp_path: Path) -> None:
 
     env = await model._acp_environment()
 
-    assert env[CLAUDE_EXECUTABLE_ENV] == _service_claude()
+    assert env[CLAUDE_EXECUTABLE_ENV] == service_claude
     assert Path(env[CLAUDE_EXECUTABLE_ENV]).is_absolute()
 
 
@@ -112,7 +116,8 @@ async def test_the_catalog_probe_pins_the_same_claude(tmp_path: Path) -> None:
     workspace.mkdir()
 
     with settings_override(capsule_assets_root=capsule), suppress(AcpError):
-        await _discover_claude_catalog(
+        await _discover_claude_family_catalog(
+            Provider.CLAUDE,
             ProviderCatalogKey(
                 provider_id=Provider.CLAUDE.value,
                 execution_mode="claude-agent-acp:node",
@@ -136,7 +141,7 @@ def test_an_operator_pin_is_not_overridden(tmp_path: Path) -> None:
     assert env[CLAUDE_EXECUTABLE_ENV] == str(cli.resolve())
 
 
-def test_the_pin_reports_what_it_resolved() -> None:
+def test_the_pin_reports_what_it_resolved(service_claude: str) -> None:
     """The caller is handed the path, so a session can record what it ran."""
     env: dict[str, str] = {}
 
@@ -144,7 +149,7 @@ def test_the_pin_reports_what_it_resolved() -> None:
 
     assert resolution.authority == "service_path"
     assert str(resolution.path) == env[CLAUDE_EXECUTABLE_ENV]
-    assert env[CLAUDE_EXECUTABLE_ENV] == _service_claude()
+    assert env[CLAUDE_EXECUTABLE_ENV] == service_claude
 
 
 @pytest.mark.asyncio
@@ -305,7 +310,9 @@ async def test_catalog_reports_a_missing_selected_cli_as_unavailable(
     key = ProviderCatalogKey(Provider.CLAUDE.value, "claude-agent-acp:node")
 
     with settings_override(capsule_assets_root=capsule):
-        discovery = await _discover_claude_catalog(key, tmp_path)
+        discovery = await _discover_claude_family_catalog(
+            Provider.CLAUDE, key, tmp_path
+        )
 
     assert discovery.catalog.state.status is CatalogStatus.UNAVAILABLE
     assert discovery.catalog.state.reason == (
@@ -370,16 +377,13 @@ async def test_the_handshake_identity_is_carried_off_the_wire(
         await asyncio.sleep(0)
     acp_session_context.response_futures[AcpRequestId.INITIALIZE].set_result(
         {
-            "result": {
-                "protocolVersion": 1,
-                "agentCapabilities": {},
-                "authMethods": [],
-                "agentInfo": {
+            "result": initialize_result(
+                agent_info={
                     "name": "@agentclientprotocol/claude-agent-acp",
                     "title": "Claude Agent",
                     "version": "0.59.0",
-                },
-            }
+                }
+            )
         }
     )
 
@@ -394,6 +398,7 @@ async def test_the_run_reports_both_halves_of_what_it_ran(
     acp_session_context: AcpSessionContext,
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
+    service_claude: str,
 ) -> None:
     """Adapter and CLI are reported together: either alone explains nothing."""
     model = AcpChatModel(
@@ -403,7 +408,7 @@ async def test_the_run_reports_both_halves_of_what_it_ran(
         acp_family="claude",
     )
     model._state.session.agent_info = {"name": "adapter-under-test", "version": "9.9.9"}
-    model._state.session.claude_executable = _service_claude()
+    model._state.session.claude_executable = service_claude
 
     with caplog.at_level(logging.INFO, logger="vaultspec_a2a.providers"):
         model._record_provider_identity(acp_session_context)
@@ -416,4 +421,4 @@ async def test_the_run_reports_both_halves_of_what_it_ran(
     assert recorded, caplog.messages
     assert recorded[0]["agent_name"] == "adapter-under-test"
     assert recorded[0]["agent_version"] == "9.9.9"
-    assert recorded[0]["cli_executable"] == _service_claude()
+    assert recorded[0]["cli_executable"] == service_claude

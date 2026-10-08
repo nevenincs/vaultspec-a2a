@@ -1,51 +1,43 @@
-"""Internal endpoints for worker <-> gateway communication.
+"""Internal endpoints the worker calls on the gateway.
 
-The worker process communicates with the gateway via two channels:
+The worker process reaches the gateway over HTTP, through two routes:
 
-1. **WebSocket** (``/internal/ws``) -- streaming path where the worker
-   pushes ``WorkerEventEnvelope`` and ``HeartbeatMessage`` JSON frames.
-2. **HTTP POST** (``/internal/events``, ``/internal/heartbeat``) -- preferred
-   path that avoids the need for a WebSocket client library in the worker.
-   The ``WorkerBridge`` in ``vaultspec_a2a.worker.ipc`` uses this approach.
+1. ``POST /internal/events/batch`` -- the buffered event relay. The body is a
+   ``WorkerEventBatch`` of ``WorkerEventEnvelope`` entries, and the
+   ``WorkerBridge`` in ``vaultspec_a2a.worker.ipc`` is its only producer.
+2. ``POST /internal/heartbeat`` -- worker liveness, a ``HeartbeatRequest``.
 
-The gateway exposes ``/internal/health`` for readiness probes.
+The gateway exposes ``/internal/health`` for readiness probes. Request body
+size is bounded before routing by ``ipc.body_limit``, not by these routes.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-from dataclasses import dataclass
+from dataclasses import replace
 from functools import partial
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    Header,
-    HTTPException,
-    Request,
-    WebSocket,
-    WebSocketDisconnect,
-)
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.security import HTTPBearer
 from pydantic import ValidationError
 
 from ..control._worker_health import worker_liveness
 from ..control.config import settings
 from ..control.event_handlers import (
+    RelayServices,
     _handle_execution_state_event,
     relay_event,
 )
-from ..graph.enums import ServerEventType
-from ..ipc.schemas import HeartbeatRequest
+from ..ipc.schemas import HeartbeatRequest, WorkerEventBatch
 from ..thread.snapshots import is_terminal_event, normalize_wire_event_type
 from ..utils import BearerVerdict, verify_internal_bearer
 from ._replay_writer_seat import seated_replay_writer
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from ..streaming import HeldFrame, RelayHub
 
 __all__ = ["internal_router"]
 
@@ -79,72 +71,29 @@ def _app_session_factory(app: Any) -> Any:
     return declared
 
 
-def _validate_event_envelope(
-    thread_id: str,
-    payload: dict[str, Any],
-    *,
-    context: str,
-) -> None:
-    """Reject malformed worker event payloads with a client-visible error."""
-    if not thread_id or not payload:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Malformed {context}: thread_id and payload are required",
-        )
-
-
-#: Declares the internal-IPC bearer in the generated OpenAPI document.
-#:
-#: A SEPARATE scheme from the gateway's ``GatewayServiceToken``, because it is a
-#: separate credential: this plane verifies ``settings.internal_token``, the
-#: gateway<->worker IPC secret, not the attach credential that lifecycle discovery
-#: publishes for external callers. Declaring both under one scheme would tell a
-#: reader the two surfaces accept the same token, which they do not.
-#:
-#: Declared here rather than beside :func:`verify_internal_bearer`: that module is
-#: framework-free by design and leaves transport mapping to each caller, so a
-#: FastAPI security object belongs on this side of the boundary.
-#:
-#: ``auto_error=False`` keeps it inert - the raw header below is still what the
-#: verifier compares, and the 401/500 mapping stays in one place.
-#:
-#: Attached per HTTP ROUTE rather than to the router, and that placement is
-#: load-bearing: this router also carries the worker WebSocket, router-level
-#: dependencies apply to WebSocket routes too, and ``HTTPBearer`` resolves only
-#: against an HTTP request - mounting it on the router raises
-#: ``TypeError: HTTPBearer.__call__() missing 1 required positional argument:
-#: 'request'`` and drops the worker connection. The router keeps the raw-header
-#: verifier, which both scopes can satisfy.
-internal_bearer_scheme = HTTPBearer(
-    auto_error=False,
-    scheme_name="InternalIpcToken",
-    description=(
-        "Internal gateway-to-worker IPC token. Not the gateway service token: "
-        "these routes are the worker's callback surface, not a client surface."
-    ),
-)
-
-#: Declaration-only dependency for the HTTP routes below. Never read; depending
-#: on it is what puts the security requirement on these operations in the
-#: published contract.
-_declare_internal_bearer = Depends(internal_bearer_scheme)
-
-
 async def _verify_internal_token(
+    request: Request,
     authorization: str | None = Header(None, include_in_schema=False),
 ) -> None:
     """Verify bearer token for internal IPC endpoints.
 
-    Skipped when settings.internal_token is None **and** the environment
-    is DEVELOPMENT.  In production/staging/testing, a missing token is a
-    configuration error. Delegates the rule to the shared IPC bearer verifier.
+    The token is the one the gateway seated on ``app.state.internal_token``: the
+    secret it minted for this boot under the armed desktop profile, otherwise the
+    configured one. It is read off the app that serves the request, so a token
+    minted at runtime never has to be written back onto the settings. An app that
+    seated nothing raises rather than reading as an unconfigured token, which
+    would open the development bypass on state nobody chose.
 
-    Runs for the WebSocket route as well as the HTTP ones, so it reads the raw
-    header rather than a security object; see :data:`internal_bearer_scheme`.
+    Skipped when the seated token is None **and** the environment is DEVELOPMENT.
+    In production/staging/testing, a missing token is a configuration error.
+    Delegates the rule to the shared IPC bearer verifier.
+
+    Reads the raw header directly: this plane is unpublished, so no security
+    object is declared for it, and the 401/500 mapping stays in one place.
     """
     verdict, detail = verify_internal_bearer(
         authorization,
-        token=settings.internal_token,
+        token=request.app.state.internal_token,
         environment=settings.environment,
         environment_declared=settings.environment_declared,
     )
@@ -158,349 +107,143 @@ internal_router = APIRouter(
     prefix="/internal",
     tags=["internal"],
     dependencies=[Depends(_verify_internal_token)],
-    # Both refusals belong to the gate every route here sits behind, not to any
-    # one verb. Note the misconfiguration case is a 500 on this plane, where the
-    # gateway's attach gate answers 503: an unset internal token outside
-    # DEVELOPMENT is this service's own configuration error, not a dependency
-    # that might yet become available.
-    responses={
-        401: {"description": "Missing or invalid internal IPC token."},
-        500: {"description": "Internal IPC token is not configured."},
-    },
+    # Unpublished, and that is the contract rather than an omission. These are
+    # the worker's callback surface: they verify a different credential from
+    # every client surface, are reachable only from this service's own worker,
+    # and no external caller may use them. Publishing them told a client
+    # generator to emit methods for a plane no client may call, and told a
+    # reader of the contract that this service exposes an unauthenticated
+    # ``/internal/health`` alongside its versioned verbs.
+    #
+    # It also removes them from ``route_signature``, which is served on an
+    # authenticated client surface and compared by the doctor CLI: the
+    # signature describes the surface a client may address, not this service's
+    # private wiring.
+    include_in_schema=False,
 )
 
 
-@dataclass(frozen=True, slots=True)
-class _RelayContext:
-    agg: Any
-    session_factory: Any
-    checkpointer: Any
-    drain_gate: Any
-    prune_registry: Any
-    transport: str = "http"
-    # The seated replay recorder, resolved once per ingest rather than per
-    # event: seating it is also what binds the run-sequence authority, so an
-    # ingest that reaches the aggregator has either both or neither.
-    replay: Any = None
-
-    @classmethod
-    def of(
-        cls, app: Any, agg: Any, transport: str = "http", *, replay: Any = None
-    ) -> _RelayContext:
-        """Read one app's relay collaborators off the state it seated them on."""
-        return cls(
-            agg,
-            _app_session_factory(app),
-            getattr(app.state, "checkpointer", None),
-            # Read, never get-or-created: a gate or a prune registry that was
-            # never seated has admitted and started nothing.
-            getattr(app.state, "drain_gate", None),
-            getattr(app.state, "checkpoint_prunes", None),
-            transport,
-            replay,
-        )
+def _relay_services(app: Any, relay_hub: RelayHub) -> RelayServices:
+    """Read one app's relay collaborators off the state it seated them on."""
+    return RelayServices(
+        relay_hub=relay_hub,
+        session_factory=_app_session_factory(app),
+        checkpointer=getattr(app.state, "checkpointer", None),
+        # Read, never get-or-created: a gate or a prune registry that was
+        # never seated has admitted and started nothing.
+        drain_gate=getattr(app.state, "drain_gate", None),
+        prune_registry=getattr(app.state, "checkpoint_prunes", None),
+    )
 
 
 async def _relay_single_event(
-    thread_id: str, payload: dict[str, Any], context: _RelayContext
+    thread_id: str,
+    payload: dict[str, Any],
+    relay_hub: RelayHub,
+    services: RelayServices,
 ) -> None:
-    """Aggregate and relay a single worker event.
+    """Relay a single worker event through the gateway's relay hub.
 
-    Shared by all three ingest paths (WS, HTTP POST, HTTP batch) to
-    avoid copy-pasting the aggregator sync → relay_event sequence.
-
-    *drain_gate* is the process-wide run-admission gate seated on ``app.state``;
-    it travels to the terminal handler, which releases the run from it, exactly
-    as *agg* and *session_factory* travel to their handlers.
+    *services* is the ingest's collaborator bundle. Its run-admission gate is the
+    process-wide one seated on ``app.state``; it travels to the terminal handler,
+    which releases the run from it, exactly as the relay hub and session factory
+    travel to their handlers.
 
     One frame is relayed differently. A terminal says the RUN ended, and only
     the control plane knows whether it did: a run with a continuation waiting
     takes the next turn instead of settling, and this relay reaches the
-    aggregator first, so it used to show that run a terminal it then kept
-    running past. The terminal is therefore handed to the control plane as a
-    publisher rather than fanned out here, and released on the far side of the
-    decision. Every other frame crosses as it always has.
+    hub first, so it used to show that run a terminal it then kept running
+    past. The terminal is therefore NUMBERED here and handed to the control
+    plane as a publisher, then fanned out on the far side of the decision.
+    Numbering it before the decision rather than at the fan-out is what keeps
+    the settled cursor and the terminal frame's own SSE id the same number:
+    the settlement records the run's issued mark, and a frame numbered
+    afterwards is never in that mark. A decision that does not end the run
+    gives the number back, so the run's sequence space stays contiguous.
+    Every other frame crosses as it always has.
     """
     payload = normalize_wire_event_type(payload)
     if payload.get("type") == "execution_state_projection":
         await _handle_execution_state_event(
-            thread_id, payload, session_factory=context.session_factory
+            thread_id, payload, session_factory=services.session_factory
         )
         return
     if payload.get("type") == "dispatch_applied":
         # Application receipts are a private worker->gateway settlement signal.
-        # They deliberately bypass the public aggregator/SSE projection so the
+        # They deliberately bypass the public relay-hub/SSE projection so the
         # stable dispatch identity never becomes a progress-frame field.
+        await relay_event(thread_id, payload, services=services)
+        return
+
+    held: HeldFrame | None = None
+    publish_terminal: Callable[[], None] | None = None
+    # Establishes the run's durable numbering before the synchronous
+    # chokepoint needs it; a no-op once seeded, and on a gateway that
+    # numbers nothing.
+    await relay_hub.prepare_run(thread_id)
+    if is_terminal_event(payload):
+        held = relay_hub.hold_payload(thread_id, payload)
+        publish_terminal = partial(relay_hub.publish_held, held)
+    else:
+        relay_hub.relay_payload(thread_id, payload)
+    # Mirrors the event into the relay hub's agent, tool-call and node state
+    # before the handlers below, whose settled path purges that state.
+    relay_hub.sync_worker_event(thread_id, payload)
+    try:
         await relay_event(
             thread_id,
             payload,
-            session_factory=context.session_factory,
-            checkpointer=context.checkpointer,
-            drain_gate=context.drain_gate,
-            prune_registry=context.prune_registry,
+            services=replace(services, publish_terminal=publish_terminal),
         )
-        return
-
-    publish_terminal: Callable[[], None] | None = None
-    if context.agg is not None:
-        # Establishes the run's durable numbering before the synchronous
-        # chokepoint needs it; a no-op once seeded, and on a gateway that
-        # numbers nothing.
-        await context.agg.prepare_run(thread_id)
-        if is_terminal_event(payload):
-            publish_terminal = partial(context.agg.relay_payload, thread_id, payload)
-        else:
-            context.agg.relay_payload(thread_id, payload)
-        # Left in front of the decision even for a held terminal. This is the
-        # aggregator's own per-run counter, which no client reads and no frame
-        # carries - the number a subscriber sees is taken in ``relay_payload``
-        # above - and the settled run's recorded cursor is read off it, so
-        # moving it would change what a settlement records.
-        context.agg.sync_worker_event(thread_id, payload)
-    else:
-        logger.warning(
-            "No relay target available -- dropping event for %s",
-            thread_id,
-            extra={
-                "thread_id": thread_id,
-                "event_type": str(payload.get("event_type", payload.get("type", ""))),
-                "transport": context.transport,
-                "action": "relay_drop_event",
-            },
-        )
-    await relay_event(
-        thread_id,
-        payload,
-        aggregator=context.agg,
-        session_factory=context.session_factory,
-        checkpointer=context.checkpointer,
-        drain_gate=context.drain_gate,
-        prune_registry=context.prune_registry,
-        publish_terminal=publish_terminal,
-    )
+    finally:
+        if held is not None:
+            # Unconditional and idempotent: a published terminal keeps its
+            # number, and a promoted turn, a refused stale event or a handler
+            # that raised gives it back rather than leaving a hole no frame
+            # will ever fill.
+            relay_hub.release_held(held)
 
 
-async def _relay_worker_event(
-    websocket: WebSocket, msg: dict[str, object], raw: str
-) -> None:
-    """Relay a single worker event to WS clients and update aggregator/DB."""
-    thread_id_raw: object = msg.get("thread_id", "")
-    payload_raw: object = msg.get("payload", {})
-    if not thread_id_raw or not payload_raw:
-        logger.warning(
-            "Malformed worker event envelope: %s",
-            raw[:200],
-            extra={
-                "thread_id": thread_id_raw,
-                "event_type": "",
-                "message_type": str(msg.get("type", "")),
-                "transport": "ws",
-                "frame_size": len(raw),
-            },
-        )
-        return
-    thread_id = cast("str", thread_id_raw)
-    payload = cast("dict[str, Any]", payload_raw)
-    agg = getattr(websocket.app.state, "aggregator", None)
-    context = _RelayContext.of(
-        websocket.app,
-        agg,
-        "ws",
-        replay=seated_replay_writer(websocket.app, _app_session_factory(websocket.app)),
-    )
-    await _relay_single_event(thread_id, payload, context)
-    # Behind the fan-out, once per ingested frame: a WebSocket frame carries
-    # one event, so this is the same per-batch cadence the HTTP routes use
-    # rather than a second policy. Leaving it to the writer's ticker instead
-    # would widen the window in which a terminal purges a run's numbering
-    # before its own frames are durable.
-    if context.replay is not None:
-        await context.replay.flush()
-
-
-@internal_router.websocket("/ws")
-async def worker_ws_endpoint(websocket: WebSocket) -> None:
-    """Internal WebSocket -- receives events and heartbeats from the worker."""
-    # WebSocket routes bypass router-level Depends(), so enforce the same worker
-    # IPC bearer rule the HTTP endpoints use through the one shared authority. The
-    # gateway-facing internal channel accepts only the worker IPC credential, never
-    # the attach credential; a non-OK verdict refuses the connection.
-    verdict, _ = verify_internal_bearer(
-        websocket.headers.get("authorization"),
-        token=settings.internal_token,
-        environment=settings.environment,
-        environment_declared=settings.environment_declared,
-    )
-    if verdict is not BearerVerdict.OK:
-        await websocket.close(code=1008, reason="Unauthorized")
-        return
-
-    await websocket.accept()
-    logger.info("Worker connected to internal WS")
-
-    # Store reference so supervisor can check connectivity
-    websocket.app.state.worker_ws = websocket
-    # The accept itself is contact, but it says nothing about what the worker is
-    # running, so no thread set is claimed here.
-    worker_liveness(websocket.app.state).record_contact()
-
-    try:
-        while True:
-            raw = await websocket.receive_text()
-            # Reject oversized frames (1 MB) to prevent memory exhaustion.
-            if len(raw) > settings.internal_max_frame_bytes:
-                logger.warning(
-                    "Dropping oversized internal WS frame (%d bytes)", len(raw)
-                )
-                continue
-            msg = json.loads(raw)
-            msg_type = msg.get("type", "")
-
-            match msg_type:
-                case ServerEventType.HEARTBEAT:
-                    worker_liveness(websocket.app.state).record_contact(
-                        active_threads=msg.get("active_threads", [])
-                    )
-                    logger.debug(
-                        "Worker heartbeat: %d active threads",
-                        len(msg.get("active_threads", [])),
-                        extra={
-                            "message_type": msg_type,
-                            "active_thread_count": len(msg.get("active_threads", [])),
-                            "transport": "ws",
-                        },
-                    )
-
-                case "event":
-                    await _relay_worker_event(websocket, msg, raw)
-
-                case _:
-                    logger.warning(
-                        "Unknown internal WS message type: %s",
-                        msg_type,
-                        extra={
-                            "message_type": msg_type,
-                            "transport": "ws",
-                            "frame_size": len(raw),
-                        },
-                    )
-
-    except WebSocketDisconnect:
-        logger.warning("Worker disconnected from internal WS")
-        websocket.app.state.worker_ws = None
-
-
-@internal_router.get("/health", dependencies=[_declare_internal_bearer])
+@internal_router.get("/health")
 async def internal_health() -> dict[str, str]:
     """Readiness probe -- confirms the internal API is accepting connections."""
     return {"status": "ok", "service": "gateway"}
 
 
-# ---------------------------------------------------------------------------
-# HTTP POST endpoints -- preferred IPC path (avoids WS client dependency)
-# ---------------------------------------------------------------------------
-
-
-@internal_router.post("/events", dependencies=[_declare_internal_bearer])
-async def receive_worker_event(request: Request) -> dict[str, str]:
-    """Receive a single event from the worker and relay to browser clients.
-
-    The ``WorkerBridge`` in the worker process POSTs here instead of
-    sending a WebSocket frame.  The payload format matches
-    ``WorkerEventEnvelope``.
-    """
-    # The application middleware also counts actual streamed bytes before parsing.
-    content_length = request.headers.get("content-length")
-    try:
-        if (
-            content_length is not None
-            and int(content_length) > settings.internal_max_http_body_bytes
-        ):
-            raise HTTPException(status_code=413, detail="Payload too large (max 1 MB)")
-    except ValueError as e:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid Content-Length header",
-        ) from e
-
-    body: dict[str, Any] = await request.json()
-    thread_id: str = body.get("thread_id", "")
-    payload: dict[str, Any] = body.get("payload", {})
-    _validate_event_envelope(thread_id, payload, context="worker event POST")
-
-    agg = getattr(request.app.state, "aggregator", None)
-    if agg is None:
-        raise HTTPException(
-            status_code=503,
-            detail="No relay target available -- gateway not ready",
-        )
-
-    replay = seated_replay_writer(request.app, _app_session_factory(request.app))
-    await _relay_single_event(
-        thread_id, payload, _RelayContext.of(request.app, agg, replay=replay)
-    )
-    if replay is not None:
-        await replay.flush()
-    return {"status": "ok"}
-
-
-@internal_router.post("/events/batch", dependencies=[_declare_internal_bearer])
+@internal_router.post("/events/batch")
 async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     """Receive a batch of events from the worker.
 
-    The ``WorkerBridge`` accumulates events for a short interval then
-    POSTs them as a single ``{"events": [...]}`` payload.  Each entry
-    has the same shape as a single-event envelope (``thread_id`` +
-    ``payload``).
+    The ``WorkerBridge`` accumulates events for a short interval then POSTs
+    them as a single ``WorkerEventBatch``. A batch carries many events in one
+    request, so the body-limit middleware allows it a larger body than any
+    other internal write; the worker sizes its batches against the same figure.
     """
-    content_length = request.headers.get("content-length")
-    # A batch carries many events in one request, so it is allowed a larger body
-    # than a single-event post. The worker sizes its batches against the same
-    # figure, which is why the figure has one home.
-    batch_limit = settings.internal_max_event_batch_bytes
+    raw = await request.json()
     try:
-        if content_length is not None and int(content_length) > batch_limit:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Payload too large (max {batch_limit} bytes)",
-            )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid Content-Length header",
-        ) from e
-
-    body: dict[str, Any] = await request.json()
-    events: list[dict[str, Any]] = body.get("events", [])
+        batch = WorkerEventBatch.model_validate(raw)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors(), body=raw) from exc
 
     # Sort events by worker-side monotonic timestamp to preserve causal order
     # even if the batch was assembled out of order.
-    events.sort(key=lambda e: e.get("ts", 0.0))
+    events = sorted(batch.events, key=lambda event: event.ts)
 
-    agg = getattr(request.app.state, "aggregator", None)
-    if agg is None:
+    relay_hub = getattr(request.app.state, "relay_hub", None)
+    if relay_hub is None:
         raise HTTPException(
             status_code=503,
             detail="No relay target available -- gateway not ready",
         )
 
-    replay = seated_replay_writer(request.app, _app_session_factory(request.app))
-    context = _RelayContext.of(request.app, agg, replay=replay)
+    services = _relay_services(request.app, relay_hub)
+    # Resolved once per ingest rather than per event: seating the recorder is
+    # also what binds the run-sequence authority, so an ingest that reaches the
+    # relay hub has either both or neither.
+    replay = seated_replay_writer(request.app, services.session_factory)
 
-    for idx, evt in enumerate(events):
-        thread_id = evt.get("thread_id", "")
-        payload = evt.get("payload", {})
-        try:
-            _validate_event_envelope(
-                thread_id, payload, context=f"worker event batch entry {idx}"
-            )
-        except HTTPException as exc:
-            raise HTTPException(status_code=422, detail=exc.detail) from None
-
-    for evt in events:
-        thread_id = evt.get("thread_id", "")
-        payload = evt.get("payload", {})
-        await _relay_single_event(thread_id, payload, context)
+    for event in events:
+        await _relay_single_event(event.thread_id, event.payload, relay_hub, services)
 
     # Behind the fan-out, once per ingested batch: every frame above already
     # reached its subscribers, and this is the round trip that makes them
@@ -511,12 +254,11 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     return {"status": "ok"}
 
 
-@internal_router.post("/heartbeat", dependencies=[_declare_internal_bearer])
+@internal_router.post("/heartbeat")
 async def receive_worker_heartbeat(request: Request) -> dict[str, str]:
     """Receive a heartbeat from the worker.
 
-    Updates ``app.state`` so the gateway can monitor worker
-    liveness without a persistent WebSocket connection.
+    Updates ``app.state`` so the gateway can monitor worker liveness.
     """
     raw = await request.json()
     try:

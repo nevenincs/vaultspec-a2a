@@ -1,68 +1,94 @@
 """Thread state snapshot assembly service.
 
-Extracts the 95-line orchestration from the ``/threads/{id}/state``
-endpoint into a testable, protocol-agnostic function.  The route
-handler validates input and converts the result to a Pydantic wire model.
+Assembles one run's snapshot and checkpoint projection in a testable,
+transport-agnostic function.  The route handlers validate input and serve the
+result.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from langgraph.checkpoint.base import CheckpointTuple
 from pydantic import ValidationError
 
-from ..authoring.contract import is_document_authoring_role
-from ..control.projection import (
-    apply_authoring_completion_check,
-    apply_checkpoint_projection,
-    clear_permissions_without_checkpoint_truth,
-    enrich_snapshot_from_durable_state,
-    enrich_snapshot_from_execution_state,
-    reconcile_checkpoint_permissions_with_durable_state,
+from ..context.metadata import ThreadMetadata
+from ..database import (
+    ThreadModel,
+    get_thread,
+    read_latest_checkpoint,
+    retained_high_water_mark,
 )
-from ..control.recovery_authority import (
-    RecoveryRequest,
-    RecoveryTrigger,
-    reconcile_run_checkpoint,
-)
-from ..control.snapshot import (
-    MinimalState,
-    checkpoint_history_depth,
-    enrich_snapshot_from_state,
-)
-from ..database import ThreadModel, get_thread
 from ..domain_config import domain_config
-from ..graph.enums import SemanticPhase, research_adr_semantic_phase
-from ..team.team_config import load_agent_config, load_team_config
+from ..graph.enums import (
+    ProviderCondition,
+    SemanticPhase,
+    research_adr_semantic_phase,
+)
+from ..providers.team_selection import TeamSelectionError
+from ..team.team_config import AuthoringCapability, authoring_capability
 from ..thread.enums import (
+    DegradedReason,
     RepairStatus,
     ReplayStatus,
     ThreadStatus,
     TranscriptAvailability,
 )
-from ..thread.errors import ConfigError
-from ..thread.snapshots import (
-    ThreadStateData,
-    classify_transcript_availability,
-    finalize_snapshot_replay_status,
-    project_checkpoint_tuple,
+from ..thread.snapshots import ThreadStateSnapshot, project_checkpoint_tuple
+from ..utils.coercion import (
+    coerce_nonempty_str,
+    coerce_string_list,
+    decode_json_object,
 )
-from ..utils.coercion import coerce_object_mapping, coerce_string_list
-from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
+from .execution_authority import (
+    ExecutionAuthorityError,
+    read_frozen_team_selection_from_fields,
+    resolve_execution_authority_from_fields,
+)
+from .graph_definition import read_accepted_graph_definition
+from .projection import (
+    apply_authoring_completion_check,
+    apply_checkpoint_projection,
+    classify_transcript_availability,
+    clear_permissions_without_checkpoint_truth,
+    enrich_snapshot_from_durable_state,
+    enrich_snapshot_from_execution_state,
+    finalize_snapshot_replay_status,
+    mark_degraded,
+    reconcile_checkpoint_permissions_with_durable_state,
+    withhold_terminal_interrupt_disclosure,
+)
+from .recovery_authority import (
+    STORE_CONTENDED,
+    RecoveryRequest,
+    RecoveryTrigger,
+    reconcile_run_checkpoint,
+)
+from .snapshot import (
+    MinimalState,
+    checkpoint_history_depth,
+    enrich_snapshot_from_state,
+)
 
 if TYPE_CHECKING:
-    from langchain_core.runnables import RunnableConfig
+    from collections.abc import Collection
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database.checkpoints import Checkpointer
-    from ..streaming.aggregator import EventAggregator
+    from ..database import Checkpointer
+    from ..providers.team_selection import FrozenTeamSelection
+    from ..streaming import RelayHub, RunLiveStateMirror
+    from ..thread.snapshots import CheckpointProjection
 
 __all__ = [
+    "ACTIVE_FEATURE_FIELD",
+    "AUTHORING_SESSION_FIELD",
+    "CHANGESET_ID_FIELD",
+    "PROPOSAL_ID_FIELD",
     "capture_thread_state",
+    "derive_run_authoring_ids",
+    "derive_run_semantic_context",
     "project_semantic_phase",
 ]
 
@@ -133,97 +159,49 @@ def project_semantic_phase(
     return SemanticPhase.RUNNING
 
 
-def _channel_values(checkpoint_tuple: CheckpointTuple) -> dict[str, object]:
-    """Return the channel values of a checkpoint tuple, or an empty mapping."""
-    channel_values: object = checkpoint_tuple.checkpoint.get("channel_values")
-    return coerce_object_mapping(channel_values) or {}
-
-
-async def read_run_snapshot(
-    checkpointer: Checkpointer,
-    thread_id: str,
-    *,
-    timeout: float = 2.0,
-) -> CheckpointTuple | None:
-    """Read a run's checkpoint tuple once, or ``None`` when it is unreadable.
-
-    Every run-status field derives from one snapshot. Reading the checkpoint
-    per field let a run advance between reads, so a single response could carry
-    a status from one moment and a position from another - internally
-    inconsistent, and worse than a stale but coherent answer.
-
-    Non-raising, matching the derivations it feeds: a missing, timed-out, or
-    unreadable checkpoint yields ``None`` and each field degrades to its own
-    empty value.
-    """
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-    try:
-        checkpoint_tuple = await asyncio.wait_for(
-            checkpointer.aget_tuple(config), timeout=timeout
-        )
-        return (
-            checkpoint_tuple if isinstance(checkpoint_tuple, CheckpointTuple) else None
-        )
-    except TimeoutError:
-        logger.warning("Checkpoint read timed out: %s", thread_id)
-        return None
-    except Exception:
-        logger.warning("Checkpoint read failed: %s", thread_id, exc_info=True)
-        return None
-
-
 def derive_run_authoring_ids(
-    checkpoint_tuple: CheckpointTuple | None,
+    projection: CheckpointProjection | None,
 ) -> tuple[list[str], list[str]]:
-    """Derive ``(proposal_ids, changeset_ids)`` from an already-read snapshot."""
-    if checkpoint_tuple is None:
+    """Derive ``(proposal_ids, changeset_ids)`` from one projection."""
+    if projection is None:
         return [], []
-    values = _channel_values(checkpoint_tuple)
+    values = projection.channel_values
     return (
         coerce_string_list(values.get(PROPOSAL_ID_FIELD), drop_empty=True) or [],
         coerce_string_list(values.get(CHANGESET_ID_FIELD), drop_empty=True) or [],
     )
 
 
-def _preset_requires_document_authoring(team_preset: str | None) -> bool:
-    """Return whether *team_preset* runs at least one document-authoring role.
+async def _document_authoring_required(db: AsyncSession, thread_id: str) -> bool:
+    """Return whether the run's accepted definition has a document-authoring role.
 
-    Deliberately role-based, not topology-based. The served
-    ``authoring_capability`` projection (``team_config.authoring_capability``)
-    keys on topology alone (``is_document_authoring_topology``, true only for
-    ``research_adr``), which misclassifies the solo doc-editor lane: its
-    topology is ``pipeline``, not ``research_adr``, so that predicate answers
-    "coding" for a preset that authors documents through the engine bridge.
-    Checking each worker's persona ``role`` against the authoring contract's
-    role set catches both the research_adr phase machine and the solo
-    doc-editor lane through one predicate, because ``DOCUMENT_AUTHORING_ROLES``
-    already unions both by construction.
+    Asked of the definition frozen when the run was accepted, never of the preset
+    files as they read now: the answer is the one the run executes under, and no
+    config file is loaded to give it. Role-based, through
+    ``team_config.authoring_capability``, so the research_adr phase machine and the
+    solo doc-editor lane are both caught by one predicate.
 
-    Fails closed toward *not flagging*: a preset that cannot be resolved or
-    whose worker configs cannot be loaded returns ``False`` rather than
-    raising, so a run-status read never breaks over a config problem. An
-    unloadable preset already fails run-start elsewhere (fail-closed there),
-    so this module declining to guess at an unproven predicate does not mask
-    that defect.
+    Fails closed toward *not flagging*: a run whose accepted definition cannot be
+    read answers ``False`` rather than raising, so a run-status read never breaks
+    over it. The same unreadable definition already refuses every later graph
+    action of the run, so declining to guess here does not mask that defect.
     """
-    if not team_preset:
-        return False
     try:
-        team_config = load_team_config(team_preset)
-    except (ConfigError, ValidationError):
+        definition = await read_accepted_graph_definition(db, thread_id)
+    except ValueError as exc:
+        logger.warning(
+            "Run %s has no readable accepted definition (%s); the authoring "
+            "completion check is skipped",
+            thread_id,
+            exc,
+        )
         return False
-    for worker in team_config.workers:
-        try:
-            agent_config = load_agent_config(worker.agent_id)
-        except (ConfigError, ValidationError):
-            continue
-        if is_document_authoring_role(agent_config.role):
-            return True
-    return False
+    team, agents, _ = definition.compiler_inputs()
+    return authoring_capability(team, agents) is AuthoringCapability.DOCUMENT_AUTHORING
 
 
 @dataclass(frozen=True, slots=True)
-class SemanticContext:
+class _SemanticContext:
     """A run's target feature and produced authoring session id (run-status)."""
 
     feature_tag: str | None
@@ -231,73 +209,126 @@ class SemanticContext:
 
 
 @dataclass(frozen=True, slots=True)
-class ThreadStateCapture:
+class _MetadataView:
+    """A thread's stored metadata, decoded once for every reader of its capture.
+
+    ``fields`` is the JSON object the blob holds, for the readers of one keyed
+    entry, and ``provenance`` is the metadata model those fields satisfy. Both are
+    ``None`` when the blob is absent or does not decode to what they name.
+    """
+
+    fields: dict[str, object] | None
+    provenance: ThreadMetadata | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ThreadStateCapture:
     """One coherent durable and checkpoint-backed run-status read.
 
     The gateway must derive every response field from this capture.  Keeping the
-    tuple with its fully reconciled snapshot prevents a second checkpoint or
-    thread read from mixing different moments of a progressing run.
+    checkpoint projection with its fully reconciled snapshot prevents a second
+    checkpoint or thread read from mixing different moments of a progressing run.
+
+    ``checkpoint_projection`` is the one projection of the checkpoint the
+    snapshot was built from, present exactly when that checkpoint was read and
+    projected. A field read from the checkpoint - its channel values - reads it
+    rather than projecting the tuple again; the pending clarification was read
+    from it once, onto the snapshot, which every surface then serves.
+    ``proposal_ids`` and ``changeset_ids`` are the authoring ids that projection
+    holds, derived once and empty without one.
+
+    ``metadata`` is the thread's stored metadata, decoded once here so no reader
+    parses the blob again. ``frozen_selection`` is the execution authority that
+    metadata holds, validated once beside the digest the snapshot is reconciled
+    against, and ``None`` whenever there is none to disclose - including a stored
+    record that fails validation, which the snapshot reports as a degraded
+    reason. Carried here rather than re-read at the edge because the stored bytes
+    are digest-protected: a second reading of them raises, and a surface that
+    raises over a field the capture already degraded over refuses the whole run.
 
     ``transcript`` states whether the snapshot's messages are the run's record
     or an artefact of an unread checkpoint. It is carried here rather than
-    re-derived by each reader because ``checkpoint_tuple`` alone cannot answer
-    it: a ``None`` tuple is a not-yet-dispatched run, a lost checkpoint, and an
-    unreachable checkpoint store all at once.
+    re-derived by each reader because ``checkpoint_projection`` alone cannot
+    answer it: a ``None`` projection is a not-yet-dispatched run, a lost
+    checkpoint, and an unreachable checkpoint store all at once.
     """
 
-    snapshot: ThreadStateData
-    checkpoint_tuple: CheckpointTuple | None
+    snapshot: ThreadStateSnapshot
+    checkpoint_projection: CheckpointProjection | None
     team_preset: str | None
-    thread_metadata: str | None
+    metadata: _MetadataView
+    frozen_selection: FrozenTeamSelection | None
+    proposal_ids: list[str]
+    changeset_ids: list[str]
     transcript: TranscriptAvailability
 
 
-def _optional_str(value: object) -> str | None:
-    """Return *value* when it is a non-empty string, else None."""
-    return value if isinstance(value, str) and value else None
-
-
 def derive_run_semantic_context(
-    checkpoint_tuple: CheckpointTuple | None,
-) -> SemanticContext:
-    """Derive the target feature and authoring session from a read snapshot."""
-    if checkpoint_tuple is None:
-        return SemanticContext(feature_tag=None, authoring_session_id=None)
-    values = _channel_values(checkpoint_tuple)
-    return SemanticContext(
-        feature_tag=_optional_str(values.get(ACTIVE_FEATURE_FIELD)),
-        authoring_session_id=_optional_str(values.get(AUTHORING_SESSION_FIELD)),
+    projection: CheckpointProjection | None,
+) -> _SemanticContext:
+    """Derive the target feature and authoring session from one projection."""
+    if projection is None:
+        return _SemanticContext(feature_tag=None, authoring_session_id=None)
+    values = projection.channel_values
+    return _SemanticContext(
+        feature_tag=coerce_nonempty_str(values.get(ACTIVE_FEATURE_FIELD)),
+        authoring_session_id=coerce_nonempty_str(values.get(AUTHORING_SESSION_FIELD)),
     )
+
+
+def _view_metadata(thread_id: str, text: str | None) -> _MetadataView:
+    """Decode *text* once into the view every reader of the capture shares.
+
+    Absent metadata is stored as null OR as an empty string depending on how the
+    run was created, and an empty string is not parseable JSON - so the guard is
+    truthiness, not "is not None".
+
+    Unreadable metadata is reported as absent rather than failing the read. Not
+    defensive padding: the stored blob and the metadata model genuinely disagree
+    today - a run started without a workspace root persists metadata the model
+    rejects as incomplete - and run-status and run-history report the record they
+    can read rather than lose a whole read over one unrelated field.
+    """
+    fields = decode_json_object(text)
+    provenance: ThreadMetadata | None = None
+    if text:
+        try:
+            provenance = ThreadMetadata.model_validate(fields)
+        except ValidationError:
+            logger.warning(
+                "Stored metadata for run %s does not satisfy the metadata model; "
+                "reporting it absent",
+                thread_id,
+            )
+    return _MetadataView(fields=fields, provenance=provenance)
 
 
 @dataclass(frozen=True, slots=True)
 class _CheckpointSnapshotRead:
-    snapshot: ThreadStateData
+    snapshot: ThreadStateSnapshot
     loaded: bool
     present: bool
     error: bool
-    captured_tuple: CheckpointTuple | None
+    captured_projection: CheckpointProjection | None
 
 
 async def _read_projected_checkpoint(
     checkpointer: Checkpointer,
-    snapshot: ThreadStateData,
-    aggregator: EventAggregator,
+    snapshot: ThreadStateSnapshot,
+    mirror: RunLiveStateMirror,
     expected_assignment_digest: str | None,
-    durable_permission_ids: set[str],
+    durable_permission_ids: Collection[str],
 ) -> _CheckpointSnapshotRead:
     thread_id = snapshot.thread_id
     checkpoint_loaded = False
     checkpoint_present = False
     checkpoint_error = False
-    captured_tuple: CheckpointTuple | None = None
+    captured_projection: CheckpointProjection | None = None
 
     try:
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
-        checkpoint_tuple = await asyncio.wait_for(
-            checkpointer.aget_tuple(config),
-            timeout=10.0,
-        )
+        checkpoint_tuple = (
+            await read_latest_checkpoint(checkpointer, thread_id)
+        ).tuple_or_raise()
         if checkpoint_tuple is not None:
             checkpoint_present = True
             # Read off the tuple above, so there is no second listing to time
@@ -316,28 +347,25 @@ async def _read_projected_checkpoint(
             snapshot = enrich_snapshot_from_state(
                 snapshot,
                 minimal_state,
-                aggregator=aggregator,
+                mirror=mirror,
                 expected_assignment_digest=expected_assignment_digest,
             )
             snapshot = apply_checkpoint_projection(snapshot, projection)
             snapshot = reconcile_checkpoint_permissions_with_durable_state(
                 snapshot,
-                durable_request_ids=durable_permission_ids,
+                projection,
+                durable_permission_ids=durable_permission_ids,
             )
             checkpoint_loaded = True
-            captured_tuple = checkpoint_tuple
+            captured_projection = projection
     except TimeoutError:
-        logger.warning(
-            "Timed out loading checkpoint for thread %s after 10s; "
-            "returning partial snapshot",
-            thread_id,
-        )
         checkpoint_error = True
-        snapshot.snapshot_complete = False
-        snapshot.degraded_reasons.append("checkpoint_timeout")
+        mark_degraded(
+            snapshot,
+            DegradedReason.CHECKPOINT_TIMEOUT,
+            repair=RepairStatus.CHECKPOINT_UNAVAILABLE,
+        )
         snapshot.replay_status = ReplayStatus.UNKNOWN.value
-        snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
-        snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
     except Exception:
         logger.warning(
@@ -346,11 +374,12 @@ async def _read_projected_checkpoint(
             exc_info=True,
         )
         checkpoint_error = True
-        snapshot.snapshot_complete = False
-        snapshot.degraded_reasons.append("checkpoint_unavailable")
+        mark_degraded(
+            snapshot,
+            DegradedReason.CHECKPOINT_UNAVAILABLE,
+            repair=RepairStatus.CHECKPOINT_UNAVAILABLE,
+        )
         snapshot.replay_status = ReplayStatus.UNKNOWN.value
-        snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
-        snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
 
     return _CheckpointSnapshotRead(
@@ -358,42 +387,44 @@ async def _read_projected_checkpoint(
         loaded=checkpoint_loaded,
         present=checkpoint_present,
         error=checkpoint_error,
-        captured_tuple=captured_tuple,
+        captured_projection=captured_projection,
     )
 
 
-def _should_clear_permissions_without_checkpoint(
-    thread: ThreadModel,
-    snapshot: ThreadStateData,
-    *,
-    checkpoint_loaded: bool,
-    checkpoint_present: bool,
-) -> bool:
-    if checkpoint_loaded or checkpoint_present:
-        return False
-    return bool(
-        thread.status != "submitted"
-        or snapshot.pending_permissions
-        or snapshot.approval_status is not None
-        or snapshot.approval_request_id is not None
-        or snapshot.pause_cause is not None
-    )
+async def _served_last_sequence(
+    db: AsyncSession, thread: ThreadModel, relay_hub: RelayHub
+) -> int:
+    """Return the run's frame cursor: the highest number its stream has issued.
+
+    The durable column wins once it exists: settle wrote it from the sequence
+    allocator, and a settled run is never revived, so no later turn moves it.
+    Otherwise the allocator's issued mark answers, then the retained window's
+    greatest sequence - the mark a restarted gateway seeds its numbering from,
+    so a restart does not rewind the cursor - then 0, the honest answer for a
+    run no allocator numbered.
+    """
+    if thread.last_sequence is not None:
+        return thread.last_sequence
+    issued = relay_hub.issued_sequence(thread.id)
+    if issued is not None:
+        return issued
+    return await retained_high_water_mark(db, thread.id) or 0
 
 
 async def capture_thread_state(
     db: AsyncSession,
     *,
     thread_id: str,
-    aggregator: EventAggregator,
+    relay_hub: RelayHub,
     checkpointer: Checkpointer,
-) -> ThreadStateCapture | None:
-    """Capture a coherent thread snapshot and its successfully projected tuple.
+) -> _ThreadStateCapture | None:
+    """Capture a coherent thread snapshot and its checkpoint projection.
 
     A single durable thread/permission read is reconciled against exactly one
-    checkpoint tuple.  The tuple is exposed only after its projection succeeds,
-    so consumers cannot combine a partial snapshot with untrusted checkpoint
-    fields.  Does **not** raise ``HTTPException`` — the route handler owns HTTP
-    response mapping.
+    checkpoint tuple.  Its projection is exposed only once the snapshot has been
+    built from it, so consumers cannot combine a partial snapshot with untrusted
+    checkpoint fields.  Does **not** raise ``HTTPException`` — the route handler
+    owns HTTP response mapping.
     """
     thread = await get_thread(db, thread_id)
     if thread is None or thread.status == ThreadStatus.DELETING.value:
@@ -401,7 +432,7 @@ async def capture_thread_state(
         # Product run lookups must not surface it; the cleanup coordinator reads
         # it directly instead. Report it as absent so the route answers 404.
         return None
-    await reconcile_run_checkpoint(
+    observation = await reconcile_run_checkpoint(
         db,
         checkpointer,
         RecoveryRequest(
@@ -411,57 +442,64 @@ async def capture_thread_state(
         ),
     )
     await db.commit()
-    thread = await db.get(ThreadModel, thread_id, populate_existing=True)
+    thread = await get_thread(db, thread_id, refresh=True)
     if thread is None or thread.status == ThreadStatus.DELETING.value:
         return None
-    # The durable column wins once it exists (captured at terminal settle,
-    # control/event_handlers.py::_handle_terminal_event, before the aggregator
-    # prunes its in-memory copy - F19). The live aggregator read is the
-    # fallback for a run that has not settled yet, where nothing has been
-    # captured because there is nothing terminal to capture: the run is still
-    # active and the aggregator's own counter is the current truth. A settled
-    # run whose row predates this column (last_sequence IS NULL forever, no
-    # captured value ever existed for it) falls back to the same pruned
-    # default 0 it always answered - a known limitation for rows written
-    # before the fix, not a regression this introduces.
-    last_seq = (
-        thread.last_sequence
-        if thread.last_sequence is not None
-        else aggregator.get_sequence(thread_id)
-    )
-
-    snapshot = ThreadStateData(
+    snapshot = ThreadStateSnapshot(
         thread_id=thread_id,
-        status=thread.status,
-        last_sequence=last_seq,
-        repair_status=thread.repair_status,
-        execution_readiness=thread.execution_readiness,
-        approval_status=thread.approval_status,
-        approval_request_id=thread.approval_request_id,
+        status=ThreadStatus(thread.status),
+        last_sequence=await _served_last_sequence(db, thread, relay_hub),
         failure_reason=thread.failure_reason,
-        provider_condition=thread.provider_condition,
+        # Resolved to its member here rather than carried as the stored string:
+        # the read model declares the vocabulary, and the column is only ever
+        # written from it, so a value outside it is store corruption and says so.
+        provider_condition=(
+            None
+            if thread.provider_condition is None
+            else ProviderCondition(thread.provider_condition)
+        ),
         repair_reason=thread.repair_reason,
     )
+    # Collects every request id a durable row exists for, disclosed or withheld
+    # alike, so the checkpoint reconciliation below never reports a row that
+    # exists but was withheld as having no durable row at all. Without it the
+    # withholding reason and the orphan reason both fired for one fault, and
+    # only the second one sends an operator looking for lost data.
+    durable_permission_ids: set[str] = set()
     snapshot = await enrich_snapshot_from_durable_state(
-        db, thread=thread, snapshot=snapshot
+        db,
+        thread=thread,
+        snapshot=snapshot,
+        durable_permission_ids=durable_permission_ids,
     )
+    if observation.condition == STORE_CONTENDED:
+        # The read's product is the truth about the run, and the row above is
+        # that truth: the refused settlement applied nothing, so the status
+        # served is the run's own durable state and this names the advance it is
+        # still owed. Disclosed rather than refused because the settlement is
+        # the recovery coordinator's work, not this read's - failing the whole
+        # response would cost the caller the record it asked for over a store
+        # condition that resolves by itself, which is what the 500 on run-status
+        # and run-history did. No repair posture: nothing about the run is
+        # damaged, and the next pass writes what this one proved.
+        mark_degraded(snapshot, DegradedReason.SETTLEMENT_STORE_CONTENDED)
+    metadata = _view_metadata(thread_id, thread.thread_metadata)
     try:
-        expected_assignment_digest = resolve_execution_authority(
-            thread.thread_metadata
+        expected_assignment_digest = resolve_execution_authority_from_fields(
+            metadata.fields
         ).model_assignment_digest
-    except ExecutionAuthorityError as exc:
+        # Read in the SAME attempt as the digest above: both are the one stored
+        # record, so one reason covers every way it fails and no later surface
+        # has to re-validate bytes this read already judged.
+        frozen_selection = read_frozen_team_selection_from_fields(metadata.fields)
+    except (ExecutionAuthorityError, TeamSelectionError):
         expected_assignment_digest = None
-        snapshot.snapshot_complete = False
-        snapshot.degraded_reasons.append(
-            f"incompatible_execution_authority_{exc.reason.value}"
-        )
-    durable_permission_ids = {
-        permission.request_id for permission in snapshot.pending_permissions
-    }
+        frozen_selection = None
+        mark_degraded(snapshot, DegradedReason.INCOMPATIBLE_EXECUTION_AUTHORITY)
     checkpoint_read = await _read_projected_checkpoint(
         checkpointer,
         snapshot,
-        aggregator,
+        relay_hub.mirror,
         expected_assignment_digest,
         durable_permission_ids,
     )
@@ -469,15 +507,17 @@ async def capture_thread_state(
     checkpoint_loaded = checkpoint_read.loaded
     checkpoint_present = checkpoint_read.present
     checkpoint_error = checkpoint_read.error
-    captured_tuple = checkpoint_read.captured_tuple
+    captured_projection = checkpoint_read.captured_projection
 
-    if _should_clear_permissions_without_checkpoint(
-        thread,
-        snapshot,
-        checkpoint_loaded=checkpoint_loaded,
-        checkpoint_present=checkpoint_present,
-    ):
+    if not checkpoint_present:
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
+
+    # Both halves of the run's interrupt state have landed, so this is the one
+    # place a settled run's disclosure is withdrawn. Every surface serving this
+    # capture - run-status and run-history alike - reads the gated snapshot.
+    snapshot = withhold_terminal_interrupt_disclosure(
+        snapshot, thread_status=thread.status
+    )
 
     snapshot = await enrich_snapshot_from_execution_state(
         db,
@@ -487,17 +527,17 @@ async def capture_thread_state(
         checkpoint_id=snapshot.checkpoint_id,
     )
 
-    # Gated on checkpoint_loaded, not merely captured_tuple: an unread
+    proposal_ids, changeset_ids = derive_run_authoring_ids(captured_projection)
+    # Gated on checkpoint_loaded, not merely captured_projection: an unread
     # checkpoint already carries its own "unavailable" degraded reason above,
     # and asserting emptiness on top of an unread snapshot would misreport
     # "unread" as "produced nothing" - see apply_authoring_completion_check.
     if checkpoint_loaded:
-        proposal_ids, changeset_ids = derive_run_authoring_ids(captured_tuple)
         snapshot = apply_authoring_completion_check(
             snapshot,
             thread_status=thread.status,
-            requires_document_authoring=_preset_requires_document_authoring(
-                thread.team_preset
+            requires_document_authoring=await _document_authoring_required(
+                db, thread_id
             ),
             proposal_ids=proposal_ids,
             changeset_ids=changeset_ids,
@@ -510,11 +550,14 @@ async def capture_thread_state(
         checkpoint_error=checkpoint_error,
         thread_status=thread.status,
     )
-    return ThreadStateCapture(
+    return _ThreadStateCapture(
         snapshot=finalized_snapshot,
-        checkpoint_tuple=captured_tuple,
+        checkpoint_projection=captured_projection,
         team_preset=thread.team_preset,
-        thread_metadata=thread.thread_metadata,
+        metadata=metadata,
+        frozen_selection=frozen_selection,
+        proposal_ids=proposal_ids,
+        changeset_ids=changeset_ids,
         transcript=classify_transcript_availability(
             checkpoint_loaded=checkpoint_loaded,
             checkpoint_present=checkpoint_present,

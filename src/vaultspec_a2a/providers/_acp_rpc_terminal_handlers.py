@@ -14,12 +14,13 @@ import signal
 from pathlib import Path
 from uuid import uuid4
 
-from ..control.provider_execution import native_execution_refusal_reason
+from ..control.provider_execution import require_native_execution
 from ..desktop.native_isolation import NativeLaunchAuthority
+from ..utils import ProcessContainmentError
 from ..utils.async_cleanup import complete_cleanup
-from ..utils.process import ProcessContainmentError
 from ..workspace.environment import resolve_env_vars
 from ._acp_client_requests import AcpTerminalCreateRequest, AcpTerminalRequest
+from ._acp_request import jsonrpc_error, jsonrpc_result
 from ._acp_terminal_output import MAX_TERMINAL_OUTPUT_BYTES, AcpTerminalOutput
 from ._acp_types import (
     AcpModelConfig,
@@ -192,9 +193,7 @@ def terminal_isolation_authority(
     ctx: AcpSessionContext, config: AcpModelConfig
 ) -> NativeLaunchAuthority:
     """Require the session's OS boundary, never infer isolation from its cwd."""
-    reason = native_execution_refusal_reason()
-    if reason is not None:
-        raise ProcessContainmentError(reason)
+    require_native_execution()
     authority = process_native_authority(ctx.process)
     if authority is None:
         raise ProcessContainmentError("ACP terminal requires workspace OS isolation")
@@ -258,17 +257,9 @@ async def on_terminal_create(
         except BaseException:
             await _kill_process_tree(process)
             raise
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "result": {"terminalId": terminal_id},
-        }
+        return jsonrpc_result(rpc_id, {"terminalId": terminal_id})
     except Exception as exc:
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {"code": -32603, "message": str(exc)},
-        }
+        return jsonrpc_error(rpc_id, AcpErrorCode.INTERNAL_ERROR, str(exc))
 
 
 def _resolve_terminal(
@@ -298,23 +289,14 @@ def _resolve_terminal(
         request = AcpTerminalRequest.model_validate(params)
         request.require_active_session(ctx)
     except ValueError as exc:
-        return None, {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {"code": AcpErrorCode.INVALID_PARAMS, "message": str(exc)},
-        }
+        return None, jsonrpc_error(rpc_id, AcpErrorCode.INVALID_PARAMS, str(exc))
     terminal_id = request.terminal_id
     process = ctx.terminals.get(terminal_id)
     if process is not None:
         return process, {}
-    return None, {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "error": {
-            "code": AcpErrorCode.INVALID_PARAMS,
-            "message": f"Unknown terminal: {terminal_id}",
-        },
-    }
+    return None, jsonrpc_error(
+        rpc_id, AcpErrorCode.INVALID_PARAMS, f"Unknown terminal: {terminal_id}"
+    )
 
 
 def _signal_name(signal_number: int) -> str:
@@ -373,7 +355,7 @@ async def on_terminal_kill(
     if process is None:
         return refusal
     await _kill_process_tree(process)
-    return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
+    return jsonrpc_result(rpc_id, {})
 
 
 async def on_terminal_output(
@@ -399,7 +381,7 @@ async def on_terminal_output(
     # and is the v1 status OBJECT rather than a bare return code.
     if (exit_status := _exit_status(process)) is not None:
         output_result["exitStatus"] = exit_status
-    return {"jsonrpc": "2.0", "id": rpc_id, "result": output_result}
+    return jsonrpc_result(rpc_id, output_result)
 
 
 async def on_terminal_wait_for_exit(
@@ -421,17 +403,15 @@ async def on_terminal_wait_for_exit(
     try:
         await asyncio.wait_for(process.wait(), timeout=timeout)
     except TimeoutError:
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {"code": -32603, "message": "Timeout waiting for exit"},
-        }
+        return jsonrpc_error(
+            rpc_id, AcpErrorCode.INTERNAL_ERROR, "Timeout waiting for exit"
+        )
     await output.settle()
     # The wait returned, so the process has exited and the status is never None;
     # the fallback keeps the response well-formed rather than raising on a path
     # that exists to report an outcome.
     exit_result = _exit_status(process) or {"exitCode": None, "signal": None}
-    return {"jsonrpc": "2.0", "id": rpc_id, "result": exit_result}
+    return jsonrpc_result(rpc_id, exit_result)
 
 
 async def on_terminal_release(
@@ -445,13 +425,9 @@ async def on_terminal_release(
         request = AcpTerminalRequest.model_validate(params)
         request.require_active_session(ctx)
     except ValueError as exc:
-        return {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "error": {"code": AcpErrorCode.INVALID_PARAMS, "message": str(exc)},
-        }
+        return jsonrpc_error(rpc_id, AcpErrorCode.INVALID_PARAMS, str(exc))
     await release_owned_terminal(request.terminal_id, ctx)
-    return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
+    return jsonrpc_result(rpc_id, {})
 
 
 async def release_owned_terminal(terminal_id: str, ctx: AcpSessionContext) -> None:

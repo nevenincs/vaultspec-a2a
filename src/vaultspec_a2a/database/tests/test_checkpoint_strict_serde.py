@@ -1,44 +1,44 @@
-"""Every checkpoint store reads back only the types it is configured to admit.
+"""The checkpoint store reads back only the types it is configured to admit.
 
 A checkpoint store is an execution surface on the READ side: the permissive
 default imports and calls whatever type a stored value names, so anything able
 to write the store decides what this process constructs on load. Configuring
-the savers against that makes one claim with two halves, and neither half is
+the saver against that makes one claim with two halves, and neither half is
 worth anything alone - a store that refuses everything is safe and useless.
-So each backend is held to both: the shipped research preset parks at a real
+So the store is held to both: the shipped research preset parks at a real
 human gate, is read back through a SECOND saver over the same store, and must
 come back whole with nothing blocked; and the same store must decline to
 rebuild a type the graph never writes.
 
-Everything runs through the production ``open_checkpointer`` factory - the
-real SQLite file the desktop profile uses, a real PostgreSQL server, and the
-selector-thread bridge Windows loads with the sibling savers taken off it.
+Everything runs through the production ``open_checkpointer`` factory, over the
+real SQLite file the desktop profile uses.
 """
 
 from __future__ import annotations
 
-import os
 from contextlib import contextmanager
 from enum import Enum
 from typing import TYPE_CHECKING, Any, TypedDict, cast
-from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.serde.event_hooks import register_serde_event_listener
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START
 from langgraph.types import Command
 
 from ...graph.compiler import compile_team_graph
-from ...graph.tests._state_graph_helpers import add_test_node, compile_test_graph
-from ...graph.tests.conftest import deterministic_model_assignment
+from ...providers import ProviderFactory
 from ...team.team_config import (
     ResearchThreadSpec,
     load_agent_config,
     load_team_config,
+)
+from ...testing import (
+    add_test_node,
+    compile_test_graph,
+    deterministic_model_assignment,
+    new_state_graph,
 )
 from ...testing import settings_override as _settings_override
 from ...thread.action_receipts import (
@@ -46,25 +46,17 @@ from ...thread.action_receipts import (
     control_action_payload_fingerprint,
 )
 from ...thread.enums import ControlActionType
-from ..checkpoints import (
-    _open_selector_thread_checkpointer,
-    _SelectorThreadPostgresCheckpointer,
-    concurrent_checkpointer,
-    open_checkpointer,
-)
+from ..checkpoints import open_checkpointer
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Generator
+    from collections.abc import Generator
     from pathlib import Path
 
     from langgraph.checkpoint.serde.event_hooks import SerdeEvent
 
-    from ...conftest import ExternalPrerequisiteRule
     from ..checkpoints import Checkpointer
 
-_POSTGRES_URL_ENV = "VAULTSPEC_A2A_TEST_POSTGRES_URL"
-
-_PRESET = "vaultspec-adr-research-mock"
+_PRESET = "vaultspec-adr-research-deterministic"
 
 
 @contextmanager
@@ -87,12 +79,6 @@ def _config(thread_id: str) -> dict[str, Any]:
     return {"configurable": {"thread_id": thread_id}}
 
 
-def _with_database(url: str, name: str) -> str:
-    """Point *url* at another database on the same server."""
-    parts = urlsplit(url)
-    return urlunsplit(parts._replace(path=f"/{name}"))
-
-
 # ---------------------------------------------------------------------------
 # What the store must still hand back: a real preset parked at a real gate
 # ---------------------------------------------------------------------------
@@ -104,26 +90,11 @@ class _Submitter:
         return f"prop-{phase}"
 
 
-class _PassingFactory:
-    """Every lane replies ``PASS`` so the run reaches its first human gate."""
-
-    def create(
-        self,
-        provider: Any,
-        *,
-        model: Any | None = None,
-        agent_config: Any | None = None,
-        workspace_root: Any | None = None,
-        **kwargs: Any,
-    ) -> FakeListChatModel:
-        del provider, model, agent_config, workspace_root, kwargs
-        return FakeListChatModel(responses=["PASS"])
-
-
 def _research_graph(saver: Checkpointer) -> Any:
-    """Compile the shipped research preset over *saver*.
+    """Compile the shipped research preset over *saver* on the deterministic lane.
 
-    ``Any`` because the compiler's supported surface is invoke-and-inspect,
+    The lane's reviewer passes every draft, so the run reaches its first human
+    gate. ``Any`` because the compiler's supported surface is invoke-and-inspect,
     and reading a parked run's state back is what this asks of it.
     """
     team = load_team_config(_PRESET)
@@ -135,7 +106,7 @@ def _research_graph(saver: Checkpointer) -> Any:
         team_config=team,
         agent_configs={w.agent_id: load_agent_config(w.agent_id) for w in team.workers},
         checkpointer=saver,
-        provider_factory=_PassingFactory(),
+        provider_factory=ProviderFactory(),
         proposal_submitter=_Submitter(),
         model_assignment=deterministic_model_assignment(team),
     )
@@ -197,15 +168,7 @@ async def _resume_the_parked_preset(
 
 
 class _LeakedPhase(Enum):
-    """A type outside the safe set, of the kind a node leaks into state.
-
-    A plain ``Enum`` and not a ``StrEnum``, because the served saver inlines
-    ``str``, ``int``, ``float`` and ``bool`` channel values into the checkpoint
-    row instead of serializing them, and a ``str`` subclass reaches the store
-    as a bare string on that backend without the serializer ever seeing its
-    type. Proving a READ posture takes a value both backends actually hand to
-    the serializer.
-    """
+    """A type outside the safe set, of the kind a node leaks into state."""
 
     RESEARCH = "research"
 
@@ -223,7 +186,7 @@ async def _write_leak(state: _Leak) -> dict[str, Any]:
 
 
 def _leaking_graph(saver: Checkpointer) -> Any:
-    builder: StateGraph[Any, None, Any, Any] = StateGraph(cast("Any", _Leak))
+    builder = new_state_graph(_Leak)
     add_test_node(builder, "leak", _write_leak)
     builder.add_edge(START, "leak")
     builder.add_edge("leak", END)
@@ -295,10 +258,7 @@ async def test_the_desktop_store_admits_the_preset_and_refuses_what_it_never_wro
     """The SQLite saver the desktop profile opens, held to both halves."""
     database = tmp_path / "checkpoints.sqlite"
     thread_id = f"strict-desktop-{uuid4().hex}"
-    with _settings_override(
-        checkpoint_backend="sqlite",
-        checkpoint_database_url=f"sqlite+aiosqlite:///{database}",
-    ):
+    with _settings_override(checkpoint_database_url=f"sqlite+aiosqlite:///{database}"):
         async with open_checkpointer() as saver, open_checkpointer() as reader:
             await _prove_the_store_hands_a_parked_preset_back_whole(
                 saver, reader, thread_id
@@ -307,97 +267,76 @@ async def test_the_desktop_store_admits_the_preset_and_refuses_what_it_never_wro
 
 
 # ---------------------------------------------------------------------------
-# The served store, and the savers taken off it
+# A checkpoint an older build left behind, carrying a channel this build
+# no longer declares (the retired write-only `clarification_answers`).
 # ---------------------------------------------------------------------------
 
 
-@pytest_asyncio.fixture
-async def postgres_url(
-    external_prerequisite: ExternalPrerequisiteRule,
-) -> AsyncIterator[str]:
-    """Create a database of this module's own, and drop it afterwards."""
-    external_prerequisite("postgres")
-    import psycopg
-    from psycopg import sql
+def _one_turn_graph(saver: Checkpointer) -> Any:
+    """A minimal real graph over the current ``TeamState`` schema."""
 
-    server = os.environ[_POSTGRES_URL_ENV]
-    name = f"a2a_strict_{uuid4().hex[:12]}"
-    # Composed as an identifier rather than interpolated, so the quoting is the
-    # driver's rather than this test's.
-    database = sql.Identifier(name)
-    async with await psycopg.AsyncConnection.connect(server, autocommit=True) as admin:
-        await admin.execute(sql.SQL("CREATE DATABASE {}").format(database))
-    try:
-        yield _with_database(server, name)
-    finally:
-        async with await psycopg.AsyncConnection.connect(
-            server, autocommit=True
-        ) as admin:
-            await admin.execute(
-                sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(database)
-            )
+    async def _turn(state: Any) -> dict[str, Any]:
+        del state
+        return {}
+
+    builder = new_state_graph()
+    add_test_node(builder, "turn", _turn)
+    builder.add_edge(START, "turn")
+    builder.add_edge("turn", END)
+    return compile_test_graph(builder, checkpointer=saver)
 
 
 @pytest.mark.asyncio
-@pytest.mark.requires_prerequisites("postgres")
-async def test_the_served_store_admits_the_preset_and_refuses_what_it_never_wrote(
-    postgres_url: str,
+async def test_a_retired_channel_left_in_an_old_checkpoint_does_not_block_resumption(
+    tmp_path: Path,
 ) -> None:
-    """The pooled PostgreSQL saver, held to the same pair of claims."""
-    thread_id = f"strict-served-{uuid4().hex}"
-    with _settings_override(
-        checkpoint_backend="postgres",
-        checkpoint_database_url=postgres_url,
-    ):
-        async with open_checkpointer() as saver, open_checkpointer() as reader:
-            await _prove_the_store_hands_a_parked_preset_back_whole(
-                saver, reader, thread_id
-            )
-            await _prove_the_store_will_not_rebuild_an_unsafe_type(saver)
+    """A stale ``clarification_answers`` entry from before C12 still loads and resumes.
 
-
-@pytest.mark.asyncio
-@pytest.mark.requires_prerequisites("postgres")
-async def test_a_saver_taken_off_a_served_store_reads_it_the_same_way(
-    postgres_url: str,
-) -> None:
-    """Concurrency must not be a way around the store's posture.
-
-    A run writing its own checkpoints and a page of status probes each take a
-    saver of their own over the one pool, and on Windows those come off the
-    selector bridge rather than the pooled saver. A sibling that read the store
-    permissively would leave the posture depending on which caller got there.
+    The channel was deleted from ``TeamState`` once the node that wrote it was
+    deleted, but an old run's checkpoint can still carry the key an earlier
+    build wrote: the strict-serde store must hand that checkpoint back whole
+    and let the current graph resume past it, not refuse the row outright.
     """
-    with _settings_override(
-        checkpoint_backend="postgres",
-        checkpoint_database_url=postgres_url,
-    ):
+    database = tmp_path / "checkpoints.sqlite"
+    thread_id = f"strict-stale-channel-{uuid4().hex}"
+    with _settings_override(checkpoint_database_url=f"sqlite+aiosqlite:///{database}"):
         async with open_checkpointer() as saver:
-            sibling = await concurrent_checkpointer(saver)
-            assert sibling is not saver
-            await _prove_the_store_will_not_rebuild_an_unsafe_type(sibling)
+            config = _config(thread_id)
+            graph = _one_turn_graph(saver)
+            await graph.ainvoke(
+                cast(
+                    "Any",
+                    {"thread_id": thread_id, "messages": [HumanMessage(content="hi")]},
+                ),
+                cast("Any", config),
+            )
 
+            # Patch the real, just-written checkpoint to carry the retired
+            # channel too, exactly as an older build's row would still read.
+            written = await saver.aget_tuple(cast("Any", config))
+            assert written is not None
+            stale_checkpoint = cast("Any", written.checkpoint)
+            stale_values = dict(stale_checkpoint["channel_values"])
+            stale_values["clarification_answers"] = {"old-request": {"scope": "legacy"}}
+            stale_checkpoint["channel_values"] = stale_values
+            stale_versions = dict(stale_checkpoint["channel_versions"])
+            stale_versions["clarification_answers"] = saver.get_next_version(
+                None, cast("Any", None)
+            )
+            stale_checkpoint["channel_versions"] = stale_versions
+            await saver.aput(
+                written.config,
+                stale_checkpoint,
+                written.metadata,
+                stale_versions,
+            )
 
-@pytest.mark.asyncio
-@pytest.mark.requires_prerequisites("postgres")
-async def test_the_selector_bridge_carries_the_store_posture_to_its_clones(
-    postgres_url: str,
-) -> None:
-    """Windows reaches the served store through the bridge and nothing else.
-
-    The bridge is what the Windows branch yields, and every saver a run or a
-    probe takes on that platform is cloned off it - a sibling on the same pool,
-    or a clone narrowed for one compiled graph. A posture set only on the
-    pooled saver would be absent from the whole platform.
-    """
-    async with _open_selector_thread_checkpointer(postgres_url) as bridge:
-        assert isinstance(bridge, _SelectorThreadPostgresCheckpointer)
-        await _prove_the_store_will_not_rebuild_an_unsafe_type(bridge)
-        await _prove_the_store_will_not_rebuild_an_unsafe_type(
-            await concurrent_checkpointer(bridge)
-        )
-        # Narrowing for a compiled graph adds to the safe set; it must not
-        # reopen it.
-        await _prove_the_store_will_not_rebuild_an_unsafe_type(
-            bridge.with_allowlist([("builtins", "set")])
-        )
+            with _recorded_serde_events() as events:
+                hydrated = await graph.aget_state(cast("Any", config))
+                assert hydrated.values["thread_id"] == thread_id
+                resumed = await graph.ainvoke(
+                    cast("Any", {"messages": [HumanMessage(content="continue")]}),
+                    cast("Any", config),
+                )
+            assert len(resumed["messages"]) == 2
+            assert not events, f"the stale channel forced a blocked type: {events}"

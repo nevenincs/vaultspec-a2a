@@ -4,17 +4,15 @@ Single entry point for all gateway-to-worker dispatch calls.  Handles
 the common core: ensure worker is spawned, circuit breaker check,
 HTTP POST to ``/dispatch``, and success/failure recording.
 
-Protocol-agnostic: does NOT raise ``HTTPException``.  Callers are
-responsible for translating errors into HTTP or WebSocket responses.
+Edge-agnostic: does NOT raise ``HTTPException``.  Callers are
+responsible for translating its typed errors into HTTP responses.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
@@ -23,34 +21,37 @@ import httpx
 from ..database import (
     ThreadStatusElectionOutcome,
     begin_write_transaction,
-    elect_thread_status,
     get_control_action_by_dispatch_id,
     get_session_factory,
     list_threads,
-    successor_thread_write_authority,
     thread_write_expectation,
 )
+from ..ipc.body_limit import dispatch_envelope_budget
 from ..ipc.schemas import (
     DispatchRequest,
     DispatchResponse,
 )
-from ..thread.dispatch_policy import FailureType
-from ..thread.enums import ThreadStatus
-from ..utils.coercion import coerce_object_mapping
+from ..thread.dispatch_policy import FailureType, resolve_failure_type
+from ..thread.enums import ControlActionType, ThreadStatus
+from ..utils.coercion import coerce_object_mapping, decode_json_object
 from ._thread_metadata import workspace_root_from_metadata
-from .accepted_input import AcceptedActionInput, restore_accepted_dispatch
-from .dispatch_receipts import bind_graph_action_receipt
+from .accepted_input import read_accepted_input, restore_accepted_dispatch
+from .config import settings
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
+from .terminal_settlement import TerminalEvidence, lock_terminal_run, settle_terminal
 from .workspace import canonical_workspace_root, require_admitted_workspace_root
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..database import ThreadStatusElectionResult
-    from ..database.models import ThreadModel
+    from ..database import ThreadModel
+    from ..providers.team_selection import FrozenLaneAssignment
+    from ..thread import ThreadWriteExpectation
     from .circuit_breaker import DispatchAdmission, WorkerCircuitBreaker
+    from .leased_dispatch import SettledDispatchFailure
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
@@ -67,7 +68,7 @@ _REDISPATCH_LOG_EVERY_N = 5
 
 
 @dataclass(frozen=True, slots=True)
-class DispatchOutcome:
+class _DispatchOutcome:
     """Result of a :func:`safe_dispatch` call."""
 
     success: bool
@@ -90,6 +91,28 @@ class DispatchError(Exception):
 
 class IncompatibleDispatchAuthorityError(DispatchError):
     """Current durable graph-action evidence is absent or inconsistent."""
+
+
+class DispatchEnvelopeTooLargeError(DispatchError):
+    """The envelope is larger than the receiver is configured to admit.
+
+    Raised before delivery rather than discovered as the worker's 413, because
+    the bytes are the same on every attempt: a retry cannot make this envelope
+    smaller, so the caller has to be told now and by this condition rather than
+    by a transport error it would reasonably retry.
+    """
+
+    def __init__(
+        self, thread_id: str, dispatch_id: str, size: int, budget: int
+    ) -> None:
+        self.thread_id = thread_id
+        self.dispatch_id = dispatch_id
+        self.size = size
+        self.budget = budget
+        super().__init__(
+            f"dispatch envelope is {size} bytes, over the {budget}-byte internal "
+            f"delivery budget, for dispatch_id={dispatch_id} thread {thread_id}"
+        )
 
 
 class WorkerCircuitOpenError(DispatchError):
@@ -176,23 +199,39 @@ async def dispatch_to_worker(
     5. Return a ``DispatchResponse`` on success.
 
     Raises:
+        DispatchEnvelopeTooLargeError: The encoded envelope exceeds the receiver's
+            own allowance, so no worker is asked for it.
         WorkerCircuitOpenError: Circuit breaker is open (caller should 503).
         WorkerAtCapacityError: Worker returned 429 (caller decides policy).
         WorkerDispatchRejectedError: Worker returned non-2xx (e.g. 500/503).
         WorkerUnreachableError: httpx transport error (caller decides policy).
     """
-    if dispatch.action != "cancel":
-        try:
-            dispatch.require_graph_action_receipt()
-        except ValueError as exc:
-            raise IncompatibleDispatchAuthorityError(str(exc)) from exc
+    try:
+        dispatch.graph_receipt_if_required()
+    except ValueError as exc:
+        raise IncompatibleDispatchAuthorityError(str(exc)) from exc
+    # Sized before a worker is started: an envelope nothing will admit must not
+    # be the reason a worker process is spawned.
+    body = dispatch.encoded_envelope()
+    budget = dispatch_envelope_budget(settings)
+    if len(body) > budget:
+        logger.warning(
+            "Refusing oversized dispatch_id=%s for thread %s: %d bytes over %d",
+            dispatch.dispatch_id,
+            dispatch.thread_id,
+            len(body),
+            budget,
+        )
+        raise DispatchEnvelopeTooLargeError(
+            dispatch.thread_id, dispatch.dispatch_id, len(body), budget
+        )
     await spawner.ensure_worker()
 
     # Cancellation bypasses admission but not classification: it must reach a
     # worker the circuit has shut out, and it still reports honestly on whether
     # the transport worked when it got there.
     admission: DispatchAdmission | None = None
-    if dispatch.action != "cancel":
+    if dispatch.requires_graph_receipt:
         admission = circuit_breaker.pre_dispatch()
         if admission is None:
             raise WorkerCircuitOpenError(circuit_breaker.rejection_detail)
@@ -203,8 +242,8 @@ async def dispatch_to_worker(
         try:
             resp = await worker_client.post(
                 "/dispatch",
-                json=dispatch.model_dump(),
-                headers=headers or None,
+                content=body,
+                headers={**headers, "content-type": "application/json"},
             )
         except httpx.HTTPError as exc:
             circuit_breaker.record_failure()
@@ -359,38 +398,45 @@ def _log_redispatch_failure_ladder(
         logger.warning(message, *args)
 
 
-def _reconciling_metadata(thread: ThreadModel) -> dict[str, object]:
-    """Read one thread's optional metadata without losing the rest of the sweep."""
-    if not thread.thread_metadata:
-        return {}
-    try:
-        raw_metadata: object = json.loads(thread.thread_metadata)
-    except json.JSONDecodeError:
-        logger.debug("Failed to parse thread metadata for %s", thread.id, exc_info=True)
-        return {}
-    return coerce_object_mapping(raw_metadata) or {}
-
-
-async def _refuse_queue_on_settlement(
+async def _fail_reconciling_run(
     db: AsyncSession,
-    thread_id: str,
-    election: ThreadStatusElectionResult,
-    reason: str,
-) -> None:
-    """Answer a settling run's queue in the transaction that settles it.
+    thread: ThreadModel,
+    *,
+    failure_reason: str,
+    queue_refusal_reason: str,
+) -> ThreadStatusElectionOutcome:
+    """Settle one listed run FAILED on the writer authority it already holds.
 
-    The sweep's per-thread refusals are terminal settlements like any other,
-    so a continuation waiting on one would be left on a run that can never
-    promote it. Bound to the won election and written before the commit, so a
-    lost election refuses nothing: either the run settles and its queue is
-    answered, or neither happens.
+    The sweep proves nothing about the run's turn, so the election's witness is
+    the one the run was listed under, taken before the lock re-reads the row: a
+    run that moved since the listing loses the election and is left alone.
+    There is no stream position to record, so the settlement skips it. A run
+    whose row or journal action is gone resolves to the outcome the election
+    itself would have reported. Ending the transaction stays with the caller.
     """
-    from .repositories.continuation_queue import refuse_queued_continuations
-
-    if election.outcome is not ThreadStatusElectionOutcome.WON:
-        return
-    await refuse_queued_continuations(
-        db, thread_id=thread_id, refused_at=datetime.now(UTC), reason=reason
+    expectation = thread_write_expectation(thread)
+    authority = expectation.authority
+    locked = await lock_terminal_run(db, thread.id)
+    if locked is None:
+        return ThreadStatusElectionOutcome.NOT_FOUND
+    action = await get_control_action_by_dispatch_id(
+        db, thread_id=thread.id, dispatch_id=authority.action_receipt_id
+    )
+    if action is None:
+        return ThreadStatusElectionOutcome.RECEIPT_MISMATCH
+    return await settle_terminal(
+        db,
+        locked,
+        ThreadStatus.FAILED,
+        evidence=TerminalEvidence(
+            expectation=expectation,
+            action_id=action.id,
+            action_type=authority.action_type,
+            action_receipt_id=authority.action_receipt_id,
+            failure_reason=failure_reason,
+            queue_refusal_reason=queue_refusal_reason,
+        ),
+        last_sequence=None,
     )
 
 
@@ -402,31 +448,20 @@ async def _refuse_incompatible_authority(
     exc: ExecutionAuthorityError,
 ) -> None:
     """Fail one incompatible stored run while allowing the sweep to continue."""
-    expectation = thread_write_expectation(thread)
-    await begin_write_transaction(db)
-    election = await elect_thread_status(
+    outcome = await _fail_reconciling_run(
         db,
-        thread.id,
-        expectation=expectation,
-        status=ThreadStatus.FAILED,
-        successor=successor_thread_write_authority(
-            expectation,
-            action_type=expectation.authority.action_type,
-            action_receipt_id=expectation.authority.action_receipt_id,
-        ),
+        thread,
         failure_reason=(
             f"stored execution authority is incompatible ({exc.reason.value})"
         ),
-    )
-    await _refuse_queue_on_settlement(
-        db, thread.id, election, "the run's stored execution authority is incompatible"
+        queue_refusal_reason="the run's stored execution authority is incompatible",
     )
     await db.commit()
-    if election.outcome is not ThreadStatusElectionOutcome.WON:
+    if outcome is not ThreadStatusElectionOutcome.WON:
         logger.warning(
             "Skipped stale reconciliation refusal for thread %s: %s",
             thread.id,
-            election.outcome.value,
+            outcome.value,
         )
         return
     _log_redispatch_failure_ladder(
@@ -446,32 +481,21 @@ async def _refuse_missing_project(
     failure_thread_ids: dict[str, list[str]],
 ) -> None:
     """Fail one run with no active project and keep healthy runs moving."""
-    expectation = thread_write_expectation(thread)
-    await begin_write_transaction(db)
-    election = await elect_thread_status(
+    outcome = await _fail_reconciling_run(
         db,
-        thread.id,
-        expectation=expectation,
-        status=ThreadStatus.FAILED,
-        successor=successor_thread_write_authority(
-            expectation,
-            action_type=expectation.authority.action_type,
-            action_receipt_id=expectation.authority.action_receipt_id,
-        ),
+        thread,
         failure_reason=(
             "run carries no active project: its stored metadata "
             "names no workspace_root, so it cannot be re-sited"
         ),
-    )
-    await _refuse_queue_on_settlement(
-        db, thread.id, election, "the run carries no active project"
+        queue_refusal_reason="the run carries no active project",
     )
     await db.commit()
-    if election.outcome is not ThreadStatusElectionOutcome.WON:
+    if outcome is not ThreadStatusElectionOutcome.WON:
         logger.warning(
             "Skipped stale project refusal for thread %s: %s",
             thread.id,
-            election.outcome.value,
+            outcome.value,
         )
         return
     _log_redispatch_failure_ladder(
@@ -483,24 +507,50 @@ async def _refuse_missing_project(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _ReconcilingWork:
+    """One listed run's accepted action and the dispatch rebuilt from it.
+
+    The action travels with the dispatch because the delivery below is leased:
+    the lease it takes is this action's own, under this action's own stable
+    identity, so the sweep cannot deliver work a live dispatcher is holding.
+    """
+
+    action_id: str
+    action_type: ControlActionType
+    idempotency_key: str
+    request_id: str | None
+    payload: dict[str, object]
+    dispatch_id: str
+    recovery_deadline_at: datetime | None
+    dispatch: DispatchRequest
+
+
 async def _restore_reconciling_dispatch(
     db: AsyncSession,
     thread: ThreadModel,
-    frozen_map: dict[str, dict[str, object]],
+    frozen_map: dict[str, FrozenLaneAssignment],
     workspace_root: str,
-) -> DispatchRequest | None:
-    """Load the accepted action only when it matches stored execution authority."""
+) -> _ReconcilingWork | None:
+    """Load the accepted action only when it matches stored execution authority.
+
+    Every field the claim below needs is copied off the row here, because losing
+    a claim rolls the session back and a rollback expires every loaded row.
+    """
     authority = thread_write_expectation(thread).authority
     action = await get_control_action_by_dispatch_id(
         db,
         thread_id=thread.id,
         dispatch_id=authority.action_receipt_id,
     )
-    if action is None or action.payload_json is None:
+    if action is None or action.payload_json is None or action.dispatch_id is None:
         logger.warning("No accepted action for reconciling thread %s", thread.id)
         return None
     try:
-        accepted = AcceptedActionInput.model_validate_json(action.payload_json)
+        payload = decode_json_object(action.payload_json)
+        if payload is None:
+            raise ValueError("accepted action payload is not an object")
+        accepted = read_accepted_input(action)
         dispatch = restore_accepted_dispatch(
             accepted, dispatch_id=authority.action_receipt_id
         )
@@ -515,10 +565,94 @@ async def _restore_reconciling_dispatch(
             raise ValueError(
                 "accepted execution authority differs from thread metadata"
             )
-        return await bind_graph_action_receipt(db, dispatch)
+        return _ReconcilingWork(
+            action_id=action.id,
+            action_type=ControlActionType(action.action_type),
+            idempotency_key=action.idempotency_key,
+            request_id=action.request_id,
+            payload=payload,
+            dispatch_id=action.dispatch_id,
+            recovery_deadline_at=action.recovery_deadline_at,
+            dispatch=dispatch,
+        )
     except ValueError as exc:
         logger.warning("Invalid accepted action for thread %s: %s", thread.id, exc)
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class _RedispatchTransport:
+    """The worker connection and trace context one re-dispatch travels over."""
+
+    worker_client: httpx.AsyncClient
+    circuit_breaker: WorkerCircuitBreaker
+    spawner: LazyWorkerSpawner
+    trace_headers: dict[str, str] | None
+
+
+#: Why the sweep passed over a run without attempting a delivery at all.
+_LEASE_HELD = "accepted_action_leased"
+
+
+async def _deliver_reconciling_work(
+    db: AsyncSession,
+    thread_id: str,
+    work: _ReconcilingWork,
+    expectation: ThreadWriteExpectation,
+    transport: _RedispatchTransport,
+) -> SettledDispatchFailure | str | None:
+    """Deliver one listed run through its accepted action's own lease.
+
+    The sweep is one dispatcher among several - the direct recovery pass, a
+    client's own retry, another gateway - and the lease is how they agree on who
+    is delivering a run's accepted work. Delivering outside it meant the sweep
+    could hand the worker a dispatch a live dispatcher was already holding, which
+    the worker then refuses as a duplicate of work it is doing, or worse admits
+    as a second turn. Taking the claim first makes the sweep lose that race
+    instead of winning it wrongly.
+
+    Returns ``None`` on delivery, the reason this run was passed over when no
+    delivery was attempted, or the settled failure of one that was.
+    """
+    from .action_lease import ControlActionClaimRequest, prepare_control_action_claim
+    from .leased_dispatch import DispatchTransport, dispatch_leased
+
+    await begin_write_transaction(db)
+    claim = await prepare_control_action_claim(
+        db,
+        request=ControlActionClaimRequest(
+            thread_id=thread_id,
+            action_type=work.action_type,
+            idempotency_key=work.idempotency_key,
+            request_id=work.request_id,
+            payload=work.payload,
+            dispatch_id=work.dispatch_id,
+            recovery_deadline_at=work.recovery_deadline_at,
+            write_expectation=expectation,
+        ),
+    )
+    if not (claim.acquired and claim.payload_matches and claim.authority_matches):
+        # ``prepare_control_action_claim`` rolls an unacquired claim back itself;
+        # a claim acquired against content or authority that no longer matches
+        # has to release what it wrote here.
+        if db.in_transaction():
+            await db.rollback()
+        return _LEASE_HELD
+    failure = await dispatch_leased(
+        db,
+        claim,
+        work.dispatch,
+        DispatchTransport(
+            worker_client=transport.worker_client,
+            circuit_breaker=transport.circuit_breaker,
+            worker_spawner=transport.spawner,
+            trace_headers=transport.trace_headers,
+        ),
+    )
+    if failure is not None:
+        # The settlement was written into a transaction left open for this caller.
+        await db.commit()
+    return failure
 
 
 def _log_redispatch_batch_summary(
@@ -573,7 +707,7 @@ async def redispatch_reconciling_threads(
             failure_counts: dict[str, int] = {}
             failure_thread_ids: dict[str, list[str]] = {}
             for thread in threads:
-                meta = _reconciling_metadata(thread)
+                meta = decode_json_object(thread.thread_metadata) or {}
                 # Reuse the frozen effective assignment on
                 # restart so the run recompiles the exact launched models, never
                 # a re-resolution against possibly-drifted config.
@@ -598,29 +732,11 @@ async def redispatch_reconciling_threads(
                         db, thread, failure_counts, failure_thread_ids
                     )
                     continue
-                dispatch = await _restore_reconciling_dispatch(
-                    db, thread, frozen_map, workspace_root
-                )
-                # The restore above read the accepted action; release that read
-                # before the worker call rather than holding it across delivery.
-                await db.commit()
-                if dispatch is None:
-                    continue
-                headers = trace_headers_fn() if trace_headers_fn else {}
-                try:
-                    await dispatch_to_worker(
-                        worker_client,
-                        dispatch,
-                        circuit_breaker,
-                        spawner,
-                        trace_headers=headers,
-                    )
-                    record_worker_contact(time.monotonic())
-                    logger.info(
-                        "Re-dispatched reconciling thread %s",
-                        thread.id,
-                    )
-                except WorkerCircuitOpenError:
+                if circuit_breaker.shut_out:
+                    # Nothing will be admitted, and a claim taken for a delivery
+                    # that cannot happen only holds the accepted action away from
+                    # the dispatcher that could make it. Read rather than
+                    # reserved, so a half-open circuit still gets its one probe.
                     _log_redispatch_failure_ladder(
                         failure_counts,
                         failure_thread_ids,
@@ -629,20 +745,49 @@ async def redispatch_reconciling_threads(
                         thread.id,
                     )
                     continue
-                except (
-                    IncompatibleDispatchAuthorityError,
-                    WorkerAtCapacityError,
-                    WorkerDispatchRejectedError,
-                    WorkerUnreachableError,
-                ) as exc:
+                expectation = thread_write_expectation(thread)
+                work = await _restore_reconciling_dispatch(
+                    db, thread, frozen_map, workspace_root
+                )
+                # The restore above read the accepted action; release that read
+                # before the claim opens a write transaction of its own.
+                await db.commit()
+                if work is None:
+                    continue
+                failure = await _deliver_reconciling_work(
+                    db,
+                    thread.id,
+                    work,
+                    expectation,
+                    _RedispatchTransport(
+                        worker_client,
+                        circuit_breaker,
+                        spawner,
+                        trace_headers_fn() if trace_headers_fn else None,
+                    ),
+                )
+                if failure is None:
+                    record_worker_contact(time.monotonic())
+                    logger.info("Re-dispatched reconciling thread %s", thread.id)
+                    continue
+                if isinstance(failure, str):
                     _log_redispatch_failure_ladder(
                         failure_counts,
                         failure_thread_ids,
-                        ("redispatch_error", thread.id),
-                        "Re-dispatch error for thread %s: %s",
+                        (failure, thread.id),
+                        "Skipping re-dispatch for thread %s: %s",
                         thread.id,
-                        exc,
+                        failure,
                     )
+                    continue
+                _log_redispatch_failure_ladder(
+                    failure_counts,
+                    failure_thread_ids,
+                    (failure.failure_type.value, thread.id),
+                    "Re-dispatch error for thread %s: %s",
+                    thread.id,
+                    failure.detail,
+                )
             _log_redispatch_batch_summary(failure_counts, failure_thread_ids)
     except Exception as exc:
         logger.error("Reconciling re-dispatch task failed: %s", exc)
@@ -655,10 +800,10 @@ async def safe_dispatch(
     worker_spawner: LazyWorkerSpawner,
     *,
     trace_headers: dict[str, str] | None = None,
-) -> DispatchOutcome:
+) -> _DispatchOutcome:
     """Non-raising wrapper around :func:`dispatch_to_worker`.
 
-    Returns a :class:`DispatchOutcome` instead of raising dispatch errors,
+    Returns a :class:`_DispatchOutcome` instead of raising dispatch errors,
     making it easier for callers to handle failures without try/except
     boilerplate.
     """
@@ -670,11 +815,18 @@ async def safe_dispatch(
             worker_spawner,
             trace_headers=trace_headers,
         )
-        return DispatchOutcome(success=True)
+        return _DispatchOutcome(success=True)
     except IncompatibleDispatchAuthorityError as exc:
-        return DispatchOutcome(
+        return _DispatchOutcome(
             success=False,
             failure_type="incompatible_state",
+            exception=exc,
+            detail=str(exc),
+        )
+    except DispatchEnvelopeTooLargeError as exc:
+        return _DispatchOutcome(
+            success=False,
+            failure_type=FailureType.ENVELOPE_TOO_LARGE.value,
             exception=exc,
             detail=str(exc),
         )
@@ -685,7 +837,7 @@ async def safe_dispatch(
             dispatch_request.thread_id,
             exc.detail,
         )
-        return DispatchOutcome(
+        return _DispatchOutcome(
             success=False,
             failure_type="circuit_open",
             exception=exc,
@@ -697,7 +849,7 @@ async def safe_dispatch(
             dispatch_request.dispatch_id,
             dispatch_request.thread_id,
         )
-        return DispatchOutcome(
+        return _DispatchOutcome(
             success=False,
             failure_type=FailureType.AT_CAPACITY.value,
             exception=exc,
@@ -710,7 +862,7 @@ async def safe_dispatch(
             dispatch_request.dispatch_id,
             dispatch_request.thread_id,
         )
-        return DispatchOutcome(
+        return _DispatchOutcome(
             success=False,
             failure_type="unreachable",
             exception=exc,
@@ -723,7 +875,7 @@ async def safe_dispatch(
             dispatch_request.thread_id,
             exc.status_code,
         )
-        return DispatchOutcome(
+        return _DispatchOutcome(
             success=False,
             failure_type=_rejected_failure_type(exc).value,
             exception=exc,
@@ -740,9 +892,4 @@ def _rejected_failure_type(exc: WorkerDispatchRejectedError) -> FailureType:
     duplicate delivery indistinguishable from a broken request, and the recovery
     coordinator then released work that was in fact being done.
     """
-    if exc.condition is None:
-        return FailureType.REJECTED
-    try:
-        return FailureType(exc.condition)
-    except ValueError:
-        return FailureType.REJECTED
+    return resolve_failure_type(exc.condition) or FailureType.REJECTED

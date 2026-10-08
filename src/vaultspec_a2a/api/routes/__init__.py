@@ -6,10 +6,21 @@ Two routers, mounted by ``register_routes``: the versioned product surface under
 
 from fastapi import FastAPI
 
+from ._gateway_action_endpoints import register as _register_action_endpoints
+from ._gateway_action_endpoints import route_signature
+from ._gateway_read_endpoints import register as _register_read_endpoints
+from ._gateway_run_start import register as _register_run_start
 from .admin import router as admin_router
 from .gateway import router as gateway_router
 
-__all__ = ["register_routes"]
+__all__ = ["register_routes", "route_signature"]
+
+# The verbs mount once per process: the router is a module-level singleton that
+# every app includes, so a mount per ``register_routes`` call would duplicate
+# each route.
+_register_run_start(gateway_router)
+_register_read_endpoints(gateway_router)
+_register_action_endpoints(gateway_router)
 
 
 def register_routes(app: FastAPI) -> None:

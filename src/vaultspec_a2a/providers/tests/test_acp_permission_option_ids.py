@@ -15,12 +15,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from .._acp_rpc_handlers import _autonomous_option_id, on_request_permission
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
-from .._json_contract import JsonObject, JsonValue
+from ._permission_outcome import acp_permission_outcome
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from .._json_contract import JsonObject
 
 # An option dict with no identity field at all — exactly what the unfiltered set
 # comprehension turned into a ``None`` member of the "valid" ids.
@@ -42,48 +43,23 @@ def _config(
         mcp_servers=[],
         use_exec=False,
         provider="claude",
-        runtime_authority=None,
-        acp_backend="claude_code",
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
         allowed_tools=[],
         acp_family=acp_family,
     )
 
 
-async def _outcome(
-    options: list[JsonObject], config: AcpModelConfig, ctx: AcpSessionContext
-) -> JsonObject:
-    """Drive the production handler and return the outcome object it answered with."""
-    params: JsonObject = {
-        "sessionId": ctx.session_id,
-        "toolCall": {"title": "Edit", "rawInput": {}},
-        "options": list[JsonValue](options),
-    }
-    response = await on_request_permission(1, params, ctx, config)
-    result = response.get("result")
-    assert isinstance(result, dict)
-    outcome = result.get("outcome")
-    assert isinstance(outcome, dict)
-    return outcome
-
-
 async def _decide(
-    options: list[JsonObject], config: AcpModelConfig, ctx: AcpSessionContext
+    options: list[JsonObject],
+    config: AcpModelConfig,
+    ctx: AcpSessionContext,
+    *,
+    tool_call: JsonObject | None = None,
 ) -> str:
-    params: JsonObject = {
-        "sessionId": ctx.session_id,
-        "toolCall": {"title": "Edit", "rawInput": {}},
-        "options": list[JsonValue](options),
-    }
-    response = await on_request_permission(1, params, ctx, config)
-    result = response.get("result")
-    assert isinstance(result, dict)
-    outcome = result.get("outcome")
-    assert isinstance(outcome, dict)
+    outcome = await acp_permission_outcome(
+        ctx, config, options=options, tool_call=tool_call
+    )
     option_id = outcome.get("optionId")
     assert isinstance(option_id, str)
     return option_id
@@ -112,8 +88,10 @@ async def test_an_empty_option_id_is_never_serialised_into_the_outcome(
     """
     options: list[JsonObject] = [{"optionId": "approve"}, _MALFORMED]
 
-    outcome = await _outcome(
-        options, _config(permission_callback=_returning("")), acp_session_context
+    outcome = await acp_permission_outcome(
+        acp_session_context,
+        _config(permission_callback=_returning("")),
+        options=options,
     )
 
     assert outcome == {"outcome": "cancelled"}
@@ -147,8 +125,9 @@ async def test_a_snake_case_option_answered_in_kind_is_accepted(
 ) -> None:
     """A snake_case options list validates its own snake_case answer.
 
-    Previously the valid set was ``{None}``, so the legitimate answer failed the
-    guard and the fallback raised ``KeyError``.
+    The valid set is built from the snake_case options, so the legitimate answer
+    passes the guard rather than failing it and sending the fallback to a
+    ``KeyError``.
     """
     options: list[JsonObject] = [
         {"option_id": "allow_always"},
@@ -203,7 +182,13 @@ async def test_a_leading_option_without_an_id_does_not_crash_the_default_path(
 async def test_a_raising_callback_denies_without_subscripting_a_bad_option(
     acp_session_context: AcpSessionContext,
 ) -> None:
-    """The fail-closed denial path must not itself raise on malformed options."""
+    """The fail-closed denial path must not itself raise on malformed options.
+
+    The refusal on offer is the once-only one, which is the only refusal a
+    denial ever selects: a remembering refusal would have the CLI persist a rule
+    this run cannot retract, so it is never reached for, and a list offering only
+    that is answered with the cancelled outcome instead.
+    """
 
     async def callback(
         _name: str, _args: JsonObject, _options: list[JsonObject]
@@ -212,7 +197,7 @@ async def test_a_raising_callback_denies_without_subscripting_a_bad_option(
 
     options: list[JsonObject] = [
         {"optionId": "approve"},
-        {"optionId": "deny_always"},
+        {"optionId": "deny_once"},
         _MALFORMED,
     ]
 
@@ -220,7 +205,7 @@ async def test_a_raising_callback_denies_without_subscripting_a_bad_option(
         options, _config(permission_callback=callback), acp_session_context
     )
 
-    assert decision == "deny_always"
+    assert decision == "deny_once"
 
 
 @pytest.mark.asyncio
@@ -241,14 +226,17 @@ async def test_a_denial_never_slides_onto_an_approval_on_a_bad_last_option(
     ) -> str:
         raise RuntimeError("the human hung up")
 
-    outcome = await _outcome(
-        options, _config(permission_callback=callback), acp_session_context
+    outcome = await acp_permission_outcome(
+        acp_session_context, _config(permission_callback=callback), options=options
     )
 
     assert outcome == {"outcome": "cancelled"}
 
 
-def test_the_kimi_autonomous_lane_reads_snake_case_options(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_the_kimi_autonomous_lane_reads_snake_case_options(
+    acp_session_context: AcpSessionContext, tmp_path: Path
+) -> None:
     """The Kimi read-only enforcement resolves ids through the same rule."""
     options: list[JsonObject] = [
         {"option_id": "approve", "kind": "allow_once"},
@@ -258,14 +246,20 @@ def test_the_kimi_autonomous_lane_reads_snake_case_options(tmp_path: Path) -> No
     read: JsonObject = {"path": "a.py"}
 
     assert (
-        _autonomous_option_id(
-            "ReadFile: a.py", config, options, args=read, locations=[]
+        await _decide(
+            options,
+            config,
+            acp_session_context,
+            tool_call={"title": "ReadFile: a.py", "rawInput": read},
         )
         == "approve"
     )
     assert (
-        _autonomous_option_id(
-            "WriteFile: a.py", config, options, args=read, locations=[]
+        await _decide(
+            options,
+            config,
+            acp_session_context,
+            tool_call={"title": "WriteFile: a.py", "rawInput": read},
         )
         == "reject"
     )
@@ -349,10 +343,10 @@ async def test_an_unoffered_answer_cancels_when_every_option_is_an_approval(
         {"optionId": "allow", "kind": "allow_once"},
     ]
 
-    outcome = await _outcome(
-        options,
-        _config(permission_callback=_returning("no-such-option")),
+    outcome = await acp_permission_outcome(
         acp_session_context,
+        _config(permission_callback=_returning("no-such-option")),
+        options=options,
     )
 
     assert outcome == {"outcome": "cancelled"}
@@ -373,6 +367,8 @@ async def test_an_uncovered_autonomous_call_is_never_granted_by_position(
         {"optionId": "allow_always", "kind": "allow_always"},
     ]
 
-    outcome = await _outcome(options, _config(), acp_session_context)
+    outcome = await acp_permission_outcome(
+        acp_session_context, _config(), options=options
+    )
 
     assert outcome == {"outcome": "cancelled"}

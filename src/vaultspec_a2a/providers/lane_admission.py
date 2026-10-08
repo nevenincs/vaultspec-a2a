@@ -50,12 +50,12 @@ is deliberately a SIBLING of the turn declaration rather than a field on
 withdrawn independently - upstream tool drift can cost a lane its web activation
 while it keeps serving turns perfectly - and folding them into one record would
 make withdrawing one an edit to the other's citation. The turn side admits lanes
-through TWO declarations, the mapping and :data:`IN_PROCESS_LANES`, and the
-in-process lanes must never be web-proven: they spawn no CLI, so there is nothing
-there to retrieve with, and a field hanging off :class:`LaneProof` could not have
-expressed that at all, because those lanes hold no proof record. And the consumers
-differ: turn admission is a REFUSAL consulted by the eligibility service, while web
-proof is an ACTIVATION consulted by tool and persona composition.
+through TWO sources, the mapping and the in-process lanes this process holds, and
+the in-process lanes must never be web-proven: they spawn no CLI, so there is
+nothing there to retrieve with, and a field hanging off :class:`LaneProof` could
+not have expressed that at all, because those lanes hold no proof record. And the
+consumers differ: turn admission is a REFUSAL consulted by the eligibility service,
+while web proof is an ACTIVATION consulted by tool and persona composition.
 
 What keeps the sibling from becoming a registry that can disagree with the turn one
 is not a shared container but an enforced implication, asserted at import by
@@ -88,15 +88,18 @@ from typing import TYPE_CHECKING
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from .binary_version import next_minor_version, parse_binary_version
-from .in_process_catalog import IN_PROCESS_EXECUTION_MODES
+from .execution_modes import ACP_BACKEND_LANES, EXTERNAL_EXECUTION_MODES
+from .in_process_catalog import in_process_catalog_key, in_process_lane
+from .lane_registry import registered_lanes
 from .provider_catalog import ProviderCatalogKey
+from .provider_readiness import probe_provider_readiness
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
+
+    from .cli_resolution import ProviderRuntimeUnavailableReason
 
 __all__ = [
-    "IN_PROCESS_CATALOG_LANES",
-    "IN_PROCESS_LANES",
     "PROVEN_CATALOG_TURN_LANES",
     "PROVEN_TURN_LANES",
     "PROVEN_WEB_LANES",
@@ -106,6 +109,7 @@ __all__ = [
     "is_catalog_lane_admissible",
     "is_web_lane_proven",
     "lane_proof_accepts_version",
+    "served_lane_eligible",
     "web_tool_names_for",
 ]
 
@@ -218,42 +222,14 @@ PROVEN_TURN_LANES: Mapping[Provider, LaneProof] = MappingProxyType(
 
 # Catalog serving is execution-mode specific. A future transport for an
 # already-proven provider must not inherit another transport's evidence. Keep
-# this declaration literal and deny-by-default.
+# the admitted lanes literal and deny-by-default; only the mode's spelling comes
+# from the execution-mode vocabulary.
 PROVEN_CATALOG_TURN_LANES: Mapping[ProviderCatalogKey, LaneProof] = MappingProxyType(
     {
-        ProviderCatalogKey("codex", "codex-app-server"): PROVEN_TURN_LANES[
-            Provider.CODEX
-        ],
+        ProviderCatalogKey(
+            Provider.CODEX.value, EXTERNAL_EXECUTION_MODES[Provider.CODEX]
+        ): PROVEN_TURN_LANES[Provider.CODEX],
     }
-)
-
-# The in-process lanes: no external transport exists to complete a turn against,
-# so the completed-turn standard cannot be applied to them and does not gate them.
-# MOCK proxies the in-repo tape server and DETERMINISTIC runs entirely in-process
-# (the acceptance provider). Both are admitted by this explicit declaration, never
-# by falling through the check - an unlisted lane must always land on deny.
-IN_PROCESS_LANES: frozenset[Provider] = frozenset(
-    {Provider.MOCK, Provider.DETERMINISTIC}
-)
-
-# The same in-process admission at CATALOG identity, and it is a SEPARATE
-# declaration for the reason the catalog map above is separate from the
-# provider-level one: catalog admission is execution-mode specific, so admitting
-# a provider does not admit every mode it might one day be served under. An
-# in-process provider offered under some other execution mode is not this
-# declaration and still lands on deny.
-#
-# It is derived from :data:`IN_PROCESS_LANES` and the serving module's mode
-# declaration rather than hand-listed, and that is deliberate in a module whose
-# rule is otherwise "edit by hand, never derive". The hand-editing rule protects
-# claims about work that finished on a lane; these lanes make no such claim, and
-# their identity is exactly "the in-process lanes, under the modes they are
-# served as". Restating the pair here would create a second place for a renamed
-# execution mode to be forgotten, which is the failure mode this module exists to
-# prevent, not an instance of the vigilance it asks for.
-IN_PROCESS_CATALOG_LANES: frozenset[ProviderCatalogKey] = frozenset(
-    ProviderCatalogKey(provider.value, IN_PROCESS_EXECUTION_MODES[provider])
-    for provider in IN_PROCESS_LANES
 )
 
 # ---------------------------------------------------------------------------
@@ -302,9 +278,9 @@ def _require_web_proof_implies_turn_proof(
 
     The single rule that keeps the two declarations from disagreeing. A retrieval
     is work completed on a lane, so a lane with no completed turn cannot have
-    completed a retrieval; and the in-process lanes, admitted for service by
-    :data:`IN_PROCESS_LANES` rather than by proof, spawn no CLI and have nothing
-    to retrieve with. Checked at import against the real declarations, so an
+    completed a retrieval; and the in-process lanes, admitted for service as held
+    lanes rather than by proof, spawn no CLI and have nothing to retrieve with.
+    Checked at import against the real declarations, so an
     incoherent pair - a lane activated for web while refused for service - cannot
     be committed and discovered later at a spawn.
 
@@ -329,7 +305,8 @@ def _lane_of(provider: Provider | str | None) -> Provider | None:
 
     Callers hold the lane as the bounded string an ACP model carries rather than
     as an enum member, and a run whose model never declared its lane is the normal
-    unidentified case (hosted APIs, the in-repo mock). Both land on ``None`` here
+    unidentified case (hosted APIs, in-process fixture lanes). Both land on
+    ``None`` here
     so every gate below denies by default instead of raising at a composition
     seam - an unidentifiable lane is exactly a lane with no recorded proof.
     """
@@ -347,11 +324,111 @@ def is_catalog_lane_admissible(key: ProviderCatalogKey) -> bool:
     """Return whether this exact execution lane may be served as selectable.
 
     True for an external lane with recorded completed-turn proof and for the
-    in-process lanes under the exact modes they are served as. False for
-    everything else, including an in-process provider named under a foreign
-    execution mode - deny is the default here as it is one layer up.
+    in-process lanes this process holds, under the exact modes they declare. No
+    external transport exists to complete a turn against on those, so the
+    completed-turn standard cannot apply to them; they are admitted as held
+    lanes instead. False for everything else, including an in-process provider
+    named under a foreign execution mode - deny is the default here as it is one
+    layer up.
+
+    The in-process set is read from the lane registrations rather than
+    hand-listed, deliberately in a module whose rule is otherwise "edit by hand,
+    never derive": that rule protects claims about work that finished on a lane,
+    these lanes make no such claim, and restating their identity here would be a
+    second place for a renamed execution mode to be forgotten.
     """
-    return key in PROVEN_CATALOG_TURN_LANES or key in IN_PROCESS_CATALOG_LANES
+    return key in PROVEN_CATALOG_TURN_LANES or any(
+        in_process_catalog_key(lane) == key for lane in registered_lanes()
+    )
+
+
+def _launcher_admission(
+    lane: Provider,
+) -> Callable[[], ProviderRuntimeUnavailableReason | None] | None:
+    """Return the entry that measures *lane*'s resolved launcher, or ``None``.
+
+    A lane's launcher is resolved by the provider factory, and each lane
+    differently, because the binary that completed the turn is not always the
+    command the lane spawns: the Claude-backed lanes (:data:`ACP_BACKEND_LANES`)
+    pin a CLI behind an ACP wrapper, while Codex and Kimi probe the
+    service-path executable they hand their child. The version comparison is
+    therefore ASKED of the factory rather than repeated here, and this function
+    is only the pairing between a recorded proof and the entry that checks it.
+
+    This call site carries no run workspace - eligibility is asked independent
+    of any particular run - so every entry paired here is the factory's
+    workspace-free probe (:func:`~.factory.claude_binary_proof_reason`,
+    :func:`~.factory.codex_binary_proof_reason`,
+    :func:`~.factory.kimi_binary_proof_reason`), never the workspace-scoped
+    sibling catalog discovery uses.
+
+    The pairing is hand-written beside the declaration for the same reason the
+    declaration is: a proof is a claim about a binary identity, so a lane added
+    above without an entry here carries no way to check the identity it claims,
+    and :func:`served_lane_eligible` refuses it rather than serving it on the
+    proof alone. Every lane this module can record proof for is paired, not
+    only the one with a proof entry today, so recording a future lane's proof
+    needs no second edit here. The factory is imported at call time because it
+    reads this declaration itself.
+    """
+    if lane in ACP_BACKEND_LANES:
+        from .factory import claude_binary_proof_reason
+
+        def _claude_admission() -> ProviderRuntimeUnavailableReason | None:
+            return claude_binary_proof_reason(lane)
+
+        return _claude_admission
+    if lane is Provider.CODEX:
+        from .factory import codex_binary_proof_reason
+
+        return codex_binary_proof_reason
+    if lane is Provider.KIMI:
+        from .factory import kimi_binary_proof_reason
+
+        return kimi_binary_proof_reason
+    return None
+
+
+def served_lane_eligible(provider: Provider | str | None) -> bool:
+    """Return whether *provider* may be served to run work on this host.
+
+    Three terms, every one of them required, and they are conjunctive here so
+    that no consumer can assemble a weaker eligibility of its own:
+
+    1. a recorded completed-turn proof for the lane,
+    2. a resolved launcher whose reported version that proof admits, and
+    3. the lane's own readiness - its configuration present and its launch
+       command resolvable (:func:`..provider_readiness.probe_provider_readiness`).
+
+    Readiness is the LAST of the three and the weakest: it is necessary and
+    never sufficient, and a derivation that asked only for it served lanes with
+    nothing but handshake coverage because their credential resolved. Proof is
+    asked first so an unproven lane is refused without spawning anything, and
+    readiness is asked before the launcher probe so a profile that refuses
+    native execution refuses here with its own reason rather than through a
+    version probe it would not permit.
+
+    The in-process lanes this process holds are eligible as HELD lanes, exactly
+    as :func:`is_catalog_lane_admissible` admits them: they spawn no CLI, so
+    there is no external transport to complete a turn against and no launcher to
+    identify. Keeping the two predicates' treatment of them identical is what
+    stops the execution surface and the catalog surface from disagreeing about
+    which lanes are usable.
+
+    A lane this module cannot identify is refused, never raised on: an
+    unidentifiable lane is exactly a lane with no recorded proof.
+    """
+    lane = _lane_of(provider)
+    if lane is None:
+        return False
+    if in_process_lane(lane) is not None:
+        return True
+    if lane not in PROVEN_TURN_LANES:
+        return False
+    if not probe_provider_readiness(lane).ready:
+        return False
+    admission = _launcher_admission(lane)
+    return admission is not None and admission() is None
 
 
 def catalog_lane_admission_reason(key: ProviderCatalogKey) -> str | None:

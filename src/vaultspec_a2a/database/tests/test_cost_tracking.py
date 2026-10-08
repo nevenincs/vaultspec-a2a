@@ -1,49 +1,42 @@
-"""Tests for exact monetary storage in ``cost_tracking``.
+"""Tests for the ``cost_tracking`` accounting path.
 
-Guards the defect these tests exist for: ``estimated_cost`` used to be an
-IEEE-754 double that was SUM-aggregated inside the database, so a thread's
-total accumulated binary error against its true decimal cost. The aggregation
-tests below are written so they would FAIL against a float column — each one
-first asserts that the equivalent float arithmetic genuinely diverges, so a
-passing run proves the fix rather than a coincidence.
+Guards the property the table exists for: a token count reaching a durable row
+is one a provider actually reported, and an unreported one is stored as unknown
+rather than as a measured zero. The writers are proven to be injected as well as
+written, because this capability was once built in three places and dead in all
+three for want of a caller.
 
-Everything here drives a real SQLite engine, the real repository functions, and
-real Alembic migrations. Nothing is mocked.
+The exact-decimal money column these tests were first written for is gone
+(revision 0028): no served lane is metered per token and the project holds no
+rate table, so the column could only ever hold a structural zero that a reader
+would take for a measured one. What remains of it here is revision 0014's own
+round trip, which a store below head still replays.
+
+Everything here drives a real SQLite engine, the real repository functions, real
+provider subprocesses, and real Alembic migrations. Nothing is mocked.
 """
 
 from __future__ import annotations
 
 import ast
-import asyncio
+import dataclasses
 import inspect
 import json
 import sqlite3
 import sys
-import warnings
-from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
-from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 from alembic import command
 from alembic.config import Config
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.messages.ai import UsageMetadata
 from sqlalchemy import select
-from sqlalchemy.dialects import postgresql, sqlite
-from sqlalchemy.exc import SAWarning, StatementError
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
-from sqlalchemy.schema import CreateTable
 
 from ...graph.compiler import compile_team_graph
 from ...graph.nodes.worker import (
+    WorkerNodeOptions,
     _describe_worker_model,
     _finalize_worker_response,
     _record_turn_usage,
@@ -57,55 +50,27 @@ from ...providers._subprocess import spawn_acp_process
 from ...providers.acp_chat_model import AcpChatModel
 from ...providers.acp_exceptions import AcpPromptError
 from ...providers.codex_chat_model import CodexChatModel
-from ...providers.deterministic_chat_model import DeterministicResearchAdrChatModel
+from ...testing import DeterministicResearchAdrChatModel
 from ...tests._write_authority import make_test_thread_authority_columns
 from ...thread.models import TokenUsageEntry
 from ...thread.state import merge_token_usage
 from ...worker.cost_port import SqlCostPort
-from ..artifact_repository import (
-    append_cost_record,
-    sum_cost_by_agent,
+from ..cost_repository import (
+    sum_cost_by_role,
     sum_cost_by_thread,
 )
 from ..models import (
-    MONEY_PRECISION,
-    MONEY_SCALE,
-    Base,
     CostTrackingModel,
     ThreadModel,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Sequence
-
     from langchain_core.outputs import ChatGenerationChunk
-    from sqlalchemy import Table
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 _ALEMBIC_INI = (
     Path(__file__).resolve().parent.parent.parent.parent.parent / "alembic.ini"
 )
-
-#: A run of realistic per-invocation LLM costs — fractions of a cent up to a
-#: few cents, at the column's full ten-decimal resolution — whose float sum
-#: provably differs from their exact decimal sum.
-_DRIFTING_COSTS: tuple[str, ...] = (
-    "0.0000273468",
-    "0.0104859498",
-    "0.0455136054",
-    "0.0234994168",
-    "0.0490179490",
-    "0.0198712797",
-    "0.0036520099",
-    "0.0314727827",
-    "0.0389255651",
-    "0.0134888524",
-)
-
-
-def _cost_table() -> Table:
-    """Return the live ``cost_tracking`` table straight from the metadata."""
-    return Base.metadata.tables["cost_tracking"]
-
 
 _THREAD = "thread-1"
 
@@ -251,23 +216,6 @@ def _insert_raw_cost_row(db_path: Path, *, row_id: str, cost: float) -> None:
         conn.close()
 
 
-@pytest_asyncio.fixture
-async def engine() -> AsyncGenerator[AsyncEngine]:
-    """A real in-memory SQLite engine with the live metadata schema."""
-    eng = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as sess:
-        yield sess
-
-
 async def _seed_thread(session: AsyncSession, thread_id: str) -> ThreadModel:
     thread = ThreadModel(
         **make_test_thread_authority_columns(),
@@ -277,191 +225,6 @@ async def _seed_thread(session: AsyncSession, thread_id: str) -> ThreadModel:
     session.add(thread)
     await session.flush()
     return thread
-
-
-async def _add_costs(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    agent_id: str,
-    amounts: Sequence[Decimal],
-) -> None:
-    for amount in amounts:
-        await append_cost_record(
-            session,
-            CostTrackingModel(
-                id=uuid4().hex,
-                thread_id=thread_id,
-                agent_id=agent_id,
-                provider="claude",
-                model="max",
-                input_tokens=1,
-                output_tokens=2,
-                estimated_cost=amount,
-            ),
-        )
-
-
-class TestMoneyAmountPortability:
-    """One portable model must render the right exact type on each backend."""
-
-    def test_postgres_renders_native_numeric(self) -> None:
-        """Postgres gets a native NUMERIC at the declared precision and scale."""
-        ddl = str(CreateTable(_cost_table()).compile(dialect=postgresql.dialect()))
-        assert f"NUMERIC({MONEY_PRECISION}, {MONEY_SCALE})" in ddl
-
-    def test_sqlite_renders_scaled_integer(self) -> None:
-        """SQLite, which has no decimal type, gets exact integer storage."""
-        ddl = str(CreateTable(_cost_table()).compile(dialect=sqlite.dialect()))
-        cost_clause = ddl.split("estimated_cost")[1].split(",")[0]
-        assert "BIGINT" in cost_clause
-        assert "FLOAT" not in cost_clause
-
-    def test_scale_resolves_below_the_cheapest_priceable_token(self) -> None:
-        """The small end must not truncate a single cheap token's cost."""
-        cheapest_token_cost = Decimal("0.000000075")
-        quantum = Decimal(1).scaleb(-MONEY_SCALE)
-        assert quantum < cheapest_token_cost
-
-    @pytest.mark.asyncio
-    async def test_sqlite_roundtrip_emits_no_decimal_warning(
-        self, session: AsyncSession
-    ) -> None:
-        """SQLAlchemy must not warn about converting Decimal through float.
-
-        That warning is SQLAlchemy reporting the exact defect under repair; if
-        it fires, the column is silently round-tripping through IEEE-754 again.
-        """
-        await _seed_thread(session, "t-warn")
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", SAWarning)
-            await _add_costs(
-                session,
-                thread_id="t-warn",
-                agent_id="a",
-                amounts=[Decimal("0.0123456789")],
-            )
-            await sum_cost_by_thread(session, "t-warn")
-
-
-class TestExactStorage:
-    """A stored amount must return bit-for-bit what was written."""
-
-    @pytest.mark.asyncio
-    async def test_roundtrip_preserves_exact_decimal(
-        self, session: AsyncSession
-    ) -> None:
-        await _seed_thread(session, "t-round")
-        amount = Decimal("0.0123456789")
-        await _add_costs(session, thread_id="t-round", agent_id="a", amounts=[amount])
-        session.expire_all()
-        loaded = (
-            await session.execute(
-                select(CostTrackingModel).where(
-                    CostTrackingModel.thread_id == "t-round"
-                )
-            )
-        ).scalar_one()
-        assert isinstance(loaded.estimated_cost, Decimal)
-        assert loaded.estimated_cost == amount
-
-    @pytest.mark.asyncio
-    async def test_smallest_representable_amount_survives(
-        self, session: AsyncSession
-    ) -> None:
-        """One unit at the declared scale must not floor to zero."""
-        await _seed_thread(session, "t-tiny")
-        smallest = Decimal(1).scaleb(-MONEY_SCALE)
-        await _add_costs(session, thread_id="t-tiny", agent_id="a", amounts=[smallest])
-        totals = await sum_cost_by_thread(session, "t-tiny")
-        assert totals["estimated_cost"] == smallest
-        assert totals["estimated_cost"] > 0
-
-    @pytest.mark.asyncio
-    async def test_sub_cent_amount_is_not_truncated(
-        self, session: AsyncSession
-    ) -> None:
-        """A cost far below one cent keeps every significant digit."""
-        await _seed_thread(session, "t-subcent")
-        amount = Decimal("0.0000004237")
-        await _add_costs(session, thread_id="t-subcent", agent_id="a", amounts=[amount])
-        totals = await sum_cost_by_thread(session, "t-subcent")
-        assert totals["estimated_cost"] == amount
-
-    @pytest.mark.asyncio
-    async def test_non_finite_amount_is_refused(self, session: AsyncSession) -> None:
-        """NaN and Infinity are not money and must not reach storage.
-
-        A NaN admitted here would silently poison every SUM that touched the
-        row, so the write is refused at the type boundary. SQLAlchemy wraps the
-        underlying ``ValueError`` as a ``StatementError`` on flush.
-        """
-        await _seed_thread(session, "t-nan")
-        for bad in (Decimal("NaN"), Decimal("Infinity")):
-            with pytest.raises(StatementError, match="finite"):
-                await _add_costs(
-                    session, thread_id="t-nan", agent_id="a", amounts=[bad]
-                )
-            await session.rollback()
-
-
-class TestExactAggregation:
-    """The regression guard for M4: in-database SUM must not drift."""
-
-    def test_the_fixture_costs_actually_drift_in_float(self) -> None:
-        """Prove the aggregation tests are not vacuous.
-
-        If float arithmetic happened to be exact for this data, the tests below
-        would pass against the very defect they exist to catch.
-        """
-        exact = sum((Decimal(c) for c in _DRIFTING_COSTS), Decimal(0))
-        as_float = sum(float(c) for c in _DRIFTING_COSTS)
-        assert float(exact) != as_float
-
-    @pytest.mark.asyncio
-    async def test_sum_by_thread_is_exact(self, session: AsyncSession) -> None:
-        await _seed_thread(session, "t-sum")
-        amounts = [Decimal(c) for c in _DRIFTING_COSTS]
-        await _add_costs(session, thread_id="t-sum", agent_id="a", amounts=amounts)
-        totals = await sum_cost_by_thread(session, "t-sum")
-        assert totals["estimated_cost"] == sum(amounts, Decimal(0))
-
-    @pytest.mark.asyncio
-    async def test_sum_by_agent_is_exact(self, session: AsyncSession) -> None:
-        """Aggregation across threads is equally exact."""
-        await _seed_thread(session, "t-a")
-        await _seed_thread(session, "t-b")
-        amounts = [Decimal(c) for c in _DRIFTING_COSTS]
-        await _add_costs(
-            session, thread_id="t-a", agent_id="shared", amounts=amounts[:5]
-        )
-        await _add_costs(
-            session, thread_id="t-b", agent_id="shared", amounts=amounts[5:]
-        )
-        totals = await sum_cost_by_agent(session, "shared")
-        assert totals["estimated_cost"] == sum(amounts, Decimal(0))
-
-    @pytest.mark.asyncio
-    async def test_sums_return_decimal_not_float(self, session: AsyncSession) -> None:
-        """Returning a float would reintroduce the defect at the boundary."""
-        await _seed_thread(session, "t-type")
-        await _add_costs(
-            session, thread_id="t-type", agent_id="a", amounts=[Decimal("0.25")]
-        )
-        by_thread = await sum_cost_by_thread(session, "t-type")
-        by_agent = await sum_cost_by_agent(session, "a")
-        assert isinstance(by_thread["estimated_cost"], Decimal)
-        assert isinstance(by_agent["estimated_cost"], Decimal)
-
-    @pytest.mark.asyncio
-    async def test_empty_sums_return_decimal_zero(self, session: AsyncSession) -> None:
-        """The no-rows coalesce must also stay off float."""
-        by_thread = await sum_cost_by_thread(session, "absent-thread")
-        by_agent = await sum_cost_by_agent(session, "absent-agent")
-        assert isinstance(by_thread["estimated_cost"], Decimal)
-        assert isinstance(by_agent["estimated_cost"], Decimal)
-        assert by_thread["estimated_cost"] == 0
-        assert by_agent["estimated_cost"] == 0
 
 
 class TestMigration0014:
@@ -518,38 +281,6 @@ class TestMigration0014:
         command.downgrade(cfg, "0013")
 
         assert _raw_cost_values(db) == [pytest.approx(0.05)]
-
-    def test_migrated_schema_reads_back_as_exact_decimal(
-        self, runtime_dir: Path
-    ) -> None:
-        """End to end: a migrated database serves Decimals through the ORM.
-
-        Proves the migration's output and the model's read path agree — the
-        two halves that must stay in lockstep.
-
-        Synchronous by necessity: Alembic's ``command`` API drives the async
-        migration env through ``asyncio.run``, which cannot be called from
-        inside an already-running loop. The ORM read gets its own loop.
-        """
-        db = runtime_dir / "cost-migrated-orm.db"
-        cfg = _make_config(db)
-        command.upgrade(cfg, "0013")
-        _insert_raw_cost_row(db, row_id="row-a", cost=0.05)
-        command.upgrade(cfg, "0014")
-
-        async def read_totals() -> dict[str, int | Decimal]:
-            eng = create_async_engine(f"sqlite+aiosqlite:///{db}")
-            try:
-                factory = async_sessionmaker(eng, expire_on_commit=False)
-                async with factory() as sess:
-                    return await sum_cost_by_thread(sess, "thread-1")
-            finally:
-                await eng.dispose()
-
-        totals = asyncio.run(read_totals())
-
-        assert totals["estimated_cost"] == Decimal("0.05")
-        assert isinstance(totals["estimated_cost"], Decimal)
 
 
 class TestCodexUsageCapture:
@@ -654,7 +385,7 @@ class TestUsageReachesAPersistedRow:
 
     @pytest.mark.asyncio
     async def test_failed_acp_usage_reaches_durable_cost_row(
-        self, engine: AsyncEngine, session: AsyncSession
+        self, session_factory: async_sessionmaker[AsyncSession], session: AsyncSession
     ) -> None:
         await _seed_thread(session, "t-failed-acp")
         await session.commit()
@@ -670,15 +401,15 @@ class TestUsageReachesAPersistedRow:
         usage = _turn_token_usage(error)
         assert usage is not None
         await _record_turn_usage(
-            cost_port=SqlCostPort(async_sessionmaker(engine, expire_on_commit=False)),
+            cost_port=SqlCostPort(session_factory),
             thread_id="t-failed-acp",
             worker_name="coder-1",
             model=AcpChatModel(command=["unused"]),
             usage=usage,
         )
         totals = await sum_cost_by_thread(session, "t-failed-acp")
-        assert totals["input_tokens"] == 8
-        assert totals["output_tokens"] == 2
+        assert totals is not None
+        assert (totals.input_tokens, totals.output_tokens) == (8, 2)
         row = (
             await session.execute(
                 select(CostTrackingModel).where(
@@ -690,7 +421,7 @@ class TestUsageReachesAPersistedRow:
 
     @pytest.mark.asyncio
     async def test_codex_frame_persists_token_accounting(
-        self, engine: AsyncEngine, session: AsyncSession
+        self, session_factory: async_sessionmaker[AsyncSession], session: AsyncSession
     ) -> None:
         """Prove the whole path, not the port in isolation.
 
@@ -715,7 +446,7 @@ class TestUsageReachesAPersistedRow:
         usage = _turn_token_usage(message)
         assert usage is not None
 
-        port = SqlCostPort(async_sessionmaker(engine, expire_on_commit=False))
+        port = SqlCostPort(session_factory)
         await port.record_usage(
             thread_id="t-e2e",
             agent_id="coder-1",
@@ -729,8 +460,13 @@ class TestUsageReachesAPersistedRow:
         )
 
         totals = await sum_cost_by_thread(session, "t-e2e")
-        assert totals["input_tokens"] == 880
-        assert totals["output_tokens"] == 120
+        assert totals is not None
+        assert (totals.input_tokens, totals.output_tokens) == (880, 120)
+        # The aggregate carries the breakdown too, so what explains a surprising
+        # bill survives the read and not only the write.
+        assert totals.cache_read_tokens == 700
+        assert totals.cache_write_tokens == 30
+        assert totals.reasoning_tokens == 64
         # The breakdown that explains a surprising bill reaches the row too.
         row = (
             await session.execute(
@@ -739,8 +475,6 @@ class TestUsageReachesAPersistedRow:
         ).scalar_one()
         assert (row.cache_read_tokens, row.cache_write_tokens) == (700, 30)
         assert row.reasoning_tokens == 64
-        # No priced lane exists, so cost stays exactly unset rather than guessed.
-        assert totals["estimated_cost"] == Decimal(0)
 
         row = (
             await session.execute(
@@ -752,13 +486,13 @@ class TestUsageReachesAPersistedRow:
         assert row.agent_id == "coder-1"
 
     @pytest.mark.asyncio
-    async def test_repeated_turns_accumulate_for_an_agent(
-        self, engine: AsyncEngine, session: AsyncSession
+    async def test_repeated_turns_accumulate_for_a_role(
+        self, session_factory: async_sessionmaker[AsyncSession], session: AsyncSession
     ) -> None:
         """Repeated turns accumulate rather than overwrite."""
         await _seed_thread(session, "t-multi")
         await session.commit()
-        port = SqlCostPort(async_sessionmaker(engine, expire_on_commit=False))
+        port = SqlCostPort(session_factory)
         for _ in range(3):
             await port.record_usage(
                 thread_id="t-multi",
@@ -771,9 +505,17 @@ class TestUsageReachesAPersistedRow:
                 cache_write_tokens=None,
                 reasoning_tokens=None,
             )
-        totals = await sum_cost_by_agent(session, "coder-1")
-        assert totals["input_tokens"] == 300
-        assert totals["output_tokens"] == 75
+        totals = await sum_cost_by_thread(session, "t-multi")
+        assert totals is not None
+        assert (totals.input_tokens, totals.output_tokens) == (300, 75)
+        # Three turns reported no breakdown at all, so the summed breakdown is
+        # unknown rather than a measured zero.
+        assert totals.cache_read_tokens is None
+        assert totals.cache_write_tokens is None
+        assert totals.reasoning_tokens is None
+        # And the run's one seat carries the whole total.
+        per_role = await sum_cost_by_role(session, "t-multi")
+        assert per_role == {"coder-1": totals}
 
 
 class TestStateChannelIsFedNotBypassed:
@@ -790,7 +532,6 @@ class TestStateChannelIsFedNotBypassed:
         return _finalize_worker_response(
             response=message,
             worker_name=worker,
-            state_updates={},
             usage=_turn_token_usage(message),
         )
 
@@ -874,7 +615,12 @@ class TestTheWritersAreActuallyInjected:
         missing = [
             node.lineno
             for node in calls
-            if not any(kw.arg == "cost_port" for kw in node.keywords)
+            if not any(
+                kw.arg == "options"
+                and isinstance(kw.value, ast.Call)
+                and any(option.arg == "cost_port" for option in kw.value.keywords)
+                for kw in node.keywords
+            )
         ]
         assert missing == [], (
             f"create_worker_node called without cost_port at lines {missing}; "
@@ -882,11 +628,12 @@ class TestTheWritersAreActuallyInjected:
         )
 
     def test_the_worker_node_accepts_the_port(self) -> None:
-        """The node factory's typed keyword contract must accept the port."""
+        """The node factory's typed options record must accept the port."""
         options = inspect.signature(create_worker_node).parameters["options"]
-        assert options.annotation == "Unpack[_WorkerNodeOptions]"
-        contract = create_worker_node.__globals__["_WorkerNodeOptions"]
-        assert "cost_port" in contract.__annotations__
+        assert options.annotation == "WorkerNodeOptions | None"
+        assert "cost_port" in {
+            option.name for option in dataclasses.fields(WorkerNodeOptions)
+        }
 
     def test_the_compile_entrypoint_accepts_the_port(self) -> None:
         """The graph entrypoint's typed keyword contract accepts the port."""
@@ -907,12 +654,11 @@ class TestTheWritersAreActuallyInjected:
         assert "SqlCostPort(get_session_factory())" in source
         assert "cost_port=self._cost_port" in source
 
-    def test_the_port_satisfies_the_protocol(self) -> None:
+    def test_the_port_satisfies_the_protocol(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         """The adapter must actually implement the injected interface."""
-        port = SqlCostPort(
-            async_sessionmaker(create_async_engine("sqlite+aiosqlite:///:memory:"))
-        )
-        assert isinstance(port, CostPort)
+        assert isinstance(SqlCostPort(session_factory), CostPort)
 
 
 class TestLaneIdentityIsTakenNotParsed:
@@ -959,13 +705,13 @@ class TestDegradedLaneIsStoredAsUnknown:
 
     @pytest.mark.asyncio
     async def test_a_null_lane_still_persists_the_real_token_counts(
-        self, engine: AsyncEngine, session: AsyncSession
+        self, session_factory: async_sessionmaker[AsyncSession], session: AsyncSession
     ) -> None:
         """Measured tokens are worth keeping even when identity is not known."""
         await _seed_thread(session, "t-degraded")
         await session.commit()
 
-        port = SqlCostPort(async_sessionmaker(engine, expire_on_commit=False))
+        port = SqlCostPort(session_factory)
         await port.record_usage(
             thread_id="t-degraded",
             agent_id="coder-1",
@@ -994,7 +740,8 @@ class TestDegradedLaneIsStoredAsUnknown:
         assert row.reasoning_tokens is None
 
         totals = await sum_cost_by_thread(session, "t-degraded")
-        assert totals["input_tokens"] == 210
+        assert totals is not None
+        assert totals.input_tokens == 210
 
     def test_the_migrated_schema_permits_the_unknown_lane(
         self, runtime_dir: Path
@@ -1016,10 +763,14 @@ class TestDegradedLaneIsStoredAsUnknown:
             conn.close()
         assert notnull["provider"] == 0
         assert notnull["model"] == 0
-        # The counters stay required; only the identity became optional.
+        # The two counts every lane reports stay required.
         assert notnull["input_tokens"] == 1
         assert notnull["output_tokens"] == 1
-        assert notnull["estimated_cost"] == 1
+        # The breakdown a lane may not report is nullable in the store too, so
+        # "did not say" has somewhere to live other than a measured zero.
+        assert notnull["cache_read_tokens"] == 0
+        assert notnull["cache_write_tokens"] == 0
+        assert notnull["reasoning_tokens"] == 0
 
     def test_downgrade_backfills_rather_than_deleting_measured_rows(
         self, runtime_dir: Path
@@ -1031,8 +782,8 @@ class TestDegradedLaneIsStoredAsUnknown:
         conn = sqlite3.connect(str(db))
         conn.execute(
             "INSERT INTO cost_tracking (id, thread_id, agent_id, provider, model,"
-            " input_tokens, output_tokens, estimated_cost, created_at)"
-            " VALUES ('r1','t1','a',NULL,NULL,210,35,0,'2026-08-03 00:00:00')"
+            " input_tokens, output_tokens, created_at)"
+            " VALUES ('r1','t1','a',NULL,NULL,210,35,'2026-08-03 00:00:00')"
         )
         conn.commit()
         conn.close()

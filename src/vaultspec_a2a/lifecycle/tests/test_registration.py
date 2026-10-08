@@ -12,6 +12,7 @@ import os
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from ...utils.runtime_exec import self_command
 from ..procs_config import PortBand, ProcsConfig, RoleConfig
 from ..registration import deregister_serve, refresh_registration, register_serve
 from ..registry import ProcRecord, read_record, record_path, write_record
@@ -74,19 +75,20 @@ def test_register_serve_preserves_operator_fields_on_convergence(
     write_record(seeded, home=tmp_path)
 
     # The serving child self-registers on the same (role, name, owner).
+    serve_command = self_command("serve")
     converged = register_serve(
         "gateway-dev",
         18100,
         name="g1",
         owner="sess-a",
-        command=["python", "-m", "vaultspec_a2a.cli.main", "serve"],
+        command=serve_command,
         home=tmp_path,
         config=_config(),
     )
     assert converged is not None
     # Self-registration owns the runtime identity...
     assert converged.pid == os.getpid()
-    assert converged.command == ["python", "-m", "vaultspec_a2a.cli.main", "serve"]
+    assert converged.command == serve_command
     assert converged.last_seen_ms >= 111
     # ...and PRESERVES every operator-supplied field (the clobber bug that killed
     # gateway/worker logs mid-incident).

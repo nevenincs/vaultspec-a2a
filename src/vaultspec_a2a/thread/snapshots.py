@@ -3,79 +3,95 @@
 Layer 1 module — no imports from ``api/`` or ``control/``.  Infrastructure
 services in ``control/`` construct these types and delegate classification
 to the pure functions defined here.
+
+The read-model dataclasses are also the wire declaration: the api edge validates
+and serves them directly, so their annotations are evaluated eagerly (this
+module deliberately omits ``from __future__ import annotations``) and their
+wire bounds ride along as ``Annotated`` metadata.
 """
 
-from __future__ import annotations
-
 import contextlib
-import hashlib
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import Annotated, Any, Literal, cast
 
+from annotated_types import Ge, MaxLen, MinLen
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langgraph.checkpoint.base import WRITES_IDX_MAP
+from langgraph.checkpoint.base import WRITES_IDX_MAP, CheckpointTuple
 from langgraph.checkpoint.serde.types import INTERRUPT
 
-from ..graph.enums import AgentLifecycleState, PermissionType, Provider
+from ..graph.enums import (
+    AgentLifecycleState,
+    PermissionOptionKind,
+    PermissionType,
+    Provider,
+    ProviderCondition,
+    StreamFrameKind,
+    ToolCallStatus,
+    ToolKind,
+)
+from ..utils.coercion import coerce_object_mapping
+from .action_receipts import sha256_hex
+from .clarification import ClarificationRequest
+from .constants import MAX_APPROVAL_REQUEST_ID_CHARS
 from .enums import (
-    TERMINAL_STATUSES,
+    TERMINAL_STATUS_VALUES,
+    ApprovalStatus,
     DegradedReason,
+    InterruptType,
     RepairStatus,
-    ReplayStatus,
     ThreadStatus,
-    TranscriptAvailability,
 )
 from .models import PlanEntry
 
-if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
-
 __all__ = [
-    "CHECKPOINT_ERROR_REPAIR_MAP",
-    "CLARIFICATION_REQUEST_INTERRUPT_TYPE",
     "LOCALLY_RESPONDABLE_PAUSE_CAUSES",
+    "MAX_REPAIR_REASON_CHARS",
+    "MODEL_ASSIGNMENT_DIGEST_CHARS",
+    "PERMISSION_REQUEST_EVENT_TYPES",
     "PLAN_APPROVAL_PAUSE_CAUSES",
-    "TERMINAL_STATUS_MAP",
-    "AgentData",
-    "ArtifactData",
+    "AgentSnapshot",
+    "ApprovalRequestId",
+    "ArtifactSnapshot",
     "CheckpointProjection",
-    "ClarificationQuestionData",
-    "ClarificationRequestData",
     "ExecutionStateProjection",
-    "ExecutionTaskData",
-    "MessageData",
-    "PermissionData",
-    "PermissionOptionData",
+    "ExecutionTaskSnapshot",
+    "LiveInterrupt",
+    "MessageSnapshot",
+    "PermissionOptionSnapshot",
+    "PermissionSnapshot",
     "ProjectedInterrupt",
-    "ThreadStateData",
-    "ToolCallData",
+    "QueuedMessageCount",
+    "RepairReason",
+    "ThreadStateSnapshot",
+    "ToolCallContent",
+    "ToolCallContentDiff",
+    "ToolCallContentTerminal",
+    "ToolCallContentText",
+    "ToolCallLocation",
+    "ToolCallSnapshot",
     "build_agent_descriptor",
-    "clarification_data_from_interrupt",
+    "checkpoint_tuple_id",
     "classify_message_role",
     "classify_permission_pause_reason",
-    "classify_transcript_availability",
-    "coerce_provider",
     "derive_message_id",
     "extract_checkpoint_fields",
     "extract_message_timestamp",
-    "finalize_snapshot_replay_status",
     "fold_pending_writes",
     "is_permission_event",
     "is_terminal_event",
+    "live_interrupts",
+    "named_request_id",
     "normalize_artifacts",
     "normalize_plan_entries",
     "normalize_wire_event_type",
     "project_checkpoint_tuple",
+    "record_repair_posture",
     "stamp_message_created_at",
-    "tasks_past_their_interrupt",
+    "unanswered_interrupt_values",
     "wire_event_type",
 ]
-
-# The interrupt payload's ``type`` discriminator for a mid-run clarification
-# question. Named once here so the projection below and any future
-# producer/consumer read the same literal.
-CLARIFICATION_REQUEST_INTERRUPT_TYPE = "clarification_request"
 
 # Shared constant — previously duplicated in control/projection.py and
 # control/event_handlers.py.
@@ -90,44 +106,18 @@ CLARIFICATION_REQUEST_INTERRUPT_TYPE = "clarification_request"
 PLAN_APPROVAL_PAUSE_CAUSES: frozenset[str] = frozenset(
     {
         PermissionType.PLAN_APPROVAL.value,
-        "plan_approval_request",
-        "document_approval_request",
+        InterruptType.PLAN_APPROVAL_REQUEST.value,
+        InterruptType.DOCUMENT_APPROVAL_REQUEST.value,
     }
 )
 
 # The subset of PLAN_APPROVAL_PAUSE_CAUSES this repository's own respond route
-# may resolve. Excludes "document_approval_request": that pause is decided
+# may resolve. Excludes the document approval pause: that pause is decided
 # solely by the engine review surface, correlated back into the run by the
-# verdict subscriber (the amended a2a-orchestration-edge contract: no second
-# approval authority in A2A). Consumed only by control/permission_service.py's
-# respond-route gating.
+# verdict subscriber (A2A holds no second approval authority). Consumed only by
+# control/permission_service.py's respond-route gating.
 LOCALLY_RESPONDABLE_PAUSE_CAUSES: frozenset[str] = PLAN_APPROVAL_PAUSE_CAUSES - {
-    "document_approval_request"
-}
-
-# Map aggregator outcome strings to ThreadStatus enum values. Derived from the
-# TERMINAL_STATUSES authority (thread/enums.py) rather than restated, so a
-# status added there cannot silently miss this map.
-TERMINAL_STATUS_MAP: dict[str, str] = {
-    status.value: status.value for status in TERMINAL_STATUSES
-}
-
-# Checkpoint error → repair status mapping.  Used by snapshot replay
-# logic to decide which RepairStatus to assign when a checkpoint probe
-# fails or returns degraded data.
-#
-# ``checkpoint_missing`` and ``checkpoint_unavailable`` are distinct conditions
-# and classify differently. Unavailable means the probe itself failed - the
-# checkpoint's contents are unknown, so the run may still be intact. Missing
-# means the probe succeeded and found nothing: the history a replay would rebuild
-# from is provably absent, which is a replay gap, not an unknown. Collapsing the
-# two onto CHECKPOINT_UNAVAILABLE reported a known gap as an unknown probe and
-# left REPLAY_GAP with no producer at all.
-CHECKPOINT_ERROR_REPAIR_MAP: dict[str, RepairStatus] = {
-    "checkpoint_unavailable": RepairStatus.CHECKPOINT_UNAVAILABLE,
-    "checkpoint_missing": RepairStatus.REPLAY_GAP,
-    "checkpoint_corrupt": RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
-    "checkpoint_timeout": RepairStatus.NEEDS_RECONCILIATION,
+    InterruptType.DOCUMENT_APPROVAL_REQUEST.value
 }
 
 # ---------------------------------------------------------------------------
@@ -188,110 +178,77 @@ def normalize_wire_event_type(payload: Mapping[str, Any]) -> dict[str, Any]:
 def is_terminal_event(payload: dict[str, Any]) -> bool:
     """Return True if the payload represents a thread-terminal event."""
     return (
-        wire_event_type(payload) == "thread_terminal"
-        and payload.get("status", "") in TERMINAL_STATUS_MAP
+        wire_event_type(payload) == StreamFrameKind.THREAD_TERMINAL
+        and payload.get("status", "") in TERMINAL_STATUS_VALUES
     )
 
 
-def is_permission_event(payload: dict[str, Any]) -> bool:
-    """Return True if the payload is a permission request or resolution."""
-    return wire_event_type(payload) in {
-        "permission_request",
-        "plan_approval_request",
-        "document_approval_request",
-        "permission_resolved",
+#: The relayed event types that open a permission journal row: a tool
+#: permission and the two approval gates. Whether the run is parked on one is the
+#: checkpoint's to say, and the pause recorder owns the pause. A clarification is
+#: the one interrupt type absent, because it parks the run without a permission
+#: row.
+PERMISSION_REQUEST_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        InterruptType.PERMISSION_REQUEST.value,
+        InterruptType.PLAN_APPROVAL_REQUEST.value,
+        InterruptType.DOCUMENT_APPROVAL_REQUEST.value,
     }
+)
+
+
+def is_permission_event(payload: dict[str, Any]) -> bool:
+    """Return True if the payload announces a permission or approval request.
+
+    Requests only. A permission is SETTLED from the application receipt of the
+    resume that carried its answer, never from an event announcing the
+    settlement, so there is no resolution type to classify here.
+    """
+    return wire_event_type(payload) in PERMISSION_REQUEST_EVENT_TYPES
 
 
 def classify_permission_pause_reason(tool_call: str | None) -> str:
     """Derive the ``pause_reason_type`` string from a permission tool_call."""
-    if tool_call == "plan_approval":
-        return "plan_approval_request"
-    return str(tool_call or "permission_request")
-
-
-def _clarification_options(raw_map: dict[str, object]) -> list[str]:
-    options: object = raw_map.get("options", [])
-    if not isinstance(options, list):
-        return []
-    return [
-        option for option in cast("list[object]", options) if isinstance(option, str)
-    ]
-
-
-def _clarification_question(raw: object) -> ClarificationQuestionData | None:
-    if not isinstance(raw, dict):
-        return None
-    raw_map = cast("dict[str, object]", raw)
-    qid = raw_map.get("id")
-    prompt = raw_map.get("prompt")
-    if not isinstance(qid, str) or not qid or not isinstance(prompt, str) or not prompt:
-        return None
-    kind_raw = raw_map.get("kind")
-    kind = (
-        kind_raw
-        if isinstance(kind_raw, str) and kind_raw in ("choice", "text")
-        else "text"
-    )
-    return ClarificationQuestionData(
-        id=qid,
-        prompt=prompt,
-        kind=kind,
-        required=bool(raw_map.get("required", False)),
-        options=_clarification_options(raw_map),
-    )
-
-
-def clarification_data_from_interrupt(
-    interrupt: ProjectedInterrupt,
-) -> ClarificationRequestData | None:
-    """Project a checkpoint-sourced clarification interrupt to its wire shape.
-
-    Returns ``None`` for any interrupt whose type is not
-    :data:`CLARIFICATION_REQUEST_INTERRUPT_TYPE`, or whose ``questions`` list
-    contains no readable entry — this is checkpoint-truth disclosure: the
-    pending clarification survives a reload from
-    ``run-status`` alone because it is read from ``ProjectedInterrupt``
-    (:func:`project_checkpoint_tuple`), never from in-memory state.
-
-    Malformed questions are dropped rather than failing the projection —
-    consistent with the node's own bound-by-truncation discipline — so a
-    drifted producer degrades the disclosed set instead of hiding the whole
-    request.
-    """
-    if interrupt.interrupt_type != CLARIFICATION_REQUEST_INTERRUPT_TYPE:
-        return None
-    payload = interrupt.payload
-    if type(payload) is not dict:
-        return None
-    raw_questions: object = payload.get("questions", [])
-    if not isinstance(raw_questions, list):
-        return None
-    questions: list[ClarificationQuestionData] = []
-    for raw in cast("list[object]", raw_questions):
-        question = _clarification_question(raw)
-        if question is not None:
-            questions.append(question)
-    if not questions:
-        return None
-    return ClarificationRequestData(
-        request_id=interrupt.interrupt_id,
-        questions=questions,
-    )
+    if tool_call == PermissionType.PLAN_APPROVAL:
+        return InterruptType.PLAN_APPROVAL_REQUEST.value
+    return str(tool_call or InterruptType.PERMISSION_REQUEST.value)
 
 
 @dataclass(slots=True)
 class ProjectedInterrupt:
-    """Normalized persisted interrupt extracted from a checkpoint tuple."""
+    """Normalized persisted interrupt extracted from a checkpoint tuple.
+
+    ``interrupt_id`` is the request id the producer named the question by, the
+    same id the stream discloses it under and an answer is addressed to.
+    """
 
     interrupt_id: str
     interrupt_type: str
     payload: dict[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class LiveInterrupt:
+    """One question a run's live state shows it still stopped on.
+
+    Read off a LangGraph state snapshot rather than a checkpoint tuple, so it
+    keeps what only the snapshot knows: the task that asked, under its node
+    name, and LangGraph's own ``interrupt_id``, which is how an answer is
+    addressed while more than one question is pending. ``request_id`` is the id
+    the producer named the question by, ``None`` when the payload names none;
+    such a question cannot be matched to an answer.
+    """
+
+    task_id: str
+    task_name: str
+    interrupt_id: str | None
+    interrupt_type: str | None
+    request_id: str | None
+    payload: dict[str, Any] | None
+
+
 @dataclass(slots=True)
-# Flat projection matches the durable checkpoint read model.
-class CheckpointProjection:  # pylint: disable=too-many-instance-attributes
+class CheckpointProjection:
     """Gateway-side normalized checkpoint projection."""
 
     channel_values: dict[str, Any]
@@ -307,58 +264,121 @@ class CheckpointProjection:  # pylint: disable=too-many-instance-attributes
     history_depth: int | None = None
     pause_cause: str | None = None
     pending_interrupts: list[ProjectedInterrupt] = field(default_factory=list)
-    degraded_reasons: list[str] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-# Flat projection matches the execution-state response model.
-class ExecutionStateProjection:  # pylint: disable=too-many-instance-attributes
-    """Normalized durable execution-state read model."""
-
-    checkpoint_id: str | None
-    parent_checkpoint_id: str | None
-    recovery_epoch: int
-    task_count: int
-    interrupt_count: int
-    next_nodes: list[str] = field(default_factory=list)
-    interrupt_types: list[str] = field(default_factory=list)
-    execution_tasks: list[ExecutionTaskData] = field(default_factory=list)
-    degraded_reasons: list[str] = field(default_factory=list)
+    # The types of the held interrupts that name no request. None is disclosed,
+    # because no answer can be addressed to one, but a run stopped on such a
+    # question is still stopped, so a reader can tell what kind holds it.
+    unnamed_interrupt_types: list[str] = field(default_factory=list)
+    # Every observation, once per occurrence; merging onto a snapshot dedupes.
+    degraded_reasons: list[DegradedReason] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
-# Layer 1 snapshot dataclasses mirroring api/schemas/snapshots Pydantic
+# Run read model: the one declaration the api edge validates and serves
 # ---------------------------------------------------------------------------
 
+#: Longest repair reason a run discloses.
+MAX_REPAIR_REASON_CHARS: int = 500
 
-@dataclass(slots=True)
-class MessageData:
-    """Layer 1 equivalent of ``MessageSnapshot``."""
+#: Length of the model-assignment digest a run discloses: the bare hex SHA-256
+#: the checkpoint-binding digest is computed with.
+MODEL_ASSIGNMENT_DIGEST_CHARS: int = len(sha256_hex(b""))
+
+#: The spelling of that digest. Carried as dataclass field metadata rather than
+#: ``Annotated``, which has no vocabulary for a pattern.
+_MODEL_ASSIGNMENT_DIGEST_PATTERN: str = (
+    rf"^[a-f0-9]{{{MODEL_ASSIGNMENT_DIGEST_CHARS}}}$"
+)
+
+#: The digest binding a run's checkpoints to the model assignment they ran under.
+_ModelAssignmentDigest = Annotated[
+    str,
+    MinLen(MODEL_ASSIGNMENT_DIGEST_CHARS),
+    MaxLen(MODEL_ASSIGNMENT_DIGEST_CHARS),
+]
+
+#: A follow-up turn count: never negative.
+QueuedMessageCount = Annotated[int, Ge(0)]
+
+#: Why an operation did not take on a run that is still alive, capped so the
+#: disclosure stays a sentence rather than a log.
+RepairReason = Annotated[str, MaxLen(MAX_REPAIR_REASON_CHARS)]
+
+#: The approval handle a run is parked on, at the width the respond verb admits
+#: it. Declared here because this is the read model every surface reporting the
+#: handle derives from: bounded on the listing record alone, the published
+#: contract said the field was capped or uncapped depending on which read a
+#: caller happened to make.
+ApprovalRequestId = Annotated[str, MaxLen(MAX_APPROVAL_REQUEST_ID_CHARS)]
+
+
+@dataclass(slots=True, kw_only=True)
+class ToolCallLocation:
+    """File location associated with a tool call."""
+
+    path: str
+    line: int | None = None
+
+
+@dataclass(slots=True, kw_only=True)
+class ToolCallContentText:
+    """Plain text content block within a tool call."""
+
+    content_type: Literal["text"] = "text"
+    text: str
+
+
+@dataclass(slots=True, kw_only=True)
+class ToolCallContentDiff:
+    """Diff content block within a tool call."""
+
+    content_type: Literal["diff"] = "diff"
+    path: str
+    old_text: str | None = None
+    new_text: str
+
+
+@dataclass(slots=True, kw_only=True)
+class ToolCallContentTerminal:
+    """Terminal output content block within a tool call."""
+
+    content_type: Literal["terminal"] = "terminal"
+    terminal_id: str
+
+
+#: The tool-call content blocks, told apart by their ``content_type`` literal.
+ToolCallContent = ToolCallContentText | ToolCallContentDiff | ToolCallContentTerminal
+
+
+# Keyword-only so a field with no default can follow one that has one: fields
+# are declared in the order they are served.
+@dataclass(slots=True, kw_only=True)
+class MessageSnapshot:
+    """Fully materialized message in a thread replay."""
 
     message_id: str
     role: str
     content: str
+    agent_id: str | None = None
     # None when the message carries no production time: an older run's
     # history, recorded before messages were stamped.
     timestamp: datetime | None
-    agent_id: str | None = None
 
 
 @dataclass(slots=True)
-class ToolCallData:
-    """Layer 1 equivalent of ``ToolCallSnapshot``."""
+class ToolCallSnapshot:
+    """Fully materialized tool call (all incremental updates merged)."""
 
     tool_call_id: str
     title: str
-    kind: str
-    status: str
-    locations: list[Any] = field(default_factory=list)
-    content: list[Any] = field(default_factory=list)
+    kind: ToolKind
+    status: ToolCallStatus
+    locations: list[ToolCallLocation] = field(default_factory=list)
+    content: list[ToolCallContent] = field(default_factory=list)
 
 
 @dataclass(slots=True)
-class ArtifactData:
-    """Layer 1 equivalent of ``ArtifactSnapshot``."""
+class ArtifactSnapshot:
+    """Fully materialized file artifact."""
 
     artifact_id: str
     filename: str
@@ -367,67 +387,39 @@ class ArtifactData:
 
 
 @dataclass(slots=True)
-class PermissionOptionData:
-    """Layer 1 equivalent of ``PermissionOptionSnapshot``."""
+class PermissionOptionSnapshot:
+    """Permission option within a snapshot."""
 
     option_id: str
     name: str
-    kind: str
+    kind: PermissionOptionKind
 
 
 @dataclass(slots=True)
-class PermissionData:
-    """Layer 1 equivalent of ``PermissionSnapshot``."""
+class PermissionSnapshot:
+    """Outstanding permission request in a state snapshot."""
 
     request_id: str
     description: str
-    options: list[PermissionOptionData] = field(default_factory=list)
+    options: list[PermissionOptionSnapshot]
     tool_call: str | None = None
-    tool_kind: str | None = None
+    tool_kind: ToolKind | None = None
 
 
+# The single declaration behind every agent-shaped surface: the REST team-status
+# entry, the ``team_status`` broadcast summary and the thread snapshot all project
+# from this type rather than redeclaring the field set.
 @dataclass(slots=True)
-class ClarificationQuestionData:
-    """Layer 1 equivalent of ``ClarificationQuestionSnapshot``.
+class AgentSnapshot:
+    """One agent of a run, and what it is doing.
 
-    One bounded question within a pending clarification request.
-    """
+    ``state`` and ``provider`` are served as their enumerations, so an
+    unrecognised value never reaches the wire as an arbitrary string.
 
-    id: str
-    prompt: str
-    kind: str
-    required: bool = False
-    options: list[str] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-class ClarificationRequestData:
-    """Layer 1 equivalent of ``ClarificationRequestSnapshot``.
-
-    A pending mid-run clarification request. ``request_id`` is the same
-    checkpoint-derived interrupt id every other interrupt
-    projection uses (:class:`ProjectedInterrupt`), so the respond route's
-    ``{run_id}/clarifications/{request_id}/respond`` path segment is exactly
-    the id disclosed here.
-    """
-
-    request_id: str
-    questions: list[ClarificationQuestionData] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-# Flat data mirrors the public agent snapshot schema.
-class AgentData:  # pylint: disable=too-many-instance-attributes
-    """Canonical agent descriptor.
-
-    Single declaration behind every agent-shaped surface: the REST team-status
-    entry, the ``team_status`` broadcast summary, and the thread snapshot all
-    project from this type rather than redeclaring the field set. ``state``,
-    ``provider``, and ``model`` carry the real enums so an unknown value cannot
-    survive as an arbitrary string all the way to the wire.
-
-    ``model_name`` holds the exact provider-issued catalog identifier the run
-    executed.
+    ``model_name`` is free-form by contrast, and deliberately so: it is the exact
+    provider-issued catalog identifier the run executed, and a served catalog
+    names its own models, so no closed vocabulary could cover them. ``None`` for
+    an agent whose model was never resolved.
     """
 
     thread_id: str
@@ -442,9 +434,12 @@ class AgentData:  # pylint: disable=too-many-instance-attributes
 
 
 @dataclass(slots=True)
-# Flat data mirrors the public task snapshot schema.
-class ExecutionTaskData:  # pylint: disable=too-many-instance-attributes
-    """Layer 1 equivalent of ``ExecutionTaskSnapshot``."""
+class ExecutionTaskSnapshot:
+    """Normalized execution task used in reconnect snapshots.
+
+    The one declaration of an execution task: the worker emits it across the
+    gateway-worker wire, the gateway persists it, and the snapshot serves it.
+    """
 
     task_id: str
     name: str
@@ -458,42 +453,85 @@ class ExecutionTaskData:  # pylint: disable=too-many-instance-attributes
 
 
 @dataclass(slots=True)
-# Flat data mirrors the public thread snapshot schema.
-class ThreadStateData:  # pylint: disable=too-many-instance-attributes
-    """Layer 1 equivalent of ``ThreadStateSnapshot``."""
+class ExecutionStateProjection:
+    """Normalized durable execution-state read model."""
+
+    task_count: int
+    interrupt_count: int
+    next_nodes: list[str] = field(default_factory=list)
+    execution_tasks: list[ExecutionTaskSnapshot] = field(default_factory=list)
+    degraded_reasons: list[DegradedReason] = field(default_factory=list)
+
+
+# The run read model's single declaration: the api edge validates and serves this
+# type directly, so a field added here reaches run-history with no second
+# declaration to keep in step. Fields are keyword-only and declared in the order
+# they are served.
+@dataclass(slots=True, kw_only=True)
+class ThreadStateSnapshot:
+    """Complete thread state for reattaching to a run's event stream.
+
+    The client fetches this via REST, notes ``last_sequence``, then discards any
+    streamed frame with ``sequence <= last_sequence``.
+    """
 
     thread_id: str
-    status: str
-    last_sequence: int
-    messages: list[MessageData] = field(default_factory=list)
-    tool_calls: list[ToolCallData] = field(default_factory=list)
-    pending_permissions: list[PermissionData] = field(default_factory=list)
-    pending_clarification: ClarificationRequestData | None = None
-    artifacts: list[ArtifactData] = field(default_factory=list)
+    status: ThreadStatus
+    messages: list[MessageSnapshot] = field(default_factory=list)
+    tool_calls: list[ToolCallSnapshot] = field(default_factory=list)
+    pending_permissions: list[PermissionSnapshot] = field(default_factory=list)
+    # The questionnaire the run is parked on, read once from the checkpoint
+    # projection as the producer's own model, so every surface serving this
+    # snapshot discloses the same bounded request run-status does.
+    pending_clarification: ClarificationRequest | None = None
+    artifacts: list[ArtifactSnapshot] = field(default_factory=list)
     plan: list[PlanEntry] = field(default_factory=list)
-    agents: list[AgentData] = field(default_factory=list)
-    model_assignment_digest: str | None = None
+    agents: list[AgentSnapshot] = field(default_factory=list)
+    model_assignment_digest: _ModelAssignmentDigest | None = field(
+        default=None, metadata={"pattern": _MODEL_ASSIGNMENT_DIGEST_PATTERN}
+    )
+    last_sequence: int
     checkpoint_id: str | None = None
     checkpoint_created_at: datetime | None = None
-    checkpoint_parent_id: str | None = None
+    checkpoint_parent_id: str | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "The parent the current checkpoint records. It may name a "
+                "checkpoint that no longer exists: once a run settles, its "
+                "superseded history is pruned and only this reference to it "
+                "remains. Do not read it as a checkpoint that can be fetched."
+            )
+        },
+    )
     checkpoint_source: str | None = None
     checkpoint_step: int | None = None
     checkpoint_updated_channels: list[str] = field(default_factory=list)
     pending_write_channels: list[str] = field(default_factory=list)
     pending_write_count: int = 0
-    history_depth: int | None = None
+    history_depth: int | None = field(
+        default=None,
+        metadata={
+            "description": (
+                "How deep the current checkpoint's recorded ancestry goes: 2 when "
+                "it names a parent, 1 when it is the first of its thread, null "
+                "when no checkpoint was read. Recorded ancestry, not stored rows - "
+                "a settled run's history is pruned and its depth does not fall."
+            )
+        },
+    )
     next_nodes: list[str] = field(default_factory=list)
     task_count: int = 0
     pending_interrupt_count: int = 0
-    execution_tasks: list[ExecutionTaskData] = field(default_factory=list)
+    execution_tasks: list[ExecutionTaskSnapshot] = field(default_factory=list)
     snapshot_complete: bool = True
-    degraded_reasons: list[str] = field(default_factory=list)
+    degraded_reasons: list[DegradedReason] = field(default_factory=list)
     replay_status: str = "unknown"
-    repair_status: str | None = None
-    execution_readiness: str | None = None
+    repair_status: RepairStatus | None = None
+    execution_readiness: RepairStatus | None = None
     pause_cause: str | None = None
-    approval_status: str | None = None
-    approval_request_id: str | None = None
+    approval_status: ApprovalStatus | None = None
+    approval_request_id: ApprovalRequestId | None = None
     # The capped, single-line reason this run last failed, or None (never
     # failed, or the durable record predates the failure_reason column).
     # Sourced straight from the durable threads.failure_reason column — never
@@ -505,19 +543,19 @@ class ThreadStateData:  # pylint: disable=too-many-instance-attributes
     # of parsing prose that changes whenever a vendor rewords a message. Read
     # from the same durable row and on the same terms - None for a run that
     # never failed, or whose record predates the column.
-    provider_condition: str | None = None
+    provider_condition: ProviderCondition | None = None
     # Why an operation did not take on a run that is STILL ALIVE - an
     # undelivered follow-up or resume - as distinct from why a run FAILED. Its
     # writers decline to set the two fields above precisely because the run
     # survives, so this is the only channel their account has, and a client that
     # rendered it as a failure would report a death that did not happen.
-    repair_reason: str | None = None
+    repair_reason: RepairReason | None = None
     # How many follow-up turns this run is holding behind the one it is
     # running. Counted from the durable journal, never from a stream: a client
     # that reloaded without one has no other way to learn that a turn it sent
     # is still waiting, and the quiet boundary between two turns looks exactly
     # like a run that has gone idle. Bounded by the configured per-run depth.
-    queued_messages: int = 0
+    queued_messages: QueuedMessageCount = 0
 
 
 # ---------------------------------------------------------------------------
@@ -525,7 +563,20 @@ class ThreadStateData:  # pylint: disable=too-many-instance-attributes
 # ---------------------------------------------------------------------------
 
 
-def coerce_provider(value: object) -> Provider | None:
+def record_repair_posture(snapshot: ThreadStateSnapshot, posture: str | None) -> None:
+    """Set *snapshot*'s repair posture together with the readiness it implies.
+
+    Readiness is never judged on its own: a run is as fit to resume as its
+    repair posture says, so every write of the posture writes the served
+    readiness with it and the two cannot disagree. A posture outside the closed
+    vocabulary raises, so an unrecognised string never reaches a served field.
+    """
+    resolved = None if posture is None else RepairStatus(posture)
+    snapshot.repair_status = resolved
+    snapshot.execution_readiness = resolved
+
+
+def _coerce_provider(value: object) -> Provider | None:
     """Coerce a node-metadata value to a :class:`Provider`, else ``None``.
 
     Node metadata is a flat string map, so an agent whose provider was never
@@ -546,19 +597,19 @@ def build_agent_descriptor(
     state: AgentLifecycleState,
     *,
     thread_id: str,
-) -> AgentData:
-    """Project one aggregator node summary onto the canonical descriptor.
+) -> AgentSnapshot:
+    """Project one node summary of the live-state mirror onto the canonical descriptor.
 
     The single seam shared by every agent-listing surface, so a field carried on
-    :class:`AgentData` reaches the REST route, the thread snapshot, and the
+    :class:`AgentSnapshot` reaches the REST route, the thread snapshot, and the
     broadcast together instead of being wired one caller at a time.
     """
-    return AgentData(
+    return AgentSnapshot(
         thread_id=thread_id,
         agent_id=summary.get("agent_id") or summary.get("node_name", ""),
         node_name=summary.get("node_name", ""),
         state=state,
-        provider=coerce_provider(summary.get("provider")),
+        provider=_coerce_provider(summary.get("provider")),
         model_name=summary.get("model_name") or None,
         role=summary.get("role", ""),
         display_name=summary.get("display_name", ""),
@@ -579,6 +630,22 @@ def _object_dict(value: object) -> dict[str, object]:
     return cast("dict[str, object]", value) if isinstance(value, dict) else {}
 
 
+def checkpoint_tuple_id(checkpoint_tuple: CheckpointTuple | None) -> str | None:
+    """Return the id a stored checkpoint answers to, or ``None`` without one.
+
+    The id the checkpoint records, falling back to the one its config names.
+    Durable storage is untrusted, so a checkpoint or config that is not a plain
+    string-keyed dict reads as naming no id.
+    """
+    checkpoint = (
+        coerce_object_mapping(getattr(checkpoint_tuple, "checkpoint", None)) or {}
+    )
+    config = coerce_object_mapping(getattr(checkpoint_tuple, "config", None)) or {}
+    configurable = coerce_object_mapping(config.get("configurable")) or {}
+    raw = checkpoint.get("id") or configurable.get("checkpoint_id")
+    return None if raw is None else str(raw)
+
+
 def extract_checkpoint_fields(
     checkpoint_tuple: Any,
     *,
@@ -595,11 +662,6 @@ def extract_checkpoint_fields(
     metadata = _object_dict(checkpoint_tuple.metadata)
     parent_config = _object_dict(checkpoint_tuple.parent_config)
     configurable_parent = _object_dict(parent_config.get("configurable", {}))
-    config = _object_dict(checkpoint_tuple.config)
-    config_configurable = _object_dict(config.get("configurable", {}))
-    checkpoint_id: object = checkpoint.get("id") or config_configurable.get(
-        "checkpoint_id"
-    )
     channel_values = cast(
         "dict[str, Any]", _object_dict(checkpoint.get("channel_values", {}))
     )
@@ -613,7 +675,7 @@ def extract_checkpoint_fields(
     projection = CheckpointProjection(
         channel_values=channel_values,
         config={"configurable": {"thread_id": thread_id}},
-        checkpoint_id=str(checkpoint_id) if checkpoint_id is not None else None,
+        checkpoint_id=checkpoint_tuple_id(checkpoint_tuple),
         checkpoint_created_at=_parse_checkpoint_created_at(checkpoint.get("ts")),
         checkpoint_parent_id=(
             str(parent_checkpoint_id_raw)
@@ -648,7 +710,23 @@ def extract_checkpoint_fields(
 _TASK_BOOKKEEPING_CHANNELS = frozenset(WRITES_IDX_MAP)
 
 
-def tasks_past_their_interrupt(pending_writes: Iterable[Any]) -> frozenset[str]:
+def _held_write_entries(pending_writes: Iterable[Any]) -> list[Sequence[object]]:
+    """Return the held writes shaped as ``(task_id, channel, value)``.
+
+    Durable storage is untrusted, so a write of any other shape is skipped
+    rather than unpacked.
+    """
+    entries: list[Sequence[object]] = []
+    for write in pending_writes or ():
+        entry: Sequence[object] = (
+            cast("Sequence[object]", write) if isinstance(write, tuple | list) else ()
+        )
+        if len(entry) == 3:
+            entries.append(entry)
+    return entries
+
+
+def _tasks_past_their_interrupt(pending_writes: Iterable[Any]) -> frozenset[str]:
     """Return the tasks whose held interrupt is a leftover, not a live question.
 
     A task's interrupt write is never cleared when the answer lets that task
@@ -666,12 +744,7 @@ def tasks_past_their_interrupt(pending_writes: Iterable[Any]) -> frozenset[str]:
     disclosing a question rather than hiding one.
     """
     finished: set[str] = set()
-    for write in pending_writes or ():
-        entry: Sequence[object] = (
-            cast("Sequence[object]", write) if isinstance(write, tuple | list) else ()
-        )
-        if len(entry) != 3:
-            continue
+    for entry in _held_write_entries(pending_writes):
         task_id, channel = entry[0], entry[1]
         if (
             isinstance(task_id, str)
@@ -682,32 +755,102 @@ def tasks_past_their_interrupt(pending_writes: Iterable[Any]) -> frozenset[str]:
     return frozenset(finished)
 
 
+def unanswered_interrupt_values(pending_writes: Iterable[Any]) -> list[object]:
+    """Return the held interrupt writes of the tasks still asking their question.
+
+    The one reading of a checkpoint's held writes as questions: an interrupt
+    write whose task has since run past it (:func:`_tasks_past_their_interrupt`)
+    is a leftover, not a pause. Each value is the write as held - one interrupt
+    or a sequence of them. A malformed write is skipped.
+    """
+    entries = _held_write_entries(pending_writes)
+    answered = _tasks_past_their_interrupt(entries)
+    return [
+        entry[2]
+        for entry in entries
+        if entry[1] == INTERRUPT and entry[0] not in answered
+    ]
+
+
+def named_request_id(value: object) -> str | None:
+    """Return the non-empty ``request_id`` *value* names, or ``None``.
+
+    An interrupt payload names the request it asks under this key, and a resume
+    value names the request it answers under the same one. One reader keeps the
+    question and its answer from disagreeing about what counts as naming a
+    request; there is no fallback identity, because a question its producer did
+    not name cannot be matched to any answer.
+    """
+    if not isinstance(value, dict):
+        return None
+    named = cast("dict[str, object]", value).get("request_id")
+    return named if isinstance(named, str) and named else None
+
+
+def _interrupt_payload(raw_interrupt: object) -> dict[str, Any] | None:
+    """Return the mapping payload a LangGraph interrupt carries, if it has one."""
+    payload: object = getattr(raw_interrupt, "value", raw_interrupt)
+    return cast("dict[str, Any]", payload) if isinstance(payload, dict) else None
+
+
+def live_interrupts(
+    state: object, held_writes: Iterable[Any]
+) -> tuple[LiveInterrupt, ...]:
+    """Return the questions a run's live state is still stopped on, task by task.
+
+    *state* is a LangGraph state snapshot. Its tasks list every interrupt write
+    the checkpoint holds against them, including one a fanned-out branch has
+    already answered and run past: the superstep that would clear it cannot
+    commit while another branch is parked. *held_writes*, the writes the store
+    holds against the snapshot's checkpoint, are the only thing that tells the
+    two apart, so a task they show finished contributes nothing. Without them
+    every listed interrupt reads as open, which is the snapshot's own reading.
+    """
+    answered = _tasks_past_their_interrupt(held_writes)
+    found: list[LiveInterrupt] = []
+    for task in getattr(state, "tasks", None) or ():
+        task_id = str(getattr(task, "id", ""))
+        if task_id in answered:
+            continue
+        task_name = str(getattr(task, "name", ""))
+        for raw_interrupt in getattr(task, "interrupts", None) or ():
+            payload = _interrupt_payload(raw_interrupt)
+            raw_id: object = getattr(raw_interrupt, "id", None)
+            raw_type: object = payload.get("type") if payload is not None else None
+            found.append(
+                LiveInterrupt(
+                    task_id=task_id,
+                    task_name=task_name,
+                    interrupt_id=raw_id if isinstance(raw_id, str) and raw_id else None,
+                    interrupt_type=raw_type if isinstance(raw_type, str) else None,
+                    request_id=named_request_id(payload),
+                    payload=payload,
+                )
+            )
+    return tuple(found)
+
+
 def _project_pending_interrupt(
-    projection: CheckpointProjection,
-    raw_interrupt: object,
-    *,
-    thread_id: str,
-    write_index: int,
+    projection: CheckpointProjection, raw_interrupt: object
 ) -> None:
-    payload_raw: object = getattr(raw_interrupt, "value", raw_interrupt)
-    if not isinstance(payload_raw, dict):
-        if "interrupt_payload_unreadable" not in projection.degraded_reasons:
-            projection.degraded_reasons.append("interrupt_payload_unreadable")
+    payload = _interrupt_payload(raw_interrupt)
+    if payload is None:
+        projection.degraded_reasons.append(DegradedReason.INTERRUPT_PAYLOAD_UNREADABLE)
         return
-    payload = cast("dict[str, Any]", payload_raw)
     interrupt_type = payload.get("type")
     if not isinstance(interrupt_type, str):
-        if "interrupt_payload_untyped" not in projection.degraded_reasons:
-            projection.degraded_reasons.append("interrupt_payload_untyped")
+        projection.degraded_reasons.append(DegradedReason.INTERRUPT_PAYLOAD_UNTYPED)
         return
-    interrupt_id = str(
-        payload.get("request_id")
-        or getattr(raw_interrupt, "id", None)
-        or f"{projection.checkpoint_id or thread_id}:interrupt:{write_index}"
-    )
+    request_id = named_request_id(payload)
+    if request_id is None:
+        # Every producer names its question; one that does not cannot be
+        # answered, so it is not disclosed as a pause anyone could resolve.
+        projection.degraded_reasons.append(DegradedReason.INTERRUPT_PAYLOAD_UNREADABLE)
+        projection.unnamed_interrupt_types.append(interrupt_type)
+        return
     projection.pending_interrupts.append(
         ProjectedInterrupt(
-            interrupt_id=interrupt_id,
+            interrupt_id=request_id,
             interrupt_type=interrupt_type,
             payload=payload,
         )
@@ -720,13 +863,7 @@ def _record_pending_channel(projection: CheckpointProjection, channel: object) -
         projection.pending_write_channels.append(channel)
 
 
-def _project_write_interrupts(
-    projection: CheckpointProjection,
-    value: object,
-    *,
-    thread_id: str,
-    write_index: int,
-) -> None:
+def _project_write_interrupts(projection: CheckpointProjection, value: object) -> None:
     """Project every interrupt one held interrupt write carries.
 
     A single write holds either one interrupt or a sequence of them, so the
@@ -738,16 +875,11 @@ def _project_write_interrupts(
         else [value]
     )
     for raw_interrupt in raw_interrupts:
-        _project_pending_interrupt(
-            projection, raw_interrupt, thread_id=thread_id, write_index=write_index
-        )
+        _project_pending_interrupt(projection, raw_interrupt)
 
 
 def fold_pending_writes(
-    projection: CheckpointProjection,
-    checkpoint_tuple: Any,
-    *,
-    thread_id: str,
+    projection: CheckpointProjection, checkpoint_tuple: Any
 ) -> None:
     """Fold the checkpoint's pending writes onto a base projection in place.
 
@@ -762,21 +894,17 @@ def fold_pending_writes(
     )
     # Every held write is counted and its channel recorded: those describe the
     # checkpoint. Only the questions are narrowed, to the tasks still asking.
-    answered = tasks_past_their_interrupt(pending_writes)
-    for index, pending_write in enumerate(pending_writes):
-        task_id, channel, value = pending_write
+    for _task_id, channel, _value in pending_writes:
         projection.pending_write_count += 1
         _record_pending_channel(projection, channel)
-        if channel == INTERRUPT and task_id not in answered:
-            _project_write_interrupts(
-                projection, value, thread_id=thread_id, write_index=index
-            )
+    for value in unanswered_interrupt_values(pending_writes):
+        _project_write_interrupts(projection, value)
 
     if projection.pending_interrupts:
         projection.pause_cause = projection.pending_interrupts[0].interrupt_type
 
     if projection.history_depth is None:
-        projection.degraded_reasons.append("checkpoint_history_unknown")
+        projection.degraded_reasons.append(DegradedReason.CHECKPOINT_HISTORY_UNKNOWN)
 
 
 def project_checkpoint_tuple(
@@ -795,7 +923,7 @@ def project_checkpoint_tuple(
     projection = extract_checkpoint_fields(
         checkpoint_tuple, thread_id=thread_id, history_depth=history_depth
     )
-    fold_pending_writes(projection, checkpoint_tuple, thread_id=thread_id)
+    fold_pending_writes(projection, checkpoint_tuple)
     return projection
 
 
@@ -866,7 +994,7 @@ def derive_message_id(role: str, content: str, stored_id: str | None) -> str:
     """Return the stored id or a deterministic hash fallback for deduplication."""
     if stored_id:
         return stored_id
-    return hashlib.sha256(f"{role}:{content}".encode()).hexdigest()[:32]
+    return sha256_hex(f"{role}:{content}".encode())[:32]
 
 
 def normalize_plan_entries(plan_raw: list[Any]) -> list[PlanEntry]:
@@ -905,97 +1033,3 @@ def normalize_artifacts(artifacts_raw: list[Any]) -> list[dict[str, Any]]:
                 }
             )
     return normalized
-
-
-# The only statuses a run can hold before its first checkpoint exists: it is
-# marked running on dispatch, and can be cancelled during that same window. An
-# absent checkpoint in any OTHER status means the record was lost, not unwritten.
-_PRE_TRANSCRIPT_STATUSES: frozenset[str] = frozenset(
-    {
-        ThreadStatus.SUBMITTED.value,
-        ThreadStatus.RUNNING.value,
-        ThreadStatus.CANCELLING.value,
-    }
-)
-
-
-def classify_transcript_availability(
-    *,
-    checkpoint_loaded: bool,
-    checkpoint_present: bool,
-    checkpoint_error: bool,
-    thread_status: str,
-) -> TranscriptAvailability:
-    """Classify whether a run's conversation is readable from its checkpoint.
-
-    Takes the SAME four facts as :func:`finalize_snapshot_replay_status` and
-    sits beside it deliberately: both answer from one checkpoint read, and
-    splitting them across modules would let the replay verdict and the
-    transcript verdict drift out of agreement on the same run.
-
-    Distinct from the replay verdict rather than derived from it. Replay status
-    answers "can this run resume", which folds the not-yet-dispatched case and
-    an unreadable checkpoint store together under ``unknown``. Those are
-    opposite answers to "is the transcript lost": one is a run that has said
-    nothing yet, the other is a record we cannot read.
-
-    Absence is excused ONLY in the states a run can legitimately reach before
-    its first checkpoint write, and that window is real: a run is marked running
-    the moment it dispatches, well before the worker writes anything, and it can
-    be cancelled inside that window. Calling ordinary startup a loss would fire
-    the signal on healthy traffic and teach every reader to ignore it.
-
-    Every other state is held to owe a transcript, including the states that are
-    still "active". A run parked on an interrupt was checkpointed to park, and a
-    run in a recovery state advanced far enough for recovery to be needed, so an
-    absent checkpoint there is a loss and not a run that has yet to speak -
-    excusing those would soft-pedal exactly the cases most likely to BE the
-    loss.
-    """
-    if checkpoint_loaded:
-        return TranscriptAvailability.AVAILABLE
-    if checkpoint_error or checkpoint_present:
-        # ``checkpoint_present`` without ``checkpoint_loaded`` means the tuple
-        # was read but its projection raised: the record exists and this reader
-        # could not render it, which is unreadable, not missing.
-        return TranscriptAvailability.UNREADABLE
-    if thread_status in _PRE_TRANSCRIPT_STATUSES:
-        return TranscriptAvailability.NOT_YET_RECORDED
-    return TranscriptAvailability.MISSING
-
-
-def finalize_snapshot_replay_status(
-    snapshot: Any,
-    *,
-    checkpoint_loaded: bool,
-    checkpoint_present: bool,
-    checkpoint_error: bool,
-    thread_status: str,
-) -> Any:
-    """Apply the reconnect snapshot replay/degradation contract.
-
-    Works with any snapshot object that has ``replay_status``,
-    ``snapshot_complete``, and ``degraded_reasons`` attributes.
-    """
-    if checkpoint_loaded:
-        snapshot.replay_status = ReplayStatus.DURABLE.value
-    elif checkpoint_error:
-        snapshot.snapshot_complete = False
-        snapshot.replay_status = ReplayStatus.UNKNOWN.value
-    elif checkpoint_present:
-        snapshot.snapshot_complete = False
-        snapshot.replay_status = ReplayStatus.BEST_EFFORT.value
-    elif thread_status == ThreadStatus.SUBMITTED.value:
-        snapshot.snapshot_complete = True
-        snapshot.replay_status = ReplayStatus.UNKNOWN.value
-    else:
-        snapshot.snapshot_complete = False
-        if DegradedReason.CHECKPOINT_MISSING not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append(DegradedReason.CHECKPOINT_MISSING.value)
-        repair = CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_missing"]
-        with contextlib.suppress(AttributeError):
-            snapshot.repair_status = repair.value
-        with contextlib.suppress(AttributeError):
-            snapshot.execution_readiness = repair.value
-        snapshot.replay_status = ReplayStatus.GAP_DETECTED.value
-    return snapshot

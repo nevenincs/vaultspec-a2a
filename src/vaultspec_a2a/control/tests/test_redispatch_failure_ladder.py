@@ -20,12 +20,18 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from ...testing import (
+    DEFAULT_REQUIRED_ROLE,
+    DEFAULT_TEAM_PRESET,
+    adopted_spawner,
+    frozen_deterministic_selection,
+)
 from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ...database.models import ThreadModel
+    from ...database import ThreadModel
 
 from ...control.accepted_input import freeze_accepted_input
 from ...control.circuit_breaker import WorkerCircuitBreaker
@@ -38,25 +44,15 @@ from ...control.execution_authority import (
     ExecutionAuthorityError,
     resolve_execution_authority,
 )
-from ...control.worker_management import LazyWorkerSpawner
-from ...database import create_control_action, create_thread, get_thread
-from ...database.session import close_db, get_session_factory, init_db
-from ...ipc.schemas import DispatchRequest
-from ...providers.provider_catalog import (
-    AdmissionState,
-    AuthenticationState,
-    CatalogState,
-    CatalogStatus,
-    HealthState,
-    ModelCatalogEntry,
-    ProviderCatalog,
-    ProviderCatalogKey,
-    ProviderHealthAxes,
-    ProviderRecord,
-    SelectionReference,
-    StructuredProviderHealth,
+from ...database import (
+    close_db,
+    create_control_action,
+    create_thread,
+    get_session_factory,
+    get_thread,
+    init_db,
 )
-from ...providers.team_selection import freeze_team_selection
+from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
 from ...thread.enums import ThreadStatus
 from ...thread.executable_graph import freeze_graph_definition
@@ -122,57 +118,74 @@ async def _create_reconciling_thread_with_receipt(
 
 def _current_metadata(workspace_root: str | None) -> dict[str, object]:
     """Build a valid current selection record for redispatch-path tests."""
-    now = datetime.now(UTC)
-    key = ProviderCatalogKey("deterministic", "in-process-deterministic")
-    catalog = ProviderCatalog(
-        key=key,
-        state=CatalogState(
-            status=CatalogStatus.AVAILABLE,
-            checked_at=now,
-            revision="test-revision",
-            expires_at=now + timedelta(minutes=5),
-        ),
-        models=(
-            ModelCatalogEntry(
-                entry_id="deterministic",
-                provider_value="deterministic",
-                display_name="Deterministic",
-            ),
-        ),
-    )
-    health = StructuredProviderHealth.derive(
-        axes=ProviderHealthAxes(
-            configured=HealthState.AVAILABLE,
-            transport=HealthState.AVAILABLE,
-            authentication=AuthenticationState.NOT_APPLICABLE,
-            catalog=CatalogStatus.AVAILABLE,
-            admission=AdmissionState.ADMITTED,
-        ),
-        checked_at=now,
-    )
-    record = ProviderRecord(
-        provider_id="deterministic",
-        display_name="Deterministic",
-        execution_mode="in-process-deterministic",
-        health=health,
-        catalog=catalog,
-    )
-    frozen = freeze_team_selection(
-        selection=SelectionReference(
-            provider_id="deterministic",
-            execution_mode="in-process-deterministic",
-            catalog_revision="test-revision",
-            entry_id="deterministic",
-        ),
-        overrides={},
-        fallbacks=(),
-        required_roles=("mock-coder-success",),
-        records=(record,),
-    )
+    frozen = frozen_deterministic_selection((DEFAULT_REQUIRED_ROLE,))
     metadata: dict[str, object] = {"provider_catalog_selection": frozen.to_record()}
     if workspace_root is not None:
         metadata["workspace_root"] = workspace_root
     return metadata
+
+
+async def _run_redispatch_sweep_with_open_circuit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Run one redispatch sweep against a forced-open circuit breaker.
+
+    Shared by the per-thread refusal tests below, which only care about the
+    thread rows and log messages the sweep leaves behind, not the worker-
+    contact timing :func:`_run_redispatch_sweep_and_classify_records` captures.
+    """
+    spawner = adopted_spawner()
+    circuit_breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=999.0)
+    circuit_breaker.force_open()
+
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client:
+        with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
+            await redispatch_reconciling_threads(
+                client,
+                circuit_breaker,
+                spawner,
+                record_worker_contact=lambda _when: None,
+            )
+
+
+async def _run_redispatch_sweep_and_classify_records(
+    caplog: pytest.LogCaptureFixture,
+) -> tuple[list[float], list[logging.LogRecord], list[logging.LogRecord]]:
+    """Run one redispatch sweep and split its log records by what they report.
+
+    Shared by the dedup-ladder test and its single-failure control, which
+    differ only in how many threads they seed and what they assert about the
+    counts returned here.
+    """
+    spawner = adopted_spawner()
+    circuit_breaker = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=999.0)
+    circuit_breaker.force_open()
+    worker_contacts: list[float] = []
+
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:9", timeout=0.2) as client:
+        with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
+            await redispatch_reconciling_threads(
+                client,
+                circuit_breaker,
+                spawner,
+                record_worker_contact=worker_contacts.append,
+            )
+
+    circuit_open_warnings = [
+        r
+        for r in caplog.records
+        if r.name == _LOGGER_NAME
+        and r.levelno == logging.WARNING
+        and "Circuit breaker open" in r.getMessage()
+    ]
+    summaries = [
+        r
+        for r in caplog.records
+        if r.name == _LOGGER_NAME
+        and r.levelno == logging.INFO
+        and "Re-dispatch failure ladder" in r.getMessage()
+    ]
+    return worker_contacts, circuit_open_warnings, summaries
 
 
 @pytest.mark.asyncio
@@ -200,7 +213,7 @@ async def test_retired_stored_authority_fails_closed_without_redispatch(
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="retired-authority",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(
                     {
                         "workspace_root": str(tmp_path),
@@ -216,10 +229,7 @@ async def test_retired_stored_authority_fails_closed_without_redispatch(
             )
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.replace_process(None)
+        spawner = adopted_spawner()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )
@@ -270,7 +280,7 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="unchanged-digest-extra-field",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(valid_with_extra),
             )
             # list_threads orders newest first, so create the absent thread before
@@ -278,13 +288,13 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="absent-after-corrupt",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps({"workspace_root": str(tmp_path)}),
             )
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="corrupt-modern-freeze",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(
                     {
                         "workspace_root": str(tmp_path),
@@ -297,10 +307,7 @@ async def test_invalid_or_absent_frozen_selection_fails_each_thread_and_continue
             )
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.replace_process(None)
+        spawner = adopted_spawner()
         circuit_breaker = WorkerCircuitBreaker(
             failure_threshold=1, recovery_timeout=999.0
         )
@@ -374,38 +381,20 @@ async def test_a_thread_with_no_active_project_fails_alone_and_the_sweep_continu
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="healthy-after-projectless",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(_current_metadata(str(tmp_path))),
             )
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="projectless",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(
                     {**_current_metadata(None), "feature_tag": "no-project-here"}
                 ),
             )
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.replace_process(None)
-        circuit_breaker = WorkerCircuitBreaker(
-            failure_threshold=1, recovery_timeout=999.0
-        )
-        circuit_breaker.force_open()
-
-        async with httpx.AsyncClient(
-            base_url="http://127.0.0.1:9", timeout=0.2
-        ) as client:
-            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
-                await redispatch_reconciling_threads(
-                    client,
-                    circuit_breaker,
-                    spawner,
-                    record_worker_contact=lambda _when: None,
-                )
+        await _run_redispatch_sweep_with_open_circuit(caplog)
 
         async with session_factory() as session:
             projectless = await get_thread(session, "projectless")
@@ -442,7 +431,7 @@ async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
     and still not a project a dispatch can be sited on, because resolving it
     would anchor the run to whatever directory this process was started in. It
     is the case that reaches the minting rather than the type check, and the one
-    that used to raise inside the request constructor and abort the whole pass.
+    that must not raise inside the request constructor and abort the whole pass.
     """
     db_file = tmp_path / "redispatch-relative-project.db"
     await close_db()
@@ -453,36 +442,18 @@ async def test_a_relative_stored_project_fails_its_thread_rather_than_the_sweep(
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="healthy-after-relative",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(_current_metadata(str(tmp_path))),
             )
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="relative-project",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(_current_metadata("workspaces/project")),
             )
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.replace_process(None)
-        circuit_breaker = WorkerCircuitBreaker(
-            failure_threshold=1, recovery_timeout=999.0
-        )
-        circuit_breaker.force_open()
-
-        async with httpx.AsyncClient(
-            base_url="http://127.0.0.1:9", timeout=0.2
-        ) as client:
-            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
-                await redispatch_reconciling_threads(
-                    client,
-                    circuit_breaker,
-                    spawner,
-                    record_worker_contact=lambda _when: None,
-                )
+        await _run_redispatch_sweep_with_open_circuit(caplog)
 
         async with session_factory() as session:
             relative = await get_thread(session, "relative-project")
@@ -512,52 +483,23 @@ async def test_redispatch_dedups_repeated_circuit_open_failures(
                 await _create_reconciling_thread_with_receipt(
                     session,
                     thread_id=thread_id,
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     metadata=json.dumps(_current_metadata(str(tmp_path))),
                 )
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.replace_process(None)
-        circuit_breaker = WorkerCircuitBreaker(
-            failure_threshold=1, recovery_timeout=999.0
-        )
-        circuit_breaker.force_open()
-        worker_contacts: list[float] = []
-
-        async with httpx.AsyncClient(
-            base_url="http://127.0.0.1:9", timeout=0.2
-        ) as client:
-            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
-                await redispatch_reconciling_threads(
-                    client,
-                    circuit_breaker,
-                    spawner,
-                    record_worker_contact=worker_contacts.append,
-                )
+        (
+            worker_contacts,
+            circuit_open_warnings,
+            summaries,
+        ) = await _run_redispatch_sweep_and_classify_records(caplog)
 
         assert worker_contacts == []
 
-        circuit_open_warnings = [
-            r
-            for r in caplog.records
-            if r.name == _LOGGER_NAME
-            and r.levelno == logging.WARNING
-            and "Circuit breaker open" in r.getMessage()
-        ]
         # occurrence 1 and every Nth (5, 10) out of 12 -> exactly 3 full lines,
         # never one per thread.
         assert len(circuit_open_warnings) == 3
 
-        summaries = [
-            r
-            for r in caplog.records
-            if r.name == _LOGGER_NAME
-            and r.levelno == logging.INFO
-            and "Re-dispatch failure ladder" in r.getMessage()
-        ]
         assert len(summaries) == 1
         summary_message = summaries[0].getMessage()
         assert f"{thread_count} occurrences" in summary_message
@@ -583,50 +525,19 @@ async def test_redispatch_logs_once_for_a_single_failure_with_no_summary(
             await _create_reconciling_thread_with_receipt(
                 session,
                 thread_id="single-failure",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 metadata=json.dumps(_current_metadata(str(tmp_path))),
             )
             await session.commit()
 
-        spawner = LazyWorkerSpawner(
-            worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
-        )
-        spawner.replace_process(None)
-        circuit_breaker = WorkerCircuitBreaker(
-            failure_threshold=1, recovery_timeout=999.0
-        )
-        circuit_breaker.force_open()
-        worker_contacts: list[float] = []
-
-        async with httpx.AsyncClient(
-            base_url="http://127.0.0.1:9", timeout=0.2
-        ) as client:
-            with caplog.at_level(logging.INFO, logger=_LOGGER_NAME):
-                await redispatch_reconciling_threads(
-                    client,
-                    circuit_breaker,
-                    spawner,
-                    record_worker_contact=worker_contacts.append,
-                )
+        (
+            worker_contacts,
+            circuit_open_warnings,
+            summaries,
+        ) = await _run_redispatch_sweep_and_classify_records(caplog)
 
         assert worker_contacts == []
-
-        circuit_open_warnings = [
-            r
-            for r in caplog.records
-            if r.name == _LOGGER_NAME
-            and r.levelno == logging.WARNING
-            and "Circuit breaker open" in r.getMessage()
-        ]
         assert len(circuit_open_warnings) == 1
-
-        summaries = [
-            r
-            for r in caplog.records
-            if r.name == _LOGGER_NAME
-            and r.levelno == logging.INFO
-            and "Re-dispatch failure ladder" in r.getMessage()
-        ]
         assert summaries == []
     finally:
         await close_db()

@@ -17,7 +17,9 @@ The home itself defaults to ``<project root>/.vault/data/agents``, the
 framework-managed runtime subtree vaultspec already ignores and never walks.
 
 This module is a leaf: the settings validators call it while the settings
-singleton is still being constructed, so it imports nothing from the service.
+singleton is still being constructed, so it imports nothing that reads settings.
+Its one sibling import is the thread package's digest helper, which depends on
+no other service module.
 """
 
 from __future__ import annotations
@@ -25,13 +27,14 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 
+from ..thread import sha256_hex
 from .env_prefix import ENV_PREFIX
 
 __all__ = [
     "DEFAULT_HOME",
+    "DISCOVERY_RECORD",
     "HANDOFF_CREDENTIAL",
     "SEAL_FILE",
     "StateLayout",
@@ -54,7 +57,7 @@ ENGINE_DISCOVERY_RECORD = Path(".vaultspec-engine") / "discovery"
 def engine_discovery_path(project_root: Path) -> Path:
     """Locate protected engine state without trusting workspace discovery files."""
     identity = os.path.normcase(str(project_root.resolve())).encode("utf-8")
-    project_key = sha256(identity).hexdigest()
+    project_key = sha256_hex(identity)
     # storage-anchor-ok: external producer state is owned by the engine, not A2A.
     engine_home = Path.home()  # storage-anchor-ok
     return engine_home / ENGINE_DISCOVERY_RECORD / project_key / DISCOVERY_RECORD

@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 from vaultspec_core.config import ConfigurationError
 
-from ...testing import armed_environment
+from ...domain_config import DomainSettingsConfig
+from ...testing import armed_environment, settings_override
 from ..config import Settings, settings
 from ..settings_base import ENV_FILE_ENV, PROJECT_ROOT_ENV, read_configuration
 
@@ -24,14 +25,14 @@ def test_a_rejected_database_url_never_carries_its_password(tmp_path: Path) -> N
         pytest.raises(ConfigurationError) as refusal,
     ):
         read_configuration(
-            Settings, database_url=["postgresql+asyncpg://dbuser:hunter2@dbhost/app"]
+            Settings, database_url=["mysql+aiomysql://dbuser:hunter2@dbhost/app"]
         )
 
     reported = str(refusal.value)
     assert "hunter2" not in reported
     assert "dbuser" not in reported
     # The scheme and the host survive, which is what names the store.
-    assert "postgresql+asyncpg://***@dbhost/app" in reported
+    assert "mysql+aiomysql://<redacted>@dbhost/app" in reported
 
 
 def test_a_rejected_backend_never_carries_the_urls_password(tmp_path: Path) -> None:
@@ -80,7 +81,7 @@ def test_a_size_named_tokens_still_shows_the_value_it_refused(tmp_path: Path) ->
         ),
         pytest.raises(ConfigurationError) as refusal,
     ):
-        read_configuration(Settings)
+        read_configuration(DomainSettingsConfig)
 
     assert "VAULTSPEC_A2A_CONTEXT_LIMIT_TOKENS must be int, got 'loads'" in str(
         refusal.value
@@ -95,6 +96,9 @@ def test_the_settings_singleton_refuses_to_be_pickled() -> None:
 
 def test_the_settings_singleton_compares_by_its_values() -> None:
     """Comparison reaches the settings, not the stand-in's identity."""
-    assert settings == Settings()
+    # The session seats its fixture lanes on the singleton alone, so a fresh
+    # read of the environment matches it only once they are unseated.
+    with settings_override(serve_in_process_lanes=False, lane_plugins=()):
+        assert settings == Settings()
     assert settings != "not the settings"
     assert bool(settings)

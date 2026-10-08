@@ -14,15 +14,15 @@ from ...api.dependencies import (
     require_lifecycle_capability,
 )
 from ...api.routes import admin, gateway
+from ...desktop.credentials import MAX_CREDENTIAL_BYTES
 
 _CAPABILITY = "ownership-capability-token-abcdef0123456789"
 
 
-def _app(*, capability: str | None, test_bypass: bool) -> FastAPI:
+def _app(*, capability: str | None) -> FastAPI:
     """Build a minimal app exposing a lifecycle-gated route."""
     app = FastAPI()
     app.state.lifecycle_capability = capability
-    app.state.allow_unauthenticated_v1_for_testing = test_bypass
 
     @app.post("/lifecycle", dependencies=[Depends(require_lifecycle_capability)])
     async def _lifecycle() -> dict[str, str]:
@@ -83,13 +83,13 @@ def test_dependencies_offers_no_second_spelling_of_the_attach_gate() -> None:
 
     assert "require_lifecycle_capability" in dependencies.__all__
     assert "LIFECYCLE_CAPABILITY_HEADER" in dependencies.__all__
-    assert "get_aggregator" in dependencies.__all__
+    assert "get_relay_hub" in dependencies.__all__
 
 
 @pytest.mark.asyncio
 async def test_correct_capability_admitted() -> None:
     """A matching capability header admits the lifecycle route."""
-    app = _app(capability=_CAPABILITY, test_bypass=False)
+    app = _app(capability=_CAPABILITY)
     response = await _post(app, {LIFECYCLE_CAPABILITY_HEADER: _CAPABILITY})
     assert response.status_code == 200
 
@@ -97,7 +97,7 @@ async def test_correct_capability_admitted() -> None:
 @pytest.mark.asyncio
 async def test_wrong_capability_forbidden_and_redacted() -> None:
     """A mismatched capability is a redacted 403 that leaks no expected value."""
-    app = _app(capability=_CAPABILITY, test_bypass=False)
+    app = _app(capability=_CAPABILITY)
     response = await _post(app, {LIFECYCLE_CAPABILITY_HEADER: "wrong-capability-value"})
     assert response.status_code == 403
     assert _CAPABILITY not in response.text
@@ -106,7 +106,7 @@ async def test_wrong_capability_forbidden_and_redacted() -> None:
 @pytest.mark.asyncio
 async def test_missing_capability_forbidden() -> None:
     """An absent capability header is forbidden."""
-    app = _app(capability=_CAPABILITY, test_bypass=False)
+    app = _app(capability=_CAPABILITY)
     response = await _post(app)
     assert response.status_code == 403
 
@@ -114,14 +114,22 @@ async def test_missing_capability_forbidden() -> None:
 @pytest.mark.asyncio
 async def test_unconfigured_capability_fails_closed() -> None:
     """Corrupted state with no runtime capability fails closed with 503."""
-    app = _app(capability=None, test_bypass=False)
+    app = _app(capability=None)
     response = await _post(app, {LIFECYCLE_CAPABILITY_HEADER: _CAPABILITY})
     assert response.status_code == 503
 
 
 @pytest.mark.asyncio
-async def test_test_bypass_admits_without_capability() -> None:
-    """The explicit test-only bypass admits the route without a capability."""
-    app = _app(capability=None, test_bypass=True)
-    response = await _post(app)
-    assert response.status_code == 200
+async def test_an_over_long_capability_header_is_refused_at_the_edge() -> None:
+    """A header wider than the credential bound is refused before the compare.
+
+    The header was unbounded: an authenticated caller could demand an
+    unbounded constant-time comparison before anything refused it. Bounded at
+    MAX_CREDENTIAL_BYTES, the width every on-disk capability file is already
+    held to, so a real credential is never the one this refuses.
+    """
+    app = _app(capability=_CAPABILITY)
+    response = await _post(
+        app, {LIFECYCLE_CAPABILITY_HEADER: "a" * (MAX_CREDENTIAL_BYTES + 1)}
+    )
+    assert response.status_code == 422, response.text

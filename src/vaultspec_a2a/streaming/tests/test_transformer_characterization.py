@@ -5,8 +5,8 @@ and the tool-lifecycle callbacks seated beside them. These characterize the
 observable contract of both - given one frame or one callback, what wire
 events reach a subscriber, and with what key fields.
 
-Everything runs through the real aggregator - real emitters, real buffering,
-real subscriber queue - with no mocks, so the assertions describe the
+Everything runs through the real event producer - real emitters, real
+buffering, the real relay hook - with no mocks, so the assertions describe the
 behaviour a client sees rather than the shape of the code.
 """
 
@@ -20,7 +20,9 @@ from uuid import uuid4
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RunEventProducer
+from ...streaming.transformer import StreamFrame
+from ._relay_capture import relayed_events
 
 _THREAD = "t-char"
 _AGENT = "a-char"
@@ -33,28 +35,27 @@ type _Drained = list[tuple[str, dict[str, Any]]]
 async def _drive(
     frames: list[_Frame], callbacks: list[tuple[str, dict[str, Any]]] | None = None
 ) -> _Drained:
-    """Feed frames and callbacks through the real aggregator and drain the queue."""
-    aggregator = EventAggregator()
-    queue = aggregator.add_subscriber("client")
-    aggregator.subscribe("client", [_THREAD])
-    handler = aggregator.run_lifecycle_callbacks(_THREAD, _AGENT)
+    """Feed frames and callbacks through the real producer and collect its relay."""
+    producer = RunEventProducer()
+    relayed = relayed_events(producer)
+    handler = producer._ingest.run_lifecycle_callbacks(_THREAD, _AGENT)
 
     for namespace, mode, payload in frames:
-        await aggregator.process_stream_frame(
-            namespace, mode, payload, thread_id=_THREAD, agent_id=_AGENT
+        await producer._ingest.project_frame(
+            StreamFrame(namespace=namespace, mode=mode, payload=payload),
+            thread_id=_THREAD,
+            agent_id=_AGENT,
         )
     for name, kwargs in callbacks or []:
         await getattr(handler, name)(**kwargs)
     await asyncio.sleep(0.05)
 
-    drained: _Drained = []
-    while not queue.empty():
-        sequenced = queue.get_nowait()
-        event = sequenced.event
-        # Every wire event is a dataclass, so its fields read uniformly through
-        # dataclasses.asdict without depending on a serialisation method.
-        drained.append((type(event).__name__, asdict(event)))
-    return drained
+    # Every wire event is a dataclass, so its fields read uniformly through
+    # dataclasses.asdict without depending on a serialisation method.
+    return [
+        (type(sequenced.event).__name__, asdict(sequenced.event))
+        for sequenced in relayed
+    ]
 
 
 def _run(

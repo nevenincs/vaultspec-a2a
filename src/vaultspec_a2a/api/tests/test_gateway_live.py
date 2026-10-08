@@ -9,7 +9,7 @@ producer and a streaming consumer could never run concurrently. A real socket
 streams incrementally, so the SSE test can emit an event mid-stream and read it
 back on the same loop.
 
-No mocks: the app carries the real EventAggregator, the real AsyncSqliteSaver
+No mocks: the app carries the real RelayHub, the real AsyncSqliteSaver
 checkpointer, a real SQLite thread store, and the conftest in-process worker
 that records dispatches over real HTTP.
 """
@@ -20,53 +20,59 @@ import asyncio
 import json
 import logging
 import os
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import httpx
 import pytest
-import uvicorn
 
-from ...control.accepted_input import freeze_accepted_input
-from ...control.dispatch_receipts import prepare_graph_action_receipt
-from ...control.execution_authority import resolve_execution_authority
 from ...control.health import SERVICE_HEALTH_DEADLINE_SECONDS
-from ...control.tests._catalog_authority import current_execution_metadata
 from ...database import (
-    create_control_action,
-    create_thread,
     get_thread,
     list_threads,
 )
-from ...ipc.schemas import DispatchRequest
-from ...streaming.aggregator import EventAggregator
-from ...team.team_config import load_team_config
-from ...testing.tests._support.catalog_selection import in_process_selection
+from ...providers.team_selection import FROZEN_SELECTION_SCHEMA_VERSION
+from ...streaming import RelayHub
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    ProgressDeadline,
+    actor_tokens_body,
+    async_catalog_run_fields,
+    async_run_start_body,
+    park_permission,
+    read_frame,
+    seed_completed_authority,
+    seed_live_thread,
+    serve_on_loopback,
+    wait_for_async,
+    wait_until_async,
+)
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...tests._write_authority import make_test_write_authority
-from ...thread.enums import ControlActionType, ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
+from ...thread.enums import ControlActionType
+from .._replay_writer_seat import seated_replay_writer
 from ..routes.gateway import admission_gate
+from ._relay_events import progress_event, relay_events
 from .conftest import make_app
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
+    from collections.abc import Callable, Mapping
+    from pathlib import Path
 
-    from fastapi import FastAPI
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
     from ...control.drain import DrainGate
-    from ...thread.action_receipts import GraphActionReceipt
+    from ...providers import JsonObject
     from .conftest import _InProcessWorker
 
 type SessionFactory = async_sessionmaker[AsyncSession]
-type JsonValue = bool | int | float | str | list[JsonValue] | JsonObject | None
-type JsonObject = dict[str, JsonValue]
+
+# The idle window and poll interval of a wait on in-process state that a task
+# elsewhere on the loop is changing.
+_WAIT_IDLE_WINDOW_S = 10.0
+_WAIT_POLL_S = 0.005
 
 
 @runtime_checkable
@@ -117,101 +123,18 @@ async def _apply_sql_trace_callback(
     await connection.set_trace_callback(trace_callback)
 
 
-_PRESET = "mock-success-single"
-
-
-async def _seed_live_thread(
-    session_factory: SessionFactory, *, title: str
-) -> tuple[str, GraphActionReceipt]:
-    """Create a live run with the accepted action startup recovery requires."""
-    workspace = Path.cwd()
-    metadata = current_execution_metadata(workspace)
-    authority = make_test_write_authority()
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=authority,
-            status=ThreadStatus.RUNNING,
-            team_preset=_PRESET,
-            title=title,
-            metadata=metadata,
-        )
-        dispatch = DispatchRequest(
-            action="ingest",
-            thread_id=thread.id,
-            content="live stream fixture",
-            workspace_root=str(workspace),
-            recursion_limit=25,
-            team_preset=_PRESET,
-            graph_definition=freeze_graph_definition(
-                load_team_config(_PRESET, workspace_root=workspace),
-                workspace_root=workspace,
-            ),
-            model_assignment=resolve_execution_authority(metadata).model_assignment,
-        )
-        await create_control_action(
-            session,
-            thread_id=thread.id,
-            action_type=authority.action_type,
-            idempotency_key=f"thread-create:{thread.id}",
-            dispatch_id=authority.action_receipt_id,
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-            payload=freeze_accepted_input(
-                dispatch, intent={"content": "live stream fixture"}
-            ),
-        )
-        receipt = await prepare_graph_action_receipt(
-            session, thread_id=thread.id, dispatch_id=authority.action_receipt_id
-        )
-        assert receipt is not None
-        await session.commit()
-        return thread.id, receipt
-
-
-async def _in_process_catalog_selection(
-    client: httpx.AsyncClient,
-) -> tuple[JsonObject, str]:
-    """Read one genuinely served in-process lane as a public selection reference.
-
-    In-process rather than merely selectable: these tests assert on gateway
-    verbs - replay, conflict, cancellation - and make no provider claim, so the
-    lane that answers must be one that bills nothing. The suite's catalog
-    service arms those lanes for exactly this reason.
-    """
-    workspace_root = str(Path.cwd())
-    response = await client.get(
-        "/v1/provider-catalog", params={"workspace_root": workspace_root}
-    )
-    assert response.status_code == 200, response.text
-    return in_process_selection(response.json()), workspace_root
-
-
-async def _run_fields(client: httpx.AsyncClient) -> dict[str, object]:
-    """Return the run-start fields an explicit catalog selection now requires.
-
-    Deterministic for a given served catalog, which is what makes it safe in
-    this module: several tests here post the SAME body twice to prove a replay
-    converges, or vary one field to prove a conflict is detected. A selection
-    that differed per call would turn every replay into a conflict and quietly
-    invert what those tests assert.
-    """
-    # Read the catalog on its OWN budget rather than the caller's. Every client
-    # in this module is built with a 10s timeout, which exists to assert the
-    # gateway answers its verbs promptly; the first catalog read in a process
-    # also probes each provider lane and legitimately takes longer than that.
-    # Borrowing the caller's budget made a cold probe look like an unresponsive
-    # gateway. Subsequent reads are served from the catalog's own cache.
-    async with httpx.AsyncClient(base_url=client.base_url, timeout=120.0) as probe:
-        selection, workspace_root = await _in_process_catalog_selection(probe)
-    return {"selection": selection, "metadata": {"workspace_root": workspace_root}}
-
-
 async def _seed_permission(
-    session_factory: SessionFactory, *, thread_id: str, request_id: str
-) -> None:
-    """Record a real pending permission request against a real run."""
-    from ...database.permission_repository import record_permission_request
+    session_factory: SessionFactory,
+    checkpointer: AsyncSqliteSaver,
+    *,
+    thread_id: str,
+) -> str:
+    """Park a real run on a permission request, journal it, and name it."""
+    from ...database import record_permission_request
 
+    request_id = await park_permission(
+        checkpointer, thread_id=thread_id, tool_name="bash"
+    )
     async with session_factory() as session:
         await record_permission_request(
             session,
@@ -229,6 +152,7 @@ async def _seed_permission(
             tool_call="bash",
         )
         await session.commit()
+    return request_id
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -245,17 +169,17 @@ async def test_run_history_is_the_wide_read_that_run_status_deliberately_is_not(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
             "/v1/runs",
             json={
                 "run_id": "gwlive-01",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "remember this",
                 "autonomous": True,
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201
@@ -287,7 +211,7 @@ async def test_run_history_is_the_wide_read_that_run_status_deliberately_is_not(
 async def test_archive_and_team_status_are_reachable_on_the_versioned_surface(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """Two reads-and-a-transition the transition surface used to hold alone.
+    """Archive and team status are both served on the versioned surface.
 
     Archiving is not deletion - the run survives, marked historical - so the
     test asserts it is still there afterwards rather than trusting the status
@@ -296,17 +220,17 @@ async def test_archive_and_team_status_are_reachable_on_the_versioned_surface(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
             "/v1/runs",
             json={
                 "run_id": "gwlive-02",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "work",
                 "autonomous": True,
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201
@@ -349,22 +273,22 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
     same run id is a REPLAY: it answers 201 with the ORIGINAL run and dispatches
     nothing, silently ignoring the new body. The follow-up verb refuses out
     loud, with a typed conflict naming the run's occupancy - and reserves
-    nothing while doing it, which is the point: admitting the turn used to make
+    nothing while doing it, which is the point: admitting the turn would make
     it the run's writer and strand the executing turn.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
             "/v1/runs",
             json={
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "first turn",
                 "autonomous": True,
                 "run_id": "r-followup",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201
@@ -375,11 +299,11 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
         replay = await client.post(
             "/v1/runs",
             json={
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "first turn",
                 "autonomous": True,
                 "run_id": "r-followup",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert replay.status_code == 201
@@ -419,11 +343,11 @@ async def test_a_follow_up_to_a_busy_run_is_refused_over_the_wire(
 async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    """The versioned surface can now accept the answer to what it asks.
+    """The versioned surface accepts the answer to what it asks.
 
-    ``permission_request`` is already an enumerated frame on run-stream, so the
-    question is versioned while the answer used to exist only on the transition
-    surface. This drives the answer over a real socket and pins three things: it
+    ``permission_request`` is an enumerated frame on run-stream, so the question
+    is versioned and the answer is versioned with it. This drives the answer over
+    a real socket and pins three things: it
     works, it is at-most-once, and it is scoped to the run that raised it.
 
     The scoping case is the one that matters most. A request id names a request,
@@ -434,7 +358,7 @@ async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
 
@@ -446,10 +370,10 @@ async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one
                 "/v1/runs",
                 json={
                     "run_id": run_id,
-                    "team_preset": _PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": message,
                     "autonomous": True,
-                    **await _run_fields(client),
+                    **await async_catalog_run_fields(client),
                 },
             )
             assert resp.status_code == 201, resp.text
@@ -457,8 +381,9 @@ async def test_the_versioned_verb_answers_a_permission_and_refuses_a_foreign_one
 
         owner = await _start("gwlive-05", "owns the permission")
         stranger = await _start("gwlive-06", "owns nothing")
-        request_id = f"{owner}:req-live"
-        await _seed_permission(session_factory, thread_id=owner, request_id=request_id)
+        request_id = await _seed_permission(
+            session_factory, checkpointer, thread_id=owner
+        )
 
         # Scoped: the stranger cannot answer the owner's question, and the
         # refusal is a not-found rather than a leak that the id exists.
@@ -515,7 +440,7 @@ async def test_legacy_lease_only_metadata_remains_status_visible(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """run-status carries a valid legacy lease and rejects an invalid one."""
-    from ...database.thread_repository import create_thread
+    from ...database import create_thread
     from ...thread.enums import ThreadStatus
 
     valid_metadata: JsonObject = {"run_lease": {"lease_id": "lease-legacy123"}}
@@ -539,7 +464,7 @@ async def test_legacy_lease_only_metadata_remains_status_visible(
 
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         valid_status = await client.get(f"/v1/runs/{valid.id}")
@@ -556,7 +481,7 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
     """The TCP gateway projects one real stored tuple without a second latest read."""
-    from ...database.thread_repository import create_thread
+    from ...database import create_thread
     from ...thread.enums import ThreadStatus
 
     thread_id = "coherent-status-capture"
@@ -568,7 +493,7 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
             thread_id=thread_id,
             status=ThreadStatus.RUNNING,
             title="coherent tuple",
-            team_preset=_PRESET,
+            team_preset=DEFAULT_TEAM_PRESET,
             metadata=json.dumps(metadata),
         )
         await session.commit()
@@ -599,7 +524,7 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     try:
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         ):
             response = await client.get(f"/v1/runs/{thread_id}")
@@ -613,7 +538,7 @@ async def test_run_status_projects_one_stored_checkpoint_tuple(
     assert body["changeset_ids"] == ["changeset-coherent"]
     assert body["feature_tag"] == "feature-coherent"
     assert body["authoring_session_id"] == "session-coherent"
-    assert body["topology"]["team_preset"] == _PRESET
+    assert body["topology"]["team_preset"] == DEFAULT_TEAM_PRESET
     assert body["lease_id"] == "lease-coherent"
     latest_tuple_reads = [
         statement
@@ -644,18 +569,21 @@ async def _await_probe_backed_ready(
     last-resort give-up bound, not the proof: a stack that is genuinely not ready
     never satisfies *is_ready* and fails with its last body attached.
     """
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + idle_window_s
     body: JsonObject = {}
-    while True:
+
+    async def _ready() -> JsonObject | None:
+        nonlocal body
         response = await client.get(path)
         assert response.status_code == 200, response.text
         body = response.json()
-        if is_ready(body):
-            return body
-        if loop.time() >= deadline:
-            raise AssertionError(f"{what} never became probe-ready; last: {body}")
-        await asyncio.sleep(0.1)
+        return body if is_ready(body) else None
+
+    return await wait_for_async(
+        _ready,
+        deadline=ProgressDeadline(idle_window_s=idle_window_s),
+        interval_s=0.1,
+        stalled=lambda: f"{what} never became probe-ready; last: {body}",
+    )
 
 
 def _health_worker_status(body: JsonObject) -> object:
@@ -677,40 +605,6 @@ async def _await_service_worker_ready(client: httpx.AsyncClient) -> JsonObject:
     )
 
 
-@asynccontextmanager
-async def _live_server(app: FastAPI) -> AsyncGenerator[str]:
-    """Serve *app* on an ephemeral port and yield its base URL."""
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=0, log_level="warning", lifespan="on"
-    )
-    server = uvicorn.Server(config)
-    task = asyncio.create_task(server.serve())
-    try:
-        for _ in range(500):
-            if server.started and server.servers:
-                break
-            await asyncio.sleep(0.01)
-        assert server.started and server.servers, "uvicorn did not start"
-        port = server.servers[0].sockets[0].getsockname()[1]
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        server.should_exit = True
-        await asyncio.wait_for(task, timeout=5.0)
-
-
-async def _wait_until(
-    predicate: Callable[[], bool], *, what: str, timeout: float = 10.0
-) -> None:
-    """Poll *predicate* until true, failing the test rather than racing on."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while loop.time() < deadline:
-        if predicate():
-            return
-        await asyncio.sleep(0.005)
-    raise AssertionError(f"timed out waiting for {what}")
-
-
 async def _run_same_id_insert_race(
     race_context: _LiveRaceContext,
     run_id: str,
@@ -721,14 +615,22 @@ async def _run_same_id_insert_race(
     await barrier.exec_driver_sql("BEGIN IMMEDIATE")
     try:
         first = asyncio.create_task(race_context.client.post("/v1/runs", json=payload))
-        await _wait_until(
+        await wait_until_async(
             lambda: race_context.gate.is_active(run_id),
-            what="the first modern request to pass its read",
+            deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: (
+                "timed out waiting for the first modern request to pass its read"
+            ),
         )
         second = asyncio.create_task(race_context.client.post("/v1/runs", json=payload))
-        await _wait_until(
+        await wait_until_async(
             lambda: race_context.checked_out() >= baseline + 2,
-            what="the second modern request to reach the store",
+            deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: (
+                "timed out waiting for the second modern request to reach the store"
+            ),
         )
         await asyncio.sleep(0.25)
     finally:
@@ -747,7 +649,7 @@ async def _exercise_five_verbs(
     assert presets.status_code == 200
     pbody = presets.json()
     assert pbody["api_version"] == "v1"
-    assert any(p["id"] == _PRESET for p in pbody["presets"])
+    assert any(p["id"] == DEFAULT_TEAM_PRESET for p in pbody["presets"])
 
     sbody = await _await_service_worker_ready(client)
     assert sbody["api_version"] == "v1"
@@ -758,17 +660,12 @@ async def _exercise_five_verbs(
 
     start = await client.post(
         "/v1/runs",
-        json={
-            "run_id": "gwlive-06",
-            "team_preset": _PRESET,
-            "message": "build it",
-            "autonomous": True,
-            "actor_tokens": {
-                "tokens": {"coder": "tok-coder"},
-                "engine_bearer": "bearer",
-            },
-            **await _run_fields(client),
-        },
+        json=await async_run_start_body(
+            client,
+            "gwlive-06",
+            team_preset=DEFAULT_TEAM_PRESET,
+            tokens={"coder": "tok-coder"},
+        ),
     )
     assert start.status_code == 201
     stbody = start.json()
@@ -783,7 +680,7 @@ async def _exercise_five_verbs(
     rbody = status.json()
     assert rbody["api_version"] == "v1"
     assert rbody["run_id"] == run_id
-    assert rbody["topology"]["team_preset"] == _PRESET
+    assert rbody["topology"]["team_preset"] == DEFAULT_TEAM_PRESET
     assert "roles" in rbody
     assert isinstance(rbody["proposal_ids"], list)
     # Semantic phase projection: a dispatched coder run is a generic
@@ -813,7 +710,7 @@ async def _run_nickname_insert_race(
     left_id = "rid-modern-nickname-left"
     right_id = "rid-modern-nickname-right"
     nickname_base: dict[str, object] = {
-        "team_preset": _PRESET,
+        "team_preset": DEFAULT_TEAM_PRESET,
         "message": "nickname collision",
         "selection": selection,
         "metadata": {
@@ -821,25 +718,34 @@ async def _run_nickname_insert_race(
             "nickname": nickname,
         },
     }
-    await _wait_until(
+    await wait_until_async(
         lambda: race_context.checked_out() == 0,
-        what="the same-id race connections to return to the pool",
+        deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+        interval_s=_WAIT_POLL_S,
+        stalled=lambda: (
+            "timed out waiting for the same-id race connections to return to the pool"
+        ),
     )
     barrier = await race_context.engine.connect()
     baseline = race_context.checked_out()
     await barrier.exec_driver_sql("BEGIN IMMEDIATE")
     try:
         # `nickname_base` already carries the selection AND the metadata naming
-        # the shared nickname; adding `_run_fields` would dissolve the collision.
+        # the shared nickname; adding `async_catalog_run_fields` would dissolve
+        # the collision.
         left = asyncio.create_task(
             race_context.client.post(
                 "/v1/runs",
                 json={**nickname_base, "run_id": left_id},
             )
         )
-        await _wait_until(
+        await wait_until_async(
             lambda: race_context.gate.is_active(left_id),
-            what="the first nickname request to pass its read",
+            deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: (
+                "timed out waiting for the first nickname request to pass its read"
+            ),
         )
         right = asyncio.create_task(
             race_context.client.post(
@@ -847,9 +753,13 @@ async def _run_nickname_insert_race(
                 json={**nickname_base, "run_id": right_id},
             )
         )
-        await _wait_until(
+        await wait_until_async(
             lambda: race_context.checked_out() >= baseline + 2,
-            what="the second nickname request to reach the store",
+            deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: (
+                "timed out waiting for the second nickname request to reach the store"
+            ),
         )
         await asyncio.sleep(0.25)
     finally:
@@ -879,7 +789,7 @@ def _assert_modern_race_results(
     frozen = [response.json()["frozen_assignment"] for response in responses]
     assert all(item is not None for item in frozen)
     assert frozen[0] == frozen[1] == frozen[2]
-    assert frozen[0]["schema_version"] == 1
+    assert frozen[0]["schema_version"] == FROZEN_SELECTION_SCHEMA_VERSION
     assert frozen[0]["digest"]
     assert len([d for d in worker.dispatches if d.get("thread_id") == run_id]) == 1
     assert sorted(response.status_code for response in nickname_responses) == [201, 409]
@@ -907,7 +817,7 @@ async def _run_modern_selection_races(
 ]:
     """Run the same-id and inverse nickname races for one catalog selection."""
     payload = {
-        "team_preset": _PRESET,
+        "team_preset": DEFAULT_TEAM_PRESET,
         "message": "same durable intention",
         "run_id": run_id,
         "selection": selection,
@@ -934,7 +844,7 @@ async def _run_different_body_race(
 ) -> tuple[httpx.Response, httpx.Response, httpx.Response, Mapping[str, object]]:
     """Race two bodies for one id, then replay the winner's body."""
     barrier = await race_context.engine.connect()
-    race_fields = await _run_fields(race_context.client)
+    race_fields = await async_catalog_run_fields(race_context.client)
     baseline = race_context.checked_out()
     await barrier.exec_driver_sql("BEGIN IMMEDIATE")
     try:
@@ -949,9 +859,11 @@ async def _run_different_body_race(
         )
         # Admission happens after the check-then-act read and before the insert,
         # so an active run id proves the first request read an absent run.
-        await _wait_until(
+        await wait_until_async(
             lambda: race_context.gate.is_active(run_id),
-            what="the first request to pass its read",
+            deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: "timed out waiting for the first request to pass its read",
         )
         second = asyncio.create_task(
             race_context.client.post(
@@ -964,9 +876,13 @@ async def _run_different_body_race(
         )
         # A second leased connection proves the second request is issuing DB
         # work of its own while the barrier bars every insert.
-        await _wait_until(
+        await wait_until_async(
             lambda: race_context.checked_out() >= baseline + 2,
-            what="the second request to reach the store",
+            deadline=ProgressDeadline(idle_window_s=_WAIT_IDLE_WINDOW_S),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: (
+                "timed out waiting for the second request to reach the store"
+            ),
         )
         await asyncio.sleep(0.25)
     finally:
@@ -1029,7 +945,7 @@ async def test_five_verbs_over_live_socket(
 ) -> None:
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         await _exercise_five_verbs(client, worker)
@@ -1050,7 +966,7 @@ async def test_service_state_degrades_when_circuit_breaker_opens(
     app.state.circuit_breaker.force_open()
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         resp = await client.get("/v1/service")
@@ -1071,7 +987,7 @@ async def test_service_state_degrades_when_recovery_owner_fails(
     app.state.direct_control_recovery_error = "recovery_pass_failed"
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         resp = await client.get("/v1/service")
@@ -1110,7 +1026,7 @@ async def test_service_state_deadline_returns_degraded_for_locked_real_checkpoin
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         # Budgeted well above the contract under proof: the contract is proven
         # from the server's own measurement below, and a client timeout here
         # would only re-introduce the host-speed coupling this removes.
@@ -1164,68 +1080,52 @@ async def test_run_status_carries_reconnect_cursor(
     reconnect reconciliation comes from run-status (last_sequence), not from the
     droppable SSE progress stream.
 
-    F66: this test previously asserted only the field's TYPE
-    (``isinstance(..., int)``), which a permanently-zero cursor also satisfies
-    -- so it passed against the F19 defect (last_sequence always 0 after a run
-    settles) for as long as that defect existed, naming a contract it did not
-    actually check. Widened to advance the aggregator's real counter, settle
-    the run through the SAME terminal handler production dispatch uses, and
-    assert the value the LIVE HTTP read recovers is the one advanced before
-    settle -- the read that actually exercises the reconnect-cursor contract,
-    since a reconnecting client only ever reads run-status after a run has
-    already ended.
+    Asserting only the field's TYPE (``isinstance(..., int)``) would not do: a
+    permanently-zero cursor (``last_sequence`` always 0 after a run settles)
+    also satisfies it. This test numbers five relayed frames through the real
+    sequence allocator, settles the run through the SAME terminal handler
+    production dispatch uses, and asserts the value the LIVE HTTP read recovers
+    is the one the allocator issued before settle -- the read that actually
+    exercises the reconnect-cursor contract, since a reconnecting client only
+    ever reads run-status after a run has already ended.
     """
-    from ...control.event_handlers import _handle_terminal_event
-    from ...thread.action_receipts import GraphCompletionReceipt
+    from ...control.event_handlers import RelayServices, _handle_terminal_event
 
-    run_id, receipt = await _seed_live_thread(session_factory, title="cursor")
-    config: RunnableConfig = {
-        "configurable": {"thread_id": run_id, "checkpoint_ns": ""}
-    }
-    checkpoint = await real_checkpoint()
-    checkpoint["id"] = f"cp-{run_id}"
-    checkpoint["channel_values"] = {
-        "active_graph_action_receipt": receipt.model_dump(mode="json"),
-        "graph_action_receipts": {receipt.dispatch_id: receipt.model_dump(mode="json")},
-        "graph_completion_receipts": {
-            receipt.dispatch_id: GraphCompletionReceipt(
-                schema_version="graph-completion-v1",
-                action=receipt,
-                outcome="completed",
-            ).model_dump(mode="json")
-        },
-    }
-    checkpoint["channel_versions"] = {
-        "active_graph_action_receipt": checkpointer.get_next_version(None, None),
-        "graph_action_receipts": checkpointer.get_next_version(None, None),
-        "graph_completion_receipts": checkpointer.get_next_version(None, None),
-    }
-    await checkpointer.aput(
-        config,
-        checkpoint,
-        {"source": "loop", "step": 1, "parents": {}},
-        checkpoint["channel_versions"],
-    )
+    async with session_factory() as session:
+        run_id, _receipt = await seed_completed_authority(
+            session, checkpointer, title="cursor"
+        )
 
     app, agg, _worker, _cp = make_app(session_factory, checkpointer)
-    for _ in range(5):
-        agg.advance_sequence(run_id)
-
-    await _handle_terminal_event(
-        run_id,
-        {"event_type": "thread_terminal", "status": "completed"},
-        aggregator=agg,
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-    )
-    # The prune genuinely ran: the live in-memory counter is gone, matching
-    # what a reconnecting client's HTTP read below has to contend with.
-    assert agg.get_sequence(run_id) == 0
+    # The seat the relay route itself takes on its first batch: the real
+    # sequence allocator over the real replay store, with its recorder.
+    assert seated_replay_writer(app, session_factory) is not None
+    allocator = agg.sequence_allocator
+    assert allocator is not None
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
+        await relay_events(
+            client, [progress_event(run_id, index) for index in range(1, 6)]
+        )
+        assert allocator.issued_high_water(run_id) == 5
+
+        await _handle_terminal_event(
+            run_id,
+            {"event_type": "thread_terminal", "status": "completed"},
+            services=RelayServices(
+                relay_hub=agg,
+                session_factory=session_factory,
+                checkpointer=checkpointer,
+            ),
+        )
+        # The purge genuinely ran: the live counter is gone until the run is
+        # seeded again, matching what a reconnecting client's read below has
+        # to contend with.
+        assert allocator.allocate(run_id) is None
+
         resp = await client.get(f"/v1/runs/{run_id}")
         assert resp.status_code == 200
         body = resp.json()
@@ -1242,7 +1142,7 @@ async def test_service_state_is_probe_backed_and_distinguishes_readiness(
     """service-state reports truthful probe-derived readiness fields."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         body = await _await_service_worker_ready(client)
@@ -1285,7 +1185,7 @@ async def test_presets_list_is_truthful_and_resilient(
 
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         resp = await client.get("/v1/presets", params={"workspace_root": str(tmp_path)})
@@ -1303,15 +1203,13 @@ async def test_presets_list_is_truthful_and_resilient(
         assert str(tmp_path) not in broken_reason
         assert ".vaultspec" not in broken_reason and ".toml" not in broken_reason
 
-        # A bundled coder preset loads and is marked mock.
-        assert by_id[_PRESET]["loadable"] is True
-        assert by_id[_PRESET]["is_mock"] is True
-        assert by_id[_PRESET]["authoring_capability"] == "coding"
+        # A bundled coder preset loads and reads as a coding preset.
+        assert by_id[DEFAULT_TEAM_PRESET]["loadable"] is True
+        assert by_id[DEFAULT_TEAM_PRESET]["authoring_capability"] == "coding"
 
         # The document-authoring preset reports its capability and roles.
         authoring = by_id["vaultspec-adr-research"]
         assert authoring["loadable"] is True
-        assert authoring["is_mock"] is False
         assert authoring["authoring_capability"] == "document_authoring"
         assert "vaultspec-researcher" in authoring["required_roles"]
 
@@ -1361,7 +1259,10 @@ async def test_presets_list_refuses_workspace_model_policy(
         encoding="utf-8",
     )
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
-    async with _live_server(app) as base, httpx.AsyncClient(base_url=base) as client:
+    async with (
+        serve_on_loopback(app) as base,
+        httpx.AsyncClient(base_url=base) as client,
+    ):
         response = await client.get(
             "/v1/presets", params={"workspace_root": str(tmp_path)}
         )
@@ -1382,26 +1283,26 @@ async def test_run_start_threads_feedback_batch_id_to_worker(
     dispatch the worker receives carries it verbatim - the same path active_feature
     rides. a2a never parses the id; retrieval is the worker's engine read.
 
-    Sited in the shared workspace `_run_fields` resolves against: a selection is
-    revalidated against the catalog served FOR ITS WORKSPACE, and pointing the
-    run at a fresh temporary directory forces a cold per-workspace catalog build
-    inside this request's 10s budget - a slow catalog then reads as a gateway
-    failure in a test about feedback-id threading.
+    Sited in the shared workspace `async_catalog_run_fields` resolves against: a
+    selection is revalidated against the catalog served FOR ITS WORKSPACE, and
+    pointing the run at a fresh temporary directory forces a cold per-workspace
+    catalog build inside this request's 10s budget - a slow catalog then reads as
+    a gateway failure in a test about feedback-id threading.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
             "/v1/runs",
             json={
                 "run_id": "gwlive-08",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "revise the draft",
                 "autonomous": True,
                 "feedback_batch_id": "feedback-batch:deadbeefcafe",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201, start.text
@@ -1420,17 +1321,17 @@ async def test_run_start_without_feedback_batch_id_dispatches_none(
     """A run with no feedback batch dispatches a null id (non-feedback run)."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
             "/v1/runs",
             json={
                 "run_id": "gwlive-09",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "build it",
                 "autonomous": True,
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201, start.text
@@ -1445,7 +1346,7 @@ async def test_run_start_refusals_over_live_socket(
     """The v1 run-start refuses invalid requests before dispatch."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         # Empty prompt -> 422, no dispatch.
@@ -1453,9 +1354,9 @@ async def test_run_start_refusals_over_live_socket(
             "/v1/runs",
             json={
                 "run_id": "gwlive-10",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "   ",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert empty.status_code == 422
@@ -1467,7 +1368,7 @@ async def test_run_start_refusals_over_live_socket(
                 "run_id": "gwlive-11",
                 "team_preset": "no-such-preset",
                 "message": "go",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert unknown.status_code == 422
@@ -1479,7 +1380,7 @@ async def test_run_start_refusals_over_live_socket(
                 "run_id": "gwlive-12",
                 "team_preset": "vaultspec-adr-research",
                 "message": "research it",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert no_feature.status_code == 422
@@ -1493,11 +1394,8 @@ async def test_run_start_refusals_over_live_socket(
                 "team_preset": "vaultspec-adr-research",
                 "message": "research it",
                 "feature_tag": "edge-feature",
-                "actor_tokens": {
-                    "tokens": {"vaultspec-researcher": "tok-r"},
-                    "engine_bearer": "bearer",
-                },
-                **await _run_fields(client),
+                "actor_tokens": actor_tokens_body({"vaultspec-researcher": "tok-r"}),
+                **await async_catalog_run_fields(client),
             },
         )
         assert thin_bundle.status_code == 422
@@ -1515,10 +1413,10 @@ async def test_run_start_refusals_over_live_socket(
             invalid_id = await client.post(
                 "/v1/runs",
                 json={
-                    "team_preset": _PRESET,
+                    "team_preset": DEFAULT_TEAM_PRESET,
                     "message": "go",
                     "run_id": invalid_run_id,
-                    **await _run_fields(client),
+                    **await async_catalog_run_fields(client),
                 },
             )
             assert invalid_id.status_code == 422, invalid_run_id
@@ -1534,10 +1432,10 @@ async def test_run_start_refusals_over_live_socket(
         dashboard_id = await client.post(
             "/v1/runs",
             json={
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "go",
                 "run_id": "run-0123456789abcdef0123456789abcdef",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert dashboard_id.status_code == 201
@@ -1554,25 +1452,33 @@ async def test_run_start_client_id_is_dispatch_exactly_once(
     """A retry with the same client run id returns the same run, dispatched once."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         payload = {
-            "team_preset": _PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "build it",
             "autonomous": True,
             "run_id": "client-run-0001",
         }
         first = await client.post(
             "/v1/runs",
-            json={"run_id": "gwlive-16", **payload, **await _run_fields(client)},
+            json={
+                "run_id": "gwlive-16",
+                **payload,
+                **await async_catalog_run_fields(client),
+            },
         )
         assert first.status_code == 201
         assert first.json()["run_id"] == "client-run-0001"
 
         second = await client.post(
             "/v1/runs",
-            json={"run_id": "gwlive-17", **payload, **await _run_fields(client)},
+            json={
+                "run_id": "gwlive-17",
+                **payload,
+                **await async_catalog_run_fields(client),
+            },
         )
         assert second.status_code == 201
         assert second.json()["run_id"] == "client-run-0001"
@@ -1589,19 +1495,23 @@ async def test_run_id_reservation_is_visible_before_dispatch_ack(
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     worker.hold_dispatch_response()
     payload = {
-        "team_preset": _PRESET,
+        "team_preset": DEFAULT_TEAM_PRESET,
         "message": "build it",
         "autonomous": True,
         "run_id": "run-0123456789abcdef0123456789abcdef",
     }
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         first = asyncio.create_task(
             client.post(
                 "/v1/runs",
-                json={"run_id": "gwlive-18", **payload, **await _run_fields(client)},
+                json={
+                    "run_id": "gwlive-18",
+                    **payload,
+                    **await async_catalog_run_fields(client),
+                },
             )
         )
         await asyncio.wait_for(worker.dispatch_received.wait(), timeout=5.0)
@@ -1612,7 +1522,11 @@ async def test_run_id_reservation_is_visible_before_dispatch_ack(
 
         replay = await client.post(
             "/v1/runs",
-            json={"run_id": "gwlive-19", **payload, **await _run_fields(client)},
+            json={
+                "run_id": "gwlive-19",
+                **payload,
+                **await async_catalog_run_fields(client),
+            },
         )
         assert replay.status_code == 201
         assert replay.json()["run_id"] == payload["run_id"]
@@ -1629,12 +1543,12 @@ async def test_run_id_reservation_is_visible_before_dispatch_ack(
 async def test_sse_stream_delivers_versioned_event_mid_stream(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
 ) -> None:
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
-    run_id, _receipt = await _seed_live_thread(session_factory, title="live")
+    run_id, _receipt = await seed_live_thread(session_factory, title="live")
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -1646,12 +1560,13 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
         lines = resp.aiter_lines()
 
         # Wait for the SSE handler to register its subscriber, then emit an
-        # event into the same aggregator the live server is serving from.
-        for _ in range(200):
-            if agg.subscriber_count() > 0:
-                break
-            await asyncio.sleep(0.01)
-        assert agg.subscriber_count() > 0, "SSE subscriber never registered"
+        # event into the same relay hub the live server is serving from.
+        await wait_until_async(
+            lambda: agg.subscriber_count() > 0,
+            deadline=ProgressDeadline(idle_window_s=2.0),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: "timed out waiting for the SSE subscriber to register",
+        )
 
         agg.relay_payload(
             run_id,
@@ -1664,7 +1579,7 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
             },
         )
 
-        progress = await _read_event(lines, wanted="message_chunk")
+        progress, _raw = await read_frame(lines, wanted="message_chunk", timeout=5.0)
         assert progress["api_version"] == "v1"
         assert progress["type"] == "message_chunk"
         assert progress["content"] == "tick"
@@ -1679,7 +1594,7 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
                 "status": "completed",
             },
         )
-        terminal = await _read_event(lines, wanted="thread_terminal")
+        terminal, _raw = await read_frame(lines, wanted="thread_terminal", timeout=5.0)
         assert terminal["api_version"] == "v1"
         assert terminal["status"] == "completed"
 
@@ -1697,23 +1612,24 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
     """
     from ...streaming.sse_frames import MAX_SSE_FRAME_BYTES
 
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
 
-    run_id, _receipt = await _seed_live_thread(session_factory, title="live")
+    run_id, _receipt = await seed_live_thread(session_factory, title="live")
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
         assert resp.status_code == 200
         lines = resp.aiter_lines()
-        for _ in range(200):
-            if agg.subscriber_count() > 0:
-                break
-            await asyncio.sleep(0.01)
-        assert agg.subscriber_count() > 0
+        await wait_until_async(
+            lambda: agg.subscriber_count() > 0,
+            deadline=ProgressDeadline(idle_window_s=2.0),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: "timed out waiting for the SSE subscriber to register",
+        )
 
         # A progress frame naming a research_adr node is stamped with the phase.
         agg.relay_payload(
@@ -1726,7 +1642,7 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
                 "state": "working",
             },
         )
-        status_frame = await _read_event(lines, wanted="agent_status")
+        status_frame, _raw = await read_frame(lines, wanted="agent_status", timeout=5.0)
         assert status_frame["api_version"] == "v1"
         assert status_frame["semantic_phase"] == "synthesizing_research"
 
@@ -1745,7 +1661,9 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
                 "content": document_body,
             },
         )
-        artifact_frame = await _read_event(lines, wanted="artifact_update")
+        artifact_frame, _raw = await read_frame(
+            lines, wanted="artifact_update", timeout=5.0
+        )
         assert artifact_frame["api_version"] == "v1"
         assert artifact_frame["artifact_id"] == "art-1"
         assert "content" not in artifact_frame
@@ -1762,7 +1680,7 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
                 "content": "tick",
             },
         )
-        dropped = await _read_event(lines, wanted="progress_dropped")
+        dropped, _raw = await read_frame(lines, wanted="progress_dropped", timeout=5.0)
         assert dropped["api_version"] == "v1"
         assert dropped["dropped_type"] == "message_chunk"
 
@@ -1775,7 +1693,7 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
                 "status": "completed",
             },
         )
-        terminal = await _read_event(lines, wanted="thread_terminal")
+        terminal, _raw = await read_frame(lines, wanted="thread_terminal", timeout=5.0)
         assert terminal["status"] == "completed"
 
 
@@ -1790,12 +1708,12 @@ async def test_run_stream_verb_reserves_versioned_frames(
     edge sees the identical api_version stamp, mid-stream delivery, and
     terminal-replay-then-close semantics - no second code path.
     """
-    aggregator = EventAggregator()
+    aggregator = RelayHub()
     app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
-    run_id, _receipt = await _seed_live_thread(session_factory, title="run")
+    run_id, _receipt = await seed_live_thread(session_factory, title="run")
 
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
         client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
     ):
@@ -1803,11 +1721,14 @@ async def test_run_stream_verb_reserves_versioned_frames(
         assert resp.headers["content-type"].startswith("text/event-stream")
         lines = resp.aiter_lines()
 
-        for _ in range(200):
-            if agg.subscriber_count() > 0:
-                break
-            await asyncio.sleep(0.01)
-        assert agg.subscriber_count() > 0, "run-stream subscriber never registered"
+        await wait_until_async(
+            lambda: agg.subscriber_count() > 0,
+            deadline=ProgressDeadline(idle_window_s=2.0),
+            interval_s=_WAIT_POLL_S,
+            stalled=lambda: (
+                "timed out waiting for the run-stream subscriber to register"
+            ),
+        )
 
         agg.relay_payload(
             run_id,
@@ -1819,7 +1740,7 @@ async def test_run_stream_verb_reserves_versioned_frames(
                 "content": "tick",
             },
         )
-        progress = await _read_event(lines, wanted="message_chunk")
+        progress, _raw = await read_frame(lines, wanted="message_chunk", timeout=5.0)
         assert progress["api_version"] == "v1"
         assert progress["type"] == "message_chunk"
         assert progress["content"] == "tick"
@@ -1834,7 +1755,7 @@ async def test_run_stream_verb_reserves_versioned_frames(
                 "status": "completed",
             },
         )
-        terminal = await _read_event(lines, wanted="thread_terminal")
+        terminal, _raw = await read_frame(lines, wanted="thread_terminal", timeout=5.0)
         assert terminal["api_version"] == "v1"
         assert terminal["status"] == "completed"
 
@@ -1846,38 +1767,12 @@ async def test_run_stream_unknown_run_is_404(
     """Streaming an unknown run id is a clean 404 in run vocabulary."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         resp = await client.get("/v1/runs/does-not-exist/stream")
         assert resp.status_code == 404
         assert resp.json()["detail"] == "Run not found"
-
-
-async def _read_event(
-    lines: AsyncIterator[str], *, wanted: str, timeout: float = 5.0
-) -> JsonObject:
-    """Read SSE ``data:`` frames from *lines* until one whose ``type`` matches.
-
-    Heartbeat frames (emitted on idle) are skipped. Raises on timeout so a
-    broken stream fails the test instead of hanging it.
-    """
-
-    async def _scan() -> JsonObject:
-        buffer: list[str] = []
-        async for raw in lines:
-            line = raw.rstrip("\r")
-            if line.startswith("data: "):
-                buffer.append(line.removeprefix("data: "))
-                continue
-            if line == "" and buffer:
-                payload = cast("JsonObject", json.loads("".join(buffer)))
-                buffer = []
-                if payload.get("type") == wanted:
-                    return payload
-        raise AssertionError(f"stream ended before a {wanted!r} frame")
-
-    return await asyncio.wait_for(_scan(), timeout=timeout)
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -1887,17 +1782,17 @@ async def test_run_start_freezes_and_discloses_catalog_selection(
     """Run start freezes the served selection and threads it to dispatch."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         start = await client.post(
             "/v1/runs",
             json={
                 "run_id": "gwlive-20",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "go",
                 "autonomous": True,
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert start.status_code == 201, start.text
@@ -1937,17 +1832,17 @@ async def test_run_start_rejects_retired_profile_field(
     """A retired profile field is refused with a 422 and never dispatched."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         resp = await client.post(
             "/v1/runs",
             json={
                 "run_id": "gwlive-21",
-                "team_preset": _PRESET,
+                "team_preset": DEFAULT_TEAM_PRESET,
                 "message": "go",
                 "profile_id": "ghost",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         # `profile_id` was removed when selections became explicit. The contract
@@ -1966,17 +1861,21 @@ async def test_run_start_conflicts_on_selection_request_change_retry(
     """A retry with changed work is a conflict rather than a silent replay."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         payload = {
-            "team_preset": _PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "go",
             "run_id": "rid-conflict",
         }
         first = await client.post(
             "/v1/runs",
-            json={"run_id": "gwlive-22", **payload, **await _run_fields(client)},
+            json={
+                "run_id": "gwlive-22",
+                **payload,
+                **await async_catalog_run_fields(client),
+            },
         )
         assert first.status_code == 201
         frozen = first.json()["frozen_assignment"]
@@ -1989,7 +1888,7 @@ async def test_run_start_conflicts_on_selection_request_change_retry(
             json={
                 **payload,
                 "message": "a different intention",
-                **await _run_fields(client),
+                **await async_catalog_run_fields(client),
             },
         )
         assert conflict.status_code == 409, conflict.text
@@ -1998,7 +1897,11 @@ async def test_run_start_conflicts_on_selection_request_change_retry(
         # Same run id and same request -> idempotent replay returns the run.
         replay = await client.post(
             "/v1/runs",
-            json={"run_id": "gwlive-24", **payload, **await _run_fields(client)},
+            json={
+                "run_id": "gwlive-24",
+                **payload,
+                **await async_catalog_run_fields(client),
+            },
         )
         assert replay.status_code == 201
         assert replay.json()["run_id"] == first.json()["run_id"]
@@ -2018,29 +1921,28 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
     carrying a different prompt is a NEW INTENTION wearing an old id and is
     refused, so it is never silently discarded as an idempotent replay.
 
-    The catalog selection is held equal throughout - `_run_fields` is
+    The catalog selection is held equal throughout - `async_catalog_run_fields` is
     deterministic for a served catalog - so the digest branch is exercised by
     the one field that varies, the prompt.
     """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         # Every post below shares this run id ON PURPOSE: the test is about
         # what a second request wearing an existing id is allowed to mean.
         payload = {
-            "team_preset": _PRESET,
+            "team_preset": DEFAULT_TEAM_PRESET,
             "message": "go",
             "run_id": "rid-body-conflict",
-            "actor_tokens": {
-                "tokens": {"coder": "tok-minted"},
-                "engine_bearer": "bearer-minted",
-            },
+            "actor_tokens": actor_tokens_body(
+                {"coder": "tok-minted"}, engine_bearer="bearer-minted"
+            ),
         }
         first = await client.post(
             "/v1/runs",
-            json={**payload, **await _run_fields(client)},
+            json={**payload, **await async_catalog_run_fields(client)},
         )
         assert first.status_code == 201, first.text
 
@@ -2049,11 +1951,10 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
             "/v1/runs",
             json={
                 **payload,
-                "actor_tokens": {
-                    "tokens": {"coder": "tok-rotated"},
-                    "engine_bearer": "bearer-rotated",
-                },
-                **await _run_fields(client),
+                "actor_tokens": actor_tokens_body(
+                    {"coder": "tok-rotated"}, engine_bearer="bearer-rotated"
+                ),
+                **await async_catalog_run_fields(client),
             },
         )
         assert rotated.status_code == 201, rotated.text
@@ -2066,11 +1967,10 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
             json={
                 **payload,
                 "message": "a different intention",
-                "actor_tokens": {
-                    "tokens": {"coder": "tok-rotated"},
-                    "engine_bearer": "bearer-rotated",
-                },
-                **await _run_fields(client),
+                "actor_tokens": actor_tokens_body(
+                    {"coder": "tok-rotated"}, engine_bearer="bearer-rotated"
+                ),
+                **await async_catalog_run_fields(client),
             },
         )
         assert conflict.status_code == 409, conflict.text
@@ -2090,7 +1990,7 @@ async def test_run_start_replays_a_rotated_bundle_and_conflicts_on_a_changed_bod
         # proving the 409 was the changed body - not a blanket rejection.
         replay = await client.post(
             "/v1/runs",
-            json={**payload, **await _run_fields(client)},
+            json={**payload, **await async_catalog_run_fields(client)},
         )
         assert replay.status_code == 201, replay.text
         assert replay.json()["run_id"] == "rid-body-conflict"
@@ -2103,16 +2003,20 @@ async def test_run_start_idempotency_is_race_safe(
     """Concurrent same-run_id retries never 500: insert-or-return is atomic."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
-        payload = {"team_preset": _PRESET, "message": "go", "run_id": "rid-race"}
+        payload = {
+            "team_preset": DEFAULT_TEAM_PRESET,
+            "message": "go",
+            "run_id": "rid-race",
+        }
         # Resolved ONCE, outside the racing comprehension. Awaiting inside it
         # would make the argument an async generator rather than the iterable of
         # coroutines gather expects, and every racer must post a byte-identical
         # body for the idempotency this test is asserting to be the thing under
         # test rather than five different requests.
-        raced_body = {**payload, **await _run_fields(client)}
+        raced_body = {**payload, **await async_catalog_run_fields(client)}
         results = await asyncio.gather(
             *(client.post("/v1/runs", json=raced_body) for _ in range(5))
         )
@@ -2143,10 +2047,12 @@ async def test_modern_selection_insert_race_and_direct_replay_disclose_same_free
 
     with caplog.at_level(logging.INFO, logger="vaultspec_a2a.api.routes.gateway"):
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=30.0) as client,
         ):
-            selection, workspace_root = await _in_process_catalog_selection(client)
+            fields = await async_catalog_run_fields(client)
+            selection = fields["selection"]
+            workspace_root = fields["metadata"]["workspace_root"]
             responses, nickname_responses = await _run_modern_selection_races(
                 _LiveRaceContext(
                     client=client,
@@ -2198,7 +2104,7 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
     # that pairing is the whole subject, since the loser of the insert race must
     # be refused precisely because its body differs from the winner's.
     shared = {
-        "team_preset": _PRESET,
+        "team_preset": DEFAULT_TEAM_PRESET,
         "run_id": run_id,
         "autonomous": True,
     }
@@ -2210,7 +2116,7 @@ async def test_concurrent_same_run_id_different_bodies_conflicts(
 
     with caplog.at_level(logging.INFO, logger="vaultspec_a2a.api.routes.gateway"):
         async with (
-            _live_server(app) as base,
+            serve_on_loopback(app) as base,
             httpx.AsyncClient(base_url=base, timeout=30.0) as client,
         ):
             race = await _run_different_body_race(
@@ -2243,7 +2149,7 @@ async def test_pairing_identity_is_authenticated_surface_only(
 ) -> None:
     """The gateway's lifetime identity never reaches an ungated health body.
 
-    Under the Compose and development profiles ``GET /health`` is
+    Under the unarmed development profile ``GET /health`` is
     unauthenticated and serves the full readiness aggregate - the very dict the
     pairing echo is assembled into - verbatim. The gateway's lifetime identity
     must not ride along: the armed adoption check trusts a worker's reported
@@ -2259,7 +2165,7 @@ async def test_pairing_identity_is_authenticated_surface_only(
     """
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
-        _live_server(app) as base,
+        serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=10.0) as client,
     ):
         # The ungated probe surface, serving the unarmed full body rather than a

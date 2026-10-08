@@ -2,11 +2,13 @@
 
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
-from pydantic_settings import SettingsConfigDict
+from pydantic_settings import NoDecode, SettingsConfigDict
 
+from ..desktop.credentials import MAX_CREDENTIAL_BYTES
+from ..utils import redact_url
 from ..utils.enums import CodexWebSearchMode, Environment, LogLevel
 from .env_prefix import ENV_PREFIX
 from .settings_base import (
@@ -17,12 +19,12 @@ from .settings_base import (
 from .state_layout import DEFAULT_HOME
 
 __all__ = [
-    "DEFAULT_MOCK_API_BASE",
+    "ACP_BACKENDS",
     "GATEWAY_URL_ENV",
     "INTERNAL_TOKEN_ENV",
     "WORKER_URL_ENV",
+    "AcpBackend",
     "InfraConfig",
-    "_synchronous_url",
     "_warn_seating_discard",
 ]
 
@@ -37,62 +39,16 @@ _INSTALL_ROOT: Path = (
 # Canonical service-endpoint defaults. This module is the ONE home for every
 # production host:port literal; consumers import these rather than repeating
 # the value, and each remains environment-overridable at its point of use
-# (VAULTSPEC_A2A_MOCK_API_BASE overrides the VidaiMock base;
-# OTEL_EXPORTER_OTLP_ENDPOINT is read by the telemetry module at import time
+# (OTEL_EXPORTER_OTLP_ENDPOINT is read by the telemetry module at import time
 # per the standard OTel contract).
-DEFAULT_MOCK_API_BASE = "http://localhost:8100"
 DEFAULT_OTLP_ENDPOINT = "http://localhost:4317"
 
 logger = logging.getLogger("vaultspec_a2a.control.config")
 
-# The synchronous SQLAlchemy driver this project ships for each supported backend.
-# Keyed on the SQLAlchemy *backend* name rather than on the full drivername, so the
-# mapping resolves identically for a bare scheme (``postgresql://``), an async
-# driver (``postgresql+asyncpg://``), and an already-synchronous one
-# (``postgresql+psycopg://``). Only psycopg v3 and the stdlib sqlite driver are
-# declared dependencies; psycopg2 - which SQLAlchemy would otherwise select for a
-# bare ``postgresql://`` scheme - is not installed.
-_SYNC_DRIVERNAMES: dict[str, str] = {
-    "postgresql": "postgresql+psycopg",
-    "sqlite": "sqlite",
-}
-
-
-def _synchronous_url(url: str, *, setting: str) -> str:
-    """Return the synchronous SQLAlchemy URL equivalent of ``url``.
-
-    The driver is replaced through the parsed URL structure rather than by
-    substring substitution: a substring replace is a silent no-op on a URL that
-    declares no driver, and it corrupts any URL whose password or query value
-    happens to contain the replaced text.
-
-    Raises ``ValueError`` when the URL cannot be parsed or names a backend with no
-    synchronous driver shipped here, so a broken URL is refused at its source
-    rather than reaching ``create_engine`` inside a destructive admin command.
-    """
-    # Imported lazily: SQLAlchemy costs roughly a quarter-second to import, and the
-    # settings module sits on the CLI startup path. Every consumer of the derived
-    # URL has already paid that cost.
-    from sqlalchemy.engine.url import make_url
-    from sqlalchemy.exc import ArgumentError
-
-    try:
-        parsed = make_url(url)
-    except ArgumentError as exc:
-        # The URL itself is never echoed: it routinely carries a password.
-        msg = f"{setting} is not a parseable SQLAlchemy URL."
-        raise ValueError(msg) from exc
-
-    backend = parsed.get_backend_name()
-    drivername = _SYNC_DRIVERNAMES.get(backend)
-    if drivername is None:
-        msg = (
-            f"{setting} names the {backend!r} backend, which has no synchronous "
-            f"driver in this project; expected one of {sorted(_SYNC_DRIVERNAMES)}."
-        )
-        raise ValueError(msg)
-
-    return parsed.set(drivername=drivername).render_as_string(hide_password=False)
+AcpBackend = Literal["node", "binary"]
+# Derived from the Literal so a frozen lane's backend suffix is checked against
+# the one declaration the ``acp_backend`` setting is validated by.
+ACP_BACKENDS: frozenset[str] = frozenset(get_args(AcpBackend))
 
 
 def _warn_seating_discard(env_name: str, supplied: object, derived: object) -> None:
@@ -113,10 +69,6 @@ def _warn_seating_discard(env_name: str, supplied: object, derived: object) -> N
     )
 
 
-#: Query parameters libpq and the async drivers accept a secret through.
-_SECRET_QUERY_KEYS = frozenset({"password", "sslpassword", "token"})
-
-
 def _loggable(value: object) -> object:
     """Return ``value`` safe to log: a URL's secrets are masked, never echoed.
 
@@ -125,21 +77,7 @@ def _loggable(value: object) -> object:
     value this warning reports.
     """
     text = str(value)
-    if "://" not in text:
-        return value
-    from sqlalchemy.engine.url import make_url
-    from sqlalchemy.exc import ArgumentError
-
-    try:
-        url = make_url(text)
-        masked = {
-            key: ("***" if key.lower() in _SECRET_QUERY_KEYS else item)
-            for key, item in url.query.items()
-        }
-        return url.set(query=masked).render_as_string(hide_password=True)
-    except ArgumentError:
-        # Unparseable: report that a value was discarded without the value.
-        return "<unparseable URL>"
+    return redact_url(text) if "://" in text else value
 
 
 def _valid_kimi_capability(token: str) -> bool:
@@ -176,32 +114,32 @@ class InfraConfig(ProjectSettings):
             "OTEL spans carry request tracing; opt in here for a raw access trail."
         ),
     )
-    database_backend: Literal["sqlite", "postgres"] = Field(
+    database_backend: str = Field(
         default="sqlite",
         description=(
-            "Primary application database backend.  SQLite is the local/dev "
-            "default.  Production deployments set 'postgres' via env."
+            "Retired selector, kept so a stale value is refused rather than "
+            "ignored. SQLite is the only store: any other value refuses startup."
         ),
     )
-    checkpoint_backend: Literal["sqlite", "postgres"] = Field(
+    checkpoint_backend: str = Field(
         default="sqlite",
         description=(
-            "LangGraph checkpointer persistence backend.  Follows the same "
-            "convention as database_backend: sqlite for dev, postgres for prod."
+            "Retired selector for the LangGraph checkpoint store, held to the "
+            "same rule as database_backend: sqlite is the only accepted value."
         ),
     )
     database_url: str = Field(
         default="sqlite+aiosqlite:///vaultspec.db",
         description=(
-            "SQLAlchemy async database URL.  Must match the selected "
-            "database_backend scheme (sqlite+aiosqlite or postgresql+asyncpg).  "
-            "Left unset, the store is state/vaultspec.db in the state home. A "
-            "relative SQLite path resolves against the project root."
+            "SQLAlchemy async database URL. It must name SQLite "
+            "(sqlite+aiosqlite). Left unset, the store is state/vaultspec.db in "
+            "the state home. A relative SQLite path resolves against the project "
+            "root."
         ),
     )
     checkpoint_database_url: str | None = Field(
         default=None,
-        description="Optional dedicated checkpoint database URL/DSN.",
+        description="Optional dedicated checkpoint database URL; it must name SQLite.",
     )
     sqlite_busy_timeout_ms: int = Field(
         default=5000,
@@ -210,16 +148,9 @@ class InfraConfig(ProjectSettings):
     postgres_required: bool = Field(
         default=False,
         description=(
-            "Fail startup loudly when Postgres-backed dependencies are required."
+            "Retired with the Postgres backend, kept so a stale value is refused "
+            "rather than ignored. True refuses startup."
         ),
-    )
-    db_pool_size: int = Field(
-        default=5,
-        description="SQLAlchemy QueuePool pool_size for Postgres engine.",
-    )
-    db_pool_max_overflow: int = Field(
-        default=10,
-        description="SQLAlchemy QueuePool max_overflow for Postgres engine.",
     )
     workspace_root: Path | None = Field(
         default=None,
@@ -356,8 +287,18 @@ class InfraConfig(ProjectSettings):
     serve_in_process_lanes: bool = Field(
         default=False,
         description=(
-            "Serve the in-process provider lanes (deterministic and mock). Off "
-            "by default so a deployment sees them only when it arms them."
+            "Serve the in-process provider lanes that configured lane plugins "
+            "register. Off by default so a deployment sees them only when it "
+            "arms them."
+        ),
+    )
+    lane_plugins: Annotated[tuple[str, ...], NoDecode] = Field(
+        default=(),
+        description=(
+            "Comma-separated module paths, each exposing register_lanes(registry), "
+            "whose in-process lanes this process holds. Honoured only while "
+            "serve_in_process_lanes is armed and the desktop profile is not; any "
+            "other non-empty value refuses startup."
         ),
     )
     codex_config_home_retain: bool = Field(
@@ -444,14 +385,6 @@ class InfraConfig(ProjectSettings):
             "VAULTSPEC_A2A_OTEL_METRICS_EXPORTER", "OTEL_METRICS_EXPORTER"
         ),
         description="'none' builds no metric reader at all.",
-    )
-    mock_api_base: str | None = Field(
-        default=None,
-        description=(
-            "Base URL for the VidaiMock tape-replay server.  Used by "
-            "MockChatModel when Provider.MOCK is selected.  "
-            "Example: http://vidaimock:8100"
-        ),
     )
     provider_timeout_seconds: int = Field(
         default=120,
@@ -640,6 +573,9 @@ class InfraConfig(ProjectSettings):
         default="127.0.0.1",
         description="Bind host for the uvicorn server (VAULTSPEC_A2A_HOST).",
     )
+    # procs.toml's [resident] table repeats this default and worker_port's so the
+    # dev registry never allocates a port a resident instance holds; a settings
+    # test holds the two equal.
     port: int = Field(
         default=18000,
         description="Bind port for the uvicorn server (VAULTSPEC_A2A_PORT).",
@@ -683,23 +619,19 @@ class InfraConfig(ProjectSettings):
         description=(
             "Optional dedicated bearer for the engine-facing /v1 gateway. "
             "When absent, the gateway generates a per-process credential; it "
-            "is never shared with worker IPC or embedded in discovery."
+            "is never shared with worker IPC or embedded in discovery. Bounded "
+            f"at {MAX_CREDENTIAL_BYTES} bytes, the size a reader will load the "
+            "handoff credential this token is published into."
         ),
     )
     auto_spawn_worker: bool = Field(
         default=True,
         description=("Auto-spawn worker as child process on gateway startup."),
     )
-    # Authoring verdict subscriber
-    authoring_subscriber_enabled: bool = Field(
-        default=False,
-        description=(
-            "Run the engine authoring-verdict subscriber as a gateway background "
-            "task. Consumes GET /authoring/v1/events and resumes parked runs with "
-            "reviewer verdicts. Off by default; enable when a live engine is "
-            "available to review agent-authored proposals."
-        ),
-    )
+    # Authoring verdict subscriber. Whether it RUNS is not configurable: the
+    # gateway starts it when an engine record resolves at startup, because a
+    # document-authoring run parks on an engine proposal that only the
+    # subscriber resumes. These knobs shape the loop, never whether it exists.
     authoring_subscriber_poll_interval_seconds: float = Field(
         default=3.0,
         description=(
@@ -720,7 +652,7 @@ class InfraConfig(ProjectSettings):
     )
 
     # ACP backend selection
-    acp_backend: Literal["node", "binary"] = Field(
+    acp_backend: AcpBackend = Field(
         default="node",
         description=(
             "ACP gateway backend: 'node' uses the npm-installed index.js, "
@@ -860,11 +792,7 @@ class InfraConfig(ProjectSettings):
         ),
     )
 
-    # Internal IPC frame/body limits
-    internal_max_frame_bytes: int = Field(
-        default=1_048_576,
-        description="Maximum worker→gateway WebSocket frame size (bytes).",
-    )
+    # Internal IPC body limits
     internal_max_http_body_bytes: int = Field(
         default=1_048_576,
         ge=1,
@@ -974,6 +902,44 @@ class InfraConfig(ProjectSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @field_validator("gateway_service_token")
+    @classmethod
+    def _publishable_gateway_token(cls, value: str | None) -> str | None:
+        """Refuse a gateway bearer too long to publish as a handoff credential.
+
+        This token is written verbatim into the owner-restricted credential file
+        beside the discovery record, and every reader loads that file under a
+        bound of ``MAX_CREDENTIAL_BYTES``. Without this check an over-long token
+        starts a gateway that looks healthy and publishes a credential nothing
+        can read, so the operator meets the mistake as an unexplained attach
+        failure instead of as the configuration error it is.
+
+        Measured in bytes, as the file bound is: a token inside the character
+        count can still be over the byte bound.
+        """
+        token_env = env_name(cls, "gateway_service_token")
+        if value is not None and len(value.encode("utf-8")) > MAX_CREDENTIAL_BYTES:
+            raise ValueError(
+                f"{token_env} must be at most {MAX_CREDENTIAL_BYTES} bytes: a "
+                "longer bearer cannot be published as the handoff credential "
+                "readers load under that bound"
+            )
+        return value
+
+    @field_validator("lane_plugins", mode="before")
+    @classmethod
+    def _split_lane_plugins(cls, value: object) -> object:
+        """Read the comma-separated list as module paths, refusing a malformed one."""
+        if not isinstance(value, str):
+            return value
+        if not value.strip():
+            return ()
+        modules = tuple(part.strip() for part in value.split(","))
+        for module in modules:
+            if not module or not all(part.isidentifier() for part in module.split(".")):
+                raise ValueError("lane plugins must be comma-separated module paths")
+        return tuple(dict.fromkeys(modules))
 
     @field_validator("kimi_temporary_model_max_context_size", mode="before")
     @classmethod

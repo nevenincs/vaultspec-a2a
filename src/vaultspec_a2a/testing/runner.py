@@ -9,8 +9,6 @@ reaps the complete contained process tree after a short teardown deadline.
 from __future__ import annotations
 
 import argparse
-import asyncio
-import contextlib
 import hmac
 import os
 import secrets
@@ -19,20 +17,32 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
-from ..utils.process import ProcessContainment, ProcessContainmentError
+from ..utils import (
+    ProcessContainment,
+    ProcessContainmentError,
+    reap_contained,
+    spawn_contained,
+)
 from .harness_names import COMPLETION_ENDPOINT_ENV, COMPLETION_OWNER_PID_ENV
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+__all__ = [
+    "DESCENDANT_TIMEOUT_EXIT",
+    "RUN_TIMEOUT_EXIT",
+    "TEARDOWN_TIMEOUT_EXIT",
+]
 
 TEARDOWN_TIMEOUT_EXIT = 124
 RUN_TIMEOUT_EXIT = 125
 DESCENDANT_TIMEOUT_EXIT = 126
 _POLL_SECONDS = 0.05
 _DEFAULT_PROGRESS_INTERVAL_SECONDS = 30.0
+_reap = partial(reap_contained, term_timeout=2.0, kill_timeout=5.0)
 
 
 @dataclass(frozen=True)
@@ -191,17 +201,6 @@ def _completion_received(
     return _handle_completion_complete(sender_pid, exitstatus, designated_pid)
 
 
-def _terminate(
-    containment: ProcessContainment, process: subprocess.Popen[bytes]
-) -> bool:
-    tree_reaped = asyncio.run(containment.terminate(term_timeout=2.0, kill_timeout=5.0))
-    try:
-        process.wait(timeout=5.0)
-    except subprocess.TimeoutExpired:
-        return False
-    return tree_reaped
-
-
 def _timeout_context(
     process: subprocess.Popen[bytes], containment: ProcessContainment
 ) -> str:
@@ -233,43 +232,7 @@ def _spawn_pytest_process(
         "vaultspec_a2a.testing.runner_child",
         *pytest_args,
     ]
-    spawn_kwargs = containment.spawn_kwargs()
-    start_new_session = bool(spawn_kwargs.get("start_new_session", False))
-    try:
-        return subprocess.Popen(
-            command,
-            stdin=None,
-            stdout=None,
-            stderr=None,
-            env=env,
-            creationflags=containment.suspended_creation_flag(),
-            start_new_session=start_new_session,
-            text=False,
-            encoding=None,
-            errors=None,
-        )
-    except BaseException:
-        containment.close()
-        raise
-
-
-def _assign_pytest_process(
-    process: subprocess.Popen[bytes], containment: ProcessContainment
-) -> None:
-    try:
-        containment.assign_suspended_process(process)
-    except BaseException:
-        # Assignment may leave either an owned tree or an unassigned root.
-        try:
-            if containment.assigned:
-                _terminate(containment, process)
-            elif process.poll() is None:
-                process.kill()
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                process.wait(timeout=5.0)
-        finally:
-            containment.close()
-        raise
+    return spawn_contained(command, containment, env=env)
 
 
 def _root_exit_status(
@@ -285,7 +248,7 @@ def _root_exit_status(
     first_seen = now if first_seen is None else first_seen
     if now - first_seen >= timeout_s:
         context = _timeout_context(process, containment)
-        reaped = _terminate(containment, process)
+        reaped = _reap(process, containment)
         print(
             "pytest exited but its contained descendants did not "
             f"exit within {timeout_s:g}s; tree_reaped={str(reaped).lower()} "
@@ -313,7 +276,7 @@ def _teardown_timeout_status(
     # orders of magnitude with host load and say nothing about ownership.
     result_to_exit = now - completion_seen
     context = _timeout_context(process, containment)
-    reaped = _terminate(containment, process)
+    reaped = _reap(process, containment)
     print(
         "pytest produced a session result but its owned process tree "
         f"did not exit within {timeout_s:g}s; tree_reaped={str(reaped).lower()} "
@@ -334,7 +297,7 @@ def _run_timeout_status(
     if timeout_s is None or now - started < timeout_s:
         return None
     context = _timeout_context(process, containment)
-    reaped = _terminate(containment, process)
+    reaped = _reap(process, containment)
     print(
         "pytest did not produce a session result within "
         f"{timeout_s:g}s; tree_reaped={str(reaped).lower()} {context}",
@@ -415,12 +378,12 @@ def _await_pytest_exit(
             time.sleep(_POLL_SECONDS)
     finally:
         if process.poll() is None:
-            _terminate(containment, process)
+            _reap(process, containment)
         else:
             containment.close()
 
 
-def run_pytest(
+def _run_pytest(
     pytest_args: Sequence[str],
     *,
     exit_timeout_s: float,
@@ -444,7 +407,6 @@ def run_pytest(
         token = secrets.token_hex(32)
         endpoint = f"127.0.0.1:{port}:{token}"
         process = _spawn_pytest_process(pytest_args, containment, endpoint)
-        _assign_pytest_process(process, containment)
 
         return _await_pytest_exit(
             process,
@@ -476,7 +438,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if pytest_args[:1] == ["--"]:
         pytest_args.pop(0)
     try:
-        return run_pytest(
+        return _run_pytest(
             pytest_args,
             exit_timeout_s=args.exit_timeout,
             run_timeout_s=args.run_timeout,

@@ -4,36 +4,30 @@ The deletion saga's promise is narrow and load-bearing: control state stays
 authoritative until every store is clean, so an interrupted delete resumes one
 durable saga, a replayed delete does not delete twice, a thread under teardown
 stays hidden, and control rows are removed only after the checkpoint and
-artifact cleanup finish. These drive the real coordinator against a real SQLite
+replay-store cleanup finish. These drive the real coordinator against a real SQLite
 control database and a real AsyncSqliteSaver checkpoint store - no mocks - and
 assert on the rows and checkpoints that survive.
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ...authoring._tool_calls import ToolCallJournal, tool_call_journal_path
-from ...conftest import materialize_schema
-from ...testing import settings_override
+from ...testing import seed_journaled_thread, settings_override
 from ...tests._checkpoint_seeding import real_checkpoint
-from ...tests._write_authority import make_test_write_authority
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ...control.repositories import (
+from ...control.deletion_saga import (
     CleanupItem,
     CleanupItemResult,
     CleanupItemState,
@@ -44,36 +38,10 @@ from ...control.repositories import (
 )
 from ...control.thread_service import DeleteResult, delete_thread_service
 from ...database import (
-    create_artifact,
-    create_control_action,
-    create_thread,
+    ThreadDeletionSagaModel,
     get_thread,
 )
-from ...database.models import ThreadDeletionSagaModel
 from ...thread.enums import CleanupKind, ThreadStatus
-
-
-@pytest_asyncio.fixture
-async def session_factory(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    case_dir = tmp_path_factory.mktemp("deletion-saga-control-db")
-    materialize_schema(Path(case_dir / "test.db"))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{case_dir / 'test.db'}")
-    yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    await engine.dispose()
-
-
-@pytest_asyncio.fixture
-async def checkpointer(
-    tmp_path_factory: pytest.TempPathFactory,
-) -> AsyncIterator[AsyncSqliteSaver]:
-    case_dir = tmp_path_factory.mktemp("deletion-saga-checkpoints")
-    async with AsyncSqliteSaver.from_conn_string(
-        str(case_dir / "checkpoints.db")
-    ) as saver:
-        await saver.setup()
-        yield saver
 
 
 def _config(thread_id: str, namespace: str = "") -> RunnableConfig:
@@ -98,52 +66,21 @@ async def _checkpoint_present(checkpointer: AsyncSqliteSaver, thread_id: str) ->
     return await checkpointer.aget_tuple(_config(thread_id)) is not None
 
 
-async def _create_terminal_thread(
-    session: AsyncSession, thread_id: str, *, metadata: str | None = None
-) -> None:
-    authority = make_test_write_authority()
-    await create_thread(
-        session,
-        write_authority=authority,
-        thread_id=thread_id,
-        status=ThreadStatus.COMPLETED,
-        metadata=metadata,
-    )
-    await create_control_action(
-        session,
-        thread_id=thread_id,
-        action_type=authority.action_type,
-        dispatch_id=authority.action_receipt_id,
-        idempotency_key=f"thread-create:{thread_id}",
-        recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
+async def _create_terminal_thread(session: AsyncSession, thread_id: str) -> None:
+    await seed_journaled_thread(
+        session, thread_id=thread_id, status=ThreadStatus.COMPLETED
     )
 
 
 @pytest.mark.asyncio
-async def test_delete_removes_checkpoint_and_artifact_end_to_end(
+async def test_delete_removes_checkpoint_and_rows_end_to_end(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
-    tmp_path: Path,
 ) -> None:
-    """A terminal thread's checkpoint, artifact file, and rows are all removed."""
-    workspace = tmp_path / "workspace"
-    (workspace / "outputs").mkdir(parents=True)
-    artifact_file = workspace / "outputs" / "report.md"
-    artifact_file.write_text("body", encoding="utf-8")
-
+    """A terminal thread's checkpoint and rows are all removed."""
     await _write_checkpoint(checkpointer, "t-e2e", "cp-e2e")
     async with session_factory() as session:
-        await _create_terminal_thread(
-            session,
-            "t-e2e",
-            metadata=json.dumps({"workspace_root": workspace.as_posix()}),
-        )
-        await create_artifact(
-            session,
-            thread_id="t-e2e",
-            artifact_type="file",
-            path="outputs/report.md",
-        )
+        await _create_terminal_thread(session, "t-e2e")
         await session.commit()
 
     async with session_factory() as session:
@@ -152,7 +89,6 @@ async def test_delete_removes_checkpoint_and_artifact_end_to_end(
         )
 
     assert result.deleted is True
-    assert not artifact_file.exists()
     assert await _checkpoint_present(checkpointer, "t-e2e") is False
     async with session_factory() as session:
         assert await get_thread(session, "t-e2e") is None
@@ -347,40 +283,34 @@ async def test_a_delete_racing_a_live_pass_does_not_run_a_second_teardown(
 
 @pytest.mark.asyncio
 async def test_a_permanently_failing_item_stops_wedging_the_thread(
-    session_factory: async_sessionmaker[AsyncSession], checkpointer: AsyncSqliteSaver
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    tmp_path: Path,
 ) -> None:
     """Retries of an unremovable item end in a finalized delete, not a wedge.
 
-    The cleanup item here can never succeed: it was recorded against a
-    workspace root the target no longer sits under, so every pass refuses it as
-    an escaping path. Without a bound the thread would stay hidden from every
-    product read for the life of the deployment. Each retry drives the real
-    service against the real stores.
+    The replay item the production manifest captures here can never succeed:
+    its store root is a regular file rather than a directory, so every pass
+    refuses to retire it. Without a bound the thread would stay hidden from
+    every product read for the life of the deployment. Each retry drives the
+    real service against the real stores.
     """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".vaultspec-authoring-calls").write_text("file", encoding="utf-8")
     async with session_factory() as session:
         await _create_terminal_thread(session, "t-wedge")
-        await create_deletion_saga(
-            session,
-            thread_id="t-wedge",
-            manifest=[
-                CleanupItem(
-                    kind=CleanupKind.ARTIFACT_FILE,
-                    key="artifact:gone",
-                    target="/elsewhere/out/report.md",
-                    root="/ws",
-                )
-            ],
-        )
         await session.commit()
 
     outcomes: list[DeleteResult] = []
-    for _ in range(3):
-        async with session_factory() as session:
-            outcomes.append(
-                await delete_thread_service(
-                    session, "t-wedge", checkpointer=checkpointer
+    with settings_override(a2a_home=tmp_path / "state", workspace_root=workspace):
+        for _ in range(3):
+            async with session_factory() as session:
+                outcomes.append(
+                    await delete_thread_service(
+                        session, "t-wedge", checkpointer=checkpointer
+                    )
                 )
-            )
 
     assert [outcome.deleted for outcome in outcomes] == [False, False, True]
     assert [outcome.cleanup_incomplete for outcome in outcomes] == [True, True, False]

@@ -16,18 +16,16 @@ import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
-from pydantic import TypeAdapter
 
 from ..authoring import (
     AuthoringClient,
-    AuthoringResponse,
     DocumentProposalSubmitter,
     PhaseAuthoringSpec,
-    mint_actor_token,
 )
 from ..graph.compiler import compile_team_graph
 from ..providers.factory import ProviderFactory
 from ..team import load_agent_config, load_team_config
+from ..testing import deterministic_model_assignment, mint_raw_token
 from ..thread.actor_tokens import ActorTokenBundle
 from ..worker.token_store import RunTokenStore
 
@@ -59,14 +57,6 @@ class _PromptReceipt(BaseCallbackHandler):
     ) -> None:
         del serialized, kwargs
         self.calls.extend(list(call) for call in messages)
-
-
-def _raw_actor_token(response: AuthoringResponse) -> str:
-    """Read the engine's untyped envelope without propagating unknown data."""
-    payload = TypeAdapter(dict[str, object]).validate_python(response.data)
-    raw_token = payload.get("raw_token")
-    assert isinstance(raw_token, str) and raw_token
-    return raw_token
 
 
 def _production_phase_specs() -> dict[str, PhaseAuthoringSpec]:
@@ -103,27 +93,12 @@ async def _live_token_store(
     tokens: dict[str, str] = {}
     async with AuthoringClient(base_url, bearer) as client:
         for spec in phase_specs.values():
-            minted = await mint_actor_token(
-                client,
-                actor_id=f"agent:{spec.document_role}-{thread_id}",
-                kind="agent",
+            tokens[spec.document_role] = await mint_raw_token(
+                client, f"agent:{spec.document_role}-{thread_id}", "agent"
             )
-            assert isinstance(minted, AuthoringResponse)
-            tokens[spec.document_role] = _raw_actor_token(minted)
     store = RunTokenStore()
     store.register(thread_id, ActorTokenBundle(tokens=tokens, engine_bearer=bearer))
     return store
-
-
-def _frozen_deterministic_assignment(agent_ids: list[str]) -> dict[str, dict[str, str]]:
-    """Pin every preset worker to the real in-process deterministic provider."""
-    return {
-        agent_id: {
-            "provider": "deterministic",
-            "model_name": "deterministic",
-        }
-        for agent_id in agent_ids
-    }
 
 
 def _document_state(thread_id: str, feature: str, workspace_root: str) -> TeamState:
@@ -188,9 +163,8 @@ async def test_compiled_document_graph_receives_conventions_via_runtime_config(
         provider_factory=ProviderFactory(),
         checkpointer=InMemorySaver(),
         workspace_root=workspace,
-        feature_tag=feature,
         proposal_submitter=proposal_submitter,
-        model_assignment=_frozen_deterministic_assignment(list(agent_configs)),
+        model_assignment=deterministic_model_assignment(team),
     )
     receipt = _PromptReceipt()
     config: RunnableConfig = {

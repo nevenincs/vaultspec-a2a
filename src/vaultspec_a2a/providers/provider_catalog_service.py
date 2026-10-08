@@ -8,24 +8,28 @@ from collections import OrderedDict
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Final
 
 from ..graph.enums import Provider
+from ._catalog_discovery import unavailable_catalog
 from .cli_resolution import ProviderRuntimeUnavailableReason
 from .factory import (
     ProviderCatalogRegistration,
     ProviderFactory,
 )
+from .in_process_catalog import in_process_lane
 from .lane_admission import (
     catalog_lane_admission_reason,
     is_catalog_lane_admissible,
 )
 from .provider_catalog import (
+    MAX_CONTROL_ID_LENGTH,
+    MAX_PUBLIC_ID_LENGTH,
     AdmissionState,
     AuthenticationState,
     CacheFreshness,
     CatalogRefreshCache,
     CatalogRefreshSuppressedError,
-    CatalogState,
     CatalogStatus,
     HealthState,
     ProviderCatalog,
@@ -37,7 +41,9 @@ from .provider_catalog import (
 
 logger = logging.getLogger(__name__)
 
-PROVIDER_CATALOG_CACHE_TTL = timedelta(minutes=5)
+# Lanes report no expiry of their own, so the service TTL - this default unless a
+# caller passes another - alone decides when a served catalog goes stale.
+PROVIDER_CATALOG_CACHE_TTL: Final = timedelta(minutes=5)
 _MAX_WORKSPACE_SCOPES = 16
 _DISPLAY_NAMES = {
     Provider.ANTIGRAVITY: "Antigravity",
@@ -47,12 +53,6 @@ _DISPLAY_NAMES = {
     Provider.OPENAI: "OpenAI",
     Provider.ZAI: "Z.ai",
     Provider.ZHIPU: "Zhipu AI",
-    # The in-process lanes name themselves as such wherever they are displayed.
-    # They are served only to a deployment that armed them, but a served lane is
-    # a lane a human can read, and one that returns fixed or replayed content
-    # must not be presentable as an ordinary provider.
-    Provider.DETERMINISTIC: "Deterministic (in-process)",
-    Provider.MOCK: "Mock (in-process tape replay)",
 }
 
 
@@ -214,16 +214,7 @@ class ProviderCatalogService:
         configured = scope.configured.get(key, HealthState.UNKNOWN)
         transport = scope.transport.get(key, HealthState.UNKNOWN)
         if snapshot is None:
-            now = datetime.now(UTC)
-            catalog = ProviderCatalog(
-                key=key,
-                state=CatalogState(
-                    status=CatalogStatus.UNAVAILABLE,
-                    checked_at=now,
-                    reason="provider catalog refresh failed",
-                ),
-                models=(),
-            )
+            catalog = unavailable_catalog(key, reason="provider catalog refresh failed")
         else:
             state = snapshot.catalog.state
             status = state.status
@@ -263,9 +254,13 @@ class ProviderCatalogService:
             key, catalog, authentication, configured, transport, binary_reason
         )
         provider = Provider(key.provider_id)
+        # An in-process lane names itself, as in-process, through its registration.
+        lane = in_process_lane(provider)
         return ProviderRecord(
             provider_id=key.provider_id,
-            display_name=_DISPLAY_NAMES[provider],
+            display_name=(
+                lane.display_name if lane is not None else _DISPLAY_NAMES[provider]
+            ),
             execution_mode=key.execution_mode,
             health=health,
             catalog=catalog,
@@ -343,7 +338,26 @@ def _health_for(
     )
 
 
+def stamp_catalog_expiry(catalog: ProviderCatalog) -> ProviderCatalog:
+    """Return *catalog* expiring one service TTL after it was checked.
+
+    The service stamps every record it serves from its refresh cache. A catalog
+    taken straight from a lane never passed through it, so it carries no expiry,
+    and selection freezing refuses a catalog that cannot expire.
+    """
+    state = catalog.state
+    return replace(
+        catalog,
+        state=replace(state, expires_at=state.checked_at + PROVIDER_CATALOG_CACHE_TTL),
+    )
+
+
 def _valid_public_id(value: str, *, max_length: int) -> bool:
+    # Discovery is the producer of every public id, so it refuses more than the
+    # published pattern does: ``isprintable`` also rejects C1 controls, bidi
+    # overrides and zero-width characters a dashboard would render deceptively,
+    # and it rejects everything the pattern rejects, so a served id always
+    # satisfies the contract.
     return (
         value == value.strip() and 0 < len(value) <= max_length and value.isprintable()
     )
@@ -368,7 +382,9 @@ def _catalog_public_ids(catalog: ProviderCatalog) -> tuple[str, ...]:
 def validate_public_catalog_bounds(catalog: ProviderCatalog) -> None:
     """Reject one unsafe lane before it can poison the whole public response."""
     public_ids = _catalog_public_ids(catalog)
-    if not all(_valid_public_id(value, max_length=512) for value in public_ids):
+    if not all(
+        _valid_public_id(value, max_length=MAX_PUBLIC_ID_LENGTH) for value in public_ids
+    ):
         raise ValueError("catalog contains an invalid public identifier")
     control_ids = (
         *(control.control_id for control in catalog.native_controls),
@@ -378,7 +394,10 @@ def validate_public_catalog_bounds(catalog: ProviderCatalog) -> None:
             for control_id in model.native_control_ids
         ),
     )
-    if not all(_valid_public_id(value, max_length=128) for value in control_ids):
+    if not all(
+        _valid_public_id(value, max_length=MAX_CONTROL_ID_LENGTH)
+        for value in control_ids
+    ):
         raise ValueError("catalog contains an invalid public control identifier")
 
 
@@ -386,5 +405,6 @@ __all__ = [
     "PROVIDER_CATALOG_CACHE_TTL",
     "ProviderCatalogScopeCapacityError",
     "ProviderCatalogService",
+    "stamp_catalog_expiry",
     "validate_public_catalog_bounds",
 ]

@@ -32,14 +32,10 @@ reach past the seam.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-import pytest_asyncio
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...authoring.contract import DOCUMENT_AUTHORING_ROLES
 from ...providers.lane_admission import is_web_lane_proven
@@ -49,19 +45,19 @@ from ...team.team_config import (
     load_agent_config,
     load_team_config,
 )
+from ...testing import deterministic_model_assignment, simulator_command
 from .._compiler_prompts import (
     WEB_GROUNDING_MARKER,
     compose_persona_prompt,
     web_grounding_text,
 )
 from ..compiler import compile_team_graph
-from .conftest import deterministic_model_assignment
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from pathlib import Path
 
-SIMULATOR_PATH = Path(__file__).parent / "acp_simulator.py"
-PYTHON_EXE = sys.executable
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
 
 #: The lanes the compiled runs below declare, one per stance. Named rather than
 #: derived from the declaration so the run is reproducible, but every expectation
@@ -156,14 +152,12 @@ class _SimulatorProviderFactory:
         prompt_file = self.record_dir / f"{agent_id}.prompt.json"
         self.prompt_files[agent_id] = prompt_file
         return AcpChatModel(
-            command=[
-                PYTHON_EXE,
-                str(SIMULATOR_PATH),
+            command=simulator_command(
                 "--response",
                 "PASS",
                 "--record-session-prompt",
                 str(prompt_file),
-            ],
+            ),
             # An armed run always carries its lane token; without it the spawn's
             # config-home isolation does not engage.
             env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},
@@ -181,13 +175,6 @@ class _RecordingSubmitter:
     async def __call__(self, state: Any, phase: str) -> str:
         self.phases.append(phase)
         return f"prop-{phase}"
-
-
-@pytest_asyncio.fixture
-async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
-        await saver.setup()
-        yield saver
 
 
 def _prompt_text(prompt_file: Path) -> str:

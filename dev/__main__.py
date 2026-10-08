@@ -24,7 +24,7 @@ import sys
 import textwrap
 from typing import assert_never
 
-from dev.exit_codes import advisory_result, selection_result
+from dev.exit_codes import FAILED, OK, advisory_result, selection_result
 from dev.runner import Cmd, Echo, Ref, ToolOrDocker, run, run_tool_or_docker
 from dev.toolchain import (
     DEFAULTS,
@@ -34,6 +34,8 @@ from dev.toolchain import (
     find_verb,
     public_targets,
 )
+
+__all__ = ["main"]
 
 HELP_TOKENS = frozenset({"help", "--help", "-h"})
 WRAP_WIDTH = 88
@@ -91,9 +93,9 @@ def _execute(verb: Verb, target: Target) -> int:
     Returns:
         For an advisory target, 0 when its tools ran (findings and all) and
         ADVISORY_BROKEN when one failed to run. Otherwise the code of the first
-        failing step (or of the last failing step when ``keep_going`` is set).
+        failing step; ``keep_going`` decides only whether later steps still run.
     """
-    worst = 0
+    worst = OK
     for step in target.steps:
         match step:
             case Echo():
@@ -107,7 +109,7 @@ def _execute(verb: Verb, target: Target) -> int:
                         f"'{step.target}'",
                         file=sys.stderr,
                     )
-                    return 1
+                    return FAILED
                 code = _execute(verb, referenced)
             case ToolOrDocker():
                 code = run_tool_or_docker(step)
@@ -125,7 +127,7 @@ def _execute(verb: Verb, target: Target) -> int:
                 break
 
     worst = selection_result(worst)
-    return advisory_result(worst, target.findings_codes) if target.advisory else worst
+    return advisory_result(worst) if target.advisory else worst
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -141,26 +143,26 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args or args[0] in HELP_TOKENS:
         _print_root_help()
-        return 0
+        return OK
 
     verb_name, *rest = args
     verb = find_verb(verb_name)
     if verb is None:
         print(f"unknown verb: {verb_name}", file=sys.stderr)
         print(f"  verbs: {' '.join(v.name for v in VERBS)}", file=sys.stderr)
-        return 1
+        return FAILED
 
     target_name = rest[0] if rest else DEFAULTS.get(verb.name, "all")
 
     if target_name in HELP_TOKENS:
         _print_verb_help(verb)
-        return 0
+        return OK
 
     target = verb.find(target_name)
     if target is None or target.name.startswith("_"):
         print(f"unknown {verb.name} target: {target_name}", file=sys.stderr)
         print(f"  targets: {' '.join(public_targets(verb))}", file=sys.stderr)
-        return 1
+        return FAILED
 
     return _execute(verb, target)
 

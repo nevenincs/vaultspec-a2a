@@ -13,14 +13,14 @@ composes the recovery snapshot, active-run discovery projects bounded durable
 identities, and the operator verbs roll up cancel, preset listing, and health.
 
 The run-start models expose ``start``, ``prepare``, ``commit``, and ``release``
-for :mod:`vaultspec_a2a.api.routes.gateway`. Commit binds the exact role set to
-the exact replay request. ``lease_id`` is non-secret coordination metadata, not
-a bearer credential; release applies only to an uncommitted reservation.
+for the run-start verb mounted by :mod:`vaultspec_a2a.api.routes`. Commit binds
+the exact role set to the exact replay request. ``lease_id`` is non-secret
+coordination metadata, not a bearer credential; release applies only to an
+uncommitted reservation.
 """
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal
@@ -28,59 +28,95 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ...context.metadata import ThreadMetadata
-from ...control.worker_status import WorkerConnectionStatus
-from ...graph.enums import SemanticPhase
-from ...providers.conditions import ProviderCondition
-from ...team.preset_origin import PresetOrigin
-from ...team.team_config import AuthoringCapability, DocumentCapability, TopologyType
-from ...thread.actor_tokens import MAX_ROLES_PER_RUN, ActorTokenBundle
-from ...thread.clarification import (
-    MAX_QUESTIONS_PER_REQUEST,
-    MAX_RUN_MESSAGE_CHARS,
-    AnswerText,
-    ClarificationRequest,
-    ContinuationPrompt,
-    QuestionId,
-)
-from ...thread.constants import MAX_FEATURE_TAG_LENGTH
-from ...thread.dispatch_policy import FailureType
-from ...thread.enums import (
-    ApprovalStatus,
-    CleanupKind,
-    RepairStatus,
-    ThreadStatus,
-    TranscriptAvailability,
-)
-from .gateway_readiness import (
+from ...control.readiness import (
     API_VERSION as _API_VERSION,
 )
-from .gateway_readiness import (
+from ...control.readiness import (
     DesktopReadiness,
     ProviderEligibility,
     RunAdmission,
     WorkerLifecycleState,
 )
-from .snapshots import ThreadStateSnapshot
+from ...control.worker_status import WorkerConnectionStatus
+from ...graph.enums import ProviderCondition, SemanticPhase
+from ...providers.provider_catalog import (
+    MAX_CONTROL_ID_LENGTH,
+    MAX_CONTROLS,
+    MAX_DISPLAY_LENGTH,
+    MAX_FALLBACKS,
+    MAX_PUBLIC_ID_LENGTH,
+    MAX_TEXT_LENGTH,
+)
+from ...team.preset_origin import PresetOrigin
+from ...team.team_config import AuthoringCapability, DocumentCapability, TopologyType
+from ...thread.actor_tokens import MAX_ROLES_PER_RUN, ActorTokenBundle
+from ...thread.clarification import (
+    MAX_QUESTIONS_PER_REQUEST,
+    AnswerText,
+    ClarificationRequest,
+    ContinuationPrompt,
+    QuestionId,
+)
+from ...thread.constants import (
+    MAX_AGENT_ID_CHARS,
+    MAX_CALLEE_CHARS,
+    MAX_DISCOVERY_RESULTS,
+    MAX_FEATURE_TAG_LENGTH,
+    MAX_FEEDBACK_BATCH_ID_CHARS,
+    MAX_NICKNAME_CHARS,
+    MAX_PERMISSION_OPTION_ID_CHARS,
+    MAX_ROLE_ID_CHARS,
+    MAX_RUN_ID_CHARS,
+    MAX_RUN_MESSAGE_CHARS,
+    MAX_RUN_TITLE_CHARS,
+    MAX_SOURCE_BRANCH_CHARS,
+    MAX_TEAM_PRESET_CHARS,
+    RUN_ID_PATTERN,
+)
+from ...thread.dispatch_policy import FailureType
+from ...thread.enums import (
+    ApprovalStatus,
+    CleanupKind,
+    DegradedReason,
+    RepairStatus,
+    ThreadStatus,
+    TranscriptAvailability,
+)
+from ...thread.snapshots import (
+    ApprovalRequestId,
+    QueuedMessageCount,
+    RepairReason,
+    ThreadStateSnapshot,
+)
 
-# ``MAX_RUN_MESSAGE_CHARS`` is imported to BOUND a field, not to be republished:
-# the bound belongs to ``thread.clarification`` beside the continuation prompt it
-# also bounds, and being carried on the wire does not make this a second home.
 __all__ = [
     "ActiveRunRecord",
     "ActiveRunsResponse",
+    "FrozenTeamAssignmentSummary",
+    "GatewayHealthResponse",
     "PathSafeRunId",
     "PresetSummary",
     "PresetsListResponse",
     "ProviderCatalogSelection",
     "RoleState",
+    "RunAgentSummary",
+    "RunArchiveResponse",
     "RunCancelResponse",
     "RunClarificationRespondRequest",
     "RunClarificationRespondResponse",
     "RunCommitResponse",
+    "RunDeleteResponse",
+    "RunHistoryResponse",
     "RunMessageRefusalCode",
     "RunMessageRefusalDetail",
     "RunMessageRefusalResponse",
+    "RunMessageRequest",
+    "RunMessageResponse",
+    "RunPendingPermission",
+    "RunPermissionDecision",
     "RunPermissionRefusalResponse",
+    "RunPermissionRespondRequest",
+    "RunPermissionRespondResponse",
     "RunPrepareResponse",
     "RunReleaseResponse",
     "RunStage",
@@ -90,27 +126,44 @@ __all__ = [
     "RunSummariesResponse",
     "RunSummaryRecord",
     "ServiceStateResponse",
+    "TeamStatusV1Response",
     "TerminalSettlement",
     "TopologyPosition",
 ]
 
-_PATH_SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,127}$")
+# The run identity type, shared by the reservation identity (the server-minted
+# opaque handle for a prepared admission slot) and the lease identity (the
+# non-secret, run-scoped handle the dashboard revokes at terminal settlement).
+# Both are minted in the run-id path-safe shape so they are addressable and
+# log-safe, and neither is ever a bearer.
 PathSafeRunId = Annotated[
     str,
-    Field(min_length=1, max_length=128, pattern=_PATH_SAFE_RUN_ID.pattern),
+    Field(min_length=1, max_length=MAX_RUN_ID_CHARS, pattern=RUN_ID_PATTERN),
 ]
-# A reservation identity is a server-minted opaque handle for a prepared
-# admission slot; a lease identity is the non-secret, run-scoped handle the
-# dashboard revokes at terminal settlement. Both share the run-id path-safe
-# shape so they are addressable and log-safe, and neither is ever a bearer.
-ReservationId = Annotated[
-    str,
-    Field(min_length=1, max_length=128, pattern=_PATH_SAFE_RUN_ID.pattern),
-]
-LeaseId = Annotated[
-    str,
-    Field(min_length=1, max_length=128, pattern=_PATH_SAFE_RUN_ID.pattern),
-]
+
+# Bounds local to one field below, named so none of them is a bare literal: a
+# number with no name invites a sibling restating it by coincidence rather
+# than by reference, and a reviewer comparing two fields sees a name repeat
+# or not rather than guessing whether two literals were meant to agree.
+
+#: The frozen-assignment digest is a SHA-256 hex string, optionally prefixed
+#: ``sha256:``: 64 characters bare, 71 with the 7-character prefix. Both
+#: lengths come from the pattern :data:`FrozenTeamAssignmentSummary.digest`
+#: already enforces, not an independent choice.
+_DIGEST_MIN_CHARS: int = 64
+_DIGEST_MAX_CHARS: int = 71
+
+#: How many deferred/blocked-admission reasons one prepare response lists.
+_MAX_ADMISSION_REASON_COUNT: int = 16
+
+#: A refused follow-up's operator-readable sentence.
+_MAX_REFUSAL_MESSAGE_CHARS: int = 1024
+
+#: A reviewer's optional comment on a permission answer.
+_MAX_PERMISSION_NOTES_CHARS: int = 2048
+
+#: The unarmed-profile health probe's status label.
+_MAX_HEALTH_STATUS_CHARS: int = 32
 
 
 class ProviderCatalogSelection(BaseModel):
@@ -119,14 +172,14 @@ class ProviderCatalogSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[1]
-    provider_id: str = Field(min_length=1, max_length=512)
-    execution_mode: str = Field(min_length=1, max_length=512)
-    catalog_revision: str = Field(min_length=1, max_length=512)
-    entry_id: str = Field(min_length=1, max_length=512)
+    provider_id: str = Field(min_length=1, max_length=MAX_PUBLIC_ID_LENGTH)
+    execution_mode: str = Field(min_length=1, max_length=MAX_PUBLIC_ID_LENGTH)
+    catalog_revision: str = Field(min_length=1, max_length=MAX_PUBLIC_ID_LENGTH)
+    entry_id: str = Field(min_length=1, max_length=MAX_PUBLIC_ID_LENGTH)
     controls: dict[
-        Annotated[str, Field(min_length=1, max_length=128)],
-        Annotated[str, Field(min_length=1, max_length=512)],
-    ] = Field(default_factory=dict, max_length=32)
+        Annotated[str, Field(min_length=1, max_length=MAX_CONTROL_ID_LENGTH)],
+        Annotated[str, Field(min_length=1, max_length=MAX_PUBLIC_ID_LENGTH)],
+    ] = Field(default_factory=dict, max_length=MAX_CONTROLS)
 
 
 class RunStage(StrEnum):
@@ -159,10 +212,10 @@ class RunStartRequest(BaseModel):
     stage: RunStage = RunStage.START
     # The prepared reservation a ``commit`` binds to. Required on ``commit``,
     # forbidden on ``prepare`` and ``start`` (there is nothing to bind yet).
-    reservation_id: ReservationId | None = None
+    reservation_id: PathSafeRunId | None = None
     # A non-empty preset is mandatory on the v1 verb: the engine-facing contract
     # never creates the internal surface's non-dispatched draft.
-    team_preset: str = Field(min_length=1, max_length=64)
+    team_preset: str = Field(min_length=1, max_length=MAX_TEAM_PRESET_CHARS)
     # The opening prompt, bounded at 65536 CHARACTERS - not bytes. The bound is
     # a proxy for LLM token consumption, and tokens track characters, so counting
     # bytes instead would hand a CJK or emoji author a quarter of the prompt an
@@ -177,7 +230,7 @@ class RunStartRequest(BaseModel):
     actor_tokens: ActorTokenBundle | None = None
     metadata: ThreadMetadata | None = None
     autonomous: bool | None = None
-    title: str | None = Field(default=None, max_length=200)
+    title: str | None = Field(default=None, max_length=MAX_RUN_TITLE_CHARS)
     # Target feature tag for document-authoring runs. Bounded; the eligibility
     # policy requires it for document-authoring presets. Falls back to
     # metadata.feature_tag when the field is omitted.
@@ -191,16 +244,19 @@ class RunStartRequest(BaseModel):
     # workspace catalog before admission.
     selection: ProviderCatalogSelection
     overrides: dict[
-        Annotated[str, Field(min_length=1, max_length=63)], ProviderCatalogSelection
-    ] = Field(default_factory=dict, max_length=64)
+        Annotated[str, Field(min_length=1, max_length=MAX_ROLE_ID_CHARS)],
+        ProviderCatalogSelection,
+    ] = Field(default_factory=dict, max_length=MAX_ROLES_PER_RUN)
     fallbacks: list[ProviderCatalogSelection] = Field(
-        default_factory=list, max_length=8
+        default_factory=list, max_length=MAX_FALLBACKS
     )
     # feedback-loop: an OPAQUE engine feedback-batch id for a revision run. a2a
     # never parses or owns batch content; it transports only the id
     # and the worker retrieves the authoritative feedback context from the engine
     # batch read route. Bounded; content-addressed ("feedback-batch:<digest>").
-    feedback_batch_id: str | None = Field(default=None, min_length=1, max_length=256)
+    feedback_batch_id: str | None = Field(
+        default=None, min_length=1, max_length=MAX_FEEDBACK_BATCH_ID_CHARS
+    )
 
     @model_validator(mode="after")
     def _enforce_stage_invariants(self) -> RunStartRequest:
@@ -238,25 +294,27 @@ class RunStartRequest(BaseModel):
 class FrozenNativeControlSummary(BaseModel):
     """One exact provider-native value frozen for historical disclosure."""
 
-    control_id: str = Field(min_length=1, max_length=1024)
-    option_id: str = Field(min_length=1, max_length=1024)
-    provider_value: str = Field(min_length=1, max_length=1024)
-    display_name: str | None = Field(default=None, max_length=256)
-    option_display_name: str | None = Field(default=None, max_length=256)
+    control_id: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    option_id: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    provider_value: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    display_name: str | None = Field(default=None, max_length=MAX_DISPLAY_LENGTH)
+    option_display_name: str | None = Field(default=None, max_length=MAX_DISPLAY_LENGTH)
 
 
 class FrozenExecutionSnapshotSummary(BaseModel):
     """Catalog provenance and exact provider inputs for one execution lane."""
 
-    provider_id: str = Field(min_length=1, max_length=1024)
-    provider_display_name: str | None = Field(default=None, max_length=256)
-    execution_mode: str = Field(min_length=1, max_length=1024)
-    catalog_revision: str = Field(min_length=1, max_length=1024)
-    entry_id: str = Field(min_length=1, max_length=1024)
-    model_name: str = Field(min_length=1, max_length=1024)
-    model_display_name: str | None = Field(default=None, max_length=256)
+    provider_id: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    provider_display_name: str | None = Field(
+        default=None, max_length=MAX_DISPLAY_LENGTH
+    )
+    execution_mode: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    catalog_revision: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    entry_id: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    model_name: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    model_display_name: str | None = Field(default=None, max_length=MAX_DISPLAY_LENGTH)
     controls: list[FrozenNativeControlSummary] = Field(
-        default_factory=list, max_length=32
+        default_factory=list, max_length=MAX_CONTROLS
     )
 
 
@@ -269,10 +327,10 @@ class FrozenSelectionProvenanceSummary(BaseModel):
 class FrozenRoleAssignmentSummary(FrozenExecutionSnapshotSummary):
     """One role's exact primary and ordered fallback execution snapshots."""
 
-    role_id: str = Field(min_length=1, max_length=1024)
-    agent_id: str | None = Field(default=None, max_length=1024)
+    role_id: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    agent_id: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
     fallbacks: list[FrozenExecutionSnapshotSummary] = Field(
-        default_factory=list, max_length=8
+        default_factory=list, max_length=MAX_FALLBACKS
     )
     provenance: FrozenSelectionProvenanceSummary
 
@@ -282,8 +340,8 @@ class FrozenTeamAssignmentSummary(BaseModel):
 
     schema_version: Literal[1] = 1
     digest: str = Field(
-        min_length=64,
-        max_length=71,
+        min_length=_DIGEST_MIN_CHARS,
+        max_length=_DIGEST_MAX_CHARS,
         pattern=r"^(?:sha256:)?[a-f0-9]{64}$",
     )
     assignments: list[FrozenRoleAssignmentSummary] = Field(
@@ -302,8 +360,12 @@ class RunStartResponse(BaseModel):
     # by run-status. Typed by the SAME vocabulary that field answers from, since
     # this is that question asked one moment earlier, not a second one.
     semantic_status: SemanticPhase = SemanticPhase.STARTING
-    # Whether the run was accepted as eligible to dispatch (always True on a 201;
-    # ineligible requests are refused with a 4xx before reaching this response).
+    # The accepted dispatch outcome, and only that: this response exists because
+    # the request passed its own eligibility, the profile admitted native
+    # execution, and the current catalog served the selection this run froze. It
+    # is never a statement about a preset, a profile or a provider lane - an
+    # unsatisfiable request is refused with a 422 and an inadmissible one with a
+    # 503, so a 201 is the only response that can carry it, and it carries True.
     eligible: bool = True
     # The complete execution authority the run was frozen with: the exact served
     # catalog selection that will produce this run's work.
@@ -324,8 +386,8 @@ class RunPrepareResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     stage: Literal["prepared"] = "prepared"
-    reservation_id: ReservationId
-    lease_id: LeaseId
+    reservation_id: PathSafeRunId
+    lease_id: PathSafeRunId
     # The roles commit's actor-token bundle must cover, one per required role.
     required_roles: list[str] = Field(
         default_factory=list, max_length=MAX_ROLES_PER_RUN
@@ -336,7 +398,9 @@ class RunPrepareResponse(BaseModel):
     provider_eligibility: ProviderEligibility
     run_admission: RunAdmission
     # Bounded, path-free reasons explaining a deferred or blocked admission.
-    reasons: list[str] = Field(default_factory=list, max_length=16)
+    reasons: list[str] = Field(
+        default_factory=list, max_length=_MAX_ADMISSION_REASON_COUNT
+    )
 
 
 class RunCommitResponse(BaseModel):
@@ -352,7 +416,7 @@ class RunCommitResponse(BaseModel):
     stage: Literal["committed"] = "committed"
     run_id: PathSafeRunId
     status: str
-    lease_id: LeaseId
+    lease_id: PathSafeRunId
     semantic_status: SemanticPhase = SemanticPhase.STARTING
     nickname: str | None = None
     # As on RunStartResponse, this is the exact execution authority disclosure.
@@ -364,7 +428,7 @@ class RunReleaseResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     stage: Literal["released"] = "released"
-    reservation_id: ReservationId
+    reservation_id: PathSafeRunId
     released: bool
 
 
@@ -388,7 +452,9 @@ class ActiveRunsResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     state: Literal["active", "all"] = "active"
-    runs: list[ActiveRunRecord] = Field(default_factory=list, max_length=100)
+    runs: list[ActiveRunRecord] = Field(
+        default_factory=list, max_length=MAX_DISCOVERY_RESULTS
+    )
     truncated: bool = False
     #: Total matching runs. Present only for the history reading; ``None`` in
     #: discovery, where a capped projection cannot honestly report one.
@@ -413,24 +479,25 @@ class RunSummaryRecord(BaseModel):
     run_id: PathSafeRunId
     status: ThreadStatus
     feature_tag: str | None = Field(default=None, max_length=MAX_FEATURE_TAG_LENGTH)
-    title: str | None = Field(default=None, max_length=200)
-    nickname: str | None = Field(default=None, max_length=128)
-    team_preset: str | None = Field(default=None, max_length=64)
+    title: str | None = Field(default=None, max_length=MAX_RUN_TITLE_CHARS)
+    nickname: str | None = Field(default=None, max_length=MAX_NICKNAME_CHARS)
+    team_preset: str | None = Field(default=None, max_length=MAX_TEAM_PRESET_CHARS)
     # The projection's verdict on this run's recoverability. A caller scanning
     # history for work that needs attention reads these, and they are the whole
     # reason this record exists rather than the discovery one.
     # All three answer from a closed set the service fixes, so they are served
     # as the enumerations that already own them rather than as bounded strings.
-    # ``repair_status`` and ``execution_readiness`` share one vocabulary
-    # deliberately: they ask different questions from the same set of answers.
+    # ``execution_readiness`` is derived from ``repair_status``: it is the same
+    # posture read as whether the run is fit to resume, so the two share one
+    # vocabulary and always agree.
     repair_status: RepairStatus | None = None
     execution_readiness: RepairStatus | None = None
     approval_status: ApprovalStatus | None = None
-    approval_request_id: str | None = Field(default=None, max_length=256)
+    approval_request_id: ApprovalRequestId | None = None
     created_at: datetime
     updated_at: datetime
-    source_branch: str | None = Field(default=None, max_length=256)
-    callee: str | None = Field(default=None, max_length=128)
+    source_branch: str | None = Field(default=None, max_length=MAX_SOURCE_BRANCH_CHARS)
+    callee: str | None = Field(default=None, max_length=MAX_CALLEE_CHARS)
 
 
 class RunSummariesResponse(BaseModel):
@@ -446,7 +513,9 @@ class RunSummariesResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     state: Literal["all"] = "all"
-    runs: list[RunSummaryRecord] = Field(default_factory=list, max_length=100)
+    runs: list[RunSummaryRecord] = Field(
+        default_factory=list, max_length=MAX_DISCOVERY_RESULTS
+    )
     truncated: bool = False
     total: int
 
@@ -475,6 +544,16 @@ class RoleState(BaseModel):
     display_name: str = ""
 
 
+# Two kinds of field below, and the split is the point. The ones carrying a
+# comment are run-status's OWN: the api envelope, the product projections of a
+# position, and the staged-admission identities. Every other field belongs to the
+# Layer-1 run read model (``thread/snapshots.ThreadStateSnapshot``) and is carried
+# here under that type with no second bound, default or vocabulary - a second
+# declaration drifts, and these did: the provider condition reached one surface as
+# its enum and the other as a bare string, and the frame cursor was required on
+# one and defaulted on the other. Why each read-model field exists is documented
+# once, on the read model, and `test_run_status_derives_from_read_model.py` holds
+# the two surfaces to one published shape per shared field.
 class RunStatusResponse(BaseModel):
     """The authoritative recovery snapshot for a run.
 
@@ -482,6 +561,10 @@ class RunStatusResponse(BaseModel):
     position, per-role state, and the engine proposal/changeset ids the run has
     produced, plus the checkpoint cursor and repair posture. Non-authoritative
     SSE progress frames may be lost freely; this snapshot is the source of truth.
+
+    Every relay frame is droppable, so this response is where a reloading client
+    with no live stream recovers the run's failure condition, its queue depth and
+    the question it is parked on.
     """
 
     api_version: Literal["v1"] = _API_VERSION
@@ -500,9 +583,9 @@ class RunStatusResponse(BaseModel):
     proposal_ids: list[str] = Field(default_factory=list)
     changeset_ids: list[str] = Field(default_factory=list)
     approval_status: ApprovalStatus | None = None
-    approval_request_id: str | None = None
+    approval_request_id: ApprovalRequestId | None = None
     checkpoint_id: str | None = None
-    last_sequence: int = 0
+    last_sequence: int
     # Whether this run's progress stream can be RESUMED from the id its frames
     # carry, as opposed to merely re-attached. The two postures are otherwise
     # indistinguishable without probing: a stream that serves no replay emits
@@ -514,69 +597,21 @@ class RunStatusResponse(BaseModel):
     # resumable stream and an authoritative one are different things, and this
     # response remains the authority either way.
     stream_resumable: bool = False
-    # How many follow-up turns this run is holding behind the one it is
-    # running. Read from the control-action journal, which is the authority a
-    # reloading client has to recover from: the progress stream says nothing
-    # about a turn that has not started, and the quiet boundary between two
-    # turns is indistinguishable from a run that has gone idle. Bounded by the
-    # configured per-run continuation depth, so it is a small count and never
-    # a list. Zero for every run that holds nothing, which is most of them.
-    queued_messages: int = Field(default=0, ge=0)
+    queued_messages: QueuedMessageCount = 0
     repair_status: RepairStatus | None = None
     execution_readiness: RepairStatus | None = None
-    # Left as bare strings pending the narrowing, NOT because this list lacks an
-    # owning vocabulary - ``thread.enums.DegradedReason`` declares it - but
-    # because the projection that appends to it is under concurrent revision and
-    # a member added there while this field is narrowed would fail the response
-    # rather than the write. Narrowed once that projection derives from the type.
-    degraded_reasons: list[str] = Field(default_factory=list)
-    # The capped, single-line reason this run last transitioned to FAILED,
-    # sourced from the durable threads.failure_reason column (never a live SSE
-    # frame), so a reloaded panel recovers the SAME reason a connected client
-    # already saw over the relay rather than a bare "failed". Additive; None for
-    # a run that never failed, or one whose failure predates this field.
+    degraded_reasons: list[DegradedReason] = Field(default_factory=list)
     failure_reason: str | None = None
-    # The machine-readable counterpart to the reason above: which member of the
-    # closed provider-condition vocabulary the failure resolved to. The reason
-    # says what happened, this says what the reader should do about it - wait,
-    # re-authenticate, top up, raise a ceiling, or change the request - and a
-    # client that had to derive that from the reason text would be matching
-    # vendor prose, which breaks the moment a vendor rewords a message. Served
-    # as the owning enumeration, which is what makes that promise checkable.
-    #
-    # Authoritative here rather than on the relay, following the same discipline
-    # the pending clarification below follows: the error frame carrying this
-    # value is droppable, so a reloading client with no live stream recovers it
-    # only from this response. Additive; None for a run that never failed, or
-    # one whose failure predates the durable column. The value is a wire
-    # contract shared with the consuming repository and is additive-only.
     provider_condition: ProviderCondition | None = None
-    # Why an OPERATION did not take on a run that is STILL ALIVE - a follow-up
-    # or a resume the worker never received - as opposed to why a run FAILED.
-    # The distinction is not cosmetic and a client must not collapse it: a run
-    # reported here is still parked on its question and may yet complete, so
-    # rendering this as a failure tells a user their run died when it did not.
-    # The two never both describe the same event; a failed run carries
-    # failure_reason and a live one carries this.
-    #
-    # Projected because the paths that write it - an undelivered follow-up, an
-    # undelivered clarification resume - deliberately decline to stamp
-    # failure_reason precisely BECAUSE the run survives. Without this field that
-    # account reached no client at all: durable, and readable by nobody.
-    repair_reason: str | None = Field(default=None, max_length=500)
+    repair_reason: RepairReason | None = None
     frozen_assignment: FrozenTeamAssignmentSummary | None = None
     # Non-secret staged-admission lease identity. It lets the dashboard repair
     # a locally reserved hash bundle after a process crash that followed remote
     # commit but preceded the local binding write.
-    lease_id: LeaseId | None = None
+    lease_id: PathSafeRunId | None = None
     # The persisted prepare reservation paired with ``lease_id``. This lets a
     # dashboard reconcile only the exact local reservation after a lost reply.
-    reservation_id: ReservationId | None = None
-    # The bounded questionnaire this run is currently parked on, read from the
-    # run's own checkpoint. This is the AUTHORITATIVE disclosure of a pending
-    # question: a client that reloaded, or that never saw the progress frame
-    # announcing it, re-renders the questionnaire from here. ``None`` whenever the
-    # run is not waiting on one, which is the overwhelmingly common case.
+    reservation_id: PathSafeRunId | None = None
     pending_clarification: ClarificationRequest | None = None
 
 
@@ -613,6 +648,40 @@ class RunPermissionDecision(BaseModel):
     responded_at: datetime
 
 
+class RunTokenUsage(BaseModel):
+    """Token counts a run's provider lanes reported, summed as recorded.
+
+    Counts, and only counts a lane actually declared. Nothing here is priced or
+    derived: no served lane is metered per token and the project holds no rate
+    table, so a cost field could only ever carry a number nobody measured.
+
+    ``input_tokens`` and ``output_tokens`` are the two counts every lane
+    reports. The other three are the breakdown a lane may or may not report,
+    and they are ``null`` when no recorded turn reported them - which is a
+    different fact from a measured zero and is served as a different value.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
+
+
+class RunUsage(BaseModel):
+    """One run's token accounting, totalled and split by role.
+
+    ``by_role`` is keyed by the role id that spent the tokens, and is scoped to
+    the run being read: a role id names a seat in a team preset rather than one
+    run's agent, so these are this run's rows grouped by seat, never that
+    seat's tokens across every run it ever took. A seat that took no turn is
+    absent rather than present with zeros.
+    """
+
+    total: RunTokenUsage
+    by_role: dict[str, RunTokenUsage] = Field(default_factory=dict)
+
+
 class RunHistoryResponse(BaseModel):
     """The full read of one run, including terminal and archived ones.
 
@@ -636,6 +705,13 @@ class RunHistoryResponse(BaseModel):
     run ends, so without this the record of a decision a human actually made was
     durable in the audit log and readable nowhere - a run could be reviewed whole
     with no trace that anyone had approved anything.
+
+    ``usage`` is the run's token accounting, and is the same kind of disclosure
+    for the same reason: the counts were recorded on every turn and served on no
+    surface at all. It is ``null`` when the run recorded no accounting rows,
+    rather than a zeroed object a reviewer would read as a run that spent
+    nothing. Run-status stays the bounded recovery snapshot and carries none of
+    this, so counts are a cost of the wide read by design.
     """
 
     api_version: Literal["v1"] = _API_VERSION
@@ -645,6 +721,7 @@ class RunHistoryResponse(BaseModel):
     transcript_available: bool
     transcript_status: TranscriptAvailability
     permission_decisions: list[RunPermissionDecision] = Field(default_factory=list)
+    usage: RunUsage | None = None
 
 
 class RunArchiveResponse(BaseModel):
@@ -714,8 +791,8 @@ class RunMessageRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    content: str = Field(min_length=1, max_length=65536)
-    agent_id: str | None = Field(default=None, max_length=128)
+    content: str = Field(min_length=1, max_length=MAX_RUN_MESSAGE_CHARS)
+    agent_id: str | None = Field(default=None, max_length=MAX_AGENT_ID_CHARS)
 
 
 class RunMessageResponse(BaseModel):
@@ -751,13 +828,15 @@ class RunMessageResponse(BaseModel):
 class RunMessageRefusalCode(StrEnum):
     """The conditions a run action can be refused for.
 
-    A closed subset of the dispatch failure vocabulary, so the published
-    contract names only what this refusal can carry rather than every failure
-    the gateway knows. Each value is spelled as its failure-type counterpart.
+    A closed subset of the typed refusal vocabulary, so the published contract
+    names only what a refusal can carry rather than every failure the gateway
+    knows. Each value is spelled as its failure-type counterpart.
 
     Shared by every verb that reaches the worker through a run dispatch, not
     only the follow-up turn: the same worker refusal must mean the same thing
-    whichever verb met it.
+    whichever verb met it. One member instead names a condition run start
+    settles before any dispatch, so a client branches on one code set per verb
+    rather than on a second vocabulary for the pre-dispatch half.
     """
 
     INPUT_REQUIRED = FailureType.INPUT_REQUIRED.value
@@ -769,6 +848,13 @@ class RunMessageRefusalCode(StrEnum):
     # continuation queue, or the service-wide one, is already spent. Distinct
     # from RUN_BUSY, which says the run admits no continuation at all.
     QUEUE_FULL = FailureType.QUEUE_FULL.value
+    # Raised by run start alone: a document-authoring topology on a gateway
+    # that discovered no engine and therefore runs no verdict subscriber. The
+    # run's gates would park on a proposal nothing could resume, so the request
+    # is refused instead of admitted.
+    AUTHORING_SUBSCRIBER_UNAVAILABLE = (
+        FailureType.AUTHORING_SUBSCRIBER_UNAVAILABLE.value
+    )
 
 
 class RunMessageRefusalDetail(BaseModel):
@@ -783,7 +869,7 @@ class RunMessageRefusalDetail(BaseModel):
     """
 
     code: RunMessageRefusalCode
-    message: str = Field(max_length=1024)
+    message: str = Field(max_length=_MAX_REFUSAL_MESSAGE_CHARS)
 
 
 class RunMessageRefusalResponse(BaseModel):
@@ -816,14 +902,14 @@ class RunPermissionRespondRequest(BaseModel):
     themselves were advertised on the versioned progress stream in the
     ``permission_request`` frame that raised the question, so the answer names
     one rather than restating it. ``notes`` survives into the verdict resume
-    payload for a locally-respondable verdict-style pause (D6); it is ignored
+    payload for a locally-respondable verdict-style pause; it is ignored
     for a plain tool-permission response, which resumes on the bare option id.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    option_id: str = Field(min_length=1, max_length=64)
-    notes: str | None = Field(default=None, max_length=2048)
+    option_id: str = Field(min_length=1, max_length=MAX_PERMISSION_OPTION_ID_CHARS)
+    notes: str | None = Field(default=None, max_length=_MAX_PERMISSION_NOTES_CHARS)
 
 
 class RunPermissionRespondResponse(BaseModel):
@@ -891,9 +977,6 @@ class RunClarificationRespondRequest(BaseModel):
         if len(supplied) != 1:
             msg = "exactly one of answers, prompt, or decline is required"
             raise ValueError(msg)
-        if self.prompt is not None and not self.prompt.strip():
-            msg = "prompt must not be blank"
-            raise ValueError(msg)
         return self
 
 
@@ -939,8 +1022,6 @@ class PresetSummary(BaseModel):
     # either, so a wrong value here misinforms a reader rather than refusing a
     # run. See the owning module on the topology-versus-role keying question.
     authoring_capability: AuthoringCapability | None = None
-    # True for bundled mock/test presets so the product layer can exclude them.
-    is_mock: bool = False
     # The origin and document outputs are descriptive preset facts.
     origin: PresetOrigin | None = None
     supported_capabilities: list[DocumentCapability] = Field(default_factory=list)
@@ -951,6 +1032,36 @@ class PresetsListResponse(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     presets: list[PresetSummary] = Field(default_factory=list)
+
+
+class GatewayHealthResponse(BaseModel):
+    """The unarmed profile's probe body on ``GET /health``.
+
+    Declared because this is the one surface an external prober has, and it
+    was published as an untyped object: a reader of the contract learned no
+    field name, no status vocabulary, and no way to tell this body from the
+    armed profile's minimal liveness one.
+
+    Open on purpose. The fields below are the ones the endpoint itself
+    guarantees on every answer, including the degraded answer it gives when a
+    runtime singleton is missing; the probe aggregate carries further
+    dependency checks whose set depends on what this build probes, and
+    publishing them as a closed shape would promise a client a stability the
+    aggregate does not have. ``additionalProperties`` says so rather than
+    leaving the whole body unnamed.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    service: Literal["gateway"] = "gateway"
+    #: The probe verdict across every dependency this build checks.
+    status: str = Field(max_length=_MAX_HEALTH_STATUS_CHARS)
+    #: The NARROWER local question: is this gateway's own worker usable. Not a
+    #: restatement of ``status``; see the endpoint for why the two differ.
+    ready: bool
+    #: The live process id, so a lifecycle caller can confirm the owner of a
+    #: discovery record is the process answering here.
+    pid: int
 
 
 class ServiceStateResponse(BaseModel):
@@ -1015,7 +1126,7 @@ class ServiceStateResponse(BaseModel):
     # constant, so under this contract they are prose and not a vocabulary.
     degraded_reasons: list[str] = Field(default_factory=list)
     # Sorted "METHOD path" signature of the live route table (see
-    # ``route_signature`` in ``api.routes.gateway``). The doctor CLI diffs this
+    # ``route_signature``, exported by ``api.routes``). The doctor CLI diffs this
     # against the installed source's expected signature to catch a resident
     # process started before a route landed - there is no hot-reload, so a
     # stale resident silently 404s otherwise.
@@ -1041,7 +1152,7 @@ class TerminalSettlement(BaseModel):
 
     api_version: Literal["v1"] = _API_VERSION
     run_id: PathSafeRunId
-    lease_id: LeaseId
+    lease_id: PathSafeRunId
     terminal_status: ThreadStatus
 
 

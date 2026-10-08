@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from ...control.state_layout import DISCOVERY_RECORD, StateLayout
 from ...providers._factory_commands import (
     capsule_acp_entry,
     capsule_claude_executable,
@@ -20,8 +21,8 @@ from .._platform_acl import path_is_owner_restricted
 from ..profile import (
     DesktopProfile,
     DesktopProfileError,
-    DesktopStatePaths,
     derive_state_paths,
+    provisioned_directories,
 )
 
 
@@ -51,8 +52,8 @@ def test_derive_state_paths_are_absolute_and_seated_under_app_home(
     app_home = tmp_path / "app"
     state = derive_state_paths(app_home)
 
-    assert isinstance(state, DesktopStatePaths)
-    assert state.app_home == app_home
+    assert isinstance(state, StateLayout)
+    assert state.home == app_home
     for path in (
         state.database_path,
         state.checkpoint_path,
@@ -72,9 +73,9 @@ def test_derive_state_paths_are_absolute_and_seated_under_app_home(
     assert state.database_path.parent == state.checkpoint_path.parent
 
     # Seated paths mirror the operative a2a_home conventions: runtime logs and the
-    # discovery service.json at the application-home root.
+    # discovery record at the application-home root.
     assert state.logs_dir == app_home / "runtime"
-    assert state.discovery_path == app_home / "service.json"
+    assert state.discovery_path == app_home / DISCOVERY_RECORD
 
 
 def test_derive_state_paths_rejects_relative_app_home() -> None:
@@ -204,7 +205,7 @@ def test_ensure_restricts_the_state_directories_to_their_owner(
 
     profile.ensure()
 
-    for directory in profile.state.provisioned_directories:
+    for directory in provisioned_directories(profile.state):
         assert path_is_owner_restricted(directory), (
             f"{directory} is not owner-restricted"
         )
@@ -219,10 +220,10 @@ def test_ensure_materialises_only_provisioned_directories(tmp_path: Path) -> Non
     profile.ensure()
     profile.ensure()  # idempotent second pass must not raise.
 
-    for directory in state.provisioned_directories:
+    for directory in provisioned_directories(state):
         assert directory.is_dir()
 
-    # Reserved directories have no consumer yet and must not be seeded empty.
+    # Directories ``ensure`` does not provision must not be seeded empty.
     for reserved in (
         state.credentials_dir,
         state.receipts_dir,

@@ -33,6 +33,8 @@ if TYPE_CHECKING:
     from langchain_core.tracers.schemas import Run
     from langchain_protocol.protocol import MessagesData
 
+__all__ = ["ProcessChatModel"]
+
 type _Listener = Callable[[Run], None] | Callable[[Run, RunnableConfig], None] | None
 
 

@@ -17,15 +17,15 @@ import pytest
 from fastapi import HTTPException
 
 from ...api.thread_stream import ThreadStreamRequest, build_thread_stream_response
-from ...control.config import Settings
-from ...streaming.aggregator import EventAggregator
+from ...domain_config import DomainSettingsConfig, domain_config
+from ...streaming import RelayHub
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
-def _aggregator_with(subscribers: int) -> EventAggregator:
-    aggregator = EventAggregator()
+def _aggregator_with(subscribers: int) -> RelayHub:
+    aggregator = RelayHub()
     for index in range(subscribers):
         aggregator.add_subscriber(f"client-{index}")
     return aggregator
@@ -33,12 +33,12 @@ def _aggregator_with(subscribers: int) -> EventAggregator:
 
 def test_the_limit_has_a_bounded_positive_default() -> None:
     """An absent or zero default would leave the surface unbounded."""
-    assert 0 < Settings().max_stream_connections <= 10_000
+    assert 0 < domain_config.max_stream_connections <= 10_000
 
 
 def test_the_limit_is_operator_overridable() -> None:
     """Deployments differ; the bound must be tunable without a code change."""
-    assert Settings(max_stream_connections=8).max_stream_connections == 8
+    assert DomainSettingsConfig(max_stream_connections=8).max_stream_connections == 8
 
 
 def test_the_subscriber_count_tracks_registration() -> None:
@@ -62,14 +62,14 @@ async def test_a_stream_is_refused_at_capacity_without_touching_the_database() -
     honest shape - the arguments really are absent, and the test asserts neither
     is reached.
     """
-    limit = Settings().max_stream_connections
+    limit = domain_config.max_stream_connections
     aggregator = _aggregator_with(limit)
 
     with pytest.raises(HTTPException) as raised:
         await build_thread_stream_response(
             ThreadStreamRequest(
                 thread_id="any-thread",
-                aggregator=aggregator,
+                relay_hub=aggregator,
                 session_factory=cast("async_sessionmaker[AsyncSession]", None),
             ),
             db=cast("AsyncSession", None),

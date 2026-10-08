@@ -10,28 +10,27 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import subprocess
-import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-import uvicorn
 from fastapi import FastAPI
 
 if TYPE_CHECKING:
-    from types import TracebackType
+    from collections.abc import Generator
+
+    from ...conftest import ExternalPrerequisiteRule
 
 from ...desktop._platform_acl import windows_file_is_restricted
+from ...testing import serve_on_loopback_in_thread
 from ..discovery import (
     DiscoveryState,
     another_resident_is_live,
     classify_discovery,
-    is_pid_alive,
-    port_has_listener,
     read_resident_service,
     remove_service_json_if_owned,
     service_json_path,
@@ -39,55 +38,19 @@ from ..discovery import (
 )
 
 
-def test_port_has_listener_true_on_a_real_listener_false_on_a_free_port() -> None:
-    """The shared connect-probe: a real listener answers, a free port does not."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("127.0.0.1", 0))
-    sock.listen(1)
-    bound_port = sock.getsockname()[1]
-    try:
-        assert port_has_listener(bound_port, timeout=1.0) is True
-    finally:
-        sock.close()
-    # Once closed, the same port no longer accepts a connect.
-    assert port_has_listener(bound_port, timeout=0.5) is False
+@contextmanager
+def _health_server(*, ready: bool = True) -> Generator[int]:
+    """Serve a real uvicorn app exposing only ``/health``; yield its port."""
+    app = FastAPI()
 
+    @app.get("/health")
+    async def _health() -> dict[str, object]:
+        return {"status": "ok", "ready": ready, "pid": os.getpid()}
 
-class _HealthServer:
-    """A real uvicorn server exposing only ``/health`` on an ephemeral port."""
-
-    def __init__(self, *, ready: bool = True) -> None:
-        app = FastAPI()
-
-        @app.get("/health")
-        async def _health() -> dict[str, object]:
-            return {"status": "ok", "ready": ready, "pid": os.getpid()}
-
-        config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
-        self._server = uvicorn.Server(config)
-        self._thread = threading.Thread(target=self._server.run, daemon=True)
-        self.port = 0
-
-    def __enter__(self) -> _HealthServer:
-        self._thread.start()
-        for _ in range(500):
-            if self._server.started and self._server.servers:
-                break
-            time.sleep(0.01)
-        if not (self._server.started and self._server.servers):
-            raise RuntimeError("health server did not start")
-        self.port = self._server.servers[0].sockets[0].getsockname()[1]
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        self._server.should_exit = True
-        self._thread.join(timeout=5.0)
+    with serve_on_loopback_in_thread(app, lifespan="auto") as base:
+        port = httpx.URL(base).port
+        assert port is not None
+        yield port
 
 
 def test_classifier_covers_absent_fresh_stale_malformed(tmp_path: Path) -> None:
@@ -236,11 +199,7 @@ def test_writer_replaces_preexisting_broad_directory_authority(tmp_path: Path) -
         assert windows_file_is_restricted(home / "service.token")
 
 
-def test_pid_liveness_and_ownership(tmp_path: Path) -> None:
-    assert is_pid_alive(os.getpid()) is True
-    assert is_pid_alive(2**31 - 1) is False
-    assert is_pid_alive(None) is False
-
+def test_service_json_is_removed_only_by_its_owner(tmp_path: Path) -> None:
     path = service_json_path(tmp_path)
     write_service_json(path, port=8000, pid=os.getpid(), allow_tokenless=True)
     # A file owned by another pid is never reclaimed by us.
@@ -264,17 +223,15 @@ def test_stale_pid_is_not_a_live_resident(tmp_path: Path) -> None:
 
 
 def test_single_resident_true_only_when_fresh_live_and_healthy(tmp_path: Path) -> None:
-    with _HealthServer() as server:
+    with _health_server() as port:
         path = service_json_path(tmp_path)
-        write_service_json(
-            path, port=server.port, pid=os.getpid(), allow_tokenless=True
-        )
+        write_service_json(path, port=port, pid=os.getpid(), allow_tokenless=True)
         # Fresh record + our (live) pid + a real answering /health = live resident.
         assert another_resident_is_live(tmp_path) is True
 
         state, info = read_resident_service(tmp_path)
         assert state is DiscoveryState.FRESH
-        assert info is not None and info.port == server.port
+        assert info is not None and info.port == port
 
     # Server stopped: the /health probe now fails, so no live resident.
     assert another_resident_is_live(tmp_path) is False
@@ -282,12 +239,10 @@ def test_single_resident_true_only_when_fresh_live_and_healthy(tmp_path: Path) -
 
 def test_health_while_degraded_still_counts_as_resident(tmp_path: Path) -> None:
     """A degraded gateway (ready=false) is still a live resident: /health answers."""
-    with _HealthServer(ready=False) as server:
+    with _health_server(ready=False) as port:
         path = service_json_path(tmp_path)
-        write_service_json(
-            path, port=server.port, pid=os.getpid(), allow_tokenless=True
-        )
-        body = httpx.get(f"http://127.0.0.1:{server.port}/health", timeout=2.0).json()
+        write_service_json(path, port=port, pid=os.getpid(), allow_tokenless=True)
+        body = httpx.get(f"http://127.0.0.1:{port}/health", timeout=2.0).json()
         assert body["ready"] is False
         assert another_resident_is_live(tmp_path) is True
 
@@ -349,7 +304,9 @@ def test_removing_a_malformed_record_also_clears_its_credential(tmp_path: Path) 
     assert not credential.exists()
 
 
-def test_credential_removal_refuses_a_link_like_destination(tmp_path: Path) -> None:
+def test_credential_removal_refuses_a_link_like_destination(
+    tmp_path: Path, external_prerequisite: ExternalPrerequisiteRule
+) -> None:
     """A symlink where the credential belongs must not be followed on removal.
 
     Otherwise anyone able to write the discovery directory could redirect the
@@ -363,7 +320,7 @@ def test_credential_removal_refuses_a_link_like_destination(tmp_path: Path) -> N
     try:
         link.symlink_to(outsider)
     except (OSError, NotImplementedError) as exc:
-        pytest.skip(f"host cannot create symlinks: {exc}")
+        external_prerequisite.absent("symlinks", str(exc))
 
     assert remove_service_json_if_owned(path, os.getpid()) is True
 

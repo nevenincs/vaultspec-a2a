@@ -6,11 +6,11 @@ run-start), the worker retrieves the authoritative batch BY ID from the
 engine and mounts its comments as grounding context for the writer's revision.
 a2a never owns or parses the batch as state - it reads the content fresh each
 mount pass and renders it into the transient mounted context, exactly as the
-vault-document and task-queue mounts do.
+vault-document mount does.
 
 Retrieval is best-effort: an unreachable engine, a missing credential, or an
 unknown id degrades to no grounding block rather than failing the worker turn
-(parity with the vault/queue mounts, which skip a missing document).
+(parity with the vault mount, which skips a missing document).
 """
 
 from __future__ import annotations

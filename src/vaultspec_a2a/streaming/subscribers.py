@@ -1,32 +1,28 @@
-"""Subscriber management for the streaming event bus.
+"""The gateway's relay: subscriber queues, frame numbering and the live-state mirror.
 
-Manages client WebSocket connections, thread subscriptions, broadcast hooks,
-and the graph node metadata cache.  Extracted from the monolithic
-``aggregator.py`` during the aggregator decomposition.
-
-This module also owns the one place a run's authoritative event sequence is
-allocated. Every frame a subscriber receives passes through
-:meth:`SubscriberManager.enqueue_payload` or :meth:`SubscriberManager.broadcast`,
-so numbering there - and only there - gives a relayed worker payload and an
-in-process domain event exactly one number each from one counter. A process
-that binds no allocator (the worker's own aggregator, or a gateway serving no
-replay) numbers nothing and behaves exactly as it did before.
+Every frame a viewer receives is a relayed worker payload, and every one enters
+through :meth:`RelayHub.relay_payload`. That is the one place a run's
+authoritative event sequence is allocated: numbering there - and only there -
+gives each relayed frame exactly one number from one counter. A hub that binds
+no allocator (a gateway serving no replay) numbers nothing, and its frames
+carry the worker's own ordering untouched.
 """
 
 import asyncio
 import logging
 from collections import OrderedDict, defaultdict
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from ..domain_config import domain_config
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
-from ..thread.errors import EventAggregatorError
+from ..thread.errors import StreamSubscriptionError
+from ..utils import active_trace_ids
+from ._run_state import RunLiveStateMirror
 from .fanout import deliver_bounded
-from .node_metadata import node_metadata_from_graph
-from .types import SequencedEvent, StreamableGraph
+from .transformer import project_run_progress
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +37,11 @@ _REMEMBERED_FLOORS = 1024
 
 __all__ = [
     "AllocationSink",
+    "HeldFrame",
+    "RelayHub",
     "RunSequenceAllocator",
     "RunSequenceSeedSource",
     "SequenceAllocation",
-    "SubscriberManager",
 ]
 
 
@@ -56,11 +53,20 @@ class SequenceAllocation:
     written, so the durable row records when the frame was PRODUCED. The write
     sits behind the fan-out and may land much later; dating a row by its write
     would misreport the age bound that expires it.
+
+    ``trace_id`` and ``span_id`` are stamped in the same act and for the same
+    reason: the trace that produced this frame is in scope HERE, inside the
+    relay request, and nowhere near the batched write. Reading the context at
+    the write would stamp every frame of a flush with the flush's own trace,
+    which correlates each frame to the wrong request. ``None`` on both where
+    no valid span context is in scope.
     """
 
     thread_id: str
     sequence: int
     allocated_at: datetime
+    trace_id: str | None = None
+    span_id: str | None = None
 
 
 class RunSequenceSeedSource(Protocol):
@@ -191,6 +197,59 @@ class RunSequenceAllocator:
         self._counters[thread_id] = advanced
         return advanced
 
+    def release(self, thread_id: str, sequence: int) -> None:
+        """Give back a number taken for a frame that was never published.
+
+        Only a number still at the top of the counter can be given back, and
+        giving it back is what keeps a run's sequence space contiguous: a
+        number spent on nothing leaves a hole, and the replay reader serves
+        only the newest consecutive tail, so one hole costs a resume every
+        retained frame older than it.
+
+        A number some later allocation has already overtaken is NOT retracted.
+        Lowering the counter under a number already stamped on a frame in
+        flight would hand two frames one number, which is the hazard the whole
+        numbering exists to avoid; one hole is the cheaper outcome.
+        """
+        if self._counters.get(thread_id) == sequence:
+            self._counters[thread_id] = sequence - 1
+
+    def issued_high_water(self, thread_id: str) -> int | None:
+        """Return the highest number issued to *thread_id*, or ``None`` if unnumbered.
+
+        The one reading of a run's numbering that is recorded as, and served
+        as, the run's cursor. A live counter answers with its current value; a
+        run forgotten while its floor is remembered answers with that floor,
+        because forgetting bounds memory and retracts nothing already stamped.
+
+        ``None`` is the answer for a run this process does not number: never
+        seeded here, or unseedable. A caller must read it as "no value", never
+        as zero - a counter this process did not keep says nothing about the
+        frames another gateway lifetime numbered.
+        """
+        if thread_id in self._unnumbered:
+            return None
+        live = self._counters.get(thread_id)
+        return live if live is not None else self._issued.get(thread_id)
+
+    def is_unseedable(self, thread_id: str) -> bool:
+        """Whether this process TRIED to number *thread_id* and could not.
+
+        The narrower of the two negative answers, and the distinction is what
+        makes it worth asking. A run this process has simply never touched
+        says nothing about itself: another gateway lifetime may have numbered
+        it, and its retained window is still a window a resume can be served
+        from. A run whose seed reads FAILED is different - it is unnumbered
+        for the rest of this process's lifetime by decision, so every frame it
+        serves from here carries no id, and a client watching this gateway is
+        handed no cursor to come back with however much is retained.
+
+        False once the run is forgotten, even though it failed earlier: the
+        floor a forgotten run keeps is not a failure record, and the next
+        frame reseeds.
+        """
+        return thread_id in self._unnumbered
+
     def is_numbered(self, thread_id: str) -> bool:
         """Whether this gateway's own numbers are what this run's frames carry.
 
@@ -206,14 +265,12 @@ class RunSequenceAllocator:
         survives. Its frames carry the producing worker's own counter, which
         restarts with that process and must never be offered back as a cursor.
         """
-        if thread_id in self._unnumbered:
-            return False
-        return thread_id in self._counters or thread_id in self._issued
+        return self.issued_high_water(thread_id) is not None
 
     def forget(self, thread_id: str) -> None:
         """Drop *thread_id*'s in-memory numbering state.
 
-        Called when a run's aggregator state is purged, which the terminal
+        Called when a run's relay state is purged, which the terminal
         relay does before the batch holding that terminal has been flushed.
         The counter goes, the floor it reached stays: a later frame for the
         same run reseeds from the durable mark OR that floor, whichever is
@@ -229,32 +286,67 @@ class RunSequenceAllocator:
             self._issued.popitem(last=False)
 
 
-class SubscriberManager:
-    """Client connection state.
+@dataclass(slots=True)
+class HeldFrame:
+    """One projected frame numbered before the decision that publishes it.
 
-    Manages queues, subscriptions, broadcast hooks, and node metadata.
+    A terminal frame is the only one held: whether it may be shown at all is
+    the control plane's answer, and it is numbered on THIS side of that answer
+    so the cursor the settlement records names the frame the client is about
+    to receive. The alternative - number it when it is finally fanned out -
+    puts the number on the far side of the write that records it, which is
+    what left a settled run's cursor one short of its own terminal id.
+
+    *published* is the flag that makes :meth:`RelayHub.release_held`
+    idempotent, so a caller may release unconditionally after the decision
+    without first asking which way it went.
     """
 
-    def __init__(self, telemetry: TelemetryHook | NullTelemetryHook) -> None:
-        # Subscriber queues: client_id -> bounded asyncio.Queue
-        self._subscribers: dict[str, asyncio.Queue[SequencedEvent]] = {}
+    thread_id: str
+    frame: object
+    allocation: SequenceAllocation | None
+    published: bool = False
+
+    @property
+    def sequence(self) -> int | None:
+        """The number this frame will carry, or ``None`` where it has none."""
+        return None if self.allocation is None else self.allocation.sequence
+
+
+class RelayHub:
+    """The gateway's relay: subscriber queues, frame numbering, and the live mirror.
+
+    A relayed worker payload is projected onto the positive progress catalog,
+    numbered where a number is available, and fanned out to the run's
+    subscribers; the same payload moves the mirror that run-status and team
+    status read the run's live agents, tool calls and nodes from. The hub
+    produces no event of its own.
+    """
+
+    def __init__(self, telemetry: TelemetryHook | None = None) -> None:
+        # Subscriber queues: client_id -> bounded asyncio.Queue of relayed payloads.
+        self._subscribers: dict[str, asyncio.Queue[object]] = {}
         # Which threads each client is subscribed to: client_id -> set of thread_ids
         self._subscriptions: dict[str, set[str]] = defaultdict(set)
-        # Broadcast hooks: called on every event (used by worker bridge relay).
-        self._broadcast_hooks: list[Callable[[SequencedEvent], Awaitable[None]]] = []
-        # Node metadata cache: thread_id -> node_name -> safe descriptor fields.
-        self._node_metadata: dict[str, dict[str, dict[str, str]]] = {}
         # Events this client lost to backpressure and has not been told about.
         # Held here rather than pushed into the queue because the queue being
         # full is the very condition being reported: a notice enqueued then
         # would evict another event to make room for the news that an event was
         # evicted. The consumer collects it on its way past instead.
         self._dropped: dict[str, int] = defaultdict(int)
-        self._telemetry = telemetry
-        # Unbound by default. The worker's aggregator and a gateway serving no
-        # replay never bind one, and then nothing below numbers anything.
+        self._telemetry: TelemetryHook | NullTelemetryHook = (
+            telemetry or NullTelemetryHook()
+        )
+        # Unbound by default. A gateway serving no replay never binds one, and
+        # then nothing below numbers anything.
         self._allocator: RunSequenceAllocator | None = None
         self._allocation_sink: AllocationSink | None = None
+        self._mirror = RunLiveStateMirror()
+
+    @property
+    def mirror(self) -> RunLiveStateMirror:
+        """The live agent, tool-call and node state the relayed events rebuilt."""
+        return self._mirror
 
     # ------------------------------------------------------------------
     # Sequence allocation
@@ -275,10 +367,29 @@ class SubscriberManager:
         """The seated numbering authority, or ``None`` where none is bound."""
         return self._allocator
 
-    async def prepare_run(self, thread_id: str) -> None:
-        """Establish *thread_id*'s numbering before its frames are enqueued.
+    def issued_sequence(self, thread_id: str) -> int | None:
+        """Return the highest frame number issued to *thread_id*, or ``None``.
 
-        :meth:`enqueue_payload` is synchronous and cannot read a database, so
+        ``None`` covers a gateway serving no replay and a run left unnumbered,
+        so a caller recording the answer records nothing for either.
+        """
+        allocator = self._allocator
+        return None if allocator is None else allocator.issued_high_water(thread_id)
+
+    def numbering_failed(self, thread_id: str) -> bool:
+        """Whether this hub tried to establish *thread_id*'s numbering and failed.
+
+        ``False`` on a hub that numbers nothing at all: a gateway serving no
+        replay never tried, and reporting a failure it did not have would
+        confuse "this feature is off" with "this run is broken".
+        """
+        allocator = self._allocator
+        return allocator is not None and allocator.is_unseedable(thread_id)
+
+    async def prepare_run(self, thread_id: str) -> None:
+        """Establish *thread_id*'s numbering before its frames are relayed.
+
+        :meth:`relay_payload` is synchronous and cannot read a database, so
         the ingest path that owns the await calls this first. A run reaching
         the chokepoint unprepared is not numbered, which costs it its id and
         never costs it a frame.
@@ -286,25 +397,16 @@ class SubscriberManager:
         if self._allocator is not None:
             await self._allocator.seed(thread_id)
 
-    async def shutdown_allocation_sink(self) -> None:
-        """Close the seated recorder, so a shutdown does not strand its ring."""
-        sink, self._allocation_sink = self._allocation_sink, None
-        if sink is None:
-            return
-        try:
-            await sink.aclose()
-        except Exception:
-            logger.warning("Replay recorder did not close cleanly", exc_info=True)
-
     def discard_run_replay(self, thread_id: str) -> None:
         """Drop what the recorder holds for a run whose durable home is gone.
 
-        Deliberately NOT part of :meth:`remove_thread`. A terminal purges a
-        run's aggregator state while the batch carrying that terminal is
-        still unflushed, so dropping the recorder's hold there would discard
-        the very frames a reconnect comes back for. Only a DELETED run has no
-        durable home left: the rows its held frames would become reference a
-        thread that is gone, so no flush can ever place them.
+        Called by the delete path only, and deliberately NOT part of
+        :meth:`clear_thread_state`. A terminal purges a run's relay state while
+        the batch carrying that terminal is still unflushed, so dropping the
+        recorder's hold there would discard the very frames a reconnect comes
+        back for. Only a DELETED run has no durable home left: the rows its
+        held frames would become reference a thread that is gone, so no flush
+        can ever place them.
         """
         if self._allocation_sink is not None:
             self._allocation_sink.discard(thread_id)
@@ -315,21 +417,31 @@ class SubscriberManager:
         A run's sequence space has to stay contiguous: the replay reader
         serves the longest consecutive tail of what it finds, so one frame
         numbered and never retained costs a resume every older frame in the
-        window. Asking the recorder first is what stops that, and a process
-        with no recorder retains nothing anyway, so nothing there is at stake.
+        window. Asking the recorder first is what stops that, and a hub with
+        no recorder retains nothing anyway, so nothing there is at stake.
         """
         sink = self._allocation_sink
         return sink is None or sink.retains(frame)
 
     def _allocate(self, thread_id: str) -> SequenceAllocation | None:
-        """Take this run's next number, or ``None`` where it has none."""
+        """Take this run's next number, or ``None`` where it has none.
+
+        The production time and the producing trace are read together, here,
+        because this is the one moment both are true of the frame rather than
+        of the batch that later writes it.
+        """
         if self._allocator is None:
             return None
         sequence = self._allocator.allocate(thread_id)
         if sequence is None:
             return None
+        trace_id, span_id = active_trace_ids()
         return SequenceAllocation(
-            thread_id=thread_id, sequence=sequence, allocated_at=datetime.now(UTC)
+            thread_id=thread_id,
+            sequence=sequence,
+            allocated_at=datetime.now(UTC),
+            trace_id=trace_id,
+            span_id=span_id,
         )
 
     def _record(self, allocation: SequenceAllocation, frame: object) -> None:
@@ -364,7 +476,7 @@ class SubscriberManager:
     # Subscriber management
     # ------------------------------------------------------------------
 
-    def add_subscriber(self, client_id: str) -> asyncio.Queue[SequencedEvent]:
+    def add_subscriber(self, client_id: str) -> asyncio.Queue[object]:
         """Register a new subscriber and return its bounded event queue.
 
         Refuses once the registry is at its global capacity. Each subscriber owns
@@ -372,12 +484,9 @@ class SubscriberManager:
         authenticated caller can demand without limit unless something says no.
 
         Enforced here, at the domain seam, rather than only at the route that
-        happens to have asked first. The registry is shared: the SSE stream route
-        and the event WebSocket both register against it, so a bound checked in
-        one route is not a bound - the other path admits subscribers the check
-        never sees. The route keeps its own cheap pre-check because refusing
-        before a database round trip is worth doing; this is where the limit is
-        actually true.
+        happens to have asked first. The route keeps its own cheap pre-check
+        because refusing before a database round trip is worth doing; this is
+        where the limit is actually true.
 
         Re-registering an existing ``client_id`` replaces that client's queue
         rather than growing the registry, so it is never refused - the same
@@ -404,23 +513,17 @@ class SubscriberManager:
                     "limit": limit,
                 },
             )
-            raise EventAggregatorError(
+            raise StreamSubscriptionError(
                 f"Gateway holds {len(self._subscribers)} stream subscribers, "
                 f"meeting the global limit of {limit}"
             )
-        queue: asyncio.Queue[SequencedEvent] = asyncio.Queue(
+        queue: asyncio.Queue[object] = asyncio.Queue(
             maxsize=domain_config.event_queue_maxsize
         )
         self._subscribers[client_id] = queue
         self._subscriptions[client_id] = set()
         self._dropped.pop(client_id, None)
         return queue
-
-    def get_subscriber_queue(
-        self, client_id: str
-    ) -> asyncio.Queue[SequencedEvent] | None:
-        """Return the event queue for a subscriber, or None if not registered."""
-        return self._subscribers.get(client_id)
 
     def remove_subscriber(self, client_id: str) -> None:
         """Unregister a subscriber."""
@@ -441,15 +544,15 @@ class SubscriberManager:
         """Subscribe a client to one or more thread event streams.
 
         Refuses the whole request once it would carry the client past its
-        subscription cap. Every subscription is matched against every broadcast
-        event, so cardinality here is fan-out work an authenticated caller can
+        subscription cap. Every subscription is matched against every relayed
+        frame, so cardinality here is fan-out work an authenticated caller can
         demand of the gateway - the connection limit bounds how many clients
         exist, not how much each one costs. Rejecting outright rather than
         truncating keeps the client's view honest: a partially applied
         subscription would silently drop threads it believes it is watching.
         """
         if client_id not in self._subscribers:
-            raise EventAggregatorError(f"Client {client_id} is not registered")
+            raise StreamSubscriptionError(f"Client {client_id} is not registered")
         current = self._subscriptions[client_id]
         limit = domain_config.max_subscriptions_per_client
         # Union first: re-subscribing to threads already held must stay a no-op
@@ -473,34 +576,11 @@ class SubscriberManager:
                     "limit": limit,
                 },
             )
-            raise EventAggregatorError(
+            raise StreamSubscriptionError(
                 f"Client {client_id} would hold {len(prospective)} subscriptions, "
                 f"exceeding the per-client limit of {limit}"
             )
         self._subscriptions[client_id] = prospective
-
-    def unsubscribe(self, client_id: str, thread_ids: list[str]) -> None:
-        """Unsubscribe a client from one or more thread event streams."""
-        if client_id in self._subscriptions:
-            self._subscriptions[client_id].difference_update(thread_ids)
-
-    def remove_thread(self, thread_id: str) -> None:
-        """Remove ``thread_id`` from every active subscriber subscription set."""
-        for client_id in list(self._subscriptions):
-            self._subscriptions[client_id].discard(thread_id)
-        self._node_metadata.pop(thread_id, None)
-        if self._allocator is not None:
-            self._allocator.forget(thread_id)
-
-    def remove_node_metadata(self, thread_id: str) -> None:
-        """Drop the live graph descriptors for one terminal worker thread."""
-        self._node_metadata.pop(thread_id, None)
-
-    def add_broadcast_hook(
-        self, hook: Callable[[SequencedEvent], Awaitable[None]]
-    ) -> None:
-        """Register a hook called on every broadcast (worker bridge relay)."""
-        self._broadcast_hooks.append(hook)
 
     def subscriber_count(self) -> int:
         """Return the number of currently registered subscribers.
@@ -510,49 +590,53 @@ class SubscriberManager:
         """
         return len(self._subscribers)
 
-    def subscription_count(self) -> int:
-        """Return the number of clients with active subscriptions."""
-        return len(self._subscriptions)
-
-    def get_subscriptions(self, client_id: str) -> frozenset[str]:
-        """Return a frozen snapshot of the thread subscriptions for *client_id*."""
-        return frozenset(self._subscriptions.get(client_id, set()))
-
     def get_active_thread_ids(self) -> list[str]:
         """Return all thread IDs that have at least one subscriber.
 
-        Takes a snapshot of subscription values before iterating to avoid
-        RuntimeError if a subscriber is added/removed concurrently (H1 fix).
+        Takes a snapshot of subscription values before iterating, so a
+        subscriber added or removed concurrently cannot fail the read.
         """
         all_threads: set[str] = set()
         for threads in list(self._subscriptions.values()):
             all_threads.update(threads)
         return sorted(all_threads)
 
-    def enqueue_payload(self, thread_id: str, payload: object) -> None:
-        """Enqueue a pre-serialized payload for all subscribers of ``thread_id``.
+    # ------------------------------------------------------------------
+    # Relay
+    # ------------------------------------------------------------------
 
-        Numbers the frame first, where a number is available AND the frame is
-        one the recorder will keep, and stamps that number over the body's own
-        ``sequence``. The worker's counter orders a run's events within one
-        worker lifetime and restarts with the process; the number stamped here
-        is the run's identity and survives a restart of either process, so the
-        relay overwrites rather than forwards.
+    def _numbered(
+        self, thread_id: str, payload: object
+    ) -> tuple[object, SequenceAllocation | None]:
+        """Project *payload* and stamp this run's next number over its sequence.
 
-        A payload that is not a mapping cannot carry the stamp and is not
-        retained either, so it takes no number at all rather than leaving a
-        hole in the run's sequence space.
+        Worker run events enter the public progress edge here. Each is
+        projected through the positive progress DTO, so prompts, document and
+        artifact bodies, edit diffs, and raw provider payloads are dropped at
+        the relay seam - a first enforcement the encode boundary independently
+        repeats.
+
+        The projected frame is then numbered, where a number is available AND
+        the frame is one the recorder will keep. The worker's counter orders a
+        run's events within one worker lifetime and restarts with the process;
+        the number stamped here is the run's identity and survives a restart of
+        either process, so the relay overwrites rather than forwards. A payload
+        that is not a mapping cannot carry the stamp and is not retained
+        either, so it takes no number at all rather than leaving a hole in the
+        run's sequence space.
         """
-        delivered = payload
-        if self._retainable(payload) and isinstance(payload, Mapping):
-            allocation = self._allocate(thread_id)
-            if allocation is not None:
-                stamped: dict[str, object] = {
-                    **cast("Mapping[str, object]", payload),
-                    "sequence": allocation.sequence,
-                }
-                self._record(allocation, stamped)
-                delivered = stamped
+        projected = project_run_progress(payload)
+        if not (self._retainable(projected) and isinstance(projected, Mapping)):
+            return projected, None
+        body = cast("Mapping[str, object]", projected)
+        allocation = self._allocate(thread_id)
+        if allocation is None:
+            return body, None
+        stamped: dict[str, object] = {**body, "sequence": allocation.sequence}
+        return stamped, allocation
+
+    def _fan_out(self, thread_id: str, delivered: object) -> None:
+        """Enqueue one already-numbered frame for every subscriber of this run."""
         for client_id, queue in list(self._subscribers.items()):
             client_subs = self._subscriptions.get(client_id, set())
             if thread_id not in client_subs:
@@ -561,100 +645,81 @@ class SubscriberManager:
             if outcome.dropped:
                 self._dropped[client_id] += outcome.dropped
 
-    # ------------------------------------------------------------------
-    # Graph registration
-    # ------------------------------------------------------------------
+    def relay_payload(self, thread_id: str, payload: object) -> None:
+        """Number one relayed worker payload and fan it out to this run's viewers.
 
-    def register_graph(self, thread_id: str, graph: StreamableGraph) -> None:
-        """Cache node metadata from a compiled LangGraph graph."""
-        self._node_metadata[thread_id] = node_metadata_from_graph(graph)
-        logger.debug(
-            "register_graph: cached metadata for %d nodes on %s",
-            len(self._node_metadata[thread_id]),
-            thread_id,
-        )
-
-    def get_node_summaries(self, thread_id: str) -> list[dict[str, str]]:
-        """Return a list of node metadata dicts for the team status endpoint."""
-        return [
-            {"node_name": name, "agent_id": name, **meta}
-            for name, meta in self._node_metadata.get(thread_id, {}).items()
-        ]
-
-    def get_node_metadata(self, thread_id: str) -> dict[str, dict[str, str]]:
-        """Return the raw node metadata dict (used by emitters)."""
-        return self._node_metadata.get(thread_id, {})
-
-    def set_node_metadata(
-        self, thread_id: str, metadata: dict[str, dict[str, str]]
-    ) -> None:
-        """Replace node metadata (used by sync_worker_event)."""
-        self._node_metadata[thread_id] = metadata
-
-    # ------------------------------------------------------------------
-    # Broadcasting
-    # ------------------------------------------------------------------
-
-    async def broadcast(self, sequenced: SequencedEvent) -> None:
-        """Fan out a sequenced domain event to all interested subscribers.
-
-        An in-process domain event takes its number from the same counter a
-        relayed worker payload does, so two producers on one run cannot both
-        claim one number. The delivered wrapper is a new one rather than the
-        caller's: the hooks below are the worker's relay, which must keep
-        forwarding its own producer-side ordering untouched.
-
-        Uses a drop-oldest strategy: if a subscriber queue is full,
-        the oldest buffered event is discarded before inserting the new
-        one.  This keeps the aggregator non-blocking while bounding
-        per-client memory (research §1.5).
+        Call :meth:`prepare_run` for the run first: this path is synchronous and
+        cannot establish a number it has never read.
         """
-        thread_id = getattr(sequenced.event, "thread_id", None)
-        event_type = type(sequenced.event).__name__
+        delivered, allocation = self._numbered(thread_id, payload)
+        if allocation is not None:
+            self._record(allocation, delivered)
+        self._fan_out(thread_id, delivered)
 
-        delivered_event = sequenced
-        if thread_id is not None:
-            await self.prepare_run(thread_id)
-            # Same rule as the relay path: a frame the recorder would decline
-            # takes no number, so the run's sequence space stays contiguous.
-            allocation = (
-                self._allocate(thread_id) if self._retainable(sequenced) else None
-            )
-            if allocation is not None:
-                delivered_event = SequencedEvent(
-                    event=sequenced.event, sequence=allocation.sequence
-                )
-                self._record(allocation, delivered_event)
+    def hold_payload(self, thread_id: str, payload: object) -> HeldFrame:
+        """Number one payload now and hold it for a decision still to be taken.
 
-        with self._telemetry.start_span(
-            "aggregator.broadcast",
-            **{"event.type": str(event_type), "thread_id": thread_id or ""},
-        ):
-            delivered = 0
-            for client_id, queue in list(self._subscribers.items()):
-                client_subs = self._subscriptions.get(client_id, set())
-                if not (thread_id is None or thread_id in client_subs):
-                    continue
-                outcome = deliver_bounded(queue, delivered_event, client_id=client_id)
-                if outcome.dropped:
-                    self._dropped[client_id] += outcome.dropped
-                if outcome.delivered:
-                    delivered += 1
-            self._telemetry.increment_counter(
-                "aggregator.events_emitted", 1, **{"event.type": str(event_type)}
-            )
-            for hook in self._broadcast_hooks:
-                try:
-                    await hook(sequenced)
-                except Exception:
-                    logger.warning("Broadcast hook failed", exc_info=True)
+        The terminal frame's path. Numbering it here rather than at publication
+        is what makes the run's settled cursor and the frame's own SSE id the
+        same number: the settlement reads this run's issued mark to record it,
+        and a frame numbered afterwards is never in that mark. The caller must
+        follow with :meth:`publish_held` or :meth:`release_held`; nothing has
+        reached a subscriber or the recorder yet.
+        """
+        delivered, allocation = self._numbered(thread_id, payload)
+        return HeldFrame(thread_id=thread_id, frame=delivered, allocation=allocation)
+
+    def publish_held(self, held: HeldFrame) -> None:
+        """Record and fan out a held frame whose decision went its way."""
+        held.published = True
+        if held.allocation is not None:
+            self._record(held.allocation, held.frame)
+        self._fan_out(held.thread_id, held.frame)
+
+    def release_held(self, held: HeldFrame) -> None:
+        """Give back the number of a held frame that will never be published.
+
+        Idempotent and safe to call unconditionally after the decision: a
+        frame already published keeps its number, and one that was never
+        numbered has none to give back.
+        """
+        if held.published or held.allocation is None:
+            return
+        if self._allocator is not None:
+            self._allocator.release(held.thread_id, held.allocation.sequence)
+
+    def sync_worker_event(self, thread_id: str, payload: Mapping[str, Any]) -> None:
+        """Mirror one relayed worker event into the run's live state."""
+        self._mirror.sync_worker_event(thread_id, payload)
 
     # ------------------------------------------------------------------
-    # Shutdown
+    # Lifecycle
     # ------------------------------------------------------------------
 
-    def clear(self) -> None:
-        """Clear all subscriber state."""
+    def clear_thread_state(self, thread_id: str) -> None:
+        """Purge every in-memory trace of ``thread_id`` this hub holds.
+
+        The run leaves every subscription set, its mirrored state goes, and the
+        allocator forgets its live counter while keeping the floor it reached.
+        """
+        for client_id in list(self._subscriptions):
+            self._subscriptions[client_id].discard(thread_id)
+        self._mirror.clear_thread_state(thread_id)
+        if self._allocator is not None:
+            self._allocator.forget(thread_id)
+
+    async def shutdown(self) -> None:
+        """Close the replay recorder, then drop every subscriber and mirrored run.
+
+        The recorder is closed first, so a shutdown does not strand its ring.
+        """
+        sink, self._allocation_sink = self._allocation_sink, None
+        if sink is not None:
+            try:
+                await sink.aclose()
+            except Exception:
+                logger.warning("Replay recorder did not close cleanly", exc_info=True)
         self._subscribers.clear()
         self._subscriptions.clear()
         self._dropped.clear()
+        self._mirror.clear()

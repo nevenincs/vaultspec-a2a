@@ -1,12 +1,12 @@
 """The active project is minted once and named in one spelling everywhere.
 
-A run's project used to be re-derived at every boundary it crossed. Admission
-resolved the caller's spelling locally and dispatched that; the durable record
-kept the caller's original; and every later dispatch - follow-up, clarification
-response, verdict resume, crash recovery - read the durable one back. Two
-strings for one directory, agreeing only by coincidence, and the worker's graph
-cache keyed on the raw string, so a single workspace occupied two entries and
-recompiled its graph on the first follow-up.
+A run's project is minted once, not re-derived at every boundary it crosses. If
+admission dispatched its locally resolved spelling while the durable record
+kept the caller's original, every later dispatch - follow-up, clarification
+response, verdict resume, crash recovery - would read the durable one back: two
+strings for one directory, agreeing only by coincidence. The worker's graph
+cache is keyed on the raw string, so a single workspace would then occupy two
+entries and recompile its graph on the first follow-up.
 
 These tests drive the real seams that produced the split: the admission
 function, the dispatch schema every construction site validates through, and
@@ -16,25 +16,30 @@ the worker's own cache-key former and registration seam.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast, override
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 
-from ...api.tests.clarification_harness import new_state_graph
 from ...context.metadata import ThreadMetadata
 from ...control._thread_metadata import dispatchable_workspace_root
-from ...control.config import settings
-from ...database.thread_repository import normalize_workspace_identity
+from ...database import normalize_workspace_identity
 from ...ipc.schemas import DispatchRequest, canonical_project_root
-from ...providers.team_selection import model_assignment_digest
-from ...streaming.aggregator import EventAggregator
+from ...providers.team_selection import FrozenLaneAssignment, model_assignment_digest
+from ...streaming import RunEventProducer
 from ...team.team_config import load_team_config
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    add_test_node,
+    compile_test_graph,
+    deterministic_model_assignment,
+    new_state_graph,
+    settings_override,
+    stand_in_definition_digest,
+)
 from ...thread.errors import ConfigError
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
 from ...thread.state import TeamState
@@ -52,6 +57,8 @@ from ..thread_service import process_metadata
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
 
 def _uncanonical_spelling(workspace: Path) -> str:
     """Return a second, equally valid spelling of *workspace*.
@@ -63,25 +70,22 @@ def _uncanonical_spelling(workspace: Path) -> str:
     return str(workspace.parent / "sibling" / ".." / workspace.name).replace("\\", "/")
 
 
-def _assignment(model_name: str) -> dict[str, dict[str, object]]:
+def _assignment(model_name: str) -> dict[str, FrozenLaneAssignment]:
+    """The preset's deterministic assignment, frozen under *model_name*.
+
+    The model name is the one field varied, so two assignments built under
+    different names differ in identity and in nothing else.
+    """
+    team = load_team_config(DEFAULT_TEAM_PRESET)
     return {
-        "coder": {
-            "provider": "deterministic",
-            "execution_mode": "in-process-deterministic",
-            "catalog_revision": "revision",
-            "entry_id": "entry",
-            "model_name": model_name,
-            "controls": [],
-            "fallbacks": [],
-            "provenance": {"selection_source": "team_selection"},
-            "schema_version": 1,
-        }
+        role: lane.model_copy(update={"model_name": model_name})
+        for role, lane in deterministic_model_assignment(team).items()
     }
 
 
 def _definition(workspace: Path) -> FrozenGraphDefinition:
     return freeze_graph_definition(
-        load_team_config("mock-success-single", workspace_root=workspace),
+        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=workspace),
         workspace_root=workspace,
     )
 
@@ -215,30 +219,30 @@ class TestAdmissionMintsOnce:
             )
 
     def test_managed_unarmed_profile_refuses_foreign_project(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path
     ) -> None:
         managed = tmp_path / "managed"
         foreign = tmp_path / "foreign"
         managed.mkdir()
         foreign.mkdir()
-        monkeypatch.setattr(settings, "desktop_app_home", None)
-        monkeypatch.setattr(settings, "workspace_root", managed)
 
-        with pytest.raises(ValueError, match="configured workspace root"):
+        with (
+            settings_override(desktop_app_home=None, workspace_root=managed),
+            pytest.raises(ValueError, match="configured workspace root"),
+        ):
             process_metadata(ThreadMetadata(workspace_root=str(foreign)), "run-1", None)
 
     def test_managed_unarmed_profile_accepts_configured_root_descendant(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path
     ) -> None:
         managed = tmp_path / "managed"
         project = managed / "project"
         project.mkdir(parents=True)
-        monkeypatch.setattr(settings, "desktop_app_home", None)
-        monkeypatch.setattr(settings, "workspace_root", managed)
 
-        admitted, _nickname, _metadata_json = process_metadata(
-            ThreadMetadata(workspace_root=str(project)), "run-1", None
-        )
+        with settings_override(desktop_app_home=None, workspace_root=managed):
+            admitted, _nickname, _metadata_json = process_metadata(
+                ThreadMetadata(workspace_root=str(project)), "run-1", None
+            )
 
         assert admitted == project.resolve()
 
@@ -337,7 +341,7 @@ class TestGraphStateNamesTheProject:
         return DispatchRequest(
             action="ingest",
             thread_id="run-1",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=_uncanonical_spelling(workspace),
             content=content,
             recursion_limit=25,
@@ -392,10 +396,10 @@ class TestGraphStateNamesTheProject:
             return {}
 
         builder = new_state_graph()
-        builder.add_node("observe", observe)
+        add_test_node(builder, "observe", observe)
         builder.add_edge("__start__", "observe")
         builder.add_edge("observe", "__end__")
-        graph = builder.compile(checkpointer=InMemorySaver())
+        graph = compile_test_graph(builder, checkpointer=InMemorySaver())
 
         await graph.ainvoke(
             GraphLifecycleManager.build_graph_input(
@@ -439,23 +443,13 @@ class TestAuthoringSubmitterIsBoundToTheProject:
         manager = GraphLifecycleManager(
             checkpointer=InMemorySaver(),
             bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
-            aggregator=EventAggregator(),
+            producer=RunEventProducer(),
             token_store=RunTokenStore(),
             catalog_store=RunCatalogStore(),
         )
 
         with pytest.raises(ConfigError, match="must name the project it authors into"):
             await manager._build_proposal_submitter(None)
-
-
-def _test_graph_definition_digest(team_preset: str) -> str:
-    """Deterministic stand-in for a frozen graph definition's digest.
-
-    These cache-key and registration-seam tests never compile or freeze a real
-    graph definition, so they need a digest-shaped value that still binds
-    consistently to the preset it stands in for.
-    """
-    return hashlib.sha256(team_preset.encode()).hexdigest()
 
 
 class TestOneWorkspaceOneGraphEntry:
@@ -471,10 +465,38 @@ class TestOneWorkspaceOneGraphEntry:
         return GraphLifecycleManager(
             checkpointer=InMemorySaver(),
             bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
-            aggregator=EventAggregator(),
+            producer=RunEventProducer(),
             token_store=RunTokenStore(),
             catalog_store=RunCatalogStore(),
         )
+
+    class _ControlledManager(GraphLifecycleManager):
+        """A manager whose ``_compile_graph`` blocks until released, counting entries.
+
+        Shared by the three concurrent-dispatch races below, which differ only in
+        which requests they race and what they assert about the result - the gate
+        that lets the test control when a compile "finishes" is identical.
+        """
+
+        def __init__(self) -> None:
+            super().__init__(
+                checkpointer=InMemorySaver(),
+                bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
+                producer=RunEventProducer(),
+                token_store=RunTokenStore(),
+                catalog_store=RunCatalogStore(),
+            )
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.compile_count = 0
+
+        @override
+        async def _compile_graph(self, req: DispatchRequest) -> RegisteredCompiledGraph:
+            del req
+            self.compile_count += 1
+            self.started.set()
+            await self.release.wait()
+            return TestOneWorkspaceOneGraphEntry._graph()
 
     @staticmethod
     def _graph() -> RegisteredCompiledGraph:
@@ -482,10 +504,10 @@ class TestOneWorkspaceOneGraphEntry:
             return {}
 
         builder = new_state_graph()
-        builder.add_node("finish", finish_node)
+        add_test_node(builder, "finish", finish_node)
         builder.add_edge("__start__", "finish")
         builder.add_edge("finish", "__end__")
-        return builder.compile(checkpointer=InMemorySaver())
+        return compile_test_graph(builder, checkpointer=InMemorySaver())
 
     def test_two_spellings_key_the_same_entry(self, workspace: Path) -> None:
         digest = model_assignment_digest({})
@@ -507,16 +529,16 @@ class TestOneWorkspaceOneGraphEntry:
     def test_a_project_less_key_is_still_a_key(self) -> None:
         """A run with no project still keys, so the mint cannot break cancel."""
         digest = model_assignment_digest({})
-        definition_digest = _test_graph_definition_digest("preset")
+        definition_digest = stand_in_definition_digest("preset")
         assert graph_cache_key(
             ("preset", None, True, digest, definition_digest), thread_id="r"
         ) == ("preset", None, True, digest, definition_digest, "r")
 
     def test_model_assignment_identity_partitions_the_graph_cache(self) -> None:
-        first = model_assignment_digest({"coder": {"model_name": "first"}})
-        same = model_assignment_digest({"coder": {"model_name": "first"}})
-        other = model_assignment_digest({"coder": {"model_name": "second"}})
-        definition_digest = _test_graph_definition_digest("preset")
+        first = model_assignment_digest(_assignment("first"))
+        same = model_assignment_digest(_assignment("first"))
+        other = model_assignment_digest(_assignment("second"))
+        definition_digest = stand_in_definition_digest("preset")
 
         assert graph_cache_key(
             ("preset", None, False, first, definition_digest), thread_id="r"
@@ -531,7 +553,7 @@ class TestOneWorkspaceOneGraphEntry:
 
     def test_two_runs_never_share_a_graph_entry(self) -> None:
         digest = model_assignment_digest({})
-        definition_digest = _test_graph_definition_digest("preset")
+        definition_digest = stand_in_definition_digest("preset")
         assert graph_cache_key(
             ("preset", None, False, digest, definition_digest), thread_id="run-1"
         ) != graph_cache_key(
@@ -550,7 +572,7 @@ class TestOneWorkspaceOneGraphEntry:
         """
         manager = self._manager()
 
-        definition_digest = _test_graph_definition_digest("preset")
+        definition_digest = stand_in_definition_digest("preset")
         for thread_id, spelling in (
             ("run-1", str(workspace)),
             ("run-2", _uncanonical_spelling(workspace)),
@@ -558,7 +580,7 @@ class TestOneWorkspaceOneGraphEntry:
             manager.register_compiled_graph(
                 thread_id,
                 (
-                    "mock-success-single",
+                    DEFAULT_TEAM_PRESET,
                     spelling,
                     False,
                     model_assignment_digest(_assignment("current")),
@@ -589,7 +611,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager.register_compiled_graph(
             "run-1",
             (
-                "mock-success-single",
+                DEFAULT_TEAM_PRESET,
                 str(workspace),
                 False,
                 model_assignment_digest(_assignment("current")),
@@ -601,7 +623,7 @@ class TestOneWorkspaceOneGraphEntry:
         follow_up = DispatchRequest(
             action="ingest",
             thread_id="run-1",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=_uncanonical_spelling(workspace),
             recursion_limit=25,
             model_assignment=_assignment("current"),
@@ -619,15 +641,13 @@ class TestOneWorkspaceOneGraphEntry:
         """Real compilation: a second run never receives the first run's graph."""
         manager = self._manager()
 
-        selection = _assignment("current")["coder"]
-        team = load_team_config("mock-success-single", workspace_root=workspace)
-        assignment = {ref.agent_id: dict(selection) for ref in team.workers}
+        assignment = _assignment("current")
 
         def dispatch(thread_id: str) -> DispatchRequest:
             return DispatchRequest(
                 action="ingest",
                 thread_id=thread_id,
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 workspace_root=str(workspace),
                 recursion_limit=25,
                 model_assignment=assignment,
@@ -653,7 +673,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager.register_compiled_graph(
             "run-1",
             (
-                "mock-success-single",
+                DEFAULT_TEAM_PRESET,
                 str(workspace),
                 False,
                 model_assignment_digest(accepted),
@@ -670,7 +690,7 @@ class TestOneWorkspaceOneGraphEntry:
                 DispatchRequest(
                     action="ingest",
                     thread_id="run-1",
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     workspace_root=str(workspace),
                     recursion_limit=25,
                     model_assignment=_assignment("changed"),
@@ -687,7 +707,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager.register_compiled_graph(
             "run-1",
             (
-                "mock-success-single",
+                DEFAULT_TEAM_PRESET,
                 str(workspace),
                 False,
                 model_assignment_digest(accepted),
@@ -702,7 +722,7 @@ class TestOneWorkspaceOneGraphEntry:
                 DispatchRequest(
                     action="ingest",
                     thread_id="run-1",
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     workspace_root=str(workspace),
                     recursion_limit=25,
                     model_assignment=_assignment("changed"),
@@ -714,38 +734,13 @@ class TestOneWorkspaceOneGraphEntry:
     async def test_concurrent_first_dispatches_bind_once_and_reject_a_competitor(
         self, workspace: Path
     ) -> None:
-        class ControlledManager(GraphLifecycleManager):
-            def __init__(self) -> None:
-                super().__init__(
-                    checkpointer=InMemorySaver(),
-                    bridge=WorkerBridge(
-                        api_url="http://127.0.0.1:1", worker_id="identity"
-                    ),
-                    aggregator=EventAggregator(),
-                    token_store=RunTokenStore(),
-                    catalog_store=RunCatalogStore(),
-                )
-                self.started = asyncio.Event()
-                self.release = asyncio.Event()
-                self.compile_count = 0
+        manager = TestOneWorkspaceOneGraphEntry._ControlledManager()
 
-            @override
-            async def _compile_graph(
-                self, req: DispatchRequest
-            ) -> RegisteredCompiledGraph:
-                del req
-                self.compile_count += 1
-                self.started.set()
-                await self.release.wait()
-                return TestOneWorkspaceOneGraphEntry._graph()
-
-        manager = ControlledManager()
-
-        def request(assignment: dict[str, dict[str, object]]) -> DispatchRequest:
+        def request(assignment: dict[str, FrozenLaneAssignment]) -> DispatchRequest:
             return DispatchRequest(
                 action="ingest",
                 thread_id="run-race",
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 workspace_root=str(workspace),
                 recursion_limit=25,
                 model_assignment=assignment,
@@ -769,36 +764,11 @@ class TestOneWorkspaceOneGraphEntry:
     async def test_concurrent_equal_first_dispatches_share_the_compilation(
         self, workspace: Path
     ) -> None:
-        class ControlledManager(GraphLifecycleManager):
-            def __init__(self) -> None:
-                super().__init__(
-                    checkpointer=InMemorySaver(),
-                    bridge=WorkerBridge(
-                        api_url="http://127.0.0.1:1", worker_id="identity"
-                    ),
-                    aggregator=EventAggregator(),
-                    token_store=RunTokenStore(),
-                    catalog_store=RunCatalogStore(),
-                )
-                self.started = asyncio.Event()
-                self.release = asyncio.Event()
-                self.compile_count = 0
-
-            @override
-            async def _compile_graph(
-                self, req: DispatchRequest
-            ) -> RegisteredCompiledGraph:
-                del req
-                self.compile_count += 1
-                self.started.set()
-                await self.release.wait()
-                return TestOneWorkspaceOneGraphEntry._graph()
-
-        manager = ControlledManager()
+        manager = TestOneWorkspaceOneGraphEntry._ControlledManager()
         req = DispatchRequest(
             action="ingest",
             thread_id="run-equal-race",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=str(workspace),
             recursion_limit=25,
             model_assignment=_assignment("same"),
@@ -815,38 +785,13 @@ class TestOneWorkspaceOneGraphEntry:
     async def test_concurrent_runs_of_one_compilation_identity_compile_apart(
         self, workspace: Path
     ) -> None:
-        class ControlledManager(GraphLifecycleManager):
-            def __init__(self) -> None:
-                super().__init__(
-                    checkpointer=InMemorySaver(),
-                    bridge=WorkerBridge(
-                        api_url="http://127.0.0.1:1", worker_id="identity"
-                    ),
-                    aggregator=EventAggregator(),
-                    token_store=RunTokenStore(),
-                    catalog_store=RunCatalogStore(),
-                )
-                self.started = asyncio.Event()
-                self.release = asyncio.Event()
-                self.compile_count = 0
-
-            @override
-            async def _compile_graph(
-                self, req: DispatchRequest
-            ) -> RegisteredCompiledGraph:
-                del req
-                self.compile_count += 1
-                self.started.set()
-                await self.release.wait()
-                return TestOneWorkspaceOneGraphEntry._graph()
-
-        manager = ControlledManager()
+        manager = TestOneWorkspaceOneGraphEntry._ControlledManager()
 
         def request(thread_id: str) -> DispatchRequest:
             return DispatchRequest(
                 action="ingest",
                 thread_id=thread_id,
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 workspace_root=str(workspace),
                 recursion_limit=25,
                 model_assignment=_assignment("same"),
@@ -877,7 +822,7 @@ class TestOneWorkspaceOneGraphEntry:
                     bridge=WorkerBridge(
                         api_url="http://127.0.0.1:1", worker_id="identity"
                     ),
-                    aggregator=EventAggregator(),
+                    producer=RunEventProducer(),
                     token_store=RunTokenStore(),
                     catalog_store=RunCatalogStore(),
                 )
@@ -902,7 +847,7 @@ class TestOneWorkspaceOneGraphEntry:
             return DispatchRequest(
                 action="ingest",
                 thread_id=thread_id,
-                team_preset="mock-success-single",
+                team_preset=DEFAULT_TEAM_PRESET,
                 workspace_root=str(workspace),
                 recursion_limit=25,
                 model_assignment=_assignment(model_name),
@@ -925,38 +870,35 @@ class TestOneWorkspaceOneGraphEntry:
 
     @pytest.mark.asyncio
     async def test_real_checkpoint_read_timeout_cleans_all_compile_state(
-        self, workspace: Path, tmp_path: Path
+        self, workspace: Path, checkpointer: AsyncSqliteSaver
     ) -> None:
-        checkpoint_path = tmp_path / "held-checkpoint.db"
-        async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
-            await saver.setup()
-            manager = GraphLifecycleManager(
-                checkpointer=saver,
-                bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
-                aggregator=EventAggregator(),
-                token_store=RunTokenStore(),
-                catalog_store=RunCatalogStore(),
-                checkpoint_read_timeout_seconds=0.02,
-            )
-            await saver.lock.acquire()
-            try:
-                with pytest.raises(GraphCompilationError, match="read timed out"):
-                    await manager.get_or_compile_graph(
-                        DispatchRequest(
-                            action="ingest",
-                            thread_id="held-read",
-                            team_preset="mock-success-single",
-                            workspace_root=str(workspace),
-                            recursion_limit=25,
-                            model_assignment=_assignment("current"),
-                            graph_definition=_definition(workspace),
-                        )
+        manager = GraphLifecycleManager(
+            checkpointer=checkpointer,
+            bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
+            producer=RunEventProducer(),
+            token_store=RunTokenStore(),
+            catalog_store=RunCatalogStore(),
+            checkpoint_read_timeout_seconds=0.02,
+        )
+        await checkpointer.lock.acquire()
+        try:
+            with pytest.raises(GraphCompilationError, match="read timed out"):
+                await manager.get_or_compile_graph(
+                    DispatchRequest(
+                        action="ingest",
+                        thread_id="held-read",
+                        team_preset=DEFAULT_TEAM_PRESET,
+                        workspace_root=str(workspace),
+                        recursion_limit=25,
+                        model_assignment=_assignment("current"),
+                        graph_definition=_definition(workspace),
                     )
-            finally:
-                saver.lock.release()
+                )
+        finally:
+            checkpointer.lock.release()
 
-            assert manager.thread_binding_count == 0
-            assert manager.compile_flight_count == 0
+        assert manager.thread_binding_count == 0
+        assert manager.compile_flight_count == 0
 
     @pytest.mark.asyncio
     async def test_fresh_worker_refuses_a_digest_that_disagrees_with_checkpoint(
@@ -975,7 +917,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager = GraphLifecycleManager(
             checkpointer=cast("Any", DigestCheckpointer()),
             bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
-            aggregator=EventAggregator(),
+            producer=RunEventProducer(),
             token_store=RunTokenStore(),
             catalog_store=RunCatalogStore(),
         )
@@ -986,7 +928,7 @@ class TestOneWorkspaceOneGraphEntry:
                 DispatchRequest(
                     action="ingest",
                     thread_id="run-fresh-worker",
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     workspace_root=str(workspace),
                     recursion_limit=25,
                     model_assignment=_assignment("changed"),
@@ -1018,7 +960,7 @@ class TestOneWorkspaceOneGraphEntry:
         manager = CompileTrap(
             checkpointer=cast("Any", DigestCheckpointer()),
             bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
-            aggregator=EventAggregator(),
+            producer=RunEventProducer(),
             token_store=RunTokenStore(),
             catalog_store=RunCatalogStore(),
         )
@@ -1027,7 +969,7 @@ class TestOneWorkspaceOneGraphEntry:
                 DispatchRequest(
                     action="ingest",
                     thread_id="run-noncurrent-checkpoint",
-                    team_preset="mock-success-single",
+                    team_preset=DEFAULT_TEAM_PRESET,
                     workspace_root=str(workspace),
                     recursion_limit=25,
                     model_assignment=_assignment("current"),
@@ -1046,7 +988,7 @@ class TestOneWorkspaceOneGraphEntry:
                     bridge=WorkerBridge(
                         api_url="http://127.0.0.1:1", worker_id="identity"
                     ),
-                    aggregator=EventAggregator(),
+                    producer=RunEventProducer(),
                     token_store=RunTokenStore(),
                     catalog_store=RunCatalogStore(),
                 )
@@ -1066,7 +1008,7 @@ class TestOneWorkspaceOneGraphEntry:
         req = DispatchRequest(
             action="ingest",
             thread_id="run-retry",
-            team_preset="mock-success-single",
+            team_preset=DEFAULT_TEAM_PRESET,
             workspace_root=str(workspace),
             recursion_limit=25,
             model_assignment=_assignment("same"),

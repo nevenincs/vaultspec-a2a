@@ -2,13 +2,31 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 from ..ipc.schemas import DispatchRequest
 from ..thread.executable_graph import FrozenGraphDefinition
 from .workspace import require_admitted_workspace_root
+
+if TYPE_CHECKING:
+    from ..database import ControlActionModel
+
+__all__ = [
+    "AcceptedActionInput",
+    "ActorCredentialsRequiredError",
+    "dispatch_matches_accepted_input",
+    "freeze_accepted_input",
+    "read_accepted_input",
+    "restore_accepted_dispatch",
+]
 
 _TRANSPORT_FIELDS = frozenset({"dispatch_id", "graph_action_receipt", "actor_tokens"})
 _INPUT_FIELDS = frozenset(DispatchRequest.model_fields) - _TRANSPORT_FIELDS
@@ -28,16 +46,44 @@ class AcceptedActionInput(BaseModel):
     dispatch: dict[str, object]
     actor_tokens_required: bool
 
+    # The definition the one validation below admits, so no reader parses the
+    # persisted graph again. ``None`` for a cancel, which enters no graph.
+    _graph_definition: FrozenGraphDefinition | None = PrivateAttr(default=None)
+
     @field_validator("dispatch")
     @classmethod
     def complete_effective_input(cls, value: dict[str, object]) -> dict[str, object]:
         if set(value) != set(_INPUT_FIELDS):
             raise ValueError("accepted dispatch does not carry complete current input")
-        if value["action"] != "cancel":
-            definition = FrozenGraphDefinition.model_validate(value["graph_definition"])
-            if definition.team["id"] != value["team_preset"]:
-                raise ValueError("accepted graph definition has a different preset")
         return value
+
+    @model_validator(mode="after")
+    def admit_graph_definition(self) -> Self:
+        if self.dispatch["action"] != "cancel":
+            definition = FrozenGraphDefinition.model_validate(
+                self.dispatch["graph_definition"]
+            )
+            if definition.team_id != self.dispatch["team_preset"]:
+                raise ValueError("accepted graph definition has a different preset")
+            self._graph_definition = definition
+        return self
+
+    @property
+    def graph_definition(self) -> FrozenGraphDefinition | None:
+        """The validated executable program, absent for a cancel."""
+        return self._graph_definition
+
+
+def read_accepted_input(action: ControlActionModel) -> AcceptedActionInput:
+    """Return the accepted input a journal action's stored payload holds.
+
+    Raises:
+        ValueError: When the action stores no payload, or the payload is not the
+            current accepted-input shape.
+    """
+    if action.payload_json is None:
+        raise ValueError("action stores no accepted input")
+    return AcceptedActionInput.model_validate_json(action.payload_json)
 
 
 def freeze_accepted_input(
@@ -72,7 +118,7 @@ def restore_accepted_dispatch(
             "actor_tokens": None,
         }
     )
-    if dispatch.action != "cancel" and dispatch.workspace_root is not None:
+    if dispatch.requires_graph_receipt and dispatch.workspace_root is not None:
         require_admitted_workspace_root(dispatch.workspace_root)
     return dispatch
 

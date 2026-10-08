@@ -3,22 +3,27 @@
 No mocks, no engine: the bridge is spawned with a handed catalog snapshot (env)
 and an UNREACHABLE engine base URL. If it writes its "serving tools=N" startup
 marker, it served ``list_tools`` from the handoff without an engine fetch at spawn
-- the cold-start fix that let the bridge's tools reach the model in time
-(a2a-edge-conformance S18). A fetch would have had to reach the unreachable engine
+- the cold-start fix that let the bridge's tools reach the model in time.
+A fetch would have had to reach the unreachable engine
 and could never serve.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
-import time
 from typing import TYPE_CHECKING
 
 from ....authoring import AgentTool, CatalogSnapshot
 from ....authoring.catalog import snapshot_to_catalog_payload
+from ....testing import (
+    LivenessWatch,
+    ProgressDeadline,
+    inherited_environment,
+    wait_until,
+)
+from ....utils import ProcessContainment, reap_contained, spawn_contained
 from ..authoring_stdio import (
     ENV_ACTOR_TOKEN,
     ENV_BASE_URL,
@@ -62,46 +67,53 @@ def test_bridge_serves_from_handed_catalog_without_engine(tmp_path: Path) -> Non
     snapshot = _snapshot()
     # Inherit the real environment so the child interpreter starts, then pin the
     # bridge's own vars (unreachable engine + handed catalog).
-    env = {
-        **os.environ,
-        ENV_BASE_URL: _UNREACHABLE,
-        ENV_BEARER: "bogus-bearer",
-        ENV_ACTOR_TOKEN: "bogus-actor",
-        ENV_RUN_ID: "handoff-run",
-        ENV_SERVER_NAME: "vaultspec-authoring",
-        ENV_CATALOG_JSON: json.dumps(snapshot_to_catalog_payload(snapshot)),
-        _ENV_DEBUG_MARKER: str(marker),
-    }
-    proc = subprocess.Popen(
+    env = inherited_environment(
+        {
+            ENV_BASE_URL: _UNREACHABLE,
+            ENV_BEARER: "bogus-bearer",
+            ENV_ACTOR_TOKEN: "bogus-actor",
+            ENV_RUN_ID: "handoff-run",
+            ENV_SERVER_NAME: "vaultspec-authoring",
+            ENV_CATALOG_JSON: json.dumps(snapshot_to_catalog_payload(snapshot)),
+            _ENV_DEBUG_MARKER: str(marker),
+        }
+    )
+    containment = ProcessContainment.create()
+    proc = spawn_contained(
         [sys.executable, "-m", _MODULE],
+        containment,
         env=env,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    try:
-        deadline = time.monotonic() + 30.0
-        served = False
-        while time.monotonic() < deadline:
-            if marker.exists() and "serving tools=" in marker.read_text(
-                encoding="utf-8"
-            ):
-                served = True
-                break
-            if proc.poll() is not None:
-                break
-            time.sleep(0.05)
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
 
-    text = marker.read_text(encoding="utf-8") if marker.exists() else ""
-    assert served, (
-        "bridge did not serve from the handed catalog against an unreachable "
-        f"engine; marker was {text!r}"
-    )
+    def _marker_text() -> str:
+        return marker.read_text(encoding="utf-8") if marker.exists() else ""
+
+    def _bridge_exited() -> str | None:
+        if proc.poll() is None:
+            return None
+        return (
+            f"exited with code {proc.returncode} before serving; "
+            f"marker was {_marker_text()!r}"
+        )
+
+    try:
+        wait_until(
+            lambda: "serving tools=" in _marker_text(),
+            deadline=ProgressDeadline(
+                idle_window_s=30.0,
+                watches=(LivenessWatch(label="stdio bridge", verdict=_bridge_exited),),
+            ),
+            interval_s=0.05,
+            stalled=lambda: (
+                "bridge did not serve from the handed catalog against an "
+                f"unreachable engine; marker was {_marker_text()!r}"
+            ),
+        )
+    finally:
+        reap_contained(proc, containment)
+
     # It served exactly the handed tool count, proving no engine fetch occurred.
-    assert "serving tools=3" in text
+    assert "serving tools=3" in _marker_text()

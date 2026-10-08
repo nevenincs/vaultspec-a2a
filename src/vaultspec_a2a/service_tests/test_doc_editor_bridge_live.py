@@ -17,9 +17,10 @@ were also present in its own prompt, which is the precise failure mode the
 elicitation defect hid behind. Tool names seen in the narration are retained here
 as a DIAGNOSTIC only, to help read a failure, and are never asserted on.
 
-This is the Codex-lane counterpart of the claude-lane S20 bridge proof, and it
-reuses that module's harness and its engine-side changeset reader rather than
-restating them, so the two lanes are certified against one definition of proof.
+This is the Codex-lane counterpart of the claude-lane solo-coder bridge proof, and both
+run on the shared acceptance harness and its engine-side changeset reader rather
+than restating them, so the two lanes are certified against one definition of
+proof.
 The lane is pinned: the case declares ``codex``, and a configured live selection
 naming any other provider SKIPS rather than running, because a pass recorded
 against a lane this test makes no claim about would be worse than no coverage.
@@ -42,27 +43,28 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
-from .test_pw7_acceptance import (
-    _GATEWAY_AUTH_HEADERS,
-    _MODE_AUTONOMOUS,
+from ..testing import (
+    CODER_ROLE,
+    GATEWAY_AUTH_HEADERS,
+    MODE_AUTONOMOUS,
+    OBSERVE_DEADLINE_SECONDS,
+    SOLO_CODER_PRESET,
     AcceptanceCase,
     AcceptanceHarness,
-    _reachable_stack,
-    _resolve_selection,
+    ResilientAuthoringClient,
+    mint_raw_token,
+    observe_bridged_authoring_run,
+    reachable_stack,
+    resolve_selection,
+    snapshot_vault,
+    vault_write_delta,
 )
-from .test_s20_solo_coder_bridge_live import (
-    _OBSERVE_DEADLINE_SECONDS,
-    _observe_solo_coder_run,
-)
-from .test_tool_cores_floor_live import _snapshot_vault, _vault_write_delta
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from ..conftest import ExternalPrerequisiteRule
 
-_CODER_ROLE = "vaultspec-coder"
-_SOLO_CODER_PRESET = "vaultspec-solo-coder"
 _CODEX_PROVIDER = "codex"
 
 
@@ -70,7 +72,7 @@ def _codex_authoring_case(feature: str) -> AcceptanceCase:
     """A Codex-lane run that must author through the bridged propose tool."""
     return AcceptanceCase(
         label="codex-doc-editor-bridge",
-        preset=_SOLO_CODER_PRESET,
+        preset=SOLO_CODER_PRESET,
         feature=feature,
         prompt=(
             "Author a short research note for this feature using ONLY your engine "
@@ -82,7 +84,7 @@ def _codex_authoring_case(feature: str) -> AcceptanceCase:
             "research note titled 'Codex bridge proof'. Do NOT write files directly "
             "- author only through the engine authoring tools."
         ),
-        roles=(_CODER_ROLE,),
+        roles=(CODER_ROLE,),
         expected_doc_kinds=(),
         lane_provider=_CODEX_PROVIDER,
         requires_live_selection=True,
@@ -94,15 +96,15 @@ async def _codex_authoring_harness(
     external_prerequisite: ExternalPrerequisiteRule,
 ) -> tuple[AcceptanceHarness, Path, str, AcceptanceCase, str, str]:
     """Resolve the live Codex lane and build its authenticated harness."""
-    stack = _reachable_stack()
+    stack = reachable_stack()
     if stack is None:
         external_prerequisite.absent("loopback-stack")
     gateway_url, engine_base_url, engine_bearer, vault_root = stack
 
     feature = f"codex-doc-editor-{int(time.time())}"
     case = _codex_authoring_case(feature)
-    selection, overrides = await _resolve_selection(
-        case, gateway_url, str(vault_root.parent)
+    selection, overrides = await resolve_selection(
+        case, gateway_url, str(vault_root.parent), external_prerequisite
     )
     harness = AcceptanceHarness(
         case=case,
@@ -143,40 +145,35 @@ async def test_codex_authoring_tool_call_reaches_the_engine(
         engine_bearer,
     ) = await _codex_authoring_harness(external_prerequisite)
 
-    before = _snapshot_vault(vault_root)
+    before = snapshot_vault(vault_root)
     output_parts: list[str] = []
     run_changesets: set[str] = set()
     # Diagnostic only, NEVER asserted: a tool name the agent merely NARRATES
     # proves nothing, because the prompt above names those same tools.
     narrated_bridge_names: set[str] = set()
 
-    from .test_pw7_acceptance import _ResilientAuthoringClient
-
-    async with _ResilientAuthoringClient(engine_base_url, engine_bearer) as ec:
-        run_tokens = {
-            role: await harness._mint(ec, f"agent:{harness.run_id}:{role}", "agent")
-            for role in case.roles
-        }
+    async with ResilientAuthoringClient(engine_base_url, engine_bearer) as ec:
+        run_tokens = await harness.mint_role_tokens(ec, harness.run_id, case.roles)
         # Autonomous operation mode before run-start, so the engine's eligibility
         # layer auto-approves the mutating propose_changeset INTO the review lane
         # rather than parking it as awaiting_permission. The human apply-gate
         # still lives downstream; this is the declared run mode reaching the
         # engine, not a bypass. A distinct human principal sets it, clearing the
         # self-approval ban.
-        mode_setter = await harness._mint(ec, f"mode-setter:{harness.run_id}", "human")
-        await harness._set_mode(ec, _MODE_AUTONOMOUS, setter_token=mode_setter)
+        mode_setter = await mint_raw_token(ec, f"mode-setter:{harness.run_id}", "human")
+        await harness.set_mode(ec, MODE_AUTONOMOUS, setter_token=mode_setter)
         # The gateway seam is authenticated; the harness takes the client from its
         # caller, so the bearer belongs HERE. Built unauthenticated, every gateway
         # call answers a truthful 401 and the run never starts.
-        async with httpx.AsyncClient(headers=_GATEWAY_AUTH_HEADERS) as hc:
-            await harness._run_start(
+        async with httpx.AsyncClient(headers=GATEWAY_AUTH_HEADERS) as hc:
+            await harness.run_start(
                 hc,
                 run_id=harness.run_id,
                 tokens=run_tokens,
                 feature=feature,
                 expect=201,
             )
-            run_changesets = await _observe_solo_coder_run(
+            run_changesets = await observe_bridged_authoring_run(
                 ec,
                 harness,
                 hc,
@@ -184,12 +181,12 @@ async def test_codex_authoring_tool_call_reaches_the_engine(
                 narrated_bridge_names,
             )
 
-    after = _snapshot_vault(vault_root)
-    delta = _vault_write_delta(before, after)
+    after = snapshot_vault(vault_root)
+    delta = vault_write_delta(before, after)
 
     assert run_changesets, (
         "the Codex-lane run created no engine changeset scoped to run "
-        f"{harness.run_id} within {_OBSERVE_DEADLINE_SECONDS:.0f}s "
+        f"{harness.run_id} within {OBSERVE_DEADLINE_SECONDS:.0f}s "
         f"(cs:{harness.run_id}:* absent from /authoring/v1/proposals). The "
         "authoring call never reached the engine - which is exactly what the "
         "unanswered codex tool-approval produced, a run that completes and "

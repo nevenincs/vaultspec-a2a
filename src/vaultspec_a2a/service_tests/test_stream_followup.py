@@ -1,26 +1,25 @@
-"""SSE and follow-up certification against the real compose stack."""
+"""SSE and follow-up certification against the real service stack."""
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from typing import TYPE_CHECKING
 
-from ..testing.tests._support.payloads import (
+from ..testing import (
     json_object,
     json_object_list,
+    read_frames_until,
     required_bool,
     required_text,
+    wait_for_run_status,
 )
-from ._state import select_option_id, thread_state, wait_for_state
+from ._state import select_option_id, thread_state
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    import httpx
-
-    from ..providers._json_contract import JsonObject
+    from ..providers import JsonObject
     from .harness import ServiceStack
 
 
@@ -43,47 +42,6 @@ def _is_completed_state(state: JsonObject) -> bool:
     return state.get("status") == "completed"
 
 
-def _read_sse_frames(
-    response: httpx.Response,
-    *,
-    stop_when: Callable[[JsonObject], bool],
-    timeout: float = 120.0,
-) -> list[JsonObject]:
-    deadline = time.monotonic() + timeout
-    events: list[JsonObject] = []
-    fields: dict[str, list[str]] = {"data": []}
-
-    def _flush() -> JsonObject | None:
-        data_lines = fields.get("data", [])
-        if not data_lines:
-            fields.clear()
-            fields["data"] = []
-            return None
-        decoded: object = json.loads("\n".join(data_lines))
-        payload = json_object(decoded, at="SSE frame")
-        fields.clear()
-        fields["data"] = []
-        return payload
-
-    for raw_line in response.iter_lines():
-        if time.monotonic() > deadline:
-            break
-        if raw_line == "":
-            payload = _flush()
-            if payload is None:
-                continue
-            events.append(payload)
-            if stop_when(payload):
-                return events
-            continue
-        if ":" not in raw_line:
-            continue
-        key, value = raw_line.split(":", 1)
-        if key == "data":
-            fields.setdefault("data", []).append(value.lstrip())
-    raise AssertionError(f"timed out waiting for SSE event; events={events!r}")
-
-
 def _wait_for_pending_permission(
     stack: ServiceStack,
     thread_id: str,
@@ -100,7 +58,11 @@ def _wait_for_pending_permission(
             and state.get("snapshot_complete") is True
         )
 
-    return wait_for_state(stack, thread_id, _is_resumable_permission, timeout=timeout)
+    return wait_for_run_status(
+        lambda: thread_state(stack, thread_id),
+        _is_resumable_permission,
+        timeout=timeout,
+    )
 
 
 def _trigger_after(
@@ -135,7 +97,7 @@ def _approve_during_initial_stream(
                 service_stack.respond_permission(
                     required_text(request, "request_id", at="pending permission"),
                     thread_id=thread_id,
-                    option_id=select_option_id(request, label="approve"),
+                    option_id=select_option_id(request, label="Allow once"),
                 ),
                 at="permission response",
             )
@@ -147,9 +109,8 @@ def _approve_during_initial_stream(
         client.stream("GET", f"/v1/runs/{thread_id}/stream") as stream,
     ):
         trigger = _trigger_after(0.5, _approve)
-        initial_events = _read_sse_frames(
-            stream,
-            stop_when=_is_terminal_event,
+        initial_events = read_frames_until(
+            stream.iter_lines(), _is_terminal_event, timeout=120.0
         )
         trigger.join(timeout=5.0)
 
@@ -171,7 +132,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     """Consume SSE for a real run, then verify terminal replay semantics."""
     created = service_stack.create_thread(
         initial_message="Request approval and then continue with a follow-up.",
-        team_preset="mock-human-in-loop",
+        team_preset="deterministic-permission-pause",
         title="service stream follow-up",
     )
     created_body = json_object(created, at="created thread")
@@ -185,10 +146,8 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     assert any(event.get("status") == "completed" for event in initial_events)
     service_stack.record(f"sse-initial:{thread_id}", initial_events)
 
-    completed = wait_for_state(
-        service_stack,
-        thread_id,
-        _is_completed_state,
+    completed = wait_for_run_status(
+        lambda: thread_state(service_stack, thread_id), _is_completed_state
     )
     service_stack.record(f"sse-completed:{thread_id}", completed)
     assistant_messages = [
@@ -200,17 +159,15 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     ]
     assert assistant_messages, "resume flow should emit a deterministic assistant reply"
     assert required_text(assistant_messages[-1], "content", at="assistant message") == (
-        "Permission approved. The privileged command completed successfully "
-        "and the task is now finished."
+        "Deterministic permission approved with allow_once."
     )
 
     with (
         service_stack.gateway_client(timeout=None) as client,
         client.stream("GET", f"/v1/runs/{thread_id}/stream") as stream,
     ):
-        follow_up_events = _read_sse_frames(
-            stream,
-            stop_when=_is_replayed_terminal_event,
+        follow_up_events = read_frames_until(
+            stream.iter_lines(), _is_replayed_terminal_event, timeout=120.0
         )
 
     assert any(event.get("type") == "thread_terminal" for event in follow_up_events)

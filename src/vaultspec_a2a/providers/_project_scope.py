@@ -2,22 +2,25 @@
 
 A run is admitted against one project, and every lane's tools take that project
 as an argument rather than inheriting it, so the escape is argument-borne and the
-check has to run where calls pass. Both lanes have such a place - the ACP
-permission handler and the Codex approval rung - and this is the single scan they
-share, so the two cannot come to disagree about what "another project" means.
+check has to run where calls pass. That place is the permission decision both
+lanes share, ``_tool_policy.decide``, which runs the foreign-project scan here
+ahead of either lane's rung, so the two cannot come to disagree about what
+"another project" means.
 
 A tool that takes no project still takes a PATH, and a path reaches just as far:
 the lanes' own read built-ins read whatever file they are handed, so the second
-scan here measures a call's path arguments against the same bound project.
+scan here measures a call's path arguments against the same bound project; the
+ACP permission handler applies it to a native read call.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
-from ._acp_types import canonical_project_root
+from ..control.workspace import canonical_workspace_root
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -25,23 +28,31 @@ if TYPE_CHECKING:
     from ._json_contract import JsonObject, JsonValue
 
 __all__ = [
-    "ProjectScope",
     "RunProjectScope",
     "foreign_project_argument",
     "path_arguments_in_project",
 ]
 
 
-class ProjectScope(Protocol):
-    """What a permission decision needs to know about a run's project."""
+def _project_scope_key(value: str | Path) -> str:
+    """Return one project path in the single form scope decisions compare.
 
-    def bound_project_root(self) -> str | None:
-        """Return the project this run is bound to, or ``None`` if it has none."""
-        ...
+    The active project reaches a scope decision in several spellings - the
+    engine's wire form, the run's stored path, a search service's per-call root,
+    a command-line target - and a comparison between two of them is a
+    comparison between two conventions. Every value is therefore reduced to the
+    workspace boundary's own authority form, so the permission layer and
+    admission cannot disagree about what one spelling names, and is then
+    case-normalised the way the platform's own path convention is: folded on
+    Windows, unchanged elsewhere, where folding would merge distinct directories.
 
-    def binds_project_path(self, candidate: str | Path) -> bool:
-        """Return whether *candidate* lies inside the run's own project."""
-        ...
+    Raises:
+        ValueError: If *value* is blank, relative or home-relative, or does not
+            reduce to an absolute path. Each would be measured against this
+            process's working directory or home rather than the agent's.
+        OSError: If the OS refuses to resolve *value*.
+    """
+    return os.path.normcase(str(canonical_workspace_root(value)))
 
 
 # Tool-call argument keys that name a project to operate on. The search tools a
@@ -75,7 +86,7 @@ _PATH_ARGUMENT_KEYS: frozenset[str] = frozenset(
 
 
 class RunProjectScope:
-    """One run's project scope, for a lane that carries no ACP model config."""
+    """One run's project scope: what every lane measures a tool call against."""
 
     __slots__ = ("_workspace_root",)
 
@@ -83,20 +94,51 @@ class RunProjectScope:
         self._workspace_root = workspace_root
 
     def bound_project_root(self) -> str | None:
-        """Return the canonical project this run is bound to."""
+        """Return the project this run is bound to, or ``None`` if it has none.
+
+        ``workspace_root`` is the active project the run was created with. This
+        reader is what makes it usable as an AUTHORITY rather than only as a
+        starting directory: it hands back the scope key, so a caller comparing
+        against it cannot accidentally compare spellings.
+
+        ``None`` is not "unrestricted". It means the run carries no project, or
+        one that does not reduce to a key, so a caller deciding whether to
+        permit something must read it as "no authority to permit against" - see
+        :meth:`binds_project_path`.
+        """
         if not self._workspace_root:
             return None
-        return canonical_project_root(self._workspace_root)
+        try:
+            return _project_scope_key(self._workspace_root)
+        except (OSError, ValueError):
+            return None
 
     def binds_project_path(self, candidate: str | Path) -> bool:
-        """Return whether *candidate* lies inside the project the run is bound to."""
+        """Return whether *candidate* lies inside the project the run is bound to.
+
+        Containment rather than equality, because a path UNDER the run's project
+        is still the run's project: refusing a subdirectory would refuse
+        legitimately scoped work while closing nothing. A parent of the bound
+        project is NOT contained - widening the scope upward is exactly the
+        escape this answers.
+
+        Returns ``False`` when the run carries no project and for a candidate
+        that does not reduce to a key: a comparison that cannot be made is not a
+        comparison that passed.
+        """
         bound = self.bound_project_root()
         if bound is None:
             return False
-        return Path(canonical_project_root(candidate)).is_relative_to(Path(bound))
+        try:
+            key = _project_scope_key(candidate)
+        except (OSError, ValueError):
+            return False
+        # Both sides are reduced to the scope key, so this is a pure lexical
+        # containment test - no second normalisation convention can creep in.
+        return Path(key).is_relative_to(Path(bound))
 
 
-def _foreign_project_field(key: str, value: JsonValue, scope: ProjectScope) -> bool:
+def _foreign_project_field(key: str, value: JsonValue, scope: RunProjectScope) -> bool:
     return (
         key in _PROJECT_ARGUMENT_KEYS
         and isinstance(value, str)
@@ -106,7 +148,7 @@ def _foreign_project_field(key: str, value: JsonValue, scope: ProjectScope) -> b
 
 
 def _scan_foreign_project_mapping(
-    value: JsonObject, scope: ProjectScope, depth: int
+    value: JsonObject, scope: RunProjectScope, depth: int
 ) -> str | None:
     for key, item in value.items():
         if _foreign_project_field(key, item, scope):
@@ -118,7 +160,7 @@ def _scan_foreign_project_mapping(
 
 
 def _scan_foreign_project_argument(
-    value: JsonValue, scope: ProjectScope, depth: int
+    value: JsonValue, scope: RunProjectScope, depth: int
 ) -> str | None:
     if depth > _MAX_ARGUMENT_SCAN_DEPTH:
         return None
@@ -133,7 +175,7 @@ def _scan_foreign_project_argument(
     return None
 
 
-def foreign_project_argument(args: JsonObject, scope: ProjectScope) -> str | None:
+def foreign_project_argument(args: JsonObject, scope: RunProjectScope) -> str | None:
     """Return the first argument naming a project outside the run's, or ``None``.
 
     The escape this closes is argument-borne: the run's grounding tools resolve a
@@ -150,7 +192,7 @@ def foreign_project_argument(args: JsonObject, scope: ProjectScope) -> str | Non
 
 
 @dataclass(frozen=True, slots=True)
-class PathArgumentScan:
+class _PathArgumentScan:
     """Where a tool call said it would work, measured against the run's project."""
 
     inside: tuple[str, ...]
@@ -217,8 +259,8 @@ def _anchored_to(value: str, bound: str) -> str:
 
 
 def path_arguments_in_project(
-    args: JsonObject, locations: Sequence[JsonObject], scope: ProjectScope
-) -> PathArgumentScan:
+    args: JsonObject, locations: Sequence[JsonObject], scope: RunProjectScope
+) -> _PathArgumentScan:
     """Measure a tool call's path arguments against the project the run is bound to.
 
     Both halves of the ACP tool-call payload are read: ``rawInput``, which is
@@ -248,4 +290,4 @@ def path_arguments_in_project(
             inside.append(value)
         else:
             outside.append(value)
-    return PathArgumentScan(tuple(inside), tuple(outside))
+    return _PathArgumentScan(tuple(inside), tuple(outside))

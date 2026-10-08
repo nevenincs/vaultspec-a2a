@@ -13,12 +13,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from .._acp_rpc_handlers import _autonomous_option_id, on_request_permission
+from ...testing import request_permission_params
+from .._acp_rpc_handlers import on_request_permission
 from .._acp_types import AcpModelConfig, AcpSessionContext, PermissionCallback
-from .._json_contract import JsonObject, JsonValue
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from .._json_contract import JsonObject
 
 _RAG_READS: list[str] = [
     "mcp__vaultspec-rag__search_vault",
@@ -50,12 +52,7 @@ def _config(
         mcp_servers=[],
         use_exec=False,
         provider="kimi",
-        runtime_authority=None,
-        acp_backend="kimi_cli",
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
         allowed_tools=list(_RAG_READS),
         acp_family=acp_family,
@@ -69,11 +66,9 @@ async def _decide(
     raw_input: JsonObject | None = None,
 ) -> str:
     tool_call: JsonObject = {"title": name, "rawInput": raw_input or {}}
-    params: JsonObject = {
-        "sessionId": ctx.session_id,
-        "toolCall": tool_call,
-        "options": list[JsonValue](_OPTIONS),
-    }
+    params = request_permission_params(
+        ctx.session_id, tool_call=tool_call, options=_OPTIONS
+    )
     response = await on_request_permission(1, params, ctx, config)
     result = response.get("result")
     assert isinstance(result, dict)
@@ -84,6 +79,7 @@ async def _decide(
     return option_id
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "title",
     [
@@ -92,13 +88,14 @@ async def _decide(
         "get_code_file",
     ],
 )
-def test_autonomous_kimi_auto_approves_its_declared_reads(title: str) -> None:
+async def test_autonomous_kimi_auto_approves_its_declared_reads(
+    acp_session_context: AcpSessionContext, title: str
+) -> None:
     cfg = _config(acp_family="kimi")
-    assert (
-        _autonomous_option_id(title, cfg, _OPTIONS, args={}, locations=[]) == "approve"
-    )
+    assert await _decide(title, cfg, acp_session_context) == "approve"
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "title",
     [
@@ -114,11 +111,11 @@ def test_autonomous_kimi_auto_approves_its_declared_reads(title: str) -> None:
         "TotallyUnknownTool",
     ],
 )
-def test_autonomous_kimi_rejects_everything_else(title: str) -> None:
+async def test_autonomous_kimi_rejects_everything_else(
+    acp_session_context: AcpSessionContext, title: str
+) -> None:
     cfg = _config(acp_family="kimi")
-    assert (
-        _autonomous_option_id(title, cfg, _OPTIONS, args={}, locations=[]) == "reject"
-    )
+    assert await _decide(title, cfg, acp_session_context) == "reject"
 
 
 @pytest.mark.asyncio
@@ -220,11 +217,9 @@ async def test_a_floor_read_is_judged_by_the_adapter_locations_too(
         "rawInput": {"pattern": "credential"},
         "locations": [{"path": str(outside / "secrets.env")}],
     }
-    params: JsonObject = {
-        "sessionId": acp_session_context.session_id,
-        "toolCall": tool_call,
-        "options": list[JsonValue](_OPTIONS),
-    }
+    params = request_permission_params(
+        acp_session_context.session_id, tool_call=tool_call, options=_OPTIONS
+    )
 
     response = await on_request_permission(1, params, acp_session_context, cfg)
 

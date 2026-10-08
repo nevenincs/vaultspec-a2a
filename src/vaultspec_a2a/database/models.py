@@ -1,23 +1,20 @@
 """SQLAlchemy 2.0 async models for the persistence layer.
 
-Defines the core data models for threads, artifacts, permission logs,
-and cost tracking. Uses ``DeclarativeBase`` with ``Mapped`` / ``mapped_column``
-for full type-safety.
+Defines the core data models for threads, permission logs, the control
+journal, execution state and cost tracking. Uses ``DeclarativeBase`` with
+``Mapped`` / ``mapped_column`` for full type-safety.
 """
 
-from dataclasses import dataclass
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_EVEN, Decimal
-from typing import Any, cast, override
+from typing import override
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
-    Numeric,
     String,
     Text,
     TypeDecorator,
@@ -26,69 +23,48 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy.types import TypeEngine
 
+from ..thread import RECEIPT_ID_MAX_LENGTH
 from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
 from ..thread.enums import (
     ControlActionResultStatus,
-    ControlActionType,
     PermissionRequestStatus,
     RecoveryCondition,
     RepairStatus,
-    TaskQueueStatus,
     ThreadStatus,
 )
 from .control_action_schema import (
-    CONTROL_ACTION_SQL_VALUES,
     QUEUE_POSITION_BOUNDED_PREDICATE,
     QUEUED_RESERVATION_PREDICATE,
     QUEUED_ROW_PREDICATE,
     RECOVERY_ACTION_SQL_VALUES,
+    RECOVERY_DEADLINE_CHECKS,
 )
-from .write_authority_schema import WRITE_ACTION_SQL_VALUES
+from .write_authority_schema import (
+    ACTION_TYPE_MAX_LENGTH,
+    RUN_REVISION_NONNEGATIVE,
+    WRITE_AUTHORITY_CHECKS,
+    WRITE_AUTHORITY_RECEIPT_INDEX,
+    WRITE_AUTHORITY_RECEIPT_INDEX_COLUMNS,
+    WRITER_GENERATION_POSITIVE,
+    receipt_id_bounded,
+)
 
 __all__ = [
-    "MONEY_PRECISION",
-    "MONEY_SCALE",
-    "ArtifactModel",
     "AuthoringEventCursorModel",
     "Base",
     "ControlActionModel",
     "CostTrackingModel",
-    "MoneyAmount",
     "PermissionLogModel",
     "PermissionRequestModel",
     "ProviderRuntimeIdentityModel",
     "RecoveryAttemptModel",
     "RunEventModel",
-    "RunWriteAuthority",
-    "TaskQueueEntryModel",
     "ThreadDeletionSagaModel",
     "ThreadExecutionStateModel",
     "ThreadModel",
     "utcnow",
 ]
-
-#: Total significant digits stored for a monetary amount.
-#:
-#: Chosen so both backends represent the SAME domain rather than leaving the
-#: SQLite lane a silently narrower second-class citizen: the SQLite
-#: representation is an ``int64`` of :data:`MONEY_SCALE`-scaled units, whose
-#: ceiling (``2**63 - 1`` scaled down, about 922 million) sits just inside the
-#: nine integer digits ``19 - 10`` leaves on Postgres.
-MONEY_PRECISION = 19
-
-#: Decimal places kept for a monetary amount.
-#:
-#: Ten places resolve to 1e-10 USD — one ten-billionth of a dollar, or 1e-8 of
-#: a cent. Per-token LLM prices bottom out around 7.5e-8 USD/token (a cheap
-#: model at roughly $0.075 per million input tokens), so the smallest single
-#: token that can be priced today still lands about 750 storage units above the
-#: floor. Nothing at the small end truncates.
-MONEY_SCALE = 10
-
-_MONEY_QUANTUM = Decimal(1).scaleb(-MONEY_SCALE)
-_MONEY_UNITS_PER_DOLLAR = 10**MONEY_SCALE
 
 
 def utcnow() -> datetime:
@@ -99,11 +75,18 @@ def utcnow() -> datetime:
 _utcnow = utcnow
 
 
+def _named_checks(checks: Mapping[str, str]) -> tuple[CheckConstraint, ...]:
+    """Build one table's CHECKs from the schema identity its guards validate."""
+    return tuple(
+        CheckConstraint(predicate, name=name) for name, predicate in checks.items()
+    )
+
+
 class UTCDateTime(TypeDecorator[datetime]):
     """Persist timezone-aware timestamps as naive UTC and restore UTC on read.
 
-    This keeps one portable schema across SQLite and Postgres while preserving
-    UTC-aware datetimes at the application boundary.
+    The stored form is naive UTC, so the UTC-aware datetime is restored at the
+    application boundary.
     """
 
     impl = DateTime
@@ -131,80 +114,6 @@ class UTCDateTime(TypeDecorator[datetime]):
         return value.replace(tzinfo=UTC)
 
 
-class MoneyAmount(TypeDecorator[Decimal]):
-    """Persist a monetary amount exactly on both backends, never via float.
-
-    The sibling of :class:`UTCDateTime`: one portable schema across SQLite and
-    Postgres, with the precise Python type restored at the application
-    boundary. Here the hazard is IEEE-754 rather than tz-naivety.
-
-    Postgres stores a native ``NUMERIC`` and needs no help. SQLite has no
-    decimal type, and SQLAlchemy's plain ``Numeric`` copes by round-tripping
-    through ``float`` — which is precisely the defect this type exists to
-    remove, and which SQLAlchemy itself warns about at runtime. So the SQLite
-    lane stores a scaled ``int64`` instead: an exact integer count of
-    1e-:data:`MONEY_SCALE` dollar units.
-
-    Integer storage buys more than lossless round-tripping. ``SUM()`` over
-    these rows is evaluated inside the database, and SQLite sums integers
-    exactly while it accumulates binary error over floats. Because SQLAlchemy
-    infers an aggregate's type from its argument, ``func.sum()`` over this
-    column returns through :meth:`process_result_value` and therefore yields a
-    ``Decimal`` on both backends — the aggregate is exact end to end, not just
-    the individual row.
-    """
-
-    impl = Numeric
-    cache_ok = True
-
-    @override
-    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
-        """Select scaled-integer storage on SQLite, native NUMERIC elsewhere."""
-        if dialect.name == "sqlite":
-            return dialect.type_descriptor(BigInteger())
-        return dialect.type_descriptor(
-            Numeric(precision=MONEY_PRECISION, scale=MONEY_SCALE, asdecimal=True)
-        )
-
-    @override
-    def process_bind_param(
-        self, value: Decimal | int | float | str | None, dialect: Dialect
-    ) -> Decimal | int | None:
-        """Quantize to the stored scale, scaling to integer units on SQLite.
-
-        ``float`` is accepted but converted through ``str`` so the decimal
-        literal the caller wrote is preserved instead of its binary expansion:
-        ``Decimal(0.05)`` is 0.05000000000000000277…, whereas
-        ``Decimal(str(0.05))`` is exactly ``0.05``. Callers computing real
-        money should hand over ``Decimal`` and keep float out of the
-        arithmetic entirely; this conversion makes the boundary safe, it does
-        not make upstream float arithmetic correct.
-        """
-        if value is None:
-            return None
-        amount = Decimal(str(value)) if isinstance(value, float) else Decimal(value)
-        if not amount.is_finite():
-            msg = f"MoneyAmount requires a finite amount, got: {value!r}"
-            raise ValueError(msg)
-        quantized = amount.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_EVEN)
-        if dialect.name == "sqlite":
-            return int(quantized.scaleb(MONEY_SCALE))
-        return quantized
-
-    @override
-    def process_result_value(
-        self, value: Decimal | int | float | str | None, dialect: Dialect
-    ) -> Decimal | None:
-        """Restore an exact ``Decimal``, unscaling the SQLite integer form."""
-        if value is None:
-            return None
-        if dialect.name == "sqlite":
-            return (Decimal(int(value)) / _MONEY_UNITS_PER_DOLLAR).quantize(
-                _MONEY_QUANTUM
-            )
-        return Decimal(str(value)) if not isinstance(value, Decimal) else value
-
-
 class Base(DeclarativeBase):
     """Shared declarative base for all database models.
 
@@ -226,12 +135,12 @@ class Base(DeclarativeBase):
     entire suite and fail on real deployments. That is strictly worse than the
     status quo, so a forward-only convention is refused.
 
-    Renaming the existing constraints instead would mean rebuilding all ten
-    tables under SQLite batch mode (every table has an unnamed primary key, and
-    eight also carry an unnamed ``thread_id`` foreign key), copying every row
-    and recreating the four partial ``ix_threads_active_*`` indexes — a
-    whole-database rewrite whose only beneficiary is a migration nobody has
-    written yet.
+    Renaming the existing constraints instead would mean rebuilding every table
+    under SQLite batch mode (each has an unnamed primary key, and every
+    thread-owned table also carries an unnamed ``thread_id`` foreign key),
+    copying every row and recreating the four partial ``ix_threads_active_*``
+    indexes — a whole-database rewrite whose only beneficiary is a migration
+    nobody has written yet.
 
     That beneficiary is already served without any of it. Alembic's
     ``batch_alter_table`` accepts a ``naming_convention`` argument precisely so
@@ -239,13 +148,13 @@ class Base(DeclarativeBase):
     moment a migration needs to target it::
 
         with op.batch_alter_table(
-            "artifacts",
+            "permission_logs",
             naming_convention={
                 "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s"
             },
         ) as batch_op:
             batch_op.drop_constraint(
-                "fk_artifacts_thread_id_threads", type_="foreignkey"
+                "fk_permission_logs_thread_id_threads", type_="foreignkey"
             )
 
     That is the supported way to drop one of these foreign keys, it needs no
@@ -254,78 +163,16 @@ class Base(DeclarativeBase):
     """
 
 
-_MAX_ACTION_RECEIPT_ID_LENGTH = 64
-
-
-def _is_integer_at_least(value: object, minimum: int) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
-
-
-@dataclass(frozen=True, slots=True)
-class RunWriteAuthority:
-    """Complete identity required to elect one durable run-state writer.
-
-    This value is deliberately separate from :class:`ThreadModel` until the
-    current-only migration installs all four columns atomically. Mapping the
-    fields ahead of that migration would make the current schema unreadable;
-    making them nullable or defaulted would instead manufacture authority for
-    rows that never carried it. The value contains only concurrency and receipt
-    identity. Checkpoint state and transcript content remain in their existing
-    stores, and credentials have no field here.
-    """
-
-    run_revision: int
-    writer_generation: int
-    action_type: ControlActionType
-    action_receipt_id: str
-
-    def __post_init__(self) -> None:
-        """Reject incomplete or structurally invalid current authority."""
-        # Runtime checks also defend against deserialized values that bypass
-        # the static types; bool is not a valid revision or generation.
-        if not _is_integer_at_least(self.run_revision, 0):
-            raise ValueError("run_revision must be a non-negative integer")
-        if not _is_integer_at_least(self.writer_generation, 1):
-            raise ValueError("writer_generation must be a positive integer")
-        if not isinstance(cast("object", self.action_type), ControlActionType):
-            raise TypeError("action_type must be a ControlActionType")
-        if not isinstance(cast("object", self.action_receipt_id), str):
-            raise TypeError("action_receipt_id must be a string")
-        if (
-            not self.action_receipt_id.strip()
-            or len(self.action_receipt_id) > _MAX_ACTION_RECEIPT_ID_LENGTH
-        ):
-            raise ValueError(
-                "action_receipt_id cannot be blank and must contain at most "
-                f"{_MAX_ACTION_RECEIPT_ID_LENGTH} characters"
-            )
-
-
 class ThreadModel(Base):
     """Orchestration thread — the top-level unit of work."""
 
     __tablename__ = "threads"
 
     __table_args__ = (
-        CheckConstraint(
-            "run_revision >= 0", name="ck_threads_run_revision_nonnegative"
-        ),
-        CheckConstraint(
-            "writer_generation >= 1",
-            name="ck_threads_writer_generation_positive",
-        ),
-        CheckConstraint(
-            f"writer_action_type IN ({WRITE_ACTION_SQL_VALUES})",
-            name="ck_threads_writer_action_type_current",
-        ),
-        CheckConstraint(
-            "length(trim(writer_action_receipt_id)) >= 1 "
-            "AND length(writer_action_receipt_id) <= 64",
-            name="ck_threads_writer_action_receipt_id_bounded",
-        ),
+        *_named_checks(WRITE_AUTHORITY_CHECKS),
         Index(
-            "ux_threads_writer_action_receipt_id",
-            "writer_action_receipt_id",
+            WRITE_AUTHORITY_RECEIPT_INDEX,
+            *WRITE_AUTHORITY_RECEIPT_INDEX_COLUMNS,
             unique=True,
         ),
         Index("ix_threads_nickname", "nickname", unique=True),
@@ -334,7 +181,6 @@ class ThreadModel(Base):
             "created_at",
             "id",
             sqlite_where=text("is_active IS 1"),
-            postgresql_where=text("is_active IS true"),
         ),
         Index(
             "ix_threads_active_workspace_order",
@@ -342,7 +188,6 @@ class ThreadModel(Base):
             "created_at",
             "id",
             sqlite_where=text("is_active IS 1"),
-            postgresql_where=text("is_active IS true"),
         ),
         Index(
             "ix_threads_active_feature_order",
@@ -350,7 +195,6 @@ class ThreadModel(Base):
             "created_at",
             "id",
             sqlite_where=text("is_active IS 1"),
-            postgresql_where=text("is_active IS true"),
         ),
         Index(
             "ix_threads_active_workspace_feature_order",
@@ -359,15 +203,14 @@ class ThreadModel(Base):
             "created_at",
             "id",
             sqlite_where=text("is_active IS 1"),
-            postgresql_where=text("is_active IS true"),
         ),
     )
 
     id: Mapped[str] = mapped_column(primary_key=True)
     run_revision: Mapped[int] = mapped_column()
     writer_generation: Mapped[int] = mapped_column()
-    writer_action_type: Mapped[str] = mapped_column(String(32))
-    writer_action_receipt_id: Mapped[str] = mapped_column(String(64))
+    writer_action_type: Mapped[str] = mapped_column(String(ACTION_TYPE_MAX_LENGTH))
+    writer_action_receipt_id: Mapped[str] = mapped_column(String(RECEIPT_ID_MAX_LENGTH))
     title: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -410,44 +253,36 @@ class ThreadModel(Base):
     # worse than recording an honest floor value.
     provider_condition: Mapped[str | None] = mapped_column(default=None)
     # Typed by RepairStatus, the SAME closed vocabulary as repair_status above,
-    # and deliberately not by an enum of its own. The two columns answer
-    # different questions from one shared set of answers: repair_status is the
-    # run's repair classification, execution_readiness is the readiness reading
-    # a dispatcher consults before resuming it. Every producer already writes a
-    # RepairStatus member here — the repair policy, reconciliation, the control
-    # projection, and the thread-state service all do — and every consumer that
-    # narrows the value tests membership against RepairStatus members. A second
-    # enum duplicating those members would be a vocabulary no writer speaks.
+    # because it holds the same answer: a run is as fit to resume as its repair
+    # posture says. The repository writes it from repair_status on every write
+    # and no reader consults it - served readiness is derived from repair_status
+    # at read time - so it only keeps step with the posture until it is dropped.
     execution_readiness: Mapped[str] = mapped_column(default=RepairStatus.HEALTHY)
     # The reconnect cursor a client compares against to discard already-seen
-    # WebSocket/SSE events (api/schemas/snapshots.py's ThreadStateSnapshot
-    # docstring). The live value lives only on the gateway's in-memory
-    # EventAggregator and is pruned the moment a run settles
-    # (EventEmitters.clear_thread_state), so a REST read after settle - the
-    # only moment the reconnect contract matters - had nothing durable to
-    # read and always answered 0 (F19). Captured and persisted here at the
-    # same terminal-status write as failure_reason/provider_condition/
-    # repair_status, before the prune runs.
+    # SSE events (the ThreadStateSnapshot docstring in thread/snapshots.py):
+    # the highest frame number the gateway's sequence allocator issued the
+    # run. The live counter is forgotten the moment a run settles
+    # (RelayHub.clear_thread_state), so a REST read after settle - the only
+    # moment the reconnect contract matters - needs a durable value to read.
+    # Captured and persisted here at the same terminal-status write as
+    # failure_reason/provider_condition/repair_status, before the purge runs.
     #
     # Nullable with no default, on the SAME reasoning as provider_condition
-    # above: a run that settled before this column existed, or through a
-    # code path with no aggregator available, genuinely has no captured
-    # cursor, and 0 is a legitimate value a thread with truly zero relayed
-    # events could carry. Defaulting to 0 would make "never captured"
+    # above: a run that settled before this column existed, or one no
+    # allocator numbered, genuinely has no captured cursor, and 0 is a
+    # legitimate value a thread with truly zero relayed events could
+    # carry. Defaulting to 0 would make "never captured"
     # indistinguishable from "captured as zero" - the same failure mode
     # this column exists to close, reintroduced at the schema level.
     last_sequence: Mapped[int | None] = mapped_column(default=None)
     approval_status: Mapped[str | None] = mapped_column(default=None)
     approval_request_id: Mapped[str | None] = mapped_column(default=None)
-    approval_reason: Mapped[str | None] = mapped_column(Text, default=None)
     approval_response_action_id: Mapped[str | None] = mapped_column(default=None)
     approval_updated_at: Mapped[datetime | None] = mapped_column(
         UTCDateTime(), default=None
     )
     last_requested_action: Mapped[str | None] = mapped_column(default=None)
     last_applied_action: Mapped[str | None] = mapped_column(default=None)
-    repair_generation: Mapped[int] = mapped_column(default=0)
-    recovery_epoch: Mapped[int] = mapped_column(default=0)
     thread_metadata: Mapped[str | None] = mapped_column(Text, default=None)
     workspace_root: Mapped[str | None] = mapped_column(
         String(MAX_WORKSPACE_ROOT_LENGTH), default=None
@@ -459,9 +294,6 @@ class ThreadModel(Base):
     nickname: Mapped[str | None] = mapped_column(default=None)
     team_preset: Mapped[str | None] = mapped_column(default=None)
 
-    artifacts: Mapped[list["ArtifactModel"]] = relationship(
-        back_populates="thread", cascade="all, delete-orphan", lazy="raise"
-    )
     permission_logs: Mapped[list["PermissionLogModel"]] = relationship(
         back_populates="thread", cascade="all, delete-orphan", lazy="raise"
     )
@@ -483,9 +315,6 @@ class ThreadModel(Base):
     cost_records: Mapped[list["CostTrackingModel"]] = relationship(
         back_populates="thread", cascade="all, delete-orphan", lazy="raise"
     )
-    task_queue_entries: Mapped[list["TaskQueueEntryModel"]] = relationship(
-        back_populates="thread", cascade="all, delete-orphan", lazy="raise"
-    )
 
     @override
     def __repr__(self) -> str:
@@ -493,34 +322,6 @@ class ThreadModel(Base):
         return (
             f"ThreadModel(id={self.id!r}, status={self.status!r}, "
             f"nickname={self.nickname!r})"
-        )
-
-
-class ArtifactModel(Base):
-    """File artifact produced by an agent during a thread."""
-
-    __tablename__ = "artifacts"
-
-    id: Mapped[str] = mapped_column(primary_key=True)
-    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"))
-    type: Mapped[str] = mapped_column()
-    path: Mapped[str] = mapped_column()
-    content_hash: Mapped[str | None] = mapped_column(default=None)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
-    agent_id: Mapped[str | None] = mapped_column(default=None)
-
-    thread: Mapped["ThreadModel"] = relationship(
-        back_populates="artifacts", lazy="raise"
-    )
-
-    __table_args__ = (Index("ix_artifacts_thread_id", "thread_id"),)
-
-    @override
-    def __repr__(self) -> str:
-        """Return developer-friendly representation."""
-        return (
-            f"ArtifactModel(id={self.id!r}, thread_id={self.thread_id!r}, "
-            f"type={self.type!r}, path={self.path!r})"
         )
 
 
@@ -554,7 +355,15 @@ class PermissionLogModel(Base):
 
 
 class PermissionRequestModel(Base):
-    """Durable record of a pending or resolved permission request."""
+    """Durable record of a permission request's lifecycle, never of its answer.
+
+    The question as it was asked, and how far the ask has got. What was ANSWERED
+    is not here: the settlement reads the chosen option off the frozen envelope of
+    the accepted response action, so that a row rewritten after acceptance cannot
+    change which option a run is settled under, and ``permission_logs`` is the
+    durable record of the decision. A copy of either here would be a second
+    source for a fact that already has an owner.
+    """
 
     __tablename__ = "permission_requests"
 
@@ -565,9 +374,6 @@ class PermissionRequestModel(Base):
     description: Mapped[str] = mapped_column(Text)
     allowed_options_json: Mapped[str] = mapped_column(Text)
     request_status: Mapped[str] = mapped_column(default=PermissionRequestStatus.PENDING)
-    response_option_id: Mapped[str | None] = mapped_column(default=None)
-    idempotency_key: Mapped[str | None] = mapped_column(default=None)
-    worker_generation: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     responded_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
     applied_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
@@ -588,17 +394,7 @@ class ControlActionModel(Base):
     __tablename__ = "control_actions"
 
     __table_args__ = (
-        CheckConstraint(
-            f"action_type IN ({CONTROL_ACTION_SQL_VALUES})",
-            name="ck_control_actions_action_type_current",
-        ),
-        CheckConstraint(
-            f"(action_type IN ({RECOVERY_ACTION_SQL_VALUES}) "
-            "AND recovery_deadline_at IS NOT NULL) OR "
-            f"(action_type NOT IN ({RECOVERY_ACTION_SQL_VALUES}) "
-            "AND recovery_deadline_at IS NULL)",
-            name="ck_control_actions_recovery_deadline_required",
-        ),
+        *_named_checks(RECOVERY_DEADLINE_CHECKS),
         CheckConstraint(
             QUEUE_POSITION_BOUNDED_PREDICATE,
             name="ck_control_actions_queue_position_bounded",
@@ -619,7 +415,6 @@ class ControlActionModel(Base):
             "queue_position",
             unique=True,
             sqlite_where=text(QUEUED_ROW_PREDICATE),
-            postgresql_where=text(QUEUED_ROW_PREDICATE),
         ),
         UniqueConstraint(
             "thread_id",
@@ -640,7 +435,6 @@ class ControlActionModel(Base):
         default=ControlActionResultStatus.ACCEPTED_NOT_APPLIED
     )
     payload_json: Mapped[str | None] = mapped_column(Text, default=None)
-    worker_generation: Mapped[int] = mapped_column(default=0)
     graph_receipt_json: Mapped[str | None] = mapped_column(Text, default=None)
     # Stable identity reused for every redelivery of this accepted intention.
     # Existing pre-0012 journal rows legitimately carry NULL until reconciled.
@@ -676,11 +470,11 @@ class RecoveryAttemptModel(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "run_revision >= 0",
+            RUN_REVISION_NONNEGATIVE,
             name="ck_recovery_attempts_run_revision_nonnegative",
         ),
         CheckConstraint(
-            "writer_generation >= 1",
+            WRITER_GENERATION_POSITIVE,
             name="ck_recovery_attempts_writer_generation_positive",
         ),
         CheckConstraint(
@@ -710,7 +504,7 @@ class RecoveryAttemptModel(Base):
             name="ck_recovery_attempts_action_type_current",
         ),
         CheckConstraint(
-            "length(trim(action_receipt_id)) >= 1 AND length(action_receipt_id) <= 64",
+            receipt_id_bounded("action_receipt_id"),
             name="ck_recovery_attempts_action_receipt_id_bounded",
         ),
         UniqueConstraint(
@@ -733,8 +527,8 @@ class RecoveryAttemptModel(Base):
     thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"))
     run_revision: Mapped[int] = mapped_column()
     writer_generation: Mapped[int] = mapped_column()
-    action_type: Mapped[str] = mapped_column(String(32))
-    action_receipt_id: Mapped[str] = mapped_column(String(64))
+    action_type: Mapped[str] = mapped_column(String(ACTION_TYPE_MAX_LENGTH))
+    action_receipt_id: Mapped[str] = mapped_column(String(RECEIPT_ID_MAX_LENGTH))
     condition: Mapped[str] = mapped_column(String(32))
     attempt_count: Mapped[int] = mapped_column()
     next_eligible_at: Mapped[datetime] = mapped_column(UTCDateTime())
@@ -767,15 +561,10 @@ class ThreadExecutionStateModel(Base):
     thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"), primary_key=True)
     checkpoint_id: Mapped[str | None] = mapped_column(default=None)
     parent_checkpoint_id: Mapped[str | None] = mapped_column(default=None)
-    snapshot_created_at: Mapped[datetime | None] = mapped_column(
-        UTCDateTime(), default=None
-    )
     recorded_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
-    recovery_epoch: Mapped[int] = mapped_column(default=0)
     task_count: Mapped[int] = mapped_column(default=0)
     interrupt_count: Mapped[int] = mapped_column(default=0)
     next_nodes_json: Mapped[str] = mapped_column(Text, default="[]")
-    interrupt_types_json: Mapped[str] = mapped_column(Text, default="[]")
     tasks_json: Mapped[str] = mapped_column(Text, default="[]")
     degraded_reasons_json: Mapped[str] = mapped_column(Text, default="[]")
 
@@ -872,8 +661,8 @@ class RunEventModel(Base):
     # ON DELETE CASCADE at the database rather than an ORM relationship, and
     # deliberately: a thread carries up to its whole retention window of these
     # rows, and an ORM cascade would load every one of them into the session to
-    # delete a single thread. Both backends enforce it natively (SQLite under
-    # the ``PRAGMA foreign_keys=ON`` the session layer sets on every connection).
+    # delete a single thread. SQLite enforces it natively under the
+    # ``PRAGMA foreign_keys=ON`` the session layer sets on every connection.
     thread_id: Mapped[str] = mapped_column(
         ForeignKey("threads.id", ondelete="CASCADE"), primary_key=True
     )
@@ -930,7 +719,17 @@ class ProviderRuntimeIdentityModel(Base):
 
 
 class CostTrackingModel(Base):
-    """Token usage and estimated cost for LLM invocations."""
+    """One LLM invocation's provider-reported token accounting.
+
+    Counts only, and only counts a lane actually reported. The table once also
+    carried a priced ``estimated_cost`` column that no writer ever set, because
+    every served lane is a subscription-authenticated CLI agent and the project
+    holds no rate table for any model. It was retired in revision 0028: a
+    column recording a measurement nobody takes invites a reader to treat its
+    structural zero as a measured zero, and a summed structural zero as a
+    measured total. Pricing a metered lane would need its own decision naming
+    the rate source, the currency and the rounding rule.
+    """
 
     __tablename__ = "cost_tracking"
 
@@ -953,7 +752,6 @@ class CostTrackingModel(Base):
     cache_read_tokens: Mapped[int | None] = mapped_column(default=None)
     cache_write_tokens: Mapped[int | None] = mapped_column(default=None)
     reasoning_tokens: Mapped[int | None] = mapped_column(default=None)
-    estimated_cost: Mapped[Decimal] = mapped_column(MoneyAmount(), default=Decimal(0))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
     thread: Mapped["ThreadModel"] = relationship(
@@ -964,57 +762,3 @@ class CostTrackingModel(Base):
         Index("ix_cost_tracking_thread_id", "thread_id"),
         Index("ix_cost_tracking_agent_id", "agent_id"),
     )
-
-
-class TaskQueueEntryModel(Base):
-    """A single worker task-queue row, owned by a thread.
-
-    Orchestration state that used to live in a ``.vault/plan`` markdown table.
-    ``position`` is the sole ordering authority; ``task_key`` is the stable
-    per-thread identity the mark-complete tool addresses.  ``plan_changeset_id``
-    and ``plan_step_key`` are references to the engine plan proposal (references,
-    never content).
-    """
-
-    __tablename__ = "task_queue_entries"
-
-    __table_args__ = (
-        Index("ix_task_queue_entries_thread_id", "thread_id"),
-        UniqueConstraint(
-            "thread_id",
-            "position",
-            name="uq_task_queue_entries_thread_id_position",
-        ),
-        UniqueConstraint(
-            "thread_id",
-            "task_key",
-            name="uq_task_queue_entries_thread_id_task_key",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(primary_key=True)
-    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"))
-    feature_tag: Mapped[str] = mapped_column()
-    position: Mapped[int] = mapped_column()
-    task_key: Mapped[str] = mapped_column()
-    description: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(default=TaskQueueStatus.PENDING)
-    plan_changeset_id: Mapped[str | None] = mapped_column(default=None)
-    plan_step_key: Mapped[str | None] = mapped_column(default=None)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), default=_utcnow, onupdate=_utcnow
-    )
-
-    thread: Mapped["ThreadModel"] = relationship(
-        back_populates="task_queue_entries", lazy="raise"
-    )
-
-    @override
-    def __repr__(self) -> str:
-        """Return developer-friendly representation."""
-        return (
-            f"TaskQueueEntryModel(thread_id={self.thread_id!r}, "
-            f"position={self.position!r}, task_key={self.task_key!r}, "
-            f"status={self.status!r})"
-        )

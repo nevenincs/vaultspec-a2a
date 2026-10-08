@@ -1,0 +1,240 @@
+"""The in-process fixture lanes a source checkout contributes to a test gateway.
+
+The product knows only the lane-plugin protocol; this package is a plugin. A
+process that names it in its lane plugins, with the in-process lanes armed
+outside the desktop profile, imports it and calls :func:`register_lanes`, which
+registers the deterministic lane. The lane keeps its wire identity - provider
+``deterministic``, execution mode ``in-process-deterministic``, model
+``deterministic`` - so a run frozen against it replays under the same identity.
+
+Two seats arm it, one per kind of process. A gateway or worker child is given
+:func:`armed_lane_environment` by the test boot environment builders whenever
+they serve the in-process lanes; a gateway hands its worker that environment,
+so one declaration reaches both processes. A test process holds
+:func:`seated_lanes` for its whole session, through the repository's root
+conftest, so a test that builds models in its own process resolves the lane
+without seating it.
+
+A child armed with a hold gate also serves the hold-then-complete scenario: its
+turn stays in flight while the gate file exists and completes once it is gone.
+The test closes and opens the gate with :func:`held_turns`, so a run is held
+mid-turn by a signal the test controls rather than by a timer.
+
+A test that compiles a graph itself freezes its team onto the lane with
+:func:`deterministic_model_assignment`, and takes a scripted scenario's agent,
+carrying the script it drives, from :func:`scripted_supervisor` or
+:func:`branch_researcher`. Both, and every test that needs the frozen selection
+itself, derive from :func:`frozen_deterministic_selection`.
+
+This module stays light on purpose: a gateway imports it at startup, and the
+model it registers, with its chat-model stack, loads only when a lane builds
+one. The model names below resolve lazily for the same reason.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import importlib
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Final
+
+from ...graph.enums import Provider
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from pathlib import Path
+
+    from langchain_core.language_models import BaseChatModel
+
+    from ...providers import LaneRegistration, LaneRegistry
+    from ...providers.provider_catalog import ProviderRecord, SelectionReference
+    from ...providers.team_selection import FrozenLaneAssignment, FrozenTeamSelection
+    from ...team.team_config import AgentConfig, TeamConfig
+    from .deterministic import UNATTENDED_REPLY as UNATTENDED_REPLY
+    from .deterministic import (
+        DeterministicResearchAdrChatModel as DeterministicResearchAdrChatModel,
+    )
+    from .deterministic import branch_researcher as branch_researcher
+    from .deterministic import path_writer as path_writer
+    from .deterministic import scripted_supervisor as scripted_supervisor
+
+__all__ = [
+    "DETERMINISTIC_LANE",
+    "LANES",
+    "UNATTENDED_REPLY",
+    "DeterministicResearchAdrChatModel",
+    "armed_lane_environment",
+    "branch_researcher",
+    "deterministic_model_assignment",
+    "frozen_deterministic_selection",
+    "held_turns",
+    "path_writer",
+    "register_lanes",
+    "scripted_supervisor",
+    "seated_lanes",
+]
+
+_LAZY_IMPORTS = {
+    "DeterministicResearchAdrChatModel": ".deterministic",
+    "UNATTENDED_REPLY": ".deterministic",
+    "branch_researcher": ".deterministic",
+    "path_writer": ".deterministic",
+    "scripted_supervisor": ".deterministic",
+}
+
+
+def __getattr__(name: str) -> object:
+    if name in _LAZY_IMPORTS:
+        module = importlib.import_module(_LAZY_IMPORTS[name], __name__)
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class _DeterministicLane:
+    """The deterministic lane's identity, selectors and model."""
+
+    provider: Provider = Provider.DETERMINISTIC
+    execution_mode: str = "in-process-deterministic"
+    display_name: str = "Deterministic (in-process)"
+    description: str = (
+        "In-process deterministic provider; returns fixed role-keyed content "
+        "with no external service and no spend."
+    )
+    model_values: tuple[str, ...] = ("deterministic",)
+
+    def create_model(self, agent_config: AgentConfig | None) -> BaseChatModel:
+        # The hold gate is read where the model is built, so it reaches a worker
+        # the way the lane arming does: through the environment it was spawned
+        # with.
+        from ..session_root import TestSessionSettings
+        from .deterministic import DeterministicResearchAdrChatModel
+
+        return DeterministicResearchAdrChatModel(
+            agent_config=agent_config, hold_gate=TestSessionSettings().hold_gate
+        )
+
+
+DETERMINISTIC_LANE: Final = _DeterministicLane()
+
+#: Every lane this plugin registers, in registration order.
+LANES: Final[tuple[LaneRegistration, ...]] = (DETERMINISTIC_LANE,)
+
+
+def register_lanes(registry: LaneRegistry) -> None:
+    """Register this package's lanes; the lane-plugin entry point."""
+    for lane in LANES:
+        registry.register(lane)
+
+
+def frozen_deterministic_selection(
+    required_roles: tuple[str, ...],
+    *,
+    model_value: str | None = None,
+    catalog_revision: str | None = None,
+    pinned_roles: tuple[str, ...] = (),
+    fallbacks: tuple[tuple[ProviderRecord, SelectionReference], ...] = (),
+) -> FrozenTeamSelection:
+    """Freeze *required_roles* onto the deterministic lane's offline served record.
+
+    The selection is the one production's team-selection freezer makes from the
+    record the gateway would serve for the lane, so what a test freezes is what a
+    real run would carry. *model_value* and *catalog_revision* restate the served
+    entry's model and catalog revision, for a run frozen against a catalog the
+    gateway has since moved past. Each of *pinned_roles* takes the selection as
+    an explicit per-role override. *fallbacks* name further lanes, each paired
+    with the served record that carries it.
+    """
+    from ...providers.team_selection import freeze_team_selection
+    from ..catalog import in_process_lane_selection
+
+    record, reference = in_process_lane_selection(DETERMINISTIC_LANE.provider)
+    catalog = record.catalog
+    if model_value is not None:
+        catalog = replace(
+            catalog,
+            models=(
+                replace(
+                    catalog.models[0],
+                    provider_value=model_value,
+                    display_name=model_value,
+                ),
+            ),
+        )
+    if catalog_revision is not None:
+        catalog = replace(
+            catalog, state=replace(catalog.state, revision=catalog_revision)
+        )
+        reference = replace(reference, catalog_revision=catalog_revision)
+    record = replace(record, catalog=catalog)
+    return freeze_team_selection(
+        selection=reference,
+        overrides=dict.fromkeys(pinned_roles, reference),
+        fallbacks=tuple(fallback for _, fallback in fallbacks),
+        required_roles=required_roles,
+        records=(record, *(served for served, _ in fallbacks)),
+    )
+
+
+def deterministic_model_assignment(
+    team_config: TeamConfig,
+) -> dict[str, FrozenLaneAssignment]:
+    """Compile *team_config*'s per-role assignment on the deterministic lane.
+
+    Frozen for the roles a run of this team must cover, so the assignment a test
+    compiles against is the one a real run would hand the worker.
+    """
+    from ...control.run_start_policy import required_role_ids
+
+    return frozen_deterministic_selection(
+        tuple(required_role_ids(team_config))
+    ).compiler_map()
+
+
+def armed_lane_environment(*, hold_gate: Path | None = None) -> dict[str, str]:
+    """Return the environment that serves these lanes from a child process.
+
+    Every name is taken from the settings schema that reads it, so the spelling
+    a child reads is the one its settings declare. *hold_gate* is the file the
+    child's hold-then-complete turns wait on; without it that scenario refuses
+    its turn rather than complete one its test meant to hold.
+    """
+    from ...control.config import setting_env
+    from ...control.settings_base import env_name
+    from ..session_root import TestSessionSettings
+
+    environment = {
+        setting_env("serve_in_process_lanes"): "true",
+        setting_env("lane_plugins"): __name__,
+    }
+    if hold_gate is not None:
+        environment[env_name(TestSessionSettings, "hold_gate")] = str(hold_gate)
+    return environment
+
+
+@contextlib.contextmanager
+def held_turns(gate: Path) -> Generator[None]:
+    """Hold every hold-then-complete turn waiting on *gate* until the block ends.
+
+    The gate is closed before the block runs, so a run started inside it holds
+    from its first turn, and opened when the block ends, however it ends, so no
+    turn stays held past the test that held it. A gate that is already closed
+    is refused: two holders would each believe they own the release.
+    """
+    gate.touch(exist_ok=False)
+    try:
+        yield
+    finally:
+        gate.unlink(missing_ok=True)
+
+
+@contextlib.contextmanager
+def seated_lanes() -> Generator[None]:
+    """Hold these lanes in this process for the duration of the block."""
+    from ..environment import settings_override
+
+    with settings_override(serve_in_process_lanes=True, lane_plugins=(__name__,)):
+        yield

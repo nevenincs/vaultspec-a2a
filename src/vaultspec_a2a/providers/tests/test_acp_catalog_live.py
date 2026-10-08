@@ -13,10 +13,10 @@ from ...control.config import settings
 from ...graph.enums import Provider
 from ...workspace.environment import resolve_env_vars
 from .._claude_tool_policy import claude_bypass_declined_meta
-from .._factory_commands import _classify_acp_command, claude_acp_entry
+from .._factory_commands import _classify_acp_command
 from ..acp_catalog import discover_acp_catalog
 from ..cli_resolution import resolve_provider_cli_executable
-from ..factory import _discover_claude_catalog, claude_auth_env
+from ..factory import _discover_claude_family_catalog, claude_auth_env
 from ..provider_catalog import (
     AuthenticationState,
     CatalogStatus,
@@ -26,15 +26,14 @@ from ..provider_catalog import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from ...conftest import ExternalPrerequisiteRule
 
-def _real_adapter_inputs() -> tuple[
-    tuple[str, ...], dict[str, str], Mapping[str, object]
-]:
-    if settings.acp_backend != "binary" and not claude_acp_entry().exists():
-        pytest.fail(
-            "ACP adapter is not installed; run 'npm install' per the ACP runbook"
-        )
-    command, metadata = _classify_acp_command(settings.acp_backend)
+
+def _real_adapter_inputs(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> tuple[tuple[str, ...], dict[str, str], Mapping[str, object]]:
+    external_prerequisite("claude-acp-adapter")
+    command = _classify_acp_command(settings.acp_backend)
     workspace = Path.cwd()
     environment = resolve_env_vars(workspace)
     auth_environment, _auth_mode = claude_auth_env()
@@ -43,14 +42,16 @@ def _real_adapter_inputs() -> tuple[
     if claude := resolve_provider_cli_executable(Provider.CLAUDE):
         environment["CLAUDE_CODE_EXECUTABLE"] = claude
     environment.pop("CLAUDECODE", None)
-    return tuple(command), environment, metadata
+    return command.argv, environment, command.metadata()
 
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_real_adapter_catalog_discovery_reaps_without_prompt() -> None:
+async def test_real_adapter_catalog_discovery_reaps_without_prompt(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """Drive the production handshake; returning proves cleanup completed."""
-    command, environment, metadata = _real_adapter_inputs()
+    command, environment, metadata = _real_adapter_inputs(external_prerequisite)
     workspace = Path.cwd()
 
     discovery = await discover_acp_catalog(
@@ -78,25 +79,24 @@ async def test_real_adapter_catalog_discovery_reaps_without_prompt() -> None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_the_production_claude_probe_opens_a_session_on_this_host() -> None:
+async def test_the_production_claude_probe_opens_a_session_on_this_host(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """The factory's own probe reaches a session, composing its own posture.
 
     The test above supplies the session meta itself, which proves the adapter
     accepts it but not that production sends it. This drives the production
-    assembly end to end instead: whatever posture ``_discover_claude_catalog``
+    assembly end to end instead: whatever posture ``_discover_claude_family_catalog``
     composes is the posture the real adapter is handed, and a probe that cannot
     open a session reports the lane unavailable - indistinguishable, from the
     gateway, from a lane that is genuinely missing.
     """
-    if settings.acp_backend != "binary" and not claude_acp_entry().exists():
-        pytest.fail(
-            "ACP adapter is not installed; run 'npm install' per the ACP runbook"
-        )
+    external_prerequisite("claude-acp-adapter")
     key = ProviderCatalogKey(
         Provider.CLAUDE.value, f"claude-agent-acp:{settings.acp_backend}"
     )
 
-    discovery = await _discover_claude_catalog(key, Path.cwd())
+    discovery = await _discover_claude_family_catalog(Provider.CLAUDE, key, Path.cwd())
 
     assert discovery.catalog.state.status is CatalogStatus.AVAILABLE, (
         discovery.catalog.state.reason
@@ -106,8 +106,10 @@ async def test_the_production_claude_probe_opens_a_session_on_this_host() -> Non
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_real_adapter_catalog_discovery_reaps_when_cancelled() -> None:
-    command, environment, metadata = _real_adapter_inputs()
+async def test_real_adapter_catalog_discovery_reaps_when_cancelled(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
+    command, environment, metadata = _real_adapter_inputs(external_prerequisite)
     workspace = Path.cwd()
     parent = psutil.Process()
     baseline = {child.pid for child in parent.children(recursive=True)}

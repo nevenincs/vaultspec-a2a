@@ -1,6 +1,6 @@
-"""Live proof of the tool-cores deterministic grounding floor (P01.S05).
+"""Live proof of the tool-cores deterministic grounding floor.
 
-The floor landed in P01.S01: an autonomous document-authoring role's ``session/new``
+The floor: an autonomous document-authoring role's ``session/new``
 auto-permits the spawned CLI's native ``Read``/``Grep``/``Glob`` built-ins by exact
 name. That wiring is proven deterministically against a real ACP subprocess in
 ``graph/tests/nodes/test_worker_native_read_tools.py``. THIS module proves the next
@@ -8,8 +8,8 @@ link live and mock-free: a real document agent, dispatched through the live loop
 stack, actually USES that permission to read a named ``.vault`` ADR mid-turn and cite
 it - with ZERO ``.vault`` writes.
 
-It is not a parallel driver. It reuses the standing pw7 acceptance harness
-(``test_pw7_acceptance``): ``_reachable_stack`` for the infra gate, and
+It is not a parallel driver. It reuses the shared acceptance harness
+(``vaultspec_a2a.testing.acceptance``): ``reachable_stack`` for the infra gate, and
 ``AcceptanceHarness`` for token-mint + run-start against the live
 ``vaultspec-adr-research`` preset. What it adds is a NON-materializing observation:
 rather than driving the review gates to apply (which writes documents), it consumes
@@ -49,42 +49,35 @@ be a reviewed source change, not an ambient shell setting.
 
 from __future__ import annotations
 
-import json
 import re
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 import httpx
 import pytest
 
 from ..control.run_start_policy import required_role_ids
-from ..graph.enums import ServerEventType
 from ..team.team_config import load_team_config
-from ..testing.tests._support.payloads import json_object
-from .test_pw7_acceptance import (
-    _PRESET_LIVE,
+from ..testing import (
+    GATEWAY_AUTH_HEADERS,
+    OBSERVE_DEADLINE_SECONDS,
+    PRESET_LIVE,
     AcceptanceCase,
     AcceptanceHarness,
-    _reachable_stack,
-    _resolve_selection,
+    ResilientAuthoringClient,
+    message_content,
+    observe_run_stream,
+    reachable_stack,
+    resolve_selection,
+    snapshot_vault,
+    vault_write_delta,
 )
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from ..conftest import ExternalPrerequisiteRule
-    from ..providers._json_contract import JsonObject
-
-# The message frame types that carry an agent's mid-turn narration and output. The
-# read/citation surface here (validated live), not in tool-call frames.
-_MESSAGE_FRAMES = frozenset(
-    {ServerEventType.MESSAGE_CHUNK.value, ServerEventType.THOUGHT_CHUNK.value}
-)
-
-# A live research turn takes minutes; bound the observation so a stalled run fails loud
-# rather than hanging. The document agents read early, mid-Diverge/Synthesize.
-_OBSERVE_DEADLINE_SECONDS = 900.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,8 +108,8 @@ class _NamedAdrObservationOptions(TypedDict):
 
 
 # Every real-provider service lane runs on the operator-configured served
-# selection. It used to name the committed all-low "fast" model profile; a
-# preset carries no model policy now, so the cost ceiling is the operator's
+# selection. A preset carries no model policy, so the cost ceiling is the
+# operator's
 # choice of a low-cost entry from the current catalog (the same thing the
 # provider-catalog live-selection prerequisite already asks for). The lane
 # claims no particular provider - it certifies the bridge/tool floor, not who
@@ -175,115 +168,36 @@ def _cites_named_adr(output: str, adr_name: str, adr_stem: str) -> bool:
     return adr_name in output or adr_stem in output
 
 
-# The vaultspec DOCUMENT surface - the directories an agent-authored document would
-# materialize under. The engine's own runtime tree (``.vault/data``: its sqlite DBs,
-# WAL files, graph cache, and the heartbeat ``service.json``) churns continuously and
-# is NOT an agent write, so it is excluded from the write watcher - the floor proof's
-# "zero .vault writes" means zero agent-origin DOCUMENT writes (validated live: a
-# whole-tree watcher tripped only on ``.vault/data`` engine churn).
-_DOCUMENT_DIRS = ("adr", "research", "audit", "plan", "exec", "reference", "index")
-
-
-def _snapshot_vault(vault_root: Path) -> dict[str, tuple[float, int]]:
-    """Map every agent-authorable document file to its (mtime, size).
-
-    Scoped to the vaultspec document directories; the engine-owned ``.vault/data``
-    runtime tree is excluded because its DB/WAL/heartbeat churn is not an agent write.
-    """
-    snapshot: dict[str, tuple[float, int]] = {}
-    for doc_dir in _DOCUMENT_DIRS:
-        base = vault_root / doc_dir
-        if not base.is_dir():
-            continue
-        for path in base.rglob("*"):
-            if path.is_file():
-                stat = path.stat()
-                snapshot[str(path)] = (stat.st_mtime, stat.st_size)
-    return snapshot
-
-
-def _vault_write_delta(
-    before: dict[str, tuple[float, int]], after: dict[str, tuple[float, int]]
-) -> dict[str, list[str]]:
-    """Return created/modified/deleted paths between two vault snapshots."""
-    created = sorted(set(after) - set(before))
-    deleted = sorted(set(before) - set(after))
-    modified = sorted(p for p in before.keys() & after.keys() if before[p] != after[p])
-    return {"created": created, "modified": modified, "deleted": deleted}
-
-
-def _message_content(payload: JsonObject) -> str | None:
-    """Return the content of a message/thought chunk frame, else None."""
-    if payload.get("type") not in _MESSAGE_FRAMES:
-        return None
-    content = payload.get("content")
-    return content if isinstance(content, str) else None
-
-
-def _parse_sse_payload(
-    raw_line: str,
-    *,
-    at: str,
-    error_source: str,
-) -> JsonObject | None:
-    """Decode one data frame, ignoring non-data and empty SSE lines."""
-    line = raw_line.strip()
-    if not line.startswith("data:"):
-        return None
-    body = line[len("data:") :].strip()
-    if not body:
-        return None
-    try:
-        decoded: object = json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise AssertionError(f"malformed SSE JSON at {error_source}: {body!r}") from exc
-    return json_object(decoded, at=at)
-
-
 async def _observe_named_adr_run(
     harness: AcceptanceHarness,
     gateway_client: httpx.AsyncClient,
     **options: Unpack[_NamedAdrObservationOptions],
 ) -> tuple[bool, list[str]]:
     """Observe the named-ADR evidence stream and cancel the run on exit."""
-    deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
     cited = False
     matched_tokens: list[str] = []
-    try:
-        async with gateway_client.stream(
-            "GET",
-            f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
-            timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
-        ) as response:
-            response.raise_for_status()
-            async for raw_line in response.aiter_lines():
-                payload = _parse_sse_payload(
-                    raw_line,
-                    at="grounding floor SSE stream",
-                    error_source="grounding floor stream",
-                )
-                if payload is None:
-                    continue
-                content = _message_content(payload)
-                if content:
-                    options["output_parts"].append(content)
-                    joined = "".join(options["output_parts"])
-                    if _cites_named_adr(
-                        joined, options["adr_name"], options["adr_stem"]
-                    ):
-                        cited = True
-                    matched_tokens = [
-                        token for token in options["tokens"] if token in joined
-                    ]
-                if payload.get("type") == "thread_terminal":
-                    break
-                if (cited and matched_tokens) or time.monotonic() > deadline:
-                    break
-    finally:
-        await gateway_client.post(
-            f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
-            timeout=30.0,
-        )
+
+    async def _on_frame(payload: dict[str, Any]) -> bool:
+        nonlocal cited, matched_tokens
+        content = message_content(payload)
+        if content:
+            options["output_parts"].append(content)
+            joined = "".join(options["output_parts"])
+            if _cites_named_adr(joined, options["adr_name"], options["adr_stem"]):
+                cited = True
+            matched_tokens = [token for token in options["tokens"] if token in joined]
+        return cited and bool(matched_tokens)
+
+    await observe_run_stream(
+        harness,
+        gateway_client,
+        _on_frame,
+        stalled=lambda: (
+            f"no document agent cited {options['adr_name']!r} together with its "
+            f"interior tokens (run {harness.run_id}); cited={cited}, "
+            f"matched tokens={len(matched_tokens)}"
+        ),
+    )
     return cited, matched_tokens
 
 
@@ -295,57 +209,47 @@ async def _observe_rag_run(
     output_parts: list[str],
 ) -> tuple[bool, bool, list[str]]:
     """Observe RAG evidence and cancel the run on exit."""
-    deadline = time.monotonic() + _OBSERVE_DEADLINE_SECONDS
     rag_invoked = False
     service_down = False
     resolving: list[str] = []
-    try:
-        async with gateway_client.stream(
-            "GET",
-            f"{harness.gateway_url}/v1/runs/{harness.run_id}/stream",
-            timeout=httpx.Timeout(_OBSERVE_DEADLINE_SECONDS, connect=10.0),
-        ) as response:
-            response.raise_for_status()
-            async for raw_line in response.aiter_lines():
-                payload = _parse_sse_payload(
-                    raw_line,
-                    at="semantic tool SSE stream",
-                    error_source="semantic tool stream",
-                )
-                if payload is None:
-                    continue
-                content = _message_content(payload)
-                if content:
-                    output_parts.append(content)
-                    joined = "".join(output_parts)
-                    if any(tool in joined for tool in _RAG_TOOLS):
-                        rag_invoked = True
-                    if _RAG_SERVICE_DOWN in joined.lower():
-                        service_down = True
-                    resolving = _resolving_citations(joined, workspace_root)
-                if payload.get("type") == "thread_terminal":
-                    break
-                if (rag_invoked and resolving) or time.monotonic() > deadline:
-                    break
-    finally:
-        await gateway_client.post(
-            f"{harness.gateway_url}/v1/runs/{harness.run_id}/cancel",
-            timeout=30.0,
-        )
+
+    async def _on_frame(payload: dict[str, Any]) -> bool:
+        nonlocal rag_invoked, service_down, resolving
+        content = message_content(payload)
+        if content:
+            output_parts.append(content)
+            joined = "".join(output_parts)
+            if any(tool in joined for tool in _RAG_TOOLS):
+                rag_invoked = True
+            if _RAG_SERVICE_DOWN in joined.lower():
+                service_down = True
+            resolving = _resolving_citations(joined, workspace_root)
+        return rag_invoked and bool(resolving)
+
+    await observe_run_stream(
+        harness,
+        gateway_client,
+        _on_frame,
+        stalled=lambda: (
+            f"no rag search with resolving citations (run {harness.run_id}); "
+            f"rag invoked={rag_invoked}, service down={service_down}, "
+            f"resolving citations={len(resolving)}"
+        ),
+    )
     return rag_invoked, service_down, resolving
 
 
 def _floor_case(feature: str, adr_name: str) -> AcceptanceCase:
     """The live floor case: a research prompt that names the target ADR to ground on.
 
-    Reuses the pw7 ``AcceptanceCase`` shape and the live preset. The prompt directs the
-    agent to read the named ``.vault`` ADR and cite it, exercising exactly the native
-    read floor. No ``gate_policy`` is set - this proof observes the mid-turn read and
-    cancels before any gate, so it never materializes a document.
+    Reuses the shared ``AcceptanceCase`` shape and the live preset. The prompt directs
+    the agent to read the named ``.vault`` ADR and cite it, exercising exactly the
+    native read floor. No ``gate_policy`` is set - this proof observes the mid-turn
+    read and cancels before any gate, so it never materializes a document.
     """
     return AcceptanceCase(
         label="tool-cores-floor-live",
-        preset=_PRESET_LIVE,
+        preset=PRESET_LIVE,
         feature=feature,
         prompt=(
             "Ground this research in the existing decision record "
@@ -354,7 +258,7 @@ def _floor_case(feature: str, adr_name: str) -> AcceptanceCase:
             "problem statement and decision, quoting the ADR filename as the "
             "locator for each claim."
         ),
-        roles=tuple(required_role_ids(load_team_config(_PRESET_LIVE))),
+        roles=tuple(required_role_ids(load_team_config(PRESET_LIVE))),
         expected_doc_kinds=(),
         requires_live_selection=True,
     )
@@ -365,13 +269,14 @@ async def _prepare_named_adr_floor(
     gateway_url: str,
     engine_base_url: str,
     engine_bearer: str,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> _NamedAdrFloorContext:
     """Select the live ADR and prepare its read-evidence harness."""
     target_adr = _pick_named_adr(vault_root)
     if target_adr is None:
-        pytest.skip(
-            f"engine vault {vault_root / 'adr'} carries no ADR to name; the "
-            "read-a-named-ADR floor proof needs at least one existing ADR to read"
+        external_prerequisite.absent(
+            "engine-vault-adr",
+            f"engine vault {vault_root / 'adr'} carries no ADR to name",
         )
     adr_name = target_adr.name
     adr_stem = target_adr.stem
@@ -380,12 +285,13 @@ async def _prepare_named_adr_floor(
     case = _floor_case(feature, adr_name)
     tokens = _distinctive_tokens(adr_text, case.prompt)
     if not tokens:
-        pytest.skip(
+        external_prerequisite.absent(
+            "engine-vault-adr",
             f"ADR {adr_name} carries no distinctive interior token absent from the "
-            "prompt; cannot form hallucination-resistant read evidence"
+            "prompt, so it cannot yield hallucination-resistant read evidence",
         )
-    selection, overrides = await _resolve_selection(
-        case, gateway_url, str(vault_root.parent)
+    selection, overrides = await resolve_selection(
+        case, gateway_url, str(vault_root.parent), external_prerequisite
     )
     harness = AcceptanceHarness(
         case=case,
@@ -408,22 +314,17 @@ async def _run_named_adr_floor(
     context: _NamedAdrFloorContext,
 ) -> tuple[bool, list[str], dict[str, list[str]]]:
     """Observe one named-ADR run and return evidence plus its vault delta."""
-    before = _snapshot_vault(context.harness.vault_root)
+    before = snapshot_vault(context.harness.vault_root)
     output_parts: list[str] = []
 
-    from .test_pw7_acceptance import _ResilientAuthoringClient
-
-    async with _ResilientAuthoringClient(
+    async with ResilientAuthoringClient(
         context.harness.engine_base_url, context.harness.engine_bearer
     ) as ec:
-        run_tokens = {
-            role: await context.harness._mint(
-                ec, f"agent:{context.harness.run_id}:{role}", "agent"
-            )
-            for role in context.harness.case.roles
-        }
-        async with httpx.AsyncClient() as hc:
-            await context.harness._run_start(
+        run_tokens = await context.harness.mint_role_tokens(
+            ec, context.harness.run_id, context.harness.case.roles
+        )
+        async with httpx.AsyncClient(headers=GATEWAY_AUTH_HEADERS) as hc:
+            await context.harness.run_start(
                 hc,
                 run_id=context.harness.run_id,
                 tokens=run_tokens,
@@ -439,8 +340,8 @@ async def _run_named_adr_floor(
                 output_parts=output_parts,
             )
 
-    after = _snapshot_vault(context.harness.vault_root)
-    return cited, matched_tokens, _vault_write_delta(before, after)
+    after = snapshot_vault(context.harness.vault_root)
+    return cited, matched_tokens, vault_write_delta(before, after)
 
 
 @pytest.mark.service
@@ -454,19 +355,23 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
     Zero .vault writes: the run is observed over its SSE stream and cancelled before
     any review gate applies; a before/after vault snapshot asserts no file changed.
     """
-    stack = _reachable_stack()
+    stack = reachable_stack()
     if stack is None:
         external_prerequisite.absent("loopback-stack")
     gateway_url, engine_base_url, engine_bearer, vault_root = stack
     context = await _prepare_named_adr_floor(
-        vault_root, gateway_url, engine_base_url, engine_bearer
+        vault_root,
+        gateway_url,
+        engine_base_url,
+        engine_bearer,
+        external_prerequisite,
     )
     cited, matched_tokens, delta = await _run_named_adr_floor(context)
 
     assert cited, (
         f"no document agent cited {context.adr_name!r} (or its stem "
         f"{context.adr_stem!r}) in its "
-        f"message stream within {_OBSERVE_DEADLINE_SECONDS:.0f}s (run "
+        f"message stream within {OBSERVE_DEADLINE_SECONDS:.0f}s (run "
         f"{context.harness.run_id}); the floor was not exercised live"
     )
     assert matched_tokens, (
@@ -481,10 +386,10 @@ async def test_document_agent_reads_named_adr_midturn_and_cites(
     )
 
 
-# --- Semantic tier (P03.S16 Claude / S17 Z.ai): agent invokes vaultspec-rag -------
+# --- Semantic tier (Claude / Z.ai): agent invokes vaultspec-rag ---------------
 
-# The rag MCP search tools the semantic tier surfaces (P03.S12 preset opt-in + S15
-# persona). The prompt directs the document agent to invoke them so the proof observes
+# The rag MCP search tools the semantic tier surfaces (preset opt-in + persona).
+# The prompt directs the document agent to invoke them so the proof observes
 # a real mid-turn rag invocation, not a native read.
 _RAG_TOOLS = (
     "mcp__vaultspec-rag__search_codebase",
@@ -498,7 +403,7 @@ def _rag_case(feature: str) -> AcceptanceCase:
     """The semantic case: a prompt that directs the agent to invoke the rag tools."""
     return AcceptanceCase(
         label="tool-cores-semantic-live",
-        preset=_PRESET_LIVE,
+        preset=PRESET_LIVE,
         feature=feature,
         prompt=(
             "Ground this research with the vaultspec-rag semantic search tools. "
@@ -507,7 +412,7 @@ def _rag_case(feature: str) -> AcceptanceCase:
             "read-only grounding decision'. Report the top file:line locations each "
             "search returns and cite them verbatim before anything else."
         ),
-        roles=tuple(required_role_ids(load_team_config(_PRESET_LIVE))),
+        roles=tuple(required_role_ids(load_team_config(PRESET_LIVE))),
         expected_doc_kinds=(),
         requires_live_selection=True,
     )
@@ -534,13 +439,14 @@ async def _prepare_rag_floor(
     engine_base_url: str,
     engine_bearer: str,
     vault_root: Path,
+    external_prerequisite: ExternalPrerequisiteRule,
 ) -> _RagFloorContext:
     """Prepare the live harness and workspace for the semantic proof."""
     workspace_root = vault_root.parent
     feature = f"tool-cores-semantic-{int(time.time())}"
     case = _rag_case(feature)
-    selection, overrides = await _resolve_selection(
-        case, gateway_url, str(workspace_root)
+    selection, overrides = await resolve_selection(
+        case, gateway_url, str(workspace_root), external_prerequisite
     )
     harness = AcceptanceHarness(
         case=case,
@@ -558,22 +464,17 @@ async def _run_rag_floor(
     context: _RagFloorContext,
 ) -> tuple[bool, bool, list[str], dict[str, list[str]]]:
     """Observe one semantic run and return evidence plus its vault delta."""
-    before = _snapshot_vault(context.harness.vault_root)
+    before = snapshot_vault(context.harness.vault_root)
     output_parts: list[str] = []
 
-    from .test_pw7_acceptance import _ResilientAuthoringClient
-
-    async with _ResilientAuthoringClient(
+    async with ResilientAuthoringClient(
         context.harness.engine_base_url, context.harness.engine_bearer
     ) as ec:
-        run_tokens = {
-            role: await context.harness._mint(
-                ec, f"agent:{context.harness.run_id}:{role}", "agent"
-            )
-            for role in context.harness.case.roles
-        }
-        async with httpx.AsyncClient() as hc:
-            await context.harness._run_start(
+        run_tokens = await context.harness.mint_role_tokens(
+            ec, context.harness.run_id, context.harness.case.roles
+        )
+        async with httpx.AsyncClient(headers=GATEWAY_AUTH_HEADERS) as hc:
+            await context.harness.run_start(
                 hc,
                 run_id=context.harness.run_id,
                 tokens=run_tokens,
@@ -587,8 +488,8 @@ async def _run_rag_floor(
                 output_parts=output_parts,
             )
 
-    after = _snapshot_vault(context.harness.vault_root)
-    return rag_invoked, service_down, resolving, _vault_write_delta(before, after)
+    after = snapshot_vault(context.harness.vault_root)
+    return rag_invoked, service_down, resolving, vault_write_delta(before, after)
 
 
 @pytest.mark.service
@@ -605,21 +506,25 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
     resolve to real files in the engine-scoped, rag-indexed workspace. Zero document-dir
     writes: observed over the SSE stream and cancelled before any gate applies.
 
-    Corroborating live evidence (recorded in the exec record, not asserted here - the
+    Corroborating live evidence (observed in the service log, not asserted here - the
     daemon log is not a test surface): the rag service's access log shows the run's
     ``POST /search`` hitting :8766, a request native Read/Grep can never make.
 
-    Pre-flight (see the S17 exec record): the :8766 service must be discoverable
+    Pre-flight: the :8766 service must be discoverable
     (``~/.vaultspec-rag/service.json`` present) and the engine-scoped workspace must be
     indexed on it, or the search returns no hits / the service-down error and the
     assertions fail loud.
     """
-    stack = _reachable_stack()
+    stack = reachable_stack()
     if stack is None:
         external_prerequisite.absent("loopback-stack")
     gateway_url, engine_base_url, engine_bearer, vault_root = stack
     context = await _prepare_rag_floor(
-        gateway_url, engine_base_url, engine_bearer, vault_root
+        gateway_url,
+        engine_base_url,
+        engine_bearer,
+        vault_root,
+        external_prerequisite,
     )
     rag_invoked, service_down, resolving, delta = await _run_rag_floor(context)
 
@@ -631,7 +536,7 @@ async def test_document_agent_invokes_rag_search_midturn_and_cites(
     )
     assert rag_invoked, (
         f"no document agent invoked a vaultspec-rag search tool {_RAG_TOOLS} in its "
-        f"message stream within {_OBSERVE_DEADLINE_SECONDS:.0f}s (run "
+        f"message stream within {OBSERVE_DEADLINE_SECONDS:.0f}s (run "
         f"{context.harness.run_id})"
     )
     assert resolving, (
@@ -649,7 +554,7 @@ def test_rag_case_prompt_names_the_search_tools() -> None:
     case = _rag_case("tool-cores-semantic-guard")
     assert "mcp__vaultspec-rag__search_codebase" in case.prompt
     assert "mcp__vaultspec-rag__search_vault" in case.prompt
-    assert case.preset == _PRESET_LIVE
+    assert case.preset == PRESET_LIVE
     assert case.gate_policy == {}
     assert case.expected_doc_kinds == ()
 
@@ -679,7 +584,7 @@ def test_floor_case_names_the_target_adr_in_its_prompt() -> None:
     adr_name = "2026-07-17-tool-cores-adr.md"
     case = _floor_case("tool-cores-floor-guard", adr_name)
     assert adr_name in case.prompt
-    assert case.preset == _PRESET_LIVE
+    assert case.preset == PRESET_LIVE
     assert case.gate_policy == {}
     assert case.expected_doc_kinds == ()
 
@@ -709,7 +614,7 @@ def test_cites_named_adr_accepts_filename_and_stem() -> None:
     stem = "2026-02-25-llm-context-provider-abstraction-adr"
     # Full .md filename cited.
     assert _cites_named_adr(f"EVIDENCE: `{name}` (Problem Statement)", name, stem)
-    # Bare stem cited (the paraphrase that broke the first Claude S05 run).
+    # Bare stem cited (the paraphrase that broke the first Claude run).
     assert _cites_named_adr(
         f"grounding in the llm-context-provider-abstraction ADR ({stem}) as decided",
         name,

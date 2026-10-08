@@ -19,13 +19,13 @@ Two honesty guarantees carry from the design constraints:
 
 from __future__ import annotations
 
-import re
 import subprocess
 from dataclasses import dataclass
 from importlib import metadata
 from typing import TYPE_CHECKING
 
 from ..context.harness import verify_harness
+from ..providers.binary_version import binary_version_text
 from ..utils.runtime_exec import module_command
 
 if TYPE_CHECKING:
@@ -199,13 +199,7 @@ def _resolved_version() -> str | None:
         return None
     if proc.returncode != 0:
         return None
-    return _parse_version(proc.stdout)
-
-
-def _parse_version(output: str) -> str | None:
-    """Extract a ``N.N.N`` semantic version from ``--version`` output, or ``None``."""
-    match = re.search(r"\d+\.\d+\.\d+(?:[.\-+][0-9A-Za-z.\-]+)?", output)
-    return match.group(0) if match else None
+    return binary_version_text(proc.stdout)
 
 
 def _compute_skew(pinned: str | None, resolved: str | None) -> str | None:

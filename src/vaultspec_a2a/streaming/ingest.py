@@ -1,8 +1,7 @@
-"""Graph ingest lifecycle for the streaming event bus.
+"""Graph ingest lifecycle for the worker's event producer.
 
 Manages graph consumption through LangGraph's public ``astream`` stream modes,
-cancellation events, and outcome classification. Extracted from the monolithic
-``aggregator.py`` during the aggregator decomposition.
+cancellation events, and outcome classification.
 """
 
 import asyncio
@@ -17,13 +16,13 @@ from langgraph.errors import GraphDrained, GraphRecursionError, NodeTimeoutError
 from langgraph.types import Command
 
 from ..domain_config import domain_config
-from ..graph.enums import AgentLifecycleState
+from ..graph.enums import AgentLifecycleState, ProviderCondition
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
-from ..providers import ProviderCondition
 from ..providers.acp_exceptions import AcpPromptCancelledError
 from ..providers.conditions import condition_is_retryable
 from ..thread.enums import ThreadStatus
 from ..thread.errors import describe_exception_chain
+from ._interrupt_projection import emit_interrupt_events
 from ._run_callbacks import RunLifecycleCallbacks
 from .buffering import BufferingManager
 from .emitters import EventEmitters
@@ -32,7 +31,6 @@ from .transformer import (
     EventProjectionServices,
     StreamFrame,
     durable_loop_checkpoint_id,
-    emit_interrupt_events,
     frame_reports_interrupt,
     process_stream_frame,
 )
@@ -42,7 +40,13 @@ from .types import StreamableGraph, StreamOptions
 #: produced it, and that mode's payload.
 type RawStreamFrame = tuple[Any, Any, Any]
 
-__all__ = ["INGEST_DRAINED", "IngestManager", "summarize_ingest_exception"]
+__all__ = [
+    "INGEST_DRAINED",
+    "GraphInvocation",
+    "IngestManager",
+    "IngestRequest",
+    "summarize_ingest_exception",
+]
 
 #: The outcome of a run that stopped at a superstep boundary because its worker
 #: asked it to drain. Not terminal: the checkpoint is resumable and the run's
@@ -342,7 +346,6 @@ class _FinalizeInterrupt:
     """What settling an interrupted run's outcome needs to know."""
 
     thread_id: str
-    agent_id: str
     graph: StreamableGraph
     config: dict[str, Any]
     outcome: str
@@ -717,7 +720,6 @@ class IngestManager:
             progress.outcome = await self._finalize_interrupt(
                 _FinalizeInterrupt(
                     thread_id=thread_id,
-                    agent_id=request.agent_id,
                     graph=request.graph,
                     config=request.invocation.config,
                     outcome=progress.outcome,
@@ -748,7 +750,6 @@ class IngestManager:
         span.set_attribute("interrupted", True)
         projected = await emit_interrupt_events(
             request.thread_id,
-            request.agent_id,
             request.graph,
             request.config,
             self._emitters,

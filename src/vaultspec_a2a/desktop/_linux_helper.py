@@ -4,10 +4,29 @@ from __future__ import annotations
 
 import ctypes
 import os
+import stat
 import struct
 
+__all__ = [
+    "GROUP_OTHER_WRITE_BITS",
+    "PRIVILEGED_MODE_BITS",
+    "anonymous_arguments",
+    "anonymous_data",
+    "require_unprivileged_static_helper",
+]
 
-def require_static_helper(descriptor: int) -> None:
+PRIVILEGED_MODE_BITS = stat.S_ISUID | stat.S_ISGID
+GROUP_OTHER_WRITE_BITS = stat.S_IWGRP | stat.S_IWOTH
+
+
+def require_unprivileged_static_helper(descriptor: int) -> None:
+    """Reject a privileged or dynamically linked helper before executing it."""
+    _require_static_elf(descriptor)
+    if os.fstat(descriptor).st_mode & PRIVILEGED_MODE_BITS:
+        raise ValueError("native helper cannot have privileged mode bits")
+
+
+def _require_static_elf(descriptor: int) -> None:
     """Reject interpreter/dynamic dependencies before executing a helper input."""
     os.lseek(descriptor, 0, os.SEEK_SET)
     header = os.read(descriptor, 64)

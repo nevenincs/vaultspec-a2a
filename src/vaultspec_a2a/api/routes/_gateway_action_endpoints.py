@@ -5,10 +5,11 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
 from fastapi import (
+    APIRouter,
     Depends,
     FastAPI,
     Header,
@@ -16,40 +17,38 @@ from fastapi import (
     Query,
     Request,
 )
+from fastapi import Path as PathParam
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...control._permission_response_contract import (
-    PermissionInput,
-    PermissionResult,
-    PermissionRuntime,
-)
+from ...control._permission_response_contract import PermissionInput
 from ...control._worker_health import worker_liveness
+from ...control.cancel_service import cancel_thread
 from ...control.clarification_service import (
     ClarificationRuntime,
     respond_to_clarification,
 )
 from ...control.config import settings
 from ...control.health import (
-    FullHealthRuntime,
     assemble_desktop_readiness,
     build_full_health,
     probe_engine_discovery_freshness,
 )
+from ...control.leased_dispatch import DispatchTransport
 from ...control.message_service import send_followup_message
 from ...control.permission_service import respond_to_permission
 from ...control.run_start_policy import (
     required_role_ids,
 )
 from ...control.worker_status import WorkerConnectionStatus
-from ...database import begin_write_transaction, get_db, get_permission_request
-from ...database.checkpoints import Checkpointer
+from ...database import Checkpointer, get_db
 from ...domain_config import domain_config
 from ...providers.provider_catalog_service import (
     ProviderCatalogScopeCapacityError,
 )
-from ...streaming.aggregator import EventAggregator
+from ...streaming import RelayHub
 from ...team.preset_origin import PresetOrigin
+from ...telemetry import trace_headers
 from ...thread.clarification import (
     ClarificationAnswers,
     ClarificationContinuation,
@@ -58,13 +57,23 @@ from ...thread.clarification import (
 )
 from ...thread.constants import (
     DEFAULT_SUPERVISOR_ID,
+    MAX_APPROVAL_REQUEST_ID_CHARS,
+    MAX_REQUEST_ID_CHARS,
     MAX_WORKSPACE_ROOT_LENGTH,
+    REQUEST_ID_PATTERN,
 )
 from ...thread.dispatch_policy import FailureType
-from ...thread.enums import ControlActionResultStatus
+from ...thread.enums import TERMINAL_STATUSES
 from ...thread.idempotency import IDEMPOTENCY_KEY_MAX_LENGTH
+from ...utils import package_version
 from ...utils.coercion import coerce_object_mapping
-from .._utils import trace_headers
+from .._dispatch_refusals import (
+    CODED_REFUSALS,
+    DISPATCH_FAILURES,
+    RUN_START_REFUSALS,
+    refusal_responses,
+    refused_outcome,
+)
 from ..dependencies import (
     get_checkpointer,
     get_circuit_breaker,
@@ -76,10 +85,9 @@ from ..schemas.gateway import (
     PathSafeRunId,
     PresetsListResponse,
     PresetSummary,
+    RunCancelResponse,
     RunClarificationRespondRequest,
     RunClarificationRespondResponse,
-    RunMessageRefusalCode,
-    RunMessageRefusalDetail,
     RunMessageRefusalResponse,
     RunMessageRequest,
     RunMessageResponse,
@@ -88,7 +96,10 @@ from ..schemas.gateway import (
     RunPermissionRespondResponse,
     ServiceStateResponse,
 )
-from ..schemas.provider_catalog import ProviderCatalogResponse
+from ..schemas.provider_catalog import (
+    PROVIDER_CATALOG_ROUTE,
+    ProviderCatalogResponse,
+)
 from ..workspace import require_existing_workspace_root
 from .gateway import (
     _DEGRADED_CHECK_STATUSES,
@@ -97,10 +108,41 @@ from .gateway import (
     _int_field,
     _optional_enum,
     _string_field,
-    router,
+    admission_gate,
 )
 
 logger = logging.getLogger("vaultspec_a2a.api.routes.gateway")
+
+#: The permission or approval handle a respond verb answers, bounded at the
+#: width the run record REPORTS it at rather than at the width this service
+#: mints: a document approval is answered by an id the authoring engine minted
+#: and this service only transports, so a bound below the reported width would
+#: refuse a handle a caller read from this service's own read surface. For the
+#: same reason it carries no grammar - an opaque foreign id is not this side's
+#: to shape.
+_PathApprovalRequestId = Annotated[
+    str, PathParam(min_length=1, max_length=MAX_APPROVAL_REQUEST_ID_CHARS)
+]
+
+#: The clarification handle, bounded and shaped by the grammar this service
+#: mints it in. The resolution model already refused anything else, one layer
+#: too late: its validation error left the service as a 500, reporting a
+#: caller's malformed path as a server fault.
+_PathClarificationRequestId = Annotated[
+    str,
+    PathParam(
+        min_length=1, max_length=MAX_REQUEST_ID_CHARS, pattern=REQUEST_ID_PATTERN
+    ),
+]
+
+#: What a client may send as the shared idempotency header. One published
+#: width for every verb that takes it: the follow-up verb bounded it and the
+#: others did not, so the same header name meant a bounded value on one route
+#: and an unbounded one on the next.
+_IdempotencyKeyHeader = Annotated[
+    str | None,
+    Header(alias="Idempotency-Key", max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +153,15 @@ class _ActionEndpointDependencies:
     worker_client: httpx.AsyncClient
     circuit_breaker: Any
     worker_spawner: Any
+
+    def transport(self) -> DispatchTransport:
+        """The worker connection this request's dispatch travels over."""
+        return DispatchTransport(
+            worker_client=self.worker_client,
+            circuit_breaker=self.circuit_breaker,
+            worker_spawner=self.worker_spawner,
+            trace_headers=trace_headers(),
+        )
 
 
 def _get_action_endpoint_dependencies(
@@ -130,7 +181,7 @@ def _get_action_endpoint_dependencies(
 
 @dataclass(frozen=True, slots=True)
 class _ActionEndpointContext:
-    """Request and idempotency context shared by message and permission routes."""
+    """Request and idempotency context shared by the permission and cancel routes."""
 
     request: Request
     dependencies: _ActionEndpointDependencies
@@ -142,7 +193,7 @@ def _get_action_endpoint_context(
     dependencies: _ActionEndpointDependencies = Depends(
         _get_action_endpoint_dependencies
     ),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: _IdempotencyKeyHeader = None,
 ) -> _ActionEndpointContext:
     """Collect request-scoped action inputs while retaining their route metadata."""
     return _ActionEndpointContext(
@@ -217,102 +268,22 @@ def _get_clarification_endpoint_context(
     )
 
 
-__all__ = ["_summarize_preset", "route_signature"]
+__all__ = ["register", "route_signature", "summarize_preset"]
 
 # ---------------------------------------------------------------------------
 # run-message
 # ---------------------------------------------------------------------------
 
 
-# The refusals a run action answers with 409. Each says the run cannot take the
-# work now and nothing was reserved, so they share one status and are told apart
-# by the typed code in the body rather than by parsing the message.
-_RUN_REFUSALS: frozenset[FailureType] = frozenset(
-    FailureType(code.value) for code in RunMessageRefusalCode
-)
-
-#: The served ``action_status`` of a turn whose work the run has finished.
-#: A fresh admission never reports it; only a replay of a key whose turn has
-#: already run does, which is what makes ``applied`` true on this verb.
-_APPLIED_ACTION_STATUS = ControlActionResultStatus.APPLIED.value
-
-# The dispatch outcomes that mean the gateway is temporarily unable to deliver,
-# rather than that the request was wrong or the far side broken.
-_RUN_UNAVAILABLE: frozenset[FailureType] = frozenset(
-    {FailureType.CIRCUIT_OPEN, FailureType.AT_CAPACITY}
-)
+# What a follow-up offer can be refused with. The verb queues the turn rather
+# than dispatching it, so no worker or transport condition can reach it, and
+# neither can a condition only run start decides.
+_FOLLOWUP_REFUSALS: frozenset[FailureType] = (CODED_REFUSALS - RUN_START_REFUSALS) | {
+    FailureType.NOT_FOUND,
+    FailureType.NO_ACTIVE_PROJECT,
+}
 
 
-def _refused_dispatch(failure_type: FailureType, detail: str | None) -> HTTPException:
-    """Serve one dispatch outcome the same way whichever verb met it.
-
-    A follow-up turn and a permission answer reach the worker through the same
-    dispatch, so the same refusal must not mean two different things to a
-    client: a worker holding the run's slot is a conflict about that run on
-    both, and a saturated or shut-out worker is the gateway asking to be tried
-    again on both. Deriving the status per verb is what let the same busy
-    worker read as an internal gateway failure on one verb and a conflict on
-    the other.
-    """
-    if failure_type in _RUN_UNAVAILABLE:
-        return HTTPException(status_code=503, detail=detail)
-    if failure_type in _RUN_REFUSALS:
-        body = RunMessageRefusalDetail(
-            code=RunMessageRefusalCode(failure_type.value),
-            # The served field is bounded, and the detail is composed upstream
-            # from worker text; truncating here keeps an over-long message a
-            # refusal rather than a validation fault inside the error path.
-            message=(detail or "The run cannot take this now")[:1024],
-        )
-        return HTTPException(status_code=409, detail=body.model_dump(mode="json"))
-    return HTTPException(status_code=502, detail=detail)
-
-
-def _refused_permission_response(result: PermissionResult) -> HTTPException:
-    """Serve a refused permission answer, dispatch outcomes through one mapping.
-
-    The guards this verb applies before anything is dispatched each name their
-    own status, because they are about this request and this permission rather
-    than about reaching the worker. Everything that got as far as a dispatch
-    carries only its typed failure and is served by the shared mapping.
-    """
-    detail = result.error_detail or "Permission response failed"
-    if result.error_status_code is not None:
-        return HTTPException(status_code=result.error_status_code, detail=detail)
-    if result.failure_type is not None:
-        return _refused_dispatch(result.failure_type, detail)
-    return HTTPException(status_code=500, detail=detail)
-
-
-@router.post(
-    "/runs/{run_id}/messages",
-    status_code=202,
-    response_model=RunMessageResponse,
-    responses={
-        202: {
-            "description": (
-                "The follow-up turn is queued behind the one the run is "
-                "executing. It holds a place in the run's queue and no write "
-                "authority; it reaches the worker when the current turn's "
-                "terminal checkpoint is proven. ``queue_position`` says where "
-                "it sits."
-            ),
-        },
-        409: {
-            "model": RunMessageRefusalResponse,
-            "description": (
-                "The run cannot accept a follow-up turn. Nothing was reserved "
-                "and nothing was dispatched; the typed code names which "
-                "condition refused it."
-            ),
-        },
-        # Restates the router's token refusal because naming a response here
-        # replaces the router-wide description for this route.
-        503: {
-            "description": "Gateway service token is not configured.",
-        },
-    },
-)
 async def run_message_endpoint(
     run_id: PathSafeRunId,
     body: RunMessageRequest,
@@ -366,19 +337,14 @@ async def run_message_endpoint(
         idempotency_key=context.idempotency_key,
     )
 
-    if result.failure_type == FailureType.NOT_FOUND:
-        raise HTTPException(status_code=404, detail="Run not found")
-    if result.failure_type == FailureType.NO_ACTIVE_PROJECT:
-        # Same status the run-creation seam returns for the same missing
-        # invariant, so one rule reads identically at both entry points.
-        raise HTTPException(status_code=422, detail=result.error_detail)
-    if result.failure_type is not None:
-        raise _refused_dispatch(result.failure_type, result.error_detail)
+    refusal = refused_outcome(result)
+    if refusal is not None:
+        raise refusal
 
     return RunMessageResponse(
         run_id=result.thread_id,
         action_status=result.action_status,
-        applied=result.action_status == _APPLIED_ACTION_STATUS,
+        applied=result.applied,
         action_id=result.action_id,
         idempotency_key=context.idempotency_key,
         queue_position=result.queue_position,
@@ -390,41 +356,12 @@ async def run_message_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post(
-    "/runs/{run_id}/permissions/{request_id}/respond",
-    response_model=RunPermissionRespondResponse,
-    responses={
-        409: {
-            "model": RunPermissionRefusalResponse,
-            "description": (
-                "The answer was not taken. A worker that refused the dispatch "
-                "is reported with the typed refusal code every run action "
-                "shares; a request-state conflict carries a plain sentence. "
-                "Nothing was applied either way."
-            ),
-        },
-        502: {
-            "description": (
-                "The answer was accepted and retained but the worker could not "
-                "be reached or failed inside itself. Reconcile from run-status."
-            ),
-        },
-        # Restates the router's token refusal because naming a response here
-        # replaces the router-wide description for this route.
-        503: {
-            "description": (
-                "Gateway service token is not configured, or the worker is "
-                "saturated or shut out by the failure breaker and the answer "
-                "was retained for retry."
-            ),
-        },
-    },
-)
 async def run_permission_respond_endpoint(
     run_id: PathSafeRunId,
-    request_id: str,
+    request_id: _PathApprovalRequestId,
     body: RunPermissionRespondRequest,
     context: _ActionEndpointContext = Depends(_get_action_endpoint_context),
+    checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> RunPermissionRespondResponse:
     """Answer a permission request the run raised on its progress stream.
 
@@ -440,43 +377,28 @@ async def run_permission_respond_endpoint(
     and a superseded or expired request is refused with a journaled rejection
     that replays identically.
 
-    Scoping matters as much as the answer. The request is resolved and checked
-    against the run in the path BEFORE anything acts on it, so a guessed request
-    id cannot be used to answer another run's question - and because that check
-    precedes the service call, a mismatch has no effect at all rather than being
-    detected after the fact.
+    Scoping matters as much as the answer. The service resolves the request
+    against the run in the path, from that run's live checkpoint, BEFORE anything
+    acts on it, so a guessed request id cannot be used to answer another run's
+    question - and a mismatch has no effect at all rather than being detected
+    after the fact.
     """
     dependencies = context.dependencies
-    # The scoping read below opens the same transaction the service then writes
-    # in, so it must hold the write lock from the start; a deferred read that
-    # upgrades after a sibling commits is refused outright on SQLite.
-    await begin_write_transaction(dependencies.db)
-    permission = await get_permission_request(dependencies.db, request_id)
-    if permission is None or permission.thread_id != run_id:
-        await dependencies.db.rollback()
-        raise HTTPException(
-            status_code=404,
-            detail=f"Permission request {request_id!r} not found for run {run_id!r}",
-        )
-
     result = await respond_to_permission(
-        db=dependencies.db,
+        dependencies.db,
+        thread_id=run_id,
         response=PermissionInput(
             request_id, body.option_id, context.idempotency_key, body.notes
         ),
-        runtime=PermissionRuntime(
-            dependencies.circuit_breaker,
-            dependencies.worker_spawner,
-            dependencies.worker_client,
-            domain_config.graph_recursion_limit,
-            trace_headers(),
-        ),
+        checkpointer=checkpointer,
+        transport=dependencies.transport(),
     )
 
     if result.dispatched:
         worker_liveness(context.request.app.state).record_contact()
-    if result.error_detail:
-        raise _refused_permission_response(result)
+    refusal = refused_outcome(result)
+    if refusal is not None:
+        raise refusal
 
     return RunPermissionRespondResponse(
         run_id=result.thread_id,
@@ -494,13 +416,9 @@ async def run_permission_respond_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post(
-    "/runs/{run_id}/clarifications/{request_id}/respond",
-    response_model=RunClarificationRespondResponse,
-)
 async def run_clarification_respond_endpoint(
     run_id: PathSafeRunId,
-    request_id: str,
+    request_id: _PathClarificationRequestId,
     body: RunClarificationRespondRequest,
     context: _ClarificationEndpointContext = Depends(
         _get_clarification_endpoint_context
@@ -529,20 +447,11 @@ async def run_clarification_respond_endpoint(
         thread_id=run_id,
         request_id=request_id,
         resolution=resolution,
-        runtime=ClarificationRuntime(
-            context.checkpointer,
-            dependencies.worker_client,
-            dependencies.circuit_breaker,
-            dependencies.worker_spawner,
-            domain_config.graph_recursion_limit,
-            trace_headers(),
-        ),
+        runtime=ClarificationRuntime(context.checkpointer, dependencies.transport()),
     )
-    if result.error_status_code is not None:
-        raise HTTPException(
-            status_code=result.error_status_code,
-            detail=result.error_detail or "Clarification resolution failed",
-        )
+    refusal = refused_outcome(result)
+    if refusal is not None:
+        raise refusal
 
     if result.dispatched:
         worker_liveness(context.request.app.state).record_contact()
@@ -557,11 +466,57 @@ async def run_clarification_respond_endpoint(
 
 
 # ---------------------------------------------------------------------------
+# run-cancel
+# ---------------------------------------------------------------------------
+
+
+async def run_cancel_endpoint(
+    run_id: PathSafeRunId,
+    context: _ActionEndpointContext = Depends(_get_action_endpoint_context),
+) -> RunCancelResponse:
+    """Cancel a run idempotently."""
+    dependencies = context.dependencies
+    result = await cancel_thread(
+        db=dependencies.db,
+        thread_id=run_id,
+        idempotency_key=context.idempotency_key,
+        transport=dependencies.transport(),
+    )
+
+    refusal = refused_outcome(result)
+    if refusal is not None:
+        raise refusal
+
+    if result.cancelled:
+        worker_liveness(context.request.app.state).record_contact()
+
+    # Cancellation is the drain's tool and is never itself admission-gated. When
+    # a cancel settles the run terminally here (e.g. a submitted-but-undispatched
+    # run), release it from the admission gate so a concurrent drain can quiesce;
+    # a run that only reaches CANCELLING is deliberately left for the worker's
+    # terminal event, which releases it in
+    # ``control.event_handlers._handle_terminal_event``. Both sites can fire for
+    # one run - the gate's release is an idempotent discard, so they cannot
+    # corrupt the active set.
+    if result.thread_status in TERMINAL_STATUSES:
+        await admission_gate(context.request.app).release(result.thread_id)
+
+    return RunCancelResponse(
+        run_id=result.thread_id,
+        status=result.thread_status,
+        cancelled=result.cancelled,
+        accepted=result.accepted,
+        applied=result.applied,
+        action_status=result.action_status,
+        idempotency_key=result.idempotency_key,
+    )
+
+
+# ---------------------------------------------------------------------------
 # provider-catalog
 # ---------------------------------------------------------------------------
 
 
-@router.get("/provider-catalog", response_model=ProviderCatalogResponse)
 async def provider_catalog_endpoint(
     request: Request,
     workspace_root: str = Query(min_length=1, max_length=MAX_WORKSPACE_ROOT_LENGTH),
@@ -592,7 +547,6 @@ async def provider_catalog_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/presets", response_model=PresetsListResponse)
 async def presets_list_endpoint(
     workspace_root: str | None = Query(
         default=None, max_length=MAX_WORKSPACE_ROOT_LENGTH
@@ -618,7 +572,7 @@ def _build_preset_summaries(ws_root: Path | None) -> list[PresetSummary]:
     from ...team.team_config import discover_team_preset_ids
 
     return [
-        _summarize_preset(preset_id, ws_root)
+        summarize_preset(preset_id, ws_root)
         for preset_id in sorted(discover_team_preset_ids(ws_root))
     ]
 
@@ -642,12 +596,8 @@ def _safe_load_reason(exc: Exception) -> str:
     return f"preset failed to load ({type(exc).__name__})"
 
 
-def _preset_origin(
-    preset_id: str, ws_root: Path | None, *, is_mock: bool
-) -> PresetOrigin:
-    """Classify a preset's origin: test_mock, workspace, or bundled."""
-    if is_mock:
-        return PresetOrigin.TEST_MOCK
+def _preset_origin(preset_id: str, ws_root: Path | None) -> PresetOrigin:
+    """Classify a preset's origin: workspace or bundled."""
     if ws_root is not None:
         workspace_toml = ws_root / ".vaultspec" / "teams" / f"{preset_id}.toml"
         if workspace_toml.is_file():
@@ -655,7 +605,7 @@ def _preset_origin(
     return PresetOrigin.BUNDLED
 
 
-def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
+def summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
     """Load one preset and summarize it, capturing any load failure truthfully.
 
     Any load or validation error is caught and reported as an unloadable preset
@@ -664,12 +614,10 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
     """
     from ...team.team_config import (
         authoring_capability,
-        is_mock_preset,
         load_team_config,
         supported_capabilities,
     )
 
-    is_mock = is_mock_preset(preset_id)
     try:
         tc = load_team_config(preset_id, workspace_root=ws_root)
     except Exception as exc:
@@ -678,8 +626,7 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
             id=preset_id,
             loadable=False,
             unavailable_reason=_safe_load_reason(exc),
-            is_mock=is_mock,
-            origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),
+            origin=_preset_origin(preset_id, ws_root),
         )
     return PresetSummary(
         id=tc.id,
@@ -697,8 +644,7 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
         # observe it.
         required_roles=required_role_ids(tc),
         authoring_capability=authoring_capability(tc),
-        is_mock=is_mock,
-        origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),
+        origin=_preset_origin(preset_id, ws_root),
         supported_capabilities=supported_capabilities(tc.topology.type),
     )
 
@@ -756,12 +702,11 @@ def _service_check_ready(checks: dict[str, object], name: str) -> bool:
     return _string_field(check, "status") == "ok"
 
 
-@router.get("/service", response_model=ServiceStateResponse)
 async def service_state_endpoint(
     request: Request,
-    services: tuple[
-        AsyncSession, EventAggregator, Checkpointer, httpx.AsyncClient
-    ] = Depends(get_services),
+    services: tuple[AsyncSession, RelayHub, Checkpointer, httpx.AsyncClient] = Depends(
+        get_services
+    ),
     circuit_breaker: Any = Depends(get_circuit_breaker),
     worker_spawner: Any = Depends(get_worker_spawner),
 ) -> ServiceStateResponse:
@@ -780,7 +725,7 @@ async def service_state_endpoint(
     db, _aggregator, _checkpointer, worker_client = services
     full = await build_full_health(
         db=db,
-        runtime=FullHealthRuntime(
+        transport=DispatchTransport(
             worker_client=worker_client,
             circuit_breaker=circuit_breaker,
             worker_spawner=worker_spawner,
@@ -820,7 +765,7 @@ async def service_state_endpoint(
     degraded_reasons = _service_degraded_reasons(checks)
 
     return ServiceStateResponse(
-        service_version=_service_version(),
+        service_version=package_version(),
         status=status,
         alive=True,
         ready=can_accept_run,
@@ -841,8 +786,8 @@ async def service_state_endpoint(
         ),
         worker_connected=_bool_field(full, "worker_connected"),
         circuit_breaker=_string_field(full, "circuit_breaker"),
-        database_backend=settings.resolved_database_backend,
-        checkpoint_backend=settings.resolved_checkpoint_backend,
+        database_backend=settings.database_backend,
+        checkpoint_backend=settings.checkpoint_backend,
         database_ready=database_ready,
         checkpoint_ready=checkpoint_ready,
         worker_ready=worker_ready,
@@ -855,11 +800,130 @@ async def service_state_endpoint(
     )
 
 
-def _service_version() -> str:
-    """Return the installed a2a distribution version, or 'unknown'."""
-    from importlib.metadata import PackageNotFoundError, version
-
-    try:
-        return version("vaultspec-a2a")
-    except PackageNotFoundError:
-        return "unknown"
+def register(router: APIRouter) -> None:
+    """Mount the run action verbs and the preset, catalog, and service reads."""
+    router.post(
+        "/runs/{run_id}/messages",
+        status_code=202,
+        response_model=RunMessageResponse,
+        responses=refusal_responses(
+            _FOLLOWUP_REFUSALS,
+            {
+                202: {
+                    "description": (
+                        "The follow-up turn is queued behind the one the run is "
+                        "executing. It holds a place in the run's queue and no write "
+                        "authority; it reaches the worker when the current turn's "
+                        "terminal checkpoint is proven. ``queue_position`` says where "
+                        "it sits."
+                    ),
+                },
+                409: {
+                    "model": RunMessageRefusalResponse,
+                    "description": (
+                        "The run cannot accept a follow-up turn. Nothing was reserved "
+                        "and nothing was dispatched; the typed code names which "
+                        "condition refused it."
+                    ),
+                },
+                # Restates the router's token refusal because naming a response here
+                # replaces the router-wide description for this route.
+                503: {
+                    "description": "Gateway service token is not configured.",
+                },
+            },
+        ),
+    )(run_message_endpoint)
+    router.post(
+        "/runs/{run_id}/permissions/{request_id}/respond",
+        response_model=RunPermissionRespondResponse,
+        responses=refusal_responses(
+            DISPATCH_FAILURES,
+            {
+                403: {
+                    "description": (
+                        "The run is parked on a DOCUMENT approval, which the "
+                        "engine's review surface decides. Answering it here "
+                        "would resume a run whose verdict nothing recorded, so "
+                        "the route refuses and the run resumes only through "
+                        "the verdict subscriber. Reachable on the same request "
+                        "shape as an ordinary permission answer, which is why "
+                        "a client needs a branch for it."
+                    ),
+                },
+                404: {
+                    "description": "No such run, or no such permission request on it.",
+                },
+                409: {
+                    "model": RunPermissionRefusalResponse,
+                    "description": (
+                        "The answer was not taken. A worker that refused the dispatch "
+                        "is reported with the typed refusal code every run action "
+                        "shares; a request-state conflict carries a plain sentence. "
+                        "Nothing was applied either way."
+                    ),
+                },
+                502: {
+                    "description": (
+                        "The answer was accepted and retained but the worker could "
+                        "not be reached or failed inside itself. Reconcile from "
+                        "run-status."
+                    ),
+                },
+                # Restates the router's token refusal because naming a response
+                # here replaces the router-wide description for this route.
+                503: {
+                    "description": (
+                        "Gateway service token is not configured, or the worker is "
+                        "saturated or shut out by the failure breaker and the answer "
+                        "was retained for retry."
+                    ),
+                },
+            },
+        ),
+    )(run_permission_respond_endpoint)
+    router.post(
+        "/runs/{run_id}/clarifications/{request_id}/respond",
+        response_model=RunClarificationRespondResponse,
+        responses=refusal_responses(
+            DISPATCH_FAILURES,
+            {
+                404: {
+                    "description": (
+                        "No such run, or the run is not parked on this questionnaire."
+                    ),
+                },
+                409: {
+                    "description": (
+                        "The resolution was not taken: a different one is already "
+                        "accepted, the run is not active or cannot be confirmed to "
+                        "have applied it, or the worker refused the dispatch with the "
+                        "typed code every run action shares."
+                    ),
+                },
+            },
+        ),
+    )(run_clarification_respond_endpoint)
+    router.post(
+        "/runs/{run_id}/cancel",
+        response_model=RunCancelResponse,
+        responses=refusal_responses(
+            DISPATCH_FAILURES,
+            {
+                409: {
+                    "description": (
+                        "The run's state refuses cancellation - it settled some "
+                        "other way, its accepted deadline expired, or its authority "
+                        "changed - and no retry will change that; re-read "
+                        "run-status. Cancelling a run that is already cancelled is "
+                        "not refused."
+                    ),
+                },
+            },
+        ),
+    )(run_cancel_endpoint)
+    router.get(PROVIDER_CATALOG_ROUTE, response_model=ProviderCatalogResponse)(
+        provider_catalog_endpoint
+    )
+    router.get("/presets", response_model=PresetsListResponse)(presets_list_endpoint)
+    router.get("/service", response_model=ServiceStateResponse)(service_state_endpoint)

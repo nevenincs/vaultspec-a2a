@@ -34,10 +34,25 @@ Verb classes, keyed to CONSEQUENCE:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Container
+__all__ = [
+    "ADVISORY_BROKEN",
+    "ALLOW_EMPTY_ENV",
+    "DRIFT",
+    "FAILED",
+    "FINDINGS_CODES",
+    "FIX_STRICT_ENV",
+    "INIT_HOST_TOOL_MISSING",
+    "INIT_LOCKED",
+    "INIT_STALE",
+    "INIT_STEP_FAILED",
+    "NOTHING_SELECTED",
+    "OK",
+    "PYTEST_NO_TESTS_COLLECTED",
+    "TOOL_BROKEN",
+    "TOOL_MISSING",
+    "advisory_result",
+    "selection_result",
+]
 
 #: Success. The command ran and found nothing that gates.
 OK = 0
@@ -48,7 +63,8 @@ FAILED = 1
 #: `just init`: a required HOST tool is absent (L6). Reserved fleet-wide so
 #: nothing else claims it. Outside `init`, an absent executable discovered at
 #: dispatch time is :data:`TOOL_MISSING`, which carries the shell's own
-#: command-not-found meaning and needs no lookup table.
+#: command-not-found meaning and needs no lookup table, and a gate or guard
+#: that could not run is :data:`TOOL_BROKEN`.
 INIT_HOST_TOOL_MISSING = 2
 
 #: `just init`: the environment exists but is stale relative to its inputs.
@@ -91,10 +107,10 @@ NOTHING_SELECTED = 8
 #: legible in CI logs and to anyone reading the number directly.
 TOOL_MISSING = 127
 
-#: Statuses meaning "the tool ran and reported findings". Every scanner in the
-#: fleet - ruff, bandit, vulture, deptry, jscpd, complexipy, xenon, npm audit,
-#: cargo deny - uses 1 for this. An advisory target suppresses exactly these;
-#: anything else is :data:`ADVISORY_BROKEN`.
+#: Statuses meaning "the tool ran and reported findings". Every scanner an
+#: advisory target runs - ruff, bandit, deptry, jscpd, complexipy, xenon, npm
+#: audit, cargo deny - uses 1 for this. An advisory target suppresses exactly
+#: these; anything else is :data:`ADVISORY_BROKEN`.
 FINDINGS_CODES = frozenset({FAILED})
 
 #: pytest's status for "no tests were collected", mapped onto
@@ -108,19 +124,11 @@ FIX_STRICT_ENV = "VAULTSPEC_A2A_FIX_STRICT"
 ALLOW_EMPTY_ENV = "VAULTSPEC_A2A_ALLOW_EMPTY_SELECTION"
 
 
-def advisory_result(code: int, findings: Container[int] = FINDINGS_CODES) -> int:
+def advisory_result(code: int) -> int:
     """Collapse an advisory step's status onto the contract.
 
     Args:
         code: The status the advisory tool exited with.
-        findings: The statuses THIS tool uses to mean "I found something".
-            Defaults to :data:`FINDINGS_CODES`, which is right for every
-            scanner in the fleet but one: vulture reports dead code with 3 and
-            reserves 1 and 2 for invalid input and invalid arguments. Reading
-            its 3 as breakage would silence the finding; reading its 1 as a
-            finding would silence a broken invocation. A tool that does not use
-            1 must therefore SAY so, which is the difference between this and a
-            blanket flag.
 
     Returns:
         :data:`OK` when the tool ran and merely reported findings, otherwise
@@ -128,7 +136,7 @@ def advisory_result(code: int, findings: Container[int] = FINDINGS_CODES) -> int
         `; exit 0` got wrong: `exit 0` maps EVERY status onto success, so a
         scanner that was missing or crashed reported exactly like a clean run.
     """
-    if code == OK or code in findings:
+    if code == OK or code in FINDINGS_CODES:
         return OK
     return ADVISORY_BROKEN
 

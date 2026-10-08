@@ -2,47 +2,32 @@
 
 from __future__ import annotations
 
-import json
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
-from unittest.mock import AsyncMock
+from typing import TYPE_CHECKING
 
-import httpx
 import pytest
 
 from ...ipc.schemas import DispatchRequest
+from ...testing import adopted_spawner, served_worker
 from ..circuit_breaker import WorkerCircuitBreaker
 from ..dispatch import safe_dispatch
 
 if TYPE_CHECKING:
-    from ..worker_management import LazyWorkerSpawner
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 
 @pytest.mark.asyncio
-async def test_cancel_dispatch_bypasses_open_circuit() -> None:
-    requests: list[httpx.Request] = []
-
-    def respond(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(200)
-
+async def test_cancel_dispatch_bypasses_open_circuit(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """The production worker admits a cancel that the open circuit would refuse."""
     circuit = WorkerCircuitBreaker(failure_threshold=1, recovery_timeout=3600)
     circuit.force_open()
-    spawner = cast(
-        "LazyWorkerSpawner",
-        SimpleNamespace(ensure_worker=AsyncMock(), spawned=True),
-    )
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(respond), base_url="http://worker"
-    ) as client:
-        outcome = await safe_dispatch(
-            client,
-            DispatchRequest(action="cancel", thread_id="run", recursion_limit=1),
-            circuit,
-            spawner,
-        )
+    cancel = DispatchRequest(action="cancel", thread_id="run")
+
+    async with served_worker(checkpointer) as worker:
+        outcome = await safe_dispatch(worker.client, cancel, circuit, adopted_spawner())
+        admitted = cancel.dispatch_id in worker.app.state.dispatch_ids
 
     assert outcome.success
-    assert len(requests) == 1
-    assert json.loads(requests[0].content)["action"] == "cancel"
+    assert admitted
     assert circuit.state == "closed"

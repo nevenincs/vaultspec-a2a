@@ -44,26 +44,39 @@ Run through the harness::
 A genuinely correct use is exempted with a trailing ``# storage-anchor-ok``
 comment on the offending line, next to a comment saying why.
 
-``DEFERRED`` lists modules whose violations are known, owned, and not yet
-closed. It is a debt list, not an exemption list: the gate reports its contents
-on every run so the remaining work stays visible, and an entry is deleted as
-its module is fixed rather than left to accumulate.
+This gate carries no deferral list. It held one once, for violations that
+were known, owned, and not yet closed; the last entry was fixed, the dict
+emptied, and an empty debt list is not a design decision worth a module of
+machinery to keep re-proving - the gate already fails loudly the moment a
+real violation reappears, deferred or not.
 """
 
 from __future__ import annotations
 
+import argparse
 import ast
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-#: The package whose production modules are gated.
-PACKAGE = "vaultspec_a2a"
+from dev.exit_codes import FAILED, OK, TOOL_BROKEN
+from dev.paths import PACKAGE_PATH, REPO_ROOT, is_test_code, repo_relative
 
-#: Source root scanned by the gate.
-ROOT = Path("src") / PACKAGE
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
-#: Repository tooling and the container entrypoint, held to the ``tempfile``
-#: rule only.
+__all__ = [
+    "ALLOW",
+    "INSTALL_ROOT_READERS",
+    "NAME_DECLARING_MODULES",
+    "SETTINGS_MODULES",
+    "SIBLING_NAMES",
+    "TOOLING_ROOTS",
+    "main",
+]
+
+#: Repository tooling and the container entrypoint, relative to the scanned
+#: root, held to the ``tempfile`` rule only.
 TOOLING_ROOTS = (Path("dev"), Path("service"))
 
 #: Trailing comment that exempts a single line.
@@ -103,24 +116,6 @@ _TEMPFILE_CALLS = frozenset(
         "SpooledTemporaryFile",
     }
 )
-
-#: Directory names whose contents are test code rather than shipped production
-#: code. Tests legitimately construct paths against the checkout they run in.
-TEST_DIRS = frozenset(
-    {"tests", "desktop_tests", "service_tests", "acceptance", "testing"}
-)
-
-#: Modules with known, owned violations that are not yet closed, each mapped to
-#: the reason it is still open. Delete an entry when its module is fixed; do not
-#: add one without an owner for the work.
-DEFERRED: dict[str, str] = {}
-
-
-def _is_test_module(relative: Path) -> bool:
-    """Return whether a package-relative module is test rather than product code."""
-    return relative.name == "conftest.py" or any(
-        part in TEST_DIRS for part in relative.parts
-    )
 
 
 def _parents_to_package_root(relative: Path) -> int:
@@ -312,39 +307,55 @@ def _install_root_violations(tree: ast.Module, relative: Path) -> list[tuple[int
     return sorted(found)
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Scan production modules and report every repository-anchored path.
 
+    Args:
+        argv: The argument vector, or ``None`` to read :data:`sys.argv`.
+
     Returns:
-        0 when no undeferred violation remains, 1 when any does, and 2 when the
-        source root is missing (which means the gate was run from the wrong
-        directory and must not report a false pass).
+        :data:`OK` when no violation remains, :data:`FAILED` when any does,
+        and :data:`TOOL_BROKEN` when the gate could not run - the package is
+        missing beneath the scanned root, or a module does not parse - which
+        must not read as a pass.
     """
-    if not ROOT.is_dir():
+    parser = argparse.ArgumentParser(
+        prog="python -m dev.guards.storage_anchors",
+        description="Gate production code on its one path and settings authority.",
+    )
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=REPO_ROOT,
+        help="the checkout to scan (default: this repository)",
+    )
+    root: Path = parser.parse_args(argv).root.resolve()
+    package = root / PACKAGE_PATH
+    if not package.is_dir():
         print(
-            f"{ROOT} not found - run this from the repository root.",
+            f"{package} not found - point --root at a repository checkout.",
             file=sys.stderr,
         )
-        return 2
+        return TOOL_BROKEN
 
     violations: list[str] = []
-    deferred_hits: dict[str, int] = {}
 
     scanned: list[tuple[Path, Path | None]] = [
-        (path, path.relative_to(ROOT)) for path in sorted(ROOT.rglob("*.py"))
+        (path, path.relative_to(package)) for path in sorted(package.rglob("*.py"))
     ]
     for tooling in TOOLING_ROOTS:
-        scanned += [(path, None) for path in sorted(tooling.rglob("*.py"))]
+        scanned += [(path, None) for path in sorted((root / tooling).rglob("*.py"))]
     for path, relative in scanned:
+        shown = repo_relative(path, root)
         text = path.read_text(encoding="utf-8")
         lines = text.splitlines()
         try:
-            tree = ast.parse(text, filename=str(path))
+            tree = ast.parse(text, filename=shown)
         except SyntaxError as exc:
-            print(f"{path}: could not parse: {exc}", file=sys.stderr)
-            return 2
+            print(f"{shown}: could not parse: {exc}", file=sys.stderr)
+            return TOOL_BROKEN
 
-        if relative is None or _is_test_module(relative):
+        if relative is None or is_test_code(relative):
             found = _tempfile_violations(tree)
         else:
             found = (
@@ -356,38 +367,11 @@ def main() -> int:
                 + _install_root_violations(tree, relative)
                 + _name_literal_violations(tree, relative)
             )
-        key = (relative if relative is not None else path).as_posix()
         for lineno, reason in sorted(found):
             source = lines[lineno - 1] if lineno <= len(lines) else ""
             if ALLOW in source:
                 continue
-            if key in DEFERRED:
-                deferred_hits[key] = deferred_hits.get(key, 0) + 1
-                continue
-            violations.append(f"{path}:{lineno}: {reason}")
-
-    if deferred_hits:
-        total = sum(deferred_hits.values())
-        print(
-            f"{total} known violation(s) remain in {len(deferred_hits)} deferred "
-            f"module(s) - open debt, not accepted design:",
-            file=sys.stderr,
-        )
-        for key in sorted(deferred_hits):
-            print(
-                f"  {key}: {deferred_hits[key]} - {DEFERRED[key]}",
-                file=sys.stderr,
-            )
-
-    stale = sorted(set(DEFERRED) - set(deferred_hits))
-    if stale:
-        print(
-            "deferred entries no longer match any violation and must be deleted:",
-            file=sys.stderr,
-        )
-        for key in stale:
-            print(f"  {key}", file=sys.stderr)
-        return 1
+            violations.append(f"{shown}:{lineno}: {reason}")
 
     if violations:
         print(
@@ -399,9 +383,9 @@ def main() -> int:
         )
         for violation in violations:
             print(f"  {violation}", file=sys.stderr)
-        return 1
+        return FAILED
 
-    return 0
+    return OK
 
 
 if __name__ == "__main__":

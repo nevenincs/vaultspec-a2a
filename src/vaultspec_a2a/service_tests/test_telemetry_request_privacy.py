@@ -4,18 +4,16 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
-import time
 import uuid
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
 
-from ..testing.ports import free_port
+from ..testing import ProgressDeadline, free_port, inherited_environment, wait_for
+from .harness import COMPOSE_FILE, REPO_ROOT, resolve_docker_executable
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -65,16 +63,15 @@ def jaeger_request_privacy(
 ) -> Generator[tuple[str, str]]:
     """Start only the real collector in a uniquely owned Compose project."""
     external_prerequisite("docker")
-    docker = shutil.which("docker")
-    assert docker is not None
-    root = Path(__file__).resolve().parents[3]
+    docker = resolve_docker_executable()
     project = "vaultspec-request-privacy-" + uuid.uuid4().hex[:10]
     ui_port, otlp_port = free_port(), free_port()
-    env = {
-        **os.environ,
-        "JAEGER_UI_PORT": str(ui_port),
-        "JAEGER_OTLP_PORT": str(otlp_port),
-    }
+    env = inherited_environment(
+        {
+            "JAEGER_UI_PORT": str(ui_port),
+            "JAEGER_OTLP_PORT": str(otlp_port),
+        }
+    )
     command = [
         docker,
         "compose",
@@ -83,13 +80,13 @@ def jaeger_request_privacy(
         "-p",
         project,
         "-f",
-        str(root / "service" / "docker-compose.integration.yml"),
+        str(COMPOSE_FILE),
     ]
     try:
         subprocess.run(
             [*command, "up", "-d", "--no-deps", "--wait", "jaeger"],
             env=env,
-            cwd=root,
+            cwd=REPO_ROOT,
             capture_output=True,
             text=True,
             check=True,
@@ -100,7 +97,7 @@ def jaeger_request_privacy(
         subprocess.run(
             [*command, "down", "--remove-orphans"],
             env=env,
-            cwd=root,
+            cwd=REPO_ROOT,
             capture_output=True,
             text=True,
             check=True,
@@ -142,15 +139,16 @@ def test_request_url_privacy_survives_export(
     """Export omits query content while handlers and W3C ancestry remain intact."""
     endpoint, query_url = jaeger_request_privacy
     trace_id = uuid.uuid4().hex
-    env = {
-        **os.environ,
-        "VAULTSPEC_A2A_OTEL_EXPORTER_OTLP_ENDPOINT": endpoint,
-        "VAULTSPEC_A2A_OTEL_EXPORTER_OTLP_INSECURE": "true",
-        "VAULTSPEC_A2A_OTEL_TRACES_EXPORTER": "otlp",
-        "VAULTSPEC_A2A_OTEL_METRICS_EXPORTER": "none",
-        "VAULTSPEC_A2A_OTEL_SDK_DISABLED": "false",
-        "VAULTSPEC_A2A_OTEL_EXPORTER_CONSOLE": "false",
-    }
+    env = inherited_environment(
+        {
+            "VAULTSPEC_A2A_OTEL_EXPORTER_OTLP_ENDPOINT": endpoint,
+            "VAULTSPEC_A2A_OTEL_EXPORTER_OTLP_INSECURE": "true",
+            "VAULTSPEC_A2A_OTEL_TRACES_EXPORTER": "otlp",
+            "VAULTSPEC_A2A_OTEL_METRICS_EXPORTER": "none",
+            "VAULTSPEC_A2A_OTEL_SDK_DISABLED": "false",
+            "VAULTSPEC_A2A_OTEL_EXPORTER_CONSOLE": "false",
+        }
+    )
     result = subprocess.run(
         [sys.executable, "-c", _REQUEST_PROBE, query, host, trace_id],
         env=env,
@@ -160,17 +158,20 @@ def test_request_url_privacy_survives_export(
         timeout=45,
     )
     assert json.loads(result.stdout)["query"] == query.removeprefix("?")
-    deadline = time.monotonic() + 30
-    payload: dict[str, Any] = {}
     with httpx.Client(base_url=query_url, timeout=5) as client:
-        while time.monotonic() < deadline:
+
+        def _exported() -> dict[str, Any] | None:
             response = client.get(f"/api/traces/{trace_id}")
             response.raise_for_status()
-            payload = cast("dict[str, Any]", response.json())
-            if payload.get("data"):
-                break
-            time.sleep(0.25)
-    assert payload.get("data"), "middleware span was not exported to Jaeger"
+            body = cast("dict[str, Any]", response.json())
+            return body if body.get("data") else None
+
+        payload = wait_for(
+            _exported,
+            deadline=ProgressDeadline(idle_window_s=30.0),
+            interval_s=0.25,
+            stalled=lambda: "middleware span was not exported to Jaeger",
+        )
     spans = payload["data"][0]["spans"]
     assert len(spans) == 1
     span = spans[0]

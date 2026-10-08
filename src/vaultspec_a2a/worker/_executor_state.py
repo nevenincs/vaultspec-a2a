@@ -9,15 +9,23 @@ from typing import TYPE_CHECKING
 
 from langgraph.runtime import RunControl
 
-from ..streaming.aggregator import EventAggregator
+from ..streaming import RunEventProducer
 from ._dispatch_receipts import DispatchReceiptReporter
+from ._run_registry import RunScopedRegistry
 from .catalog_store import RunCatalogStore
 from .token_store import RunTokenStore
 
 if TYPE_CHECKING:
-    from ..database.checkpoints import Checkpointer
+    from ..database import Checkpointer
     from ._dispatch_contract import DispatchCapacityReservation
     from ._dispatch_settlement import TerminalArbitration
+
+__all__ = [
+    "CheckpointAccess",
+    "DispatchCapacityState",
+    "RunControlRegistry",
+    "RunResources",
+]
 
 
 @dataclass(slots=True)
@@ -39,9 +47,26 @@ class DispatchCapacityState:
     The per-thread terminal arbitrations belong here with the admission slots
     they bracket: both are keyed by thread, and a thread's arbitration is what
     serializes the settlement that releases its slot.
+
+    A reservation is the one value here held for a run's active window, so
+    ``active_ingests`` is a run-scoped registry; its count, membership, key
+    snapshot and identity-checked drop are all read and written under ``lock``.
+    The other two maps stay plain dicts because neither is held for a run's
+    window: a pending cancellation is written by a cancel that may find no run
+    at all and is consumed by whichever terminal settles next, and an
+    arbitration entry lives while it has waiters, not while a run does.
     """
 
-    active_ingests: dict[str, DispatchCapacityReservation] = field(default_factory=dict)
+    active_ingests: RunScopedRegistry[DispatchCapacityReservation] = field(
+        default_factory=RunScopedRegistry
+    )
+    #: The runs whose last ingest parked at an interrupt instead of ending.
+    #: Beside ``active_ingests`` because the two together are every run this
+    #: worker still answers for: a parked run holds no slot and no reservation,
+    #: yet its in-memory stream state has to outlive the ingest that parked it
+    #: and may only be dropped when the run truly ends. Read and written under
+    #: ``lock`` with the registry it complements.
+    parked_threads: set[str] = field(default_factory=set)
     pending_cancellations: dict[str, str] = field(default_factory=dict)
     terminal_arbitrations: dict[str, TerminalArbitration] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -61,23 +86,27 @@ class RunResources:
     pruned on the same per-run boundary, so they are held together.
     """
 
-    aggregator: EventAggregator = field(default_factory=EventAggregator)
+    producer: RunEventProducer = field(default_factory=RunEventProducer)
     token_store: RunTokenStore = field(default_factory=RunTokenStore)
     catalog_store: RunCatalogStore = field(default_factory=RunCatalogStore)
     receipts: DispatchReceiptReporter = field(default_factory=DispatchReceiptReporter)
 
 
-class RunControlRegistry:
+class RunControlRegistry(RunScopedRegistry[RunControl]):
     """The drain handles of every run executing on one worker.
 
     A drain is one-way, so the reason is held for the whole remaining life of
     the registry rather than only for the runs that happened to hold a control
     when it was asked for: a run whose control opens afterwards starts drained
     and stops before its first node, and the owner refuses further dispatch.
+
+    Callers use ``open`` and ``close`` rather than the inherited ``register``
+    and ``drop``, because each of those also moves the idle signal ``drain``
+    waits on.
     """
 
     def __init__(self) -> None:
-        self._controls: dict[str, RunControl] = {}
+        super().__init__()
         self._idle = asyncio.Event()
         self._idle.set()
         self._drain_reason: str | None = None
@@ -92,14 +121,14 @@ class RunControlRegistry:
         control = RunControl()
         if self._drain_reason is not None:
             control.request_drain(self._drain_reason)
-        self._controls[thread_id] = control
+        self.register(thread_id, control)
         self._idle.clear()
         return control
 
     def close(self, thread_id: str) -> None:
         """Drop one run's control and signal idle once none is left."""
-        self._controls.pop(thread_id, None)
-        if not self._controls:
+        self.drop(thread_id)
+        if not self._entries:
             self._idle.set()
 
     async def drain(self, reason: str) -> None:
@@ -111,6 +140,6 @@ class RunControlRegistry:
         delivered again after restart.
         """
         self._drain_reason = reason
-        for control in list(self._controls.values()):
+        for control in tuple(self._entries.values()):
             control.request_drain(reason)
         await self._idle.wait()

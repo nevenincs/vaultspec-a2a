@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import socket
+import functools
 from contextlib import asynccontextmanager
 
 import httpx
 import pytest
-import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 
-from ..shutdown import ShutdownDeadline, ShutdownServer
+from ...testing import loopback_uvicorn, uvicorn_started
+from ..shutdown import ShutdownDeadline, ShutdownServer, build_shutdown_server
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -38,27 +38,18 @@ async def test_parked_sse_is_cancelled_inside_the_server_shutdown_clock() -> Non
 
         return StreamingResponse(body(), media_type="text/event-stream")
 
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("127.0.0.1", 0))
-    listener.listen()
-    listener.setblocking(False)
-    port = listener.getsockname()[1]
-
-    config = uvicorn.Config(
+    server = loopback_uvicorn(
         app,
         log_level="error",
-        lifespan="on",
         timeout_graceful_shutdown=1,
+        server_factory=functools.partial(ShutdownServer, app=app, total_seconds=3.0),
     )
-    server = ShutdownServer(config, app=app, total_seconds=3.0)
-    serving = asyncio.create_task(server.serve(sockets=[listener]))
+    serving = asyncio.create_task(server.serve())
     try:
-        while not server.started:
-            await asyncio.sleep(0.01)
+        base = await uvicorn_started(server, serving)
         async with (
             httpx.AsyncClient(timeout=5.0) as client,
-            client.stream("GET", f"http://127.0.0.1:{port}/stream") as response,
+            client.stream("GET", f"{base}/stream") as response,
         ):
             assert response.status_code == 200
             iterator = response.aiter_bytes()
@@ -74,10 +65,29 @@ async def test_parked_sse_is_cancelled_inside_the_server_shutdown_clock() -> Non
         server.should_exit = True
         if not serving.done():
             await asyncio.wait_for(serving, timeout=3.5)
-        listener.close()
 
     assert elapsed < 3.5
     assert observed_remaining, "lifespan never observed the server shutdown clock"
     assert observed_remaining[0] < 2.5, (
         "lifespan received a reset deadline after the parked stream grace elapsed"
     )
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_built_server_stops_when_the_app_requests_its_owner_to() -> None:
+    app = FastAPI()
+    server = build_shutdown_server(app, host="127.0.0.1", port=0)
+    serving = asyncio.create_task(server.serve())
+    try:
+        await uvicorn_started(server, serving)
+        assert not server.should_exit
+
+        app.state.request_server_shutdown()
+        await asyncio.wait_for(serving, timeout=3.5)
+    finally:
+        server.should_exit = True
+        if not serving.done():
+            await asyncio.wait_for(serving, timeout=3.5)
+
+    assert server.should_exit
+    assert isinstance(app.state.shutdown_deadline, ShutdownDeadline)

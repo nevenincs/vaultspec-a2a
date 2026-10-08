@@ -1,4 +1,4 @@
-"""Unit tests for the per-run Codex CODEX_HOME config.toml emission (P04.S18).
+"""Unit tests for the per-run Codex CODEX_HOME config.toml emission.
 
 Real filesystem + stdlib tomllib, no mocks. The live proof that Codex surfaces
 and invokes the servers under the read-only sandbox is executor-service's later
@@ -21,11 +21,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from pydantic import SecretStr
 
-from ...authoring import AgentTool, CatalogSnapshot
 from ...control.config import Settings
 from ...graph.enums import Provider
-from ...testing import settings_override
-from ...testing.children import run_child
+from ...testing import (
+    authoring_tool_binding,
+    inherited_environment,
+    run_child,
+    settings_override,
+)
 from ...utils.enums import CodexWebSearchMode
 from .._acp_authoring import AuthoringToolBinding, attach_authoring_tools
 from .._acp_mcp import codex_mcp_server_specs
@@ -83,8 +86,9 @@ def private_home_root(tmp_path: Path) -> Iterator[Path]:
 
 
 def _settings_from_child(web_search_mode: str) -> subprocess.CompletedProcess[str]:
-    environment = dict(os.environ)
-    environment["VAULTSPEC_A2A_CODEX_WEB_SEARCH_MODE"] = web_search_mode
+    environment = inherited_environment(
+        {"VAULTSPEC_A2A_CODEX_WEB_SEARCH_MODE": web_search_mode}
+    )
     return run_child(
         [
             sys.executable,
@@ -102,13 +106,14 @@ def _settings_from_child(web_search_mode: str) -> subprocess.CompletedProcess[st
 def _config_home_parent_from_child(
     base: Path, app_home: Path | None, *, state_home: Path | None = None
 ) -> Path:
-    environment = dict(os.environ)
-    if state_home is not None:
-        environment["VAULTSPEC_A2A_HOME"] = str(state_home)
-    if app_home is None:
-        environment.pop("VAULTSPEC_A2A_DESKTOP_APP_HOME", None)
-    else:
-        environment["VAULTSPEC_A2A_DESKTOP_APP_HOME"] = str(app_home)
+    environment = inherited_environment(
+        {
+            **({} if state_home is None else {"VAULTSPEC_A2A_HOME": str(state_home)}),
+            "VAULTSPEC_A2A_DESKTOP_APP_HOME": (
+                None if app_home is None else str(app_home)
+            ),
+        }
+    )
     # Awaited on the child's own progress, not on a wall clock: this child is a
     # real interpreter importing the provider stack, and what that costs is a
     # property of the host's current load rather than of the resolution under
@@ -197,8 +202,8 @@ def test_render_emits_env_subtable_when_present() -> None:
 
 
 def test_render_with_no_specs_still_declares_the_web_posture() -> None:
-    # Previously this asserted the empty string. It cannot any more, and the
-    # reason is the whole point of the web-posture work: Codex enables web search
+    # The rendered document is never empty, and the reason is the whole point of
+    # the web-posture work: Codex enables web search
     # when the key is absent, so an empty document is not "no capability", it is
     # "whatever the CLI defaults to". A server-less home must still say off.
     parsed = tomllib.loads(
@@ -373,13 +378,8 @@ class TestWebPostureThroughTheProductionModelSeam:
     def test_the_codex_lane_emits_live_because_it_carries_retrieval_proof(
         self, tmp_path: Path
     ) -> None:
-        # This test previously asserted the mirror image - dark, because the lane
-        # carried no proof - and was written to FAIL the day that proof was
-        # recorded rather than quietly go on describing a lane that had since
-        # been activated. That day came: the declaration now carries a live
-        # retrieval proof for this lane, so both halves are restated against the
-        # state that replaced it, and the first still states the precondition the
-        # second depends on.
+        # The declaration carries a live retrieval proof for this lane, so the lane
+        # emits live; this half states the precondition the next one depends on.
         base = tmp_path / "base"
         base.mkdir()
         assert Provider.CODEX in PROVEN_WEB_LANES
@@ -538,8 +538,9 @@ def test_composition_seam_threads_harness_into_codex_config_toml(
     # KILLS THE MASKING GAP: build the model through the REAL production
     # composition seam (compose_harness_mcp_servers), NOT by setting
     # harness_mcp_servers directly, then assert the emitted config.toml carries
-    # vaultspec-rag. Before the fix, compose silently no-oped for Codex (no
-    # with_mcp_servers) and the config.toml was always emitted from an empty list.
+    # vaultspec-rag. Composition must not silently no-op for Codex (no
+    # with_mcp_servers), which would leave the config.toml emitted from an empty
+    # list.
     import tomllib
 
     from .._acp_mcp import compose_harness_mcp_servers
@@ -573,36 +574,7 @@ def _authoring_binding(
     *, engine_base_url: str = "http://127.0.0.1:8767", run_id: str = "run:codex-test"
 ) -> AuthoringToolBinding:
     """A real stdio-transport binding, as ``AuthoringBindingProvider`` builds it."""
-    snapshot = CatalogSnapshot(
-        schema_version="authoring.semantic_tools.v1",
-        tools=(
-            AgentTool(
-                name="read_context",
-                description="read",
-                input_schema={"type": "object"},
-                risk_tier="read_only",
-                permission_requirement="auto_permitted",
-                idempotency_required=False,
-                commands=("read_context",),
-            ),
-            AgentTool(
-                name="propose_changeset",
-                description="propose",
-                input_schema={"type": "object"},
-                risk_tier="mutating",
-                permission_requirement="human_approval_required",
-                idempotency_required=True,
-                commands=("create_proposal",),
-            ),
-        ),
-    )
-    return AuthoringToolBinding(
-        snapshot=snapshot,
-        bearer_token="machine-bearer-xyz",
-        actor_token="actor-token-abc",
-        engine_base_url=engine_base_url,
-        run_id=run_id,
-    )
+    return authoring_tool_binding(engine_base_url=engine_base_url, run_id=run_id)
 
 
 def test_authoring_bridge_composition_seam_threads_into_codex_config_toml(
@@ -611,11 +583,11 @@ def test_authoring_bridge_composition_seam_threads_into_codex_config_toml(
     """KILLS THE authoring-bridge masking gap, the Codex counterpart of
     ``test_composition_seam_threads_harness_into_codex_config_toml``.
 
-    Before the fix, ``attach_authoring_tools`` dispatched ONLY on
-    ``with_mcp_servers`` (the ACP lane), so a Codex model - which has no such
-    surface - was returned UNCHANGED: the codex agent connected to app-server
-    but its config.toml never carried the ``vaultspec-authoring`` block, so the
-    engine's propose/read tools silently never reached the model. Build the
+    ``attach_authoring_tools`` must not dispatch ONLY on ``with_mcp_servers``
+    (the ACP lane): a Codex model - which has no such surface - would be
+    returned UNCHANGED, the codex agent would connect to app-server but its
+    config.toml would never carry the ``vaultspec-authoring`` block, and the
+    engine's propose/read tools would silently never reach the model. Build the
     model through the REAL production composition seam
     (``attach_authoring_tools``), not by setting ``authoring_mcp_server``
     directly, then assert the emitted config.toml carries the bridge with EVERY
@@ -701,9 +673,9 @@ def test_authoring_bridge_unions_with_harness_servers_in_one_config_toml(
 
 def test_attach_authoring_tools_refuses_a_provider_with_no_attachment_surface() -> None:
     """A model with neither ``with_mcp_servers`` nor ``with_authoring_mcp_server``
-    must refuse loud, not silently return unchanged (the S20-class defect this
-    campaign closes: a harness-armed run starting an agent with no tools and
-    burning its step timeout finding out)."""
+    must refuse loud, not silently return unchanged (a harness-armed run would
+    otherwise start an agent with no tools and burn its step timeout finding
+    out)."""
     from langchain_openai import ChatOpenAI
 
     from ...thread.errors import ConfigError
@@ -981,11 +953,7 @@ def _override_config_from_child(base: Path, base_url: str | None) -> dict[str, A
     renderer works, which the tests above already cover; what is in question
     here is whether a deployment's variable reaches the file Codex reads.
     """
-    environment = dict(os.environ)
-    if base_url is None:
-        environment.pop("VAULTSPEC_A2A_CODEX_BASE_URL", None)
-    else:
-        environment["VAULTSPEC_A2A_CODEX_BASE_URL"] = base_url
+    environment = inherited_environment({"VAULTSPEC_A2A_CODEX_BASE_URL": base_url})
     proc = run_child(
         [
             sys.executable,

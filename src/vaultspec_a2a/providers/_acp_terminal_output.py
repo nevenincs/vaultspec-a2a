@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 
 from ._cleanup import cancel_owned_tasks
 
+__all__ = ["MAX_TERMINAL_OUTPUT_BYTES", "AcpTerminalOutput"]
+
 MAX_TERMINAL_OUTPUT_BYTES = 1024 * 1024
 _DRAIN_CHUNK_BYTES = 4096
 _DRAIN_SETTLE_SECONDS = 1.0

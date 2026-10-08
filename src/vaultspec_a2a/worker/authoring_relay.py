@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import logging
 import os
 import time
@@ -16,25 +14,48 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..authoring import AuthoringClient
-from ..authoring._engine_trust import CHALLENGE_HEADER, PROOF_HEADER
+from ..authoring._engine_trust import (
+    CHALLENGE_HEADER,
+    PID_HEADER,
+    PROOF_HEADER,
+    STARTED_MS_HEADER,
+    proof_digest,
+)
 from ..authoring._errors import AuthoringError
-from ..authoring._relay_client import RELAY_CALL_PATH, RELAY_PROOF_DOMAIN
+from ..authoring._relay_client import (
+    RELAY_CALL_PATH,
+    RELAY_PROOF_PATH,
+    relay_proof_message,
+)
 from ..authoring._tool_calls import private_tool_call_journal_path
 from ..authoring.catalog import make_tool_dispatch
 from ..authoring.discovery import resolve_engine
+from ..thread.constants import (
+    MAX_ROLE_ID_CHARS,
+    MAX_RUN_ID_CHARS,
+    ROLE_ID_PATTERN,
+    RUN_ID_PATTERN,
+)
+from ..utils import bearer_matches
 
 if TYPE_CHECKING:
     from .catalog_store import RunCatalogStore
     from .token_store import RunTokenStore
 
+__all__ = ["AuthoringRelay", "router"]
+
 logger = logging.getLogger(__name__)
 
 
-class RelayCall(BaseModel):
+class _RelayCall(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
-    run_id: str = Field(min_length=1, max_length=160)
-    role: str = Field(min_length=1, max_length=63, pattern=r"^[A-Za-z_][A-Za-z0-9_-]*$")
+    run_id: str = Field(
+        min_length=1, max_length=MAX_RUN_ID_CHARS, pattern=RUN_ID_PATTERN
+    )
+    role: str = Field(
+        min_length=1, max_length=MAX_ROLE_ID_CHARS, pattern=ROLE_ID_PATTERN
+    )
     name: str = Field(min_length=1, max_length=160)
     arguments: dict[str, Any]
     tool_call_id: str | None = Field(default=None, min_length=1, max_length=160)
@@ -55,11 +76,9 @@ class AuthoringRelay:
             raise HTTPException(403, "authoring authority is unavailable")
         return actor
 
-    def authorize(self, call: RelayCall, authorization: str | None) -> str:
+    def authorize(self, call: _RelayCall, authorization: str | None) -> str:
         actor = self.actor(call.run_id, call.role)
-        if not authorization or not hmac.compare_digest(
-            authorization.encode("utf-8"), f"Bearer {actor}".encode()
-        ):
+        if not bearer_matches(authorization, actor):
             raise HTTPException(403, "authoring authority is unavailable")
         return actor
 
@@ -74,21 +93,20 @@ class AuthoringRelay:
         path = request.scope["raw_path"].decode("ascii")
         query = request.scope["query_string"].decode("ascii")
         path += "?" + query
-        message = (
-            f"{RELAY_PROOF_DOMAIN}:1\n{server[1]}\n{os.getpid()}\n"
-            f"{self._started_ms}\n{path}\n{challenge}"
-        ).encode("ascii")
-        proof = hmac.new(actor.encode("utf-8"), message, hashlib.sha256).hexdigest()
+        message = relay_proof_message(
+            server[1], os.getpid(), self._started_ms, path, challenge
+        )
+        proof = proof_digest(actor, message)
         return Response(
             headers={
                 PROOF_HEADER: proof,
-                "x-vaultspec-engine-pid": str(os.getpid()),
-                "x-vaultspec-engine-started-ms": str(self._started_ms),
+                PID_HEADER: str(os.getpid()),
+                STARTED_MS_HEADER: str(self._started_ms),
             }
         )
 
     async def dispatch(
-        self, call: RelayCall, authorization: str | None
+        self, call: _RelayCall, authorization: str | None
     ) -> dict[str, Any]:
         self.authorize(call, authorization)
         lock = self._locks.setdefault((call.run_id, call.role), asyncio.Lock())
@@ -135,13 +153,13 @@ def _relay(request: Request) -> AuthoringRelay:
     return relay
 
 
-@router.get("/internal/authoring/proof", include_in_schema=False)
+@router.get(RELAY_PROOF_PATH, include_in_schema=False)
 async def prove_authoring(request: Request, run_id: str, role: str) -> Response:
     return _relay(request).proof(request, run_id, role)
 
 
 @router.post(RELAY_CALL_PATH, include_in_schema=False)
-async def dispatch_authoring(request: Request, call: RelayCall) -> dict[str, Any]:
+async def dispatch_authoring(request: Request, call: _RelayCall) -> dict[str, Any]:
     try:
         return await _relay(request).dispatch(
             call, request.headers.get("authorization")

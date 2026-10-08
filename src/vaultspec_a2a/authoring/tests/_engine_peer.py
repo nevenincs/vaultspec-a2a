@@ -2,23 +2,52 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import os
-import threading
 import time
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, override
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 from ...desktop._platform_acl import harden_credential_path
+from ...testing import JsonReplyHandler, serve_handler
+from .._engine_trust import (
+    CHALLENGE_HEADER,
+    ENGINE_PRODUCER,
+    ENGINE_RECORD_VERSION,
+    PID_HEADER,
+    PROOF_HEADER,
+    STARTED_MS_HEADER,
+    TrustedEngineRecord,
+    proof_digest,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-    from pathlib import Path
 
 TEST_BEARER = "test-engine-bearer-0123456789abcdef0123456789abcdef"
+_STARTED_MS = 1
+
+
+@contextmanager
+def private_engine_dir() -> Generator[Path]:
+    """Hold trusted producer state outside any repository under a private ACL.
+
+    A discovery record is read only from an owner-restricted directory that no
+    repository content controls, so a record a test wants resolved cannot live
+    under the session seat: that seat is inside this checkout. Every consumer of
+    the record shares this one seat so the provenance rule is satisfied the same
+    way wherever it is exercised.
+    """
+    # storage-anchor-ok: trusted producer fixtures must be outside any repository.
+    with TemporaryDirectory(  # storage-anchor-ok
+        prefix="vaultspec-engine-security-"
+    ) as directory:
+        path = Path(directory)
+        harden_credential_path(path)
+        yield path
 
 
 def write_engine_record(path: Path, port: int, bearer: str = TEST_BEARER) -> None:
@@ -26,11 +55,11 @@ def write_engine_record(path: Path, port: int, bearer: str = TEST_BEARER) -> Non
     path.write_text(
         json.dumps(
             {
-                "version": 1,
-                "producer": "vaultspec-engine",
+                "version": ENGINE_RECORD_VERSION,
+                "producer": ENGINE_PRODUCER,
                 "port": port,
                 "pid": os.getpid(),
-                "started_ms": 1,
+                "started_ms": _STARTED_MS,
                 "service_token": bearer,
                 "last_heartbeat": int(time.time() * 1000),
             }
@@ -42,10 +71,8 @@ def write_engine_record(path: Path, port: int, bearer: str = TEST_BEARER) -> Non
 
 def health_proof(port: int, bearer: str, challenge: str) -> str:
     """Sign the peer's own listener/process identity, never caller-supplied identity."""
-    message = f"vaultspec-engine:1\n{port}\n{os.getpid()}\n1\n{challenge}"
-    return hmac.new(
-        bearer.encode("ascii"), message.encode("ascii"), hashlib.sha256
-    ).hexdigest()
+    record = TrustedEngineRecord(port, os.getpid(), _STARTED_MS, bearer)
+    return proof_digest(bearer, record.proof_message(challenge))
 
 
 def reply_health_proof(handler: BaseHTTPRequestHandler, bearer: str) -> None:
@@ -53,15 +80,15 @@ def reply_health_proof(handler: BaseHTTPRequestHandler, bearer: str) -> None:
     assert isinstance(handler.server, ThreadingHTTPServer)
     handler.send_response(200)
     handler.send_header(
-        "x-vaultspec-engine-proof",
+        PROOF_HEADER,
         health_proof(
             handler.server.server_port,
             bearer,
-            handler.headers.get("x-vaultspec-engine-challenge", ""),
+            handler.headers.get(CHALLENGE_HEADER, ""),
         ),
     )
-    handler.send_header("x-vaultspec-engine-pid", str(os.getpid()))
-    handler.send_header("x-vaultspec-engine-started-ms", "1")
+    handler.send_header(PID_HEADER, str(os.getpid()))
+    handler.send_header(STARTED_MS_HEADER, str(_STARTED_MS))
     handler.send_header("Content-Length", "0")
     handler.end_headers()
 
@@ -70,30 +97,11 @@ def reply_health_proof(handler: BaseHTTPRequestHandler, bearer: str) -> None:
 def engine_health_listener(bearer: str = TEST_BEARER) -> Generator[int]:
     """Run a real engine health listener that proves its lifecycle identity."""
 
-    class _Health(BaseHTTPRequestHandler):
+    class _Health(JsonReplyHandler, BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def do_GET(self) -> None:
-            assert isinstance(self.server, ThreadingHTTPServer)
-            self.send_response(200)
-            challenge = self.headers.get("x-vaultspec-engine-challenge", "")
-            proof = health_proof(self.server.server_port, bearer, challenge)
-            self.send_header("x-vaultspec-engine-proof", proof)
-            self.send_header("x-vaultspec-engine-pid", str(os.getpid()))
-            self.send_header("x-vaultspec-engine-started-ms", "1")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+            reply_health_proof(self, bearer)
 
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Health)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield server.server_port
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5.0)
+    with serve_handler(_Health) as port:
+        yield port

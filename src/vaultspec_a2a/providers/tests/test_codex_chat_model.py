@@ -10,6 +10,7 @@ stdio pipes with real asyncio semantics — no mocks. The live turn test is
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import sys
@@ -26,15 +27,12 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from ...database.models import ProviderRuntimeIdentityModel
-from ...database.tests._backends import migrated_session_factory
-from ...database.thread_repository import create_thread
-from ...graph.enums import Provider
-from ...service_tests._provider_catalog_live import declared_lane_model_value
+from ...database import ProviderRuntimeIdentityModel, create_thread
+from ...graph.enums import Provider, ProviderCondition
+from ...testing import declared_lane_model_value
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 from ...worker.runtime_identity_port import SqlRuntimeIdentityPort
-from .._acp_types import NativeCommandOutcome
 from .._codex_app_server_client import _CodexAppServerClient
 from .._codex_permission import CodexPermissionRung
 from .._codex_protocol import (
@@ -42,39 +40,26 @@ from .._codex_protocol import (
     _completed_action_chunk,
     _messages_to_prompt,
 )
-from .._factory_commands import _classify_codex_command, classify_provider_command
+from .._factory_commands import classify_provider_command
 from .._project_scope import RunProjectScope
 from .._runtime_identity import bind_model_runtime_identity
 from .._subprocess import STDERR_TAIL_LINES, spawn_acp_process
 from ..binary_version import probe_binary_version
 from ..cli_resolution import (
     ProviderRuntimeUnavailableError,
-    resolve_provider_cli_executable,
 )
-from ..codex_chat_model import CodexChatModel, _ActiveCodexTurn
-from ..conditions import ProviderCondition
+from ..codex_chat_model import CodexChatModel
 from ..factory import ProviderFactory, codex_binary_proof_reason
 from ..provider_readiness import probe_provider_readiness
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
     from ...conftest import ExternalPrerequisiteRule
     from .._acp_types import PermissionCallback
     from .._json_contract import JsonObject
-
-
-def _codex_present() -> bool:
-    """Whether the codex CLI resolves on PATH, asked WHEN ASKED.
-
-    A function rather than a module constant so the PATH scan does not run while
-    the module is merely imported. Import-time I/O is invisible to both purity
-    mechanisms - it is neither a call in a test body nor a fixture in a closure -
-    so as a constant this made every test in the file touch the filesystem on
-    import while the file's own tests claimed to do no I/O at all. Deferring it
-    confines the scan to the three tests that actually depend on it.
-    """
-    return resolve_provider_cli_executable(Provider.CODEX) is not None
 
 
 # A minimal JSON-RPC-over-stdio echo server matching the app-server framing:
@@ -103,15 +88,19 @@ for line in sys.stdin:
 """
 
 
-async def _echo_client() -> _CodexAppServerClient:
-    """Spawn the real echo subprocess and wrap it in the JSON-RPC client."""
-    process = await spawn_acp_process(
+async def _echo_process() -> asyncio.subprocess.Process:
+    """Spawn the real echo subprocess the JSON-RPC client is tested against."""
+    return await spawn_acp_process(
         [sys.executable, "-c", _ECHO_SERVER],
         env={},
         cwd=".",
         use_exec=True,
     )
-    return _CodexAppServerClient(process)
+
+
+async def _echo_client() -> _CodexAppServerClient:
+    """Spawn the real echo subprocess and wrap it in the JSON-RPC client."""
+    return _CodexAppServerClient(await _echo_process())
 
 
 # ---------------------------------------------------------------------------
@@ -208,119 +197,6 @@ async def test_client_request_after_close_raises() -> None:
         await client.request("echo", {})
 
 
-@pytest.mark.asyncio
-async def test_native_interrupt_targets_one_exact_active_turn() -> None:
-    class InterruptClient:
-        def __init__(self) -> None:
-            self.active: _ActiveCodexTurn | None = None
-            self.observed: tuple[str, JsonObject] | None = None
-
-        async def request(self, method: str, params: JsonObject) -> JsonObject:
-            self.observed = (method, params)
-            assert self.active is not None
-            self.active.terminal_status = "interrupted"
-            self.active.terminal_seen.set()
-            return {}
-
-    client = InterruptClient()
-    model = CodexChatModel(workspace_root=str(Path.cwd()))
-    active = _ActiveCodexTurn(cast("_CodexAppServerClient", client))
-    client.active = active
-    model._active_turns[("thread-1", "turn-1")] = active
-    result = await model.execute_native_control(
-        "interrupt", thread_id="thread-1", turn_id="turn-1"
-    )
-
-    assert result.outcome is NativeCommandOutcome.COMPLETED
-    assert result.effects_may_have_occurred is True
-    assert client.observed == (
-        "turn/interrupt",
-        {"threadId": "thread-1", "turnId": "turn-1"},
-    )
-
-
-@pytest.mark.asyncio
-async def test_native_interrupt_rejects_ack_without_interrupted_end() -> None:
-    class CompletedClient:
-        def __init__(self) -> None:
-            self.active: _ActiveCodexTurn | None = None
-
-        async def request(self, method: str, params: JsonObject) -> JsonObject:
-            assert self.active is not None
-            self.active.terminal_status = "completed"
-            self.active.terminal_seen.set()
-            return {}
-
-    client = CompletedClient()
-    model = CodexChatModel(workspace_root=str(Path.cwd()))
-    active = _ActiveCodexTurn(cast("_CodexAppServerClient", client))
-    client.active = active
-    model._active_turns[("thread-1", "turn-1")] = active
-
-    result = await model.execute_native_control(
-        "interrupt", thread_id="thread-1", turn_id="turn-1"
-    )
-
-    assert result.outcome is NativeCommandOutcome.FAILED
-    assert result.effects_may_have_occurred is True
-    assert result.reason is not None
-    assert "ended as 'completed'" in result.reason
-
-
-@pytest.mark.asyncio
-async def test_native_control_refuses_unknown_and_inactive_targets() -> None:
-    model = CodexChatModel(workspace_root=str(Path.cwd()))
-
-    unsupported = await model.execute_native_control(
-        "compact", thread_id="thread-1", turn_id="turn-1"
-    )
-    inactive = await model.execute_native_control(
-        "interrupt", thread_id="thread-1", turn_id="turn-1"
-    )
-
-    assert unsupported.outcome is NativeCommandOutcome.UNSUPPORTED
-    assert inactive.outcome is NativeCommandOutcome.BLOCKED
-
-
-@pytest.mark.asyncio
-async def test_duplicate_native_interrupt_is_busy() -> None:
-    client = cast("_CodexAppServerClient", object())
-    model = CodexChatModel(workspace_root=str(Path.cwd()))
-    active = _ActiveCodexTurn(client, interrupt_in_flight=True)
-    model._active_turns[("thread-1", "turn-1")] = active
-    result = await model.execute_native_control(
-        "interrupt", thread_id="thread-1", turn_id="turn-1"
-    )
-
-    assert result.outcome is NativeCommandOutcome.BUSY
-
-
-@pytest.mark.asyncio
-async def test_native_interrupt_refuses_an_already_terminal_turn() -> None:
-    client = cast("_CodexAppServerClient", object())
-    model = CodexChatModel(workspace_root=str(Path.cwd()))
-    active = _ActiveCodexTurn(client, terminal_status="completed")
-    active.terminal_seen.set()
-    model._active_turns[("thread-1", "turn-1")] = active
-
-    result = await model.execute_native_control(
-        "interrupt", thread_id="thread-1", turn_id="turn-1"
-    )
-
-    assert result.outcome is NativeCommandOutcome.BLOCKED
-    assert result.effects_may_have_occurred is False
-
-
-@pytest.mark.asyncio
-async def test_native_interrupt_rejects_invalid_identity_before_rpc() -> None:
-    model = CodexChatModel(workspace_root=str(Path.cwd()))
-
-    with pytest.raises(ValueError, match="thread_id"):
-        await model.execute_native_control(
-            "interrupt", thread_id=" thread-1", turn_id="turn-1"
-        )
-
-
 # ---------------------------------------------------------------------------
 # The MCP tool-approval rung (mcpServer/elicitation/request)
 #
@@ -401,11 +277,17 @@ for line in sys.stdin:
 
 async def _approval_client(
     *,
+    project_scope: RunProjectScope,
     allowed: frozenset[tuple[str, str]] = frozenset(),
     permission_callback: PermissionCallback | None = None,
-    project_scope: RunProjectScope | None = None,
 ) -> _CodexAppServerClient:
-    """Spawn the real approval subprocess behind a client carrying a live rung."""
+    """Spawn the real approval subprocess behind a client carrying a live rung.
+
+    The run's bound project is required here for the same reason the rung
+    requires it: production always supplies one, so a scope-less arm would
+    assert a decision against a path no real run takes - and every refusal below
+    would be satisfied by the scope guard rather than by the reason it names.
+    """
     process = await spawn_acp_process(
         [sys.executable, "-c", _APPROVAL_SERVER],
         env={},
@@ -435,15 +317,21 @@ async def _answered_frame(client: _CodexAppServerClient) -> JsonObject:
 
 
 @pytest.mark.asyncio
-async def test_a_declared_tool_call_is_approved() -> None:
+async def test_a_declared_tool_call_is_approved(tmp_path: Path) -> None:
     """The composed surface is auto-approved, so the bridged write actually runs.
 
     The regression that mattered: before the rung existed this arm answered
     ``-32601``, which codex resolves as a refusal, and every authoring call was
     lost while the run still reported success.
+
+    The rung carries the run's bound project, as production always gives it one:
+    a rung with nothing to measure a call against refuses every call it is
+    handed, so a scope-less arm would assert approval against a path no real run
+    takes.
     """
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         await client.request("drive", {})
@@ -456,10 +344,13 @@ async def test_a_declared_tool_call_is_approved() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_tool_call_outside_the_composed_surface_is_declined() -> None:
+async def test_a_tool_call_outside_the_composed_surface_is_declined(
+    tmp_path: Path,
+) -> None:
     """An undeclared tool is refused, never approved by the autonomous rung."""
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         await client.request("drive", {"tool": "delete_everything"})
@@ -470,14 +361,17 @@ async def test_a_tool_call_outside_the_composed_surface_is_declined() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_approval_whose_tool_cannot_be_named_is_declined() -> None:
+async def test_an_approval_whose_tool_cannot_be_named_is_declined(
+    tmp_path: Path,
+) -> None:
     """With no announced call to correlate, the rung fails closed.
 
     The payload names the tool only in prose, and this project never turns prose
     into an approval — so an approval it cannot name is refused.
     """
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         await client.request("drive", {"announce": False})
@@ -488,7 +382,9 @@ async def test_an_approval_whose_tool_cannot_be_named_is_declined() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_approval_from_a_different_turn_is_declined() -> None:
+async def test_an_approval_from_a_different_turn_is_declined(
+    tmp_path: Path,
+) -> None:
     """A stale announcement from another turn does not decide this approval.
 
     The correlation-miss path that matters most. The announcement names an
@@ -498,7 +394,8 @@ async def test_an_approval_from_a_different_turn_is_declined() -> None:
     DIFFERENT call, not weaker evidence of this one.
     """
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         await client.request("drive", {"announce_turn": "u-stale"})
@@ -509,10 +406,13 @@ async def test_an_approval_from_a_different_turn_is_declined() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_approval_from_a_different_thread_is_declined() -> None:
+async def test_an_approval_from_a_different_thread_is_declined(
+    tmp_path: Path,
+) -> None:
     """An announcement on another thread does not decide this approval either."""
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         await client.request("drive", {"announce_thread": "t-other"})
@@ -524,6 +424,7 @@ async def test_an_approval_from_a_different_thread_is_declined() -> None:
 
 @pytest.mark.asyncio
 async def test_a_correlation_miss_says_why_it_declined(
+    tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The fail-closed decline is LOUD, naming the identity it could not match.
@@ -533,7 +434,8 @@ async def test_a_correlation_miss_says_why_it_declined(
     as invisible, so the reason is asserted, not assumed.
     """
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.providers"):
@@ -555,10 +457,11 @@ async def test_a_correlation_miss_says_why_it_declined(
 
 
 @pytest.mark.asyncio
-async def test_a_non_tool_call_elicitation_is_declined() -> None:
+async def test_a_non_tool_call_elicitation_is_declined(tmp_path: Path) -> None:
     """An elicitation that is not a tool-call approval is refused, not accepted."""
     client = await _approval_client(
-        allowed=frozenset({("vaultspec-authoring", "propose_changeset")})
+        allowed=frozenset({("vaultspec-authoring", "propose_changeset")}),
+        project_scope=RunProjectScope(str(tmp_path)),
     )
     try:
         await client.request("drive", {"kind": "something_else"})
@@ -569,11 +472,12 @@ async def test_a_non_tool_call_elicitation_is_declined() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_supervised_rung_decides_the_tool_call() -> None:
+async def test_a_supervised_rung_decides_the_tool_call(tmp_path: Path) -> None:
     """A supervised run routes the decision to its human rung and honours it.
 
     The callback is handed the ACP option shape, so the id it returns IS the
-    action codex expects — which is what keeps the two lanes converged.
+    action codex expects — which is what keeps the two lanes converged. The rung
+    carries the run's bound project for the same reason the autonomous arm does.
     """
     seen: list[tuple[str, list[str]]] = []
 
@@ -583,7 +487,9 @@ async def test_a_supervised_rung_decides_the_tool_call() -> None:
         seen.append((tool_name, [str(option.get("optionId")) for option in options]))
         return "accept"
 
-    client = await _approval_client(permission_callback=approve)
+    client = await _approval_client(
+        permission_callback=approve, project_scope=RunProjectScope(str(tmp_path))
+    )
     try:
         await client.request("drive", {})
         answered = await _answered_frame(client)
@@ -598,9 +504,11 @@ async def test_a_supervised_rung_decides_the_tool_call() -> None:
 
 
 @pytest.mark.asyncio
-async def test_an_unknown_server_request_is_refused_loudly() -> None:
+async def test_an_unknown_server_request_is_refused_loudly(
+    tmp_path: Path,
+) -> None:
     """A genuinely unsupported request keeps its method-not-found answer."""
-    client = await _approval_client()
+    client = await _approval_client(project_scope=RunProjectScope(str(tmp_path)))
     try:
         await client.request("unknown/server/request", {})
         answered = await _answered_frame(client)
@@ -612,10 +520,33 @@ async def test_an_unknown_server_request_is_refused_loudly() -> None:
         await client.aclose()
 
 
+def test_a_permission_rung_cannot_be_built_without_the_runs_project() -> None:
+    """A scope-less rung is a construction error, not a rung that refuses.
+
+    The project scan is the first authority the shared decision consults, so a
+    rung holding no project can permit nothing - every call it is handed is
+    refused unmeasured. That is the right answer to a question nothing should be
+    able to ask: production derives the scope from the run's own workspace, so an
+    absent one is a wiring defect in the caller, and a refusal at the rung turns
+    it into a run whose every tool call mysteriously fails.
+
+    The callable signature is a runtime contract as well as a static one, so the
+    binding is checked through the interpreter's own argument check rather than
+    with a checker escape. The positive binding is asserted beside it: only the
+    scope became required, and an unattended run still builds a rung with no
+    human rung attached.
+    """
+    with pytest.raises(TypeError):
+        inspect.signature(CodexPermissionRung).bind(allowed_tools=frozenset())
+    inspect.signature(CodexPermissionRung).bind(
+        allowed_tools=frozenset(), project_scope=RunProjectScope("/project")
+    )
+
+
 def test_the_codex_model_declares_a_permission_callback() -> None:
     """The field the supervised worker wiring probes for exists on this lane.
 
-    ``resolve_effective_worker_model`` attaches the human rung only to a model
+    ``_resolve_effective_worker_model`` attaches the human rung only to a model
     that DECLARES ``permission_callback``; without the field a supervised Codex
     run silently skipped the rung altogether rather than failing.
     """
@@ -643,24 +574,27 @@ def test_the_codex_model_declares_a_permission_callback() -> None:
 
 def test_classify_codex_command_shape() -> None:
     """The classifier returns the app-server command and codex_cli metadata."""
-    command, meta = _classify_codex_command()
-    assert command[-1] == "app-server"
-    assert meta["command_kind"] == "codex_cli"
+    command = classify_provider_command(Provider.CODEX)
+    assert command.argv[-1] == "app-server"
+    assert command.command_kind == "codex_cli"
 
 
-def test_classify_provider_command_resolves_codex() -> None:
+def test_classify_provider_command_resolves_codex(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """When codex is installed, the provider command classifier resolves it."""
-    if not _codex_present():
-        pytest.skip("codex CLI not on PATH")
-    meta = classify_provider_command(Provider.CODEX)
-    assert meta["command_kind"] == "codex_cli"
-    assert meta["command_origin"] == "system_path_executable"
+    external_prerequisite("codex-cli")
+    command = classify_provider_command(Provider.CODEX)
+    assert Path(command.argv[0]).is_absolute()
+    assert command.command_kind == "codex_cli"
+    assert command.command_origin == "system_path_executable"
 
 
-def test_codex_readiness_ready_when_installed() -> None:
+def test_codex_readiness_ready_when_installed(
+    external_prerequisite: ExternalPrerequisiteRule,
+) -> None:
     """Readiness is command-resolvability only; no secret is emitted."""
-    if not _codex_present():
-        pytest.skip("codex CLI not on PATH")
+    external_prerequisite("codex-cli")
     readiness = probe_provider_readiness(Provider.CODEX)
     assert readiness.ready is True
     assert readiness.reason is None
@@ -756,6 +690,7 @@ async def test_codex_live_turn_returns_output(
 async def test_codex_live_turn_persists_initialized_runtime_identity(
     tmp_path: Path,
     external_prerequisite: ExternalPrerequisiteRule,
+    migrated_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """The selected real app-server writes its first native thread before the turn."""
     external_prerequisite("codex-cli")
@@ -763,39 +698,38 @@ async def test_codex_live_turn_persists_initialized_runtime_identity(
     served, reason = await declared_lane_model_value(Provider.CODEX.value, tmp_path)
     if served is None:
         external_prerequisite.absent("provider-catalog-live-selection", reason)
-    async with migrated_session_factory("sqlite", tmp_path) as (_target, factory):
-        async with factory() as session:
-            await create_thread(
-                session,
-                write_authority=make_test_write_authority(),
-                thread_id="codex-live-identity",
-                status=ThreadStatus.RUNNING,
-            )
-            await session.commit()
-        model = ProviderFactory().create(
-            Provider.CODEX, model=served, workspace_root=tmp_path
-        )
-        assert isinstance(model, CodexChatModel)
-        observed_version = probe_binary_version(model.command[0])
-        bound = bind_model_runtime_identity(
-            model,
+    async with migrated_session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
             thread_id="codex-live-identity",
-            port=SqlRuntimeIdentityPort(factory),
+            status=ThreadStatus.RUNNING,
         )
-        result = await bound.ainvoke(
-            [HumanMessage(content="Reply with exactly this word: pong")]
+        await session.commit()
+    model = ProviderFactory().create(
+        Provider.CODEX, model=served, workspace_root=tmp_path
+    )
+    assert isinstance(model, CodexChatModel)
+    observed_version = probe_binary_version(model.command[0])
+    bound = bind_model_runtime_identity(
+        model,
+        thread_id="codex-live-identity",
+        port=SqlRuntimeIdentityPort(migrated_session_factory),
+    )
+    result = await bound.ainvoke(
+        [HumanMessage(content="Reply with exactly this word: pong")]
+    )
+    assert str(result.content).strip().casefold() == "pong"
+    async with migrated_session_factory() as session:
+        row = await session.get(
+            ProviderRuntimeIdentityModel,
+            ("codex-live-identity", "codex", "codex-app-server"),
         )
-        assert str(result.content).strip().casefold() == "pong"
-        async with factory() as session:
-            row = await session.get(
-                ProviderRuntimeIdentityModel,
-                ("codex-live-identity", "codex", "codex-app-server"),
-            )
-            assert row is not None
-            assert row.cli_version == observed_version
-            assert row.adapter_version == row.cli_version
-            assert row.provider_session_id
-            assert row.managed_policy_present is None
+        assert row is not None
+        assert row.cli_version == observed_version
+        assert row.adapter_version == row.cli_version
+        assert row.provider_session_id
+        assert row.managed_policy_present is None
 
 
 @pytest.mark.asyncio
@@ -832,7 +766,7 @@ async def test_early_app_server_exit_reports_redacted_bounded_stderr_tail(
 
 @pytest.mark.asyncio
 async def test_cleanup_continues_and_reaps_the_process_after_a_prior_failure() -> None:
-    """A cleanup failure must not skip reaping the real provider subprocess (S124).
+    """A cleanup failure must not skip reaping the real provider subprocess.
 
     Spawn the real echo subprocess and wrap it in the real client, then run an
     independent cleanup where a prior step raises before the client's own
@@ -843,8 +777,8 @@ async def test_cleanup_continues_and_reaps_the_process_after_a_prior_failure() -
 
     from .._cleanup import run_independent_cleanups
 
-    client = await _echo_client()
-    process = client._process  # the real spawned subprocess this client owns
+    process = await _echo_process()
+    client = _CodexAppServerClient(process)
 
     def _failing_step() -> None:
         raise OSError("a prior cleanup step failed")
@@ -1016,7 +950,7 @@ async def test_an_unannounced_error_still_ends_the_turn_immediately() -> None:
     """The guard is bounded to what the lane actually claimed.
 
     A frame that does NOT say a retry is coming must keep ending the turn at
-    once - otherwise the fix would trade a premature failure for a hang.
+    once - otherwise the guard would trade a premature failure for a hang.
     """
     client = await _notifier_client(
         [

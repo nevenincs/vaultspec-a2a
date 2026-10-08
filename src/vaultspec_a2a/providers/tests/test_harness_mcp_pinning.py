@@ -24,7 +24,6 @@ import hashlib
 import io
 import json
 import os
-import socket
 import sys
 import tempfile
 import tomllib
@@ -40,8 +39,17 @@ import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from ...testing import session_scratch_dir
+from ...testing import (
+    ProgressDeadline,
+    ProgressStalledError,
+    free_port,
+    inherited_environment,
+    session_scratch_dir,
+    wait_for_async,
+    wait_until_async,
+)
 from ...thread.errors import ConfigError
+from ...utils._process_tree import port_has_listener_async
 from .._acp_authoring import AUTHORING_MCP_SERVER_NAME
 from .._acp_mcp import (
     _require_trust_root,
@@ -95,6 +103,7 @@ _SERVICE_CLEANUP_RESERVE_SECONDS = 15.0
 _SERVICE_LATE_RECORD_RESERVE_SECONDS = 5.0
 _SERVICE_FALLBACK_RESERVE_SECONDS = 8.0
 _CONTROL_OUTPUT_LIMIT_BYTES = 64 * 1024
+_PORT_PROBE_TIMEOUT_SECONDS = 0.1
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,15 +175,12 @@ def _isolated_rag_service_state(
     """Prepare isolated service configuration without owning a process yet."""
     service_options = options or _RagServiceOptions()
     requirement = _locked_rag_requirement(project_root)
-    port = _reserve_loopback_port()
+    port = free_port()
     status_dir = sandbox / "service-status"
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("PYTEST_") and key != RAG_PIN_VARIABLE
-    }
-    env.update(
+    env = inherited_environment(
         {
+            **dict.fromkeys(name for name in os.environ if name.startswith("PYTEST_")),
+            RAG_PIN_VARIABLE: None,
             "VAULTSPEC_RAG_STATUS_DIR": str(status_dir),
             "VAULTSPEC_RAG_DATA_DIR": str(sandbox / "service-data"),
             "VAULTSPEC_RAG_QDRANT_STORAGE_DIR": str(sandbox / "qdrant-storage"),
@@ -254,15 +260,6 @@ def _scratch() -> Path:
     return session_scratch_dir("mcp-pinning-")
 
 
-def _reserve_loopback_port() -> int:
-    """Ask the OS for a currently-free loopback port for an owned test service."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
-        reservation.bind(("127.0.0.1", 0))
-        port = reservation.getsockname()[1]
-    assert isinstance(port, int)
-    return port
-
-
 async def _run_rag_cli(
     requirement: str,
     *args: str,
@@ -327,12 +324,6 @@ async def _run_rag_cli(
     return cast("dict[str, object]", raw_payload)
 
 
-def _loopback_port_is_closed(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.settimeout(0.1)
-        return probe.connect_ex(("127.0.0.1", port)) != 0
-
-
 async def _terminate_owned_process_tree(owner: psutil.Process) -> None:
     """Terminate only the retained process identity and its observed children."""
     if not owner.is_running():
@@ -391,12 +382,32 @@ async def _await_private_service_absent(
     owner: _OwnedRagService, *, absolute_deadline: float
 ) -> None:
     """Prove both the retained process identity and private listener are gone."""
-    while asyncio.get_running_loop().time() < absolute_deadline:
-        if not owner.process.is_running() and _loopback_port_is_closed(owner.port):
-            return
-        await asyncio.sleep(0.05)
-    assert not owner.process.is_running(), "the owned private RAG process is alive"
-    assert _loopback_port_is_closed(owner.port), "the private RAG port is still open"
+    process_alive = True
+
+    async def _absent() -> bool | None:
+        nonlocal process_alive
+        process_alive = owner.process.is_running()
+        if process_alive:
+            return None
+        listening = await port_has_listener_async(
+            owner.port, timeout=_PORT_PROBE_TIMEOUT_SECONDS
+        )
+        return None if listening else True
+
+    await wait_for_async(
+        _absent,
+        deadline=ProgressDeadline(
+            idle_window_s=max(
+                0.0, absolute_deadline - asyncio.get_running_loop().time()
+            )
+        ),
+        interval_s=0.05,
+        stalled=lambda: (
+            "the owned private RAG process is alive"
+            if process_alive
+            else f"the private RAG port is still open (port {owner.port})"
+        ),
+    )
 
 
 async def _cleanup_private_rag_service(
@@ -440,7 +451,9 @@ async def _cleanup_private_rag_service(
             # If stop already removed the endpoint, the retained psutil Process
             # object still protects against PID reuse through its creation time.
             endpoint_matches = await _private_endpoint_matches(owner)
-            if not endpoint_matches and not _loopback_port_is_closed(owner.port):
+            if not endpoint_matches and await port_has_listener_async(
+                owner.port, timeout=_PORT_PROBE_TIMEOUT_SECONDS
+            ):
                 raise RuntimeError(
                     "refusing fallback because the private port changed identity"
                 )
@@ -449,7 +462,9 @@ async def _cleanup_private_rag_service(
 
         await _await_private_service_absent(owner, absolute_deadline=absolute_deadline)
         receipt.process_absent = not owner.process.is_running()
-        receipt.port_absent = _loopback_port_is_closed(owner.port)
+        receipt.port_absent = not await port_has_listener_async(
+            owner.port, timeout=_PORT_PROBE_TIMEOUT_SECONDS
+        )
         owner.record_path.unlink(missing_ok=True)
 
 
@@ -568,11 +583,18 @@ async def _isolated_rag_service(
             # The CLI control process can time out just before its detached
             # daemon atomically publishes identity. Fund a bounded discovery
             # window so that late-owned service is still reaped.
-            while (
-                not state.service_record_path.exists()
-                and asyncio.get_running_loop().time() < state.cleanup_start_deadline
-            ):
-                await asyncio.sleep(0.05)
+            with suppress(ProgressStalledError):
+                await wait_until_async(
+                    state.service_record_path.exists,
+                    deadline=ProgressDeadline(
+                        idle_window_s=max(
+                            0.0,
+                            state.cleanup_start_deadline
+                            - asyncio.get_running_loop().time(),
+                        )
+                    ),
+                    interval_s=0.05,
+                )
         if owner is None and (state.started or state.service_record_path.exists()):
             state.receipt.late_service_record_observed = True
             owner = _read_private_service_owner(
@@ -582,7 +604,9 @@ async def _isolated_rag_service(
             )
             if owner is None:
                 state.receipt.process_absent = True
-                state.receipt.port_absent = _loopback_port_is_closed(state.port)
+                state.receipt.port_absent = not await port_has_listener_async(
+                    state.port, timeout=_PORT_PROBE_TIMEOUT_SECONDS
+                )
                 state.service_record_path.unlink(missing_ok=True)
         if owner is not None:
             cleanup = asyncio.create_task(
@@ -1279,12 +1303,7 @@ def _strict_config(specs: list[JsonObject]) -> AcpModelConfig:
         mcp_servers=specs,
         use_exec=False,
         provider="claude",
-        runtime_authority=None,
-        acp_backend="node",
-        command_origin=None,
-        command_kind=None,
-        command_executable=None,
-        command_target=None,
+        provider_command=None,
         auth_mode=None,
     )
 

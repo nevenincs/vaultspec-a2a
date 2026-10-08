@@ -20,7 +20,8 @@ opening a second code path:
   stores through the desktop migration authority; ``migrate`` is the
   dashboard-spawnable upgrade step of the dashboard-owned update transaction
   (the dashboard drains, snapshots, and rolls back itself - a2a only executes
-  the schema work).
+  the schema work), and ``migrate --compact`` is the operator's way to return
+  every store's freed pages to the operating system.
 
 Every verb is idempotent from the dashboard's perspective: starting a running
 service, stopping a stopped one, and re-running setup against an initialised
@@ -33,7 +34,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack
+from typing import TYPE_CHECKING, Any
 
 import click
 import httpx
@@ -44,18 +45,25 @@ from ..gateway_auth import gateway_auth_headers
 from ..lifecycle.discovery import (
     DiscoveryState,
     another_resident_is_live,
-    is_pid_alive,
     probe_health,
     read_resident_service,
+    recorded_resident_is_live,
 )
 from ..lifecycle.manager import spawn, tree_kill
+from ..utils._process_tree import (
+    PortClaim,
+    classify_port_claim,
+    wait_pid_gone,
+)
 from ..utils.runtime_exec import self_command
 
 if TYPE_CHECKING:
     import subprocess
+    from collections.abc import Callable
 
 __all__ = [
     "ServiceVerbError",
+    "StartOptions",
     "migrate_service",
     "register_service_commands",
     "restart_service",
@@ -69,6 +77,7 @@ _READY_TIMEOUT_SECONDS = 30.0
 _STOP_TIMEOUT_SECONDS = 20.0
 _SHUTDOWN_REQUEST_TIMEOUT_SECONDS = 5.0
 _POLL_INTERVAL_SECONDS = 0.2
+_PORT_PROBE_TIMEOUT_SECONDS = 1.0
 
 
 class ServiceVerbError(RuntimeError):
@@ -106,7 +115,7 @@ def service_status(app_home: Path | None = None) -> ServiceStatus:
             state="stopped", pid=None, port=None, healthy=False, base_url=None
         )
     base_url = f"http://127.0.0.1:{info.port}"
-    if not is_pid_alive(info.pid):
+    if not recorded_resident_is_live(info):
         return ServiceStatus(
             state="stopped",
             pid=info.pid,
@@ -145,32 +154,20 @@ def _desktop_arm_env(app_home: Path, capsule_root: Path) -> dict[str, str]:
     }
 
 
-class _StartServiceOptions(TypedDict, total=False):
-    capsule_root: Path | None
-    host: str | None
-    port: int | None
-    log_path: str | None
-    ready_timeout: float
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StartOptions:
+    """How a started gateway is armed, bound, logged and gated on readiness."""
 
-
-class _RestartServiceOptions(_StartServiceOptions, total=False):
-    stop_timeout: float
-
-
-def _reject_unexpected_service_options(
-    function_name: str, options: _StartServiceOptions | _RestartServiceOptions
-) -> None:
-    """Keep compatibility wrappers strict about unsupported keyword options."""
-    if options:
-        unexpected = next(iter(options))
-        raise TypeError(
-            f"{function_name}() got an unexpected keyword argument {unexpected!r}"
-        )
+    capsule_root: Path | None = None
+    host: str | None = None
+    port: int | None = None
+    log_path: str | None = None
+    ready_timeout: float = _READY_TIMEOUT_SECONDS
 
 
 def start_service(
     app_home: Path | None = None,
-    **options: Unpack[_StartServiceOptions],
+    options: StartOptions | None = None,
 ) -> ServiceStatus:
     """Start the gateway detached and wait until it is discoverably healthy.
 
@@ -187,12 +184,7 @@ def start_service(
     pid: on Windows a venv launcher stub means the recorded gateway pid can
     legitimately differ from the spawned child's pid.
     """
-    capsule_root = options.pop("capsule_root", None)
-    host = options.pop("host", None)
-    port = options.pop("port", None)
-    log_path = options.pop("log_path", None)
-    ready_timeout = options.pop("ready_timeout", _READY_TIMEOUT_SECONDS)
-    _reject_unexpected_service_options("start_service", options)
+    options = options or StartOptions()
     home = _resolved_app_home(app_home)
     if another_resident_is_live(home):
         return service_status(home)
@@ -207,25 +199,30 @@ def start_service(
         setting_env("a2a_home"): str(home),
         setting_env("project_root"): str(settings.project_root),
     }
-    if capsule_root is not None:
-        env.update(_desktop_arm_env(home, capsule_root))
-    if host is not None:
-        env[setting_env("host")] = host
-    if port is not None:
-        env[setting_env("port")] = str(port)
+    if options.capsule_root is not None:
+        env.update(_desktop_arm_env(home, options.capsule_root))
+    if options.host is not None:
+        env[setting_env("host")] = options.host
+    if options.port is not None:
+        env[setting_env("port")] = str(options.port)
     # Spawn from the home's PARENT, never from inside the home: a child whose
     # working directory sits inside the application home holds an open handle
     # on it, and the Windows directory lease the discovery publication takes
     # over the home then refuses - the gateway would boot and immediately die
     # publishing its own record.
     process: subprocess.Popen[bytes] = spawn(
-        self_command("serve"), cwd=home.parent, log_path=log_path, env=env or None
+        self_command("serve"),
+        cwd=home.parent,
+        log_path=options.log_path,
+        env=env or None,
     )
-    deadline = time.monotonic() + ready_timeout
+    deadline = time.monotonic() + options.ready_timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
             capture_hint = (
-                f"see {log_path}" if log_path else "start with --log to capture output"
+                f"see {options.log_path}"
+                if options.log_path
+                else "start with --log to capture output"
             )
             raise ServiceVerbError(
                 f"gateway exited during startup "
@@ -238,7 +235,7 @@ def start_service(
     tree_kill(process.pid)
     raise ServiceVerbError(
         f"gateway pid {process.pid} did not become ready within "
-        f"{ready_timeout:g}s; process felled and no record published"
+        f"{options.ready_timeout:g}s; process felled and no record published"
     )
 
 
@@ -258,13 +255,31 @@ def _lifecycle_capability(app_home: Path) -> str | None:
         return None
 
 
-def _wait_pid_dead(pid: int, timeout: float) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not is_pid_alive(pid):
-            return True
-        time.sleep(_POLL_INTERVAL_SECONDS)
-    return not is_pid_alive(pid)
+def _drain_owned_resident(
+    home: Path, base_url: str, pid: int, *, timeout: float
+) -> bool:
+    """Ask the confirmed resident to drain; whether it then exited in *timeout*.
+
+    Presents the attach bearer and, when this home carries one, the
+    receipt-bound lifecycle capability. Reached only after the recorded process
+    is confirmed to own the listener, so neither credential can land on a
+    stranger.
+    """
+    headers = dict(gateway_auth_headers(base_url))
+    capability = _lifecycle_capability(home)
+    if capability is not None:
+        from ..api.dependencies import LIFECYCLE_CAPABILITY_HEADER
+
+        headers[LIFECYCLE_CAPABILITY_HEADER] = capability
+    try:
+        response = httpx.post(
+            f"{base_url}/admin/shutdown",
+            headers=headers,
+            timeout=_SHUTDOWN_REQUEST_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError:
+        return False
+    return response.status_code == 202 and wait_pid_gone(pid, timeout=timeout)
 
 
 def stop_service(
@@ -274,39 +289,49 @@ def stop_service(
 ) -> ServiceStatus:
     """Stop the resident gateway: authenticated drain first, tree kill fallback.
 
-    Idempotent: no record or a dead pid reports the stopped state without
-    failing. A live resident is asked to drain through the authenticated
-    ``/admin/shutdown`` verb (attach bearer via the shared gateway-auth
-    resolution, plus the receipt-bound lifecycle capability when this home
-    carries one). When the authenticated path is unavailable, refused, or the
-    process outlives *timeout*, the whole process tree is felled - a stop verb
-    that can hang or silently fail would break the dashboard's restart
-    contract. Raises :class:`ServiceVerbError` only when the process survives
-    even the tree kill.
+    Idempotent: no record, a dead pid, or a pid that has since been reused by an
+    unrelated process reports the stopped state without failing.
+
+    A live recorded pid is not yet a resident this verb may address, and it takes
+    two independent facts to become one. The record's process identity must still
+    describe a running process - the pid alive AND carrying the start fingerprint
+    the record published, so a stranger that inherited a crashed resident's pid is
+    never felled on the strength of that record. The listener on the recorded
+    endpoint must then be held by that process or one of its descendants; only
+    then is it asked to drain through the authenticated ``/admin/shutdown`` verb,
+    and only then may it be felled. When the
+    authenticated path is unavailable, refused, or the process outlives
+    *timeout*, the whole process tree is felled - a stop verb that can hang or
+    silently fail would break the dashboard's restart contract.
+
+    A recorded process that is alive while something ELSE holds the recorded
+    endpoint is a conflict, not a target: a pid-reused record, a crashed resident
+    whose port was taken, or an outright squatter all present this way, and none
+    of them may receive the attach bearer or the lifecycle capability, nor be
+    terminated on the strength of a record they do not match. That is reported as
+    a typed failure. An endpoint nobody holds has no occupant to credential, so
+    the recorded tree is felled directly.
+
+    Raises :class:`ServiceVerbError` when the endpoint is held in conflict, or
+    when the process survives even the tree kill.
     """
     home = _resolved_app_home(app_home)
     _, info = read_resident_service(home)
-    if info is None or info.pid is None or not is_pid_alive(info.pid):
+    if info is None or info.pid is None or not recorded_resident_is_live(info):
         return service_status(home)
-    base_url = f"http://127.0.0.1:{info.port}"
-    headers = dict(gateway_auth_headers(base_url))
-    capability = _lifecycle_capability(home)
-    if capability is not None:
-        from ..api.dependencies import LIFECYCLE_CAPABILITY_HEADER
-
-        headers[LIFECYCLE_CAPABILITY_HEADER] = capability
-    accepted = False
-    try:
-        response = httpx.post(
-            f"{base_url}/admin/shutdown",
-            headers=headers,
-            timeout=_SHUTDOWN_REQUEST_TIMEOUT_SECONDS,
+    claim = classify_port_claim(
+        info.port, info.pid, timeout=_PORT_PROBE_TIMEOUT_SECONDS
+    )
+    if claim is PortClaim.OURS and _drain_owned_resident(
+        home, f"http://127.0.0.1:{info.port}", info.pid, timeout=timeout
+    ):
+        return service_status(home)
+    if claim not in (PortClaim.OURS, PortClaim.FREE):
+        raise ServiceVerbError(
+            f"recorded gateway pid {info.pid} does not own the listener on port "
+            f"{info.port} (claim: {claim.value}); refusing to authenticate "
+            "against it or fell it - resolve the conflicting process first"
         )
-        accepted = response.status_code == 202
-    except httpx.HTTPError:
-        accepted = False
-    if accepted and _wait_pid_dead(info.pid, timeout):
-        return service_status(home)
     if not tree_kill(info.pid):
         raise ServiceVerbError(
             f"gateway pid {info.pid} survived both the authenticated shutdown "
@@ -317,7 +342,9 @@ def stop_service(
 
 def restart_service(
     app_home: Path | None = None,
-    **options: Unpack[_RestartServiceOptions],
+    options: StartOptions | None = None,
+    *,
+    stop_timeout: float = _STOP_TIMEOUT_SECONDS,
 ) -> ServiceStatus:
     """Stop the resident (confirmed dead), then start ready-gated.
 
@@ -326,23 +353,9 @@ def restart_service(
     a surviving generation on the same port; :func:`start_service` then
     publishes exactly one ready generation or fails loudly.
     """
-    capsule_root = options.pop("capsule_root", None)
-    host = options.pop("host", None)
-    port = options.pop("port", None)
-    log_path = options.pop("log_path", None)
-    ready_timeout = options.pop("ready_timeout", _READY_TIMEOUT_SECONDS)
-    stop_timeout = options.pop("stop_timeout", _STOP_TIMEOUT_SECONDS)
-    _reject_unexpected_service_options("restart_service", options)
     home = _resolved_app_home(app_home)
     stop_service(home, timeout=stop_timeout)
-    return start_service(
-        home,
-        capsule_root=capsule_root,
-        host=host,
-        port=port,
-        log_path=log_path,
-        ready_timeout=ready_timeout,
-    )
+    return start_service(home, options)
 
 
 def setup_service(
@@ -382,6 +395,7 @@ def migrate_service(
     *,
     expect_from: str | None = None,
     expect_head: str | None = None,
+    compact: bool = False,
 ) -> dict[str, Any]:
     """Upgrade the home's quiesced stores to the packaged schema head.
 
@@ -389,8 +403,10 @@ def migrate_service(
     caller owns ordering (drain, snapshot, migrate, activate) and rollback
     (its snapshot); this verb only executes a2a's schema work through the
     desktop migration authority, refusing live or locked stores and failing
-    closed on an ``expect_from``/``expect_head`` assertion mismatch. Returns
-    the bounded JSON-ready result.
+    closed on an ``expect_from``/``expect_head`` assertion mismatch. *compact*
+    then truncates every store's write-ahead log and vacuums it, refusing while
+    a service listens on a configured port. Returns the bounded JSON-ready
+    result.
     """
     import asyncio
 
@@ -398,7 +414,9 @@ def migrate_service(
 
     home = _resolved_app_home(app_home)
     result = asyncio.run(
-        migrate_stores(home, expect_from=expect_from, expect_head=expect_head)
+        migrate_stores(
+            home, expect_from=expect_from, expect_head=expect_head, compact=compact
+        )
     )
     payload = result.model_dump(mode="json")
     payload["app_home"] = str(home)
@@ -412,6 +430,19 @@ def migrate_service(
 
 def _emit_status(status: ServiceStatus) -> None:
     click.echo(json.dumps(asdict(status), indent=2, sort_keys=True))
+
+
+def _launch(
+    service: Callable[[Path | None, StartOptions], ServiceStatus],
+    app_home: Path | None,
+    options: StartOptions,
+) -> None:
+    """Run one ready-gated launch verb and report the state it left."""
+    try:
+        status = service(app_home, options)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    _emit_status(status)
 
 
 _APP_HOME_OPTION = click.option(
@@ -452,17 +483,13 @@ def start_command(
     log_path: str | None,
 ) -> None:
     """Start the gateway detached; block until it is discoverably healthy."""
-    try:
-        status = start_service(
-            app_home,
-            capsule_root=capsule_root,
-            host=host,
-            port=port,
-            log_path=log_path,
-        )
-    except Exception as exc:
-        raise _service_error(exc) from exc
-    _emit_status(status)
+    _launch(
+        start_service,
+        app_home,
+        StartOptions(
+            capsule_root=capsule_root, host=host, port=port, log_path=log_path
+        ),
+    )
 
 
 @click.command("stop")
@@ -490,17 +517,13 @@ def restart_command(
     log_path: str | None,
 ) -> None:
     """Restart the gateway: confirmed stop, then a ready-gated start."""
-    try:
-        status = restart_service(
-            app_home,
-            capsule_root=capsule_root,
-            host=host,
-            port=port,
-            log_path=log_path,
-        )
-    except Exception as exc:
-        raise _service_error(exc) from exc
-    _emit_status(status)
+    _launch(
+        restart_service,
+        app_home,
+        StartOptions(
+            capsule_root=capsule_root, host=host, port=port, log_path=log_path
+        ),
+    )
 
 
 @click.command("setup")
@@ -529,13 +552,25 @@ def setup_command(app_home: Path | None, capsule_root: Path | None) -> None:
     default=None,
     help="Refuse unless the packaged Alembic head is this revision.",
 )
+@click.option(
+    "--compact",
+    is_flag=True,
+    default=False,
+    help=(
+        "After migrating, truncate every store's write-ahead log and run "
+        "VACUUM; refused while a service listens on a configured port."
+    ),
+)
 def migrate_command(
-    app_home: Path | None, expect_from: str | None, expect_head: str | None
+    app_home: Path | None,
+    expect_from: str | None,
+    expect_head: str | None,
+    compact: bool,
 ) -> None:
     """Migrate quiesced stores to the packaged head (dashboard-spawnable)."""
     try:
         payload = migrate_service(
-            app_home, expect_from=expect_from, expect_head=expect_head
+            app_home, expect_from=expect_from, expect_head=expect_head, compact=compact
         )
     except Exception as exc:
         raise _service_error(exc) from exc

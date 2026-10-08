@@ -30,11 +30,12 @@ from ...control._worker_health import GATEWAY_LIFETIME_ID
 from ...control._worker_readiness import WorkerReadySpec, _await_worker_ready
 from ...control.worker_management import LazyWorkerSpawner, _spawn_worker_owned
 from ...testing import armed_desktop_app_home as _armed_desktop
-from ...utils.process import ProcessContainment
+from ...utils import ProcessContainment, spawn_contained
 from .test_unready_worker_reap import _await_gone, _force_cleanup, _spawn_tree
 from .test_worker_provenance import _worker_like
 
 if TYPE_CHECKING:
+    import subprocess
     from pathlib import Path
 
 # Enough iterations that a one-handle-per-call leak is unmistakable against the
@@ -62,6 +63,18 @@ def _foreign_body() -> dict[str, object]:
         "paired_gateway_lifetime": "0" * 32,
         "worker_generation": "1",
     }
+
+
+def _exited_worker() -> tuple[subprocess.Popen[bytes], ProcessContainment]:
+    """A real worker stand-in that already exited, with the containment it ran in.
+
+    The pair is what a watchdog restart installs, so the slot is handed only
+    what the spawn path can produce: a process admitted to its own containment.
+    """
+    containment = ProcessContainment.create()
+    process = spawn_contained([sys.executable, "-c", "pass"], containment)
+    process.wait(timeout=30)
+    return process, containment
 
 
 def _open_handle_count() -> int:
@@ -107,10 +120,9 @@ async def test_an_adopted_worker_hands_back_no_containment_to_own(
     remember to drop, and did, while the handle behind it stayed open.
     """
     with _worker_like(_owned_body(1)) as (url, port, _flag), _armed_desktop(tmp_path):
-        process, containment = await _spawn_worker_owned(url, port, generation=1)
+        owned = await _spawn_worker_owned(url, port, generation=1, internal_token=None)
 
-    assert process is None
-    assert containment is None
+    assert owned is None
 
 
 @pytest.mark.asyncio
@@ -125,10 +137,9 @@ async def test_an_unevictable_occupant_hands_back_no_containment_to_own(
     standing condition, retried on every dispatch.
     """
     with _worker_like(_foreign_body()) as (url, port, _flag), _armed_desktop(tmp_path):
-        process, containment = await _spawn_worker_owned(url, port, generation=1)
+        owned = await _spawn_worker_owned(url, port, generation=1, internal_token=None)
 
-    assert process is None
-    assert containment is None
+    assert owned is None
 
 
 def test_posix_containment_holds_no_handle_to_leak() -> None:
@@ -172,11 +183,11 @@ async def test_repeated_adoption_does_not_accumulate_job_handles(
         # Warm up first: the first calls through httpx and the loopback server
         # legitimately open connections and threads that persist.
         for _ in range(5):
-            await _spawn_worker_owned(url, port, generation=1)
+            await _spawn_worker_owned(url, port, generation=1, internal_token=None)
 
         before = _open_handle_count()
         for _ in range(_LEAK_ITERATIONS):
-            await _spawn_worker_owned(url, port, generation=1)
+            await _spawn_worker_owned(url, port, generation=1, internal_token=None)
         growth = _open_handle_count() - before
 
     assert growth <= _LEAK_TOLERANCE, (
@@ -197,21 +208,25 @@ def test_replacing_the_worker_handle_releases_the_containment_it_drops() -> None
     containment is dropped. The restart path reaches it after shutting the old
     worker down - but only when that worker was still running, and the commonest
     restart trigger is the opposite case, a worker that already exited. Its
-    handle would otherwise be overwritten with nothing left to close it.
+    handle would otherwise be overwritten with nothing left to close it, so each
+    replaced worker here is a real contained process that has already exited.
     """
     spawner = LazyWorkerSpawner(
-        worker_url="http://127.0.0.1:9", worker_port=9, auto_spawn=False
+        worker_url="http://127.0.0.1:9",
+        worker_port=9,
+        auto_spawn=False,
+        internal_token=None,
     )
     try:
         for _ in range(5):
-            spawner.replace_process(None, ProcessContainment.create())
+            spawner.replace_process(*_exited_worker())
 
         before = _open_handle_count()
         for _ in range(_LEAK_ITERATIONS):
-            spawner.replace_process(None, ProcessContainment.create())
+            spawner.replace_process(*_exited_worker())
         growth = _open_handle_count() - before
     finally:
-        spawner.replace_process(None)
+        spawner.adopt_worker()
 
     assert growth <= _LEAK_TOLERANCE, (
         f"{_LEAK_ITERATIONS} handle replacements grew the handle count by "
@@ -254,6 +269,7 @@ async def test_a_cancelled_readiness_wait_reaps_the_worker_tree(
                     1,
                     ["python", "-c", "<stand-in worker>"],
                     tmp_path / "worker.stderr.log",
+                    internal_token=None,
                 ),
             )
         )

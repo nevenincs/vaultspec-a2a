@@ -13,49 +13,32 @@ assert on what each read surfaces.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-import pytest_asyncio
 from langgraph.checkpoint.memory import InMemorySaver
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ...conftest import materialize_schema
-from ...control.repositories import create_deletion_saga
+from ...control.deletion_saga import create_deletion_saga
 from ...control.thread_listing import list_threads_service
 from ...control.thread_state_service import capture_thread_state
-from ...database import create_control_action, create_thread, get_thread
-from ...streaming.aggregator import EventAggregator
+from ...database import create_thread, get_thread
+from ...streaming import RelayHub
+from ...testing import seed_journaled_thread
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import ThreadStatus
 
-
-@pytest_asyncio.fixture
-async def session_factory(tmp_path_factory: pytest.TempPathFactory):
-    case_dir = tmp_path_factory.mktemp("deleting-visibility-db")
-    materialize_schema(Path(case_dir / "test.db"))
-    engine = create_async_engine(f"sqlite+aiosqlite:///{case_dir / 'test.db'}")
-    yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    await engine.dispose()
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 async def _seed_deleting_thread(
     session_factory: async_sessionmaker[AsyncSession], thread_id: str
 ) -> None:
     async with session_factory() as session:
-        authority = make_test_write_authority()
-        await create_thread(
+        await seed_journaled_thread(
             session,
-            write_authority=authority,
             thread_id=thread_id,
             status=ThreadStatus.COMPLETED,
-        )
-        await create_control_action(
-            session,
-            thread_id=thread_id,
-            action_type=authority.action_type,
-            idempotency_key=f"seed:{thread_id}",
-            dispatch_id=authority.action_receipt_id,
             recovery_deadline_at=datetime(2100, 1, 1, tzinfo=UTC),
         )
         await create_deletion_saga(session, thread_id=thread_id, manifest=[])
@@ -114,7 +97,7 @@ async def test_run_lookup_reports_a_deleting_thread_as_absent(
         capture = await capture_thread_state(
             session,
             thread_id="gone",
-            aggregator=EventAggregator(),
+            relay_hub=RelayHub(),
             checkpointer=InMemorySaver(),
         )
 

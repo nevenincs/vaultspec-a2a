@@ -42,7 +42,7 @@ from ...graph.enums import Provider
 from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpError, AcpErrorCode, AcpPromptError
 from ..factory import ProviderFactory
-from ._installed_vocabulary import MissingInstalledVocabularyError, acp_error_kinds
+from ._installed_vocabulary import acp_error_kinds, read_installed
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -76,10 +76,7 @@ async def test_zai_rejected_credential_carries_a_typed_error_kind(
     failure mode the governing decision gates this lane's typing on.
     """
     external_prerequisite("zai-credential")
-    try:
-        installed_kinds = acp_error_kinds()
-    except MissingInstalledVocabularyError as exc:
-        pytest.skip(str(exc))
+    installed_kinds = read_installed(external_prerequisite, acp_error_kinds)
 
     model = ProviderFactory().create(
         Provider.ZAI, model="zai-test-model", workspace_root=tmp_path

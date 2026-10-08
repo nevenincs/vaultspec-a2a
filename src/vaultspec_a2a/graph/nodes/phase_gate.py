@@ -25,29 +25,31 @@ The submitter is a Protocol seam, not a concrete client: the control layer owns
 wiring the real authoring client (out of this module's scope), so the gate stays
 decoupled from the authoring package and independently testable.
 
-Wire contract (distinct from the plan-approval gate, whose payload and resume
-shapes are unchanged): the interrupt payload is
-``{"type": "document_approval_request", "phase", "proposal_id", "feature"}`` and
-the resume payload is
-``{"verdict": "approved" | "rejected" | "request_changes", "notes": str | None}``.
-An ``approved`` verdict advances to the next stage; ``rejected`` and
+Wire contract (distinct from the plan-approval gate, whose payload is
+unchanged): the interrupt payload is
+``{"type": "document_approval_request", "phase", "proposal_id", "feature",
+"request_id"}`` and the resume payload is a
+:class:`~vaultspec_a2a.thread.resume_values.ApprovalVerdict` naming the
+proposal. An ``approved`` verdict advances to the next stage; ``rejected`` and
 ``request_changes`` route to the phase's writer with the reviewer notes appended
 to ``validation_errors`` so the writer has a concrete revise signal.
 """
 
 from __future__ import annotations
 
-import logging
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol
 
-from langgraph.types import Command, interrupt
+from langgraph.types import Command
 
 from ...thread.enums import (
     VERDICT_APPROVED,
     VERDICT_REJECTED,
     VERDICT_REQUEST_CHANGES,
+    InterruptType,
 )
 from ...thread.errors import DocumentConformanceError
+from ...thread.resume_values import parse_approval_verdict
+from ._interrupts import await_request_scoped_resume
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -58,17 +60,15 @@ if TYPE_CHECKING:
 # The verdict vocabulary is imported to ROUTE ON, not to offer a second way in:
 # thread.enums holds it precisely because this module and the authoring lifecycle
 # cannot import each other, and a consumer taking it from either would undo that.
-_logger = logging.getLogger(__name__)
-
 __all__ = [
     "REVIEW_REVISION_SENTINEL",
     "DocumentProposalSubmitter",
     "ProposalRevisionRequiredError",
     "create_phase_gate_node",
     "create_phase_submit_node",
-    "parse_verdict",
     "review_requests_revision",
-    "verdict_answers_request",
+    "review_revisions_spent",
+    "revision_granted",
 ]
 
 #: The standalone verdict line a reviewer persona emits to send work back.
@@ -88,6 +88,23 @@ def review_requests_revision(messages: Sequence[object]) -> bool:
     return REVIEW_REVISION_SENTINEL in {
         line.strip().upper() for line in content.splitlines()
     }
+
+
+def revision_granted(*, revision_requested: bool, spent: int, budget: int) -> bool:
+    """Whether a review loop sends its work back to the writer once more.
+
+    The one budget rule every review loop applies: a revision is granted only
+    when one is asked for and the revisions ``spent`` - counting the one being
+    asked for - stay within ``budget``. A reviewer that never passes would
+    otherwise loop until the recursion limit killed the run, so a spent budget
+    ends the loop whatever the verdict says.
+    """
+    return revision_requested and spent <= budget
+
+
+def review_revisions_spent(state: TeamState, phase: str) -> int:
+    """The revisions ``phase`` has spent since it last reached its gate."""
+    return (state.get("review_revisions") or {}).get(phase, 0)
 
 
 _REVISION_VERDICTS = frozenset({VERDICT_REJECTED, VERDICT_REQUEST_CHANGES})
@@ -123,44 +140,6 @@ class DocumentProposalSubmitter(Protocol):
     async def __call__(self, state: TeamState, phase: str) -> str:
         """Propose and submit the phase's document; return its proposal id."""
         ...
-
-
-def parse_verdict(resume_value: object) -> tuple[str | None, str | None]:
-    """Extract ``(verdict, notes)`` from a gate resume payload.
-
-    The one verdict-shape parser (D6): the document phase gate below and the
-    legacy plan-approval node (:func:`...supervisor.create_plan_approval_node`)
-    both resume on ``{"verdict": "approved" | "rejected" | "request_changes",
-    "notes": str | None}`` and both parse it here, rather than each re-deriving
-    its own reading of the shape.
-    """
-    if not isinstance(resume_value, dict):
-        return None, None
-    resume_dict = cast("dict[str, object]", resume_value)
-    verdict = resume_dict.get("verdict")
-    notes = resume_dict.get("notes")
-    verdict_str = verdict if isinstance(verdict, str) else None
-    notes_str = notes if isinstance(notes, str) else None
-    return verdict_str, notes_str
-
-
-def verdict_answers_request(resume_value: object, request_id: str | None) -> bool:
-    """Whether a verdict payload names the request the gate is parked on.
-
-    A resume value is handed to whichever ``interrupt()`` asks for one next,
-    which is not necessarily the one it was written for: a verdict delivered to
-    a checkpoint that has moved on, or that never parked, would otherwise be
-    consumed as the answer to a question no human was asked. Binding the
-    verdict to a request is what lets the gate tell those apart.
-
-    A payload naming NO request is refused rather than trusted. An unbound
-    answer is exactly the one the run cannot attribute, and accepting it is
-    how an approval arrives with no human behind it.
-    """
-    if not request_id or not isinstance(resume_value, dict):
-        return False
-    named = cast("dict[str, object]", resume_value).get("request_id")
-    return isinstance(named, str) and named == request_id
 
 
 def create_phase_submit_node(
@@ -230,8 +209,12 @@ def create_phase_submit_node(
         try:
             proposal_id = await submitter(state, phase)
         except ProposalRevisionRequiredError as exc:
-            spent = (state.get("review_revisions") or {}).get(phase, 0)
-            if spent > max_revisions:
+            spent = review_revisions_spent(state, phase)
+            # The refusal is weighed before it is counted, so even a zero
+            # budget grants the writer one corrective pass.
+            if not revision_granted(
+                revision_requested=True, spent=spent, budget=max_revisions
+            ):
                 raise DocumentConformanceError(
                     phase, exc.revision_notes, attempts=spent
                 ) from exc
@@ -292,7 +275,7 @@ def create_phase_gate_node(
         """Pause for the committed proposal's verdict, then route."""
         proposal_id = state.get("gate_pending_proposal_id")
         payload = {
-            "type": "document_approval_request",
+            "type": InterruptType.DOCUMENT_APPROVAL_REQUEST.value,
             "phase": phase,
             "proposal_id": proposal_id,
             "feature": state.get("active_feature"),
@@ -313,21 +296,15 @@ def create_phase_gate_node(
                 "proposal; resubmit it before a decision can be asked for.",
             )
         else:
-            resume_value = interrupt(payload)
             # An answer bound to another request, or to none, is not this
             # gate's decision, so the gate asks again rather than spending a
             # revision on it. The decision stays the human's, and the phase's
             # revision budget is spent only by a verdict a human gave on this
             # document.
-            while not verdict_answers_request(resume_value, proposal_id):
-                _logger.warning(
-                    "Verdict for document phase %r did not name proposal %r; "
-                    "asking again",
-                    phase,
-                    proposal_id,
-                )
-                resume_value = interrupt(payload)
-            verdict, notes = parse_verdict(resume_value)
+            decision = await_request_scoped_resume(
+                payload, proposal_id, parse_approval_verdict
+            )
+            verdict, notes = decision.verdict, decision.notes
 
         if verdict == VERDICT_APPROVED:
             return Command(

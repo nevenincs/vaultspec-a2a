@@ -23,9 +23,11 @@ __all__ = [
     "DEFAULT_SUPERVISOR_ID",
     "MAX_AGENT_ID_CHARS",
     "MAX_APPROVAL_REQUEST_ID_CHARS",
+    "MAX_CALLEE_CHARS",
     "MAX_DISCOVERY_RESULTS",
     "MAX_FEATURE_TAG_LENGTH",
     "MAX_FEEDBACK_BATCH_ID_CHARS",
+    "MAX_NICKNAME_CHARS",
     "MAX_PERMISSION_DESCRIPTION_CHARS",
     "MAX_PERMISSION_OPTION_ID_CHARS",
     "MAX_REQUEST_ID_CHARS",
@@ -34,6 +36,7 @@ __all__ = [
     "MAX_RUN_MESSAGE_CHARS",
     "MAX_RUN_TITLE_CHARS",
     "MAX_SEED_TRANSCRIPT_MESSAGES",
+    "MAX_SOURCE_BRANCH_CHARS",
     "MAX_TEAM_PRESET_CHARS",
     "MAX_TOOL_CALL_CHARS",
     "MAX_WORKSPACE_ROOT_LENGTH",
@@ -213,4 +216,23 @@ Unlike the workspace root, this bound is also carried by the OUTBOUND records â€
 the discovery and history projections bound the tag they replay from the column.
 An outbound bound below the column would truncate a stored tag on the way out,
 which reads to a caller as a tag that changed rather than one that was refused.
+"""
+
+MAX_NICKNAME_CHARS: int = 128
+"""Longest operator-assigned run nickname, for every reader of one."""
+
+MAX_SOURCE_BRANCH_CHARS: int = 256
+"""Longest source-branch label a run's history record reports.
+
+The run-history record is this bound's "way out": the metadata write that
+accepts a branch label has no matching refusal yet, so a label can reach
+the column before this side ever confines it. Named here so that write gets
+the same width to narrow to, rather than inventing its own.
+"""
+
+MAX_CALLEE_CHARS: int = 128
+"""Longest callee label a run's history record reports.
+
+The sibling of :data:`MAX_SOURCE_BRANCH_CHARS` in every respect that
+matters, including the same unbounded write on its "way in".
 """

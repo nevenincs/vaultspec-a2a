@@ -277,22 +277,48 @@ def _project_fields(
 # Enum-valued fields are bounded as text rather than checked against their
 # member set: an unrecognised member is a producer that moved ahead of this
 # catalog, and dropping it would be the refusal semantics the channel rejects.
-_ENUM = _Text(64)
+_ENUM_MAX_CHARS: Final = 64
+_ENUM = _Text(_ENUM_MAX_CHARS)
 
 # A graph node's name, which the agent-status and team-status frames both carry.
-_NODE_NAME = _Text(128)
+_NODE_NAME_MAX_CHARS: Final = 128
+_NODE_NAME = _Text(_NODE_NAME_MAX_CHARS)
 
 # Fields shared verbatim by the two tool-call frame types, declared once.
+_TOOL_CALL_ID_MAX_CHARS: Final = 128
+_TOOL_CALL_TITLE_MAX_CHARS: Final = 256
+_TOOL_CALL_LOCATIONS_MAX_ITEMS: Final = 32
+_TOOL_CALL_LOCATION_PATH_MAX_CHARS: Final = 512
 _TOOL_CALL_FIELDS: dict[str, _FieldSpec] = {
-    "tool_call_id": _Text(128),
-    "title": _Text(256),
+    "tool_call_id": _Text(_TOOL_CALL_ID_MAX_CHARS),
+    "title": _Text(_TOOL_CALL_TITLE_MAX_CHARS),
     "kind": _ENUM,
     "status": _ENUM,
     # ``content`` is deliberately absent: it is the tool-call content block
     # carrying edit diffs and raw provider output, which the progress channel
     # never relays.
-    "locations": _ObjectList(32, {"path": _Text(512), "line": _Integer()}),
+    "locations": _ObjectList(
+        _TOOL_CALL_LOCATIONS_MAX_ITEMS,
+        {"path": _Text(_TOOL_CALL_LOCATION_PATH_MAX_CHARS), "line": _Integer()},
+    ),
 }
+
+# Per-field bounds for the remaining catalog entries below, named once so a
+# value shared by more than one field - and a reviewer comparing two entries -
+# reads the same name rather than two coincidentally equal numbers.
+_ARTIFACT_ID_MAX_CHARS: Final = 256
+_ARTIFACT_FILENAME_MAX_CHARS: Final = 256
+_AGENT_STATUS_DETAIL_MAX_CHARS: Final = 256
+_TEAM_STATUS_ACTIVE_THREADS_MAX_ITEMS: Final = 64
+_TEAM_STATUS_AGENTS_MAX_ITEMS: Final = 64
+_MODEL_NAME_MAX_CHARS: Final = 128
+_DISPLAY_NAME_MAX_CHARS: Final = 128
+_AGENT_DESCRIPTION_MAX_CHARS: Final = 256
+_ERROR_MESSAGE_MAX_CHARS: Final = 512
+_THREAD_TERMINAL_ERROR_DETAIL_MAX_CHARS: Final = 512
+_PERMISSION_OPTIONS_MAX_ITEMS: Final = 16
+_PERMISSION_OPTION_NAME_MAX_CHARS: Final = 128
+_PLAN_ENTRIES_MAX_ITEMS: Final = 64
 
 
 # The closed per-event catalog: every frame type that carries content to a
@@ -332,36 +358,38 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     ServerEventType.TOOL_CALL_START: _TOOL_CALL_FIELDS,
     ServerEventType.TOOL_CALL_UPDATE: _TOOL_CALL_FIELDS,
     ServerEventType.ARTIFACT_UPDATE: {
-        "artifact_id": _Text(256),
-        "filename": _Text(256),
+        "artifact_id": _Text(_ARTIFACT_ID_MAX_CHARS),
+        "filename": _Text(_ARTIFACT_FILENAME_MAX_CHARS),
         "append": _Flag(),
         "last_chunk": _Flag(),
     },
     ServerEventType.AGENT_STATUS: {
         "state": _ENUM,
         "node_name": _NODE_NAME,
-        "detail": _Text(256),
+        "detail": _Text(_AGENT_STATUS_DETAIL_MAX_CHARS),
     },
     ServerEventType.TEAM_STATUS: {
-        "active_thread_ids": _TextList(64, MAX_RUN_ID_CHARS),
+        "active_thread_ids": _TextList(
+            _TEAM_STATUS_ACTIVE_THREADS_MAX_ITEMS, MAX_RUN_ID_CHARS
+        ),
         "agents": _ObjectList(
-            64,
+            _TEAM_STATUS_AGENTS_MAX_ITEMS,
             {
                 "thread_id": _Text(MAX_RUN_ID_CHARS),
                 "agent_id": _Text(MAX_ROLE_ID_CHARS),
                 "state": _ENUM,
                 "node_name": _NODE_NAME,
                 "provider": _ENUM,
-                "model_name": _Text(128),
+                "model_name": _Text(_MODEL_NAME_MAX_CHARS),
                 "role": _ENUM,
-                "display_name": _Text(128),
-                "description": _Text(256),
+                "display_name": _Text(_DISPLAY_NAME_MAX_CHARS),
+                "description": _Text(_AGENT_DESCRIPTION_MAX_CHARS),
             },
         ),
     },
     ServerEventType.ERROR: {
         "code": _ENUM,
-        "message": _Text(512),
+        "message": _Text(_ERROR_MESSAGE_MAX_CHARS),
         "recoverable": _Flag(),
     },
     # The first frame of every stream: the run's durable status as it stood the
@@ -374,7 +402,7 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     StreamFrameKind.THREAD_TERMINAL: {
         "status": _ENUM,
         "replay": _Flag(),
-        "error_detail": _Text(512),
+        "error_detail": _Text(_THREAD_TERMINAL_ERROR_DETAIL_MAX_CHARS),
     },
     ServerEventType.HEARTBEAT: {"server_uptime_seconds": _Number()},
     StreamFrameKind.STREAM_REJECTED: {"reason": _ENUM},
@@ -397,10 +425,10 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
         "tool_kind": _ENUM,
         "description": _Text(MAX_PERMISSION_DESCRIPTION_CHARS),
         "options": _ObjectList(
-            16,
+            _PERMISSION_OPTIONS_MAX_ITEMS,
             {
                 "option_id": _Text(MAX_PERMISSION_OPTION_ID_CHARS),
-                "name": _Text(128),
+                "name": _Text(_PERMISSION_OPTION_NAME_MAX_CHARS),
                 "kind": _ENUM,
             },
         ),
@@ -423,7 +451,9 @@ PROGRESS_CATALOG: dict[str, dict[str, _FieldSpec]] = {
     # A plan entry's ``content`` is model-authored plan text - document-body
     # adjacent, and nothing consumes it - so only its classification survives.
     ServerEventType.PLAN_UPDATE: {
-        "entries": _ObjectList(64, {"status": _ENUM, "priority": _ENUM})
+        "entries": _ObjectList(
+            _PLAN_ENTRIES_MAX_ITEMS, {"status": _ENUM, "priority": _ENUM}
+        )
     },
 }
 

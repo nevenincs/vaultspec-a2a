@@ -66,6 +66,9 @@ async def test_a_park_whose_nudge_died_with_its_process_is_re_projected(
     # checkpoint says it is waiting for an answer.
     assert reprojected.repair_status == "healthy", reprojected.repair_status
     assert reprojected.execution_readiness == "healthy"
+    # And not boot damage: a run waiting on a human is nobody's repair backlog,
+    # so a boot that found one found nothing to look at.
+    assert summary["repair_backlog"] == 0, summary
 
 
 @pytest.mark.asyncio

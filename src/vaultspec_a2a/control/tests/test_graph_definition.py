@@ -12,28 +12,40 @@ serves as HTTP 409.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
 
 from ...control.accepted_input import freeze_accepted_input
-from ...control.dispatch_receipts import prepare_graph_action_receipt
+from ...control.dispatch_receipts import (
+    prepare_graph_action_receipt,
+    validate_current_graph_receipt,
+)
 from ...control.graph_definition import read_accepted_graph_definition
 from ...control.leased_dispatch import build_followon_dispatch
 from ...database import (
     create_control_action,
     create_thread,
     get_control_action_by_idempotency_key,
+    get_thread,
 )
 from ...ipc.schemas import DispatchRequest
 from ...team.team_config import load_team_config
-from ...testing import DEFAULT_TEAM_PRESET, current_execution_metadata
+from ...testing import (
+    DEFAULT_TEAM_PRESET,
+    current_execution_metadata,
+    seed_accepted_thread,
+)
 from ...thread import RunWriteAuthority
+from ...thread.action_receipts import control_action_payload_fingerprint
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ControlActionType
 from ...thread.executable_graph import freeze_graph_definition
 from ...thread.idempotency import thread_create_action_key
+from ...utils.coercion import decode_json_object
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -124,3 +136,69 @@ async def test_a_tampered_receipt_refuses_the_graph_definition_read(
     assert not isinstance(dispatch, DispatchRequest)
     assert dispatch.failure_type is FailureType.INCOMPATIBLE_STATE
     assert "does not match its receipt" in dispatch.reason
+
+
+def test_the_accepted_payload_fingerprint_is_pinned_to_its_stored_bytes() -> None:
+    """The fingerprint of a stored accepted payload, as an independent digest.
+
+    An immutable receipt holds this value for the life of a run, so a change to
+    how a stored payload is encoded before hashing would refuse every run
+    accepted under the old encoding with nothing raising on the way. The oracle
+    below is the documented encoding computed with the stdlib directly - sorted
+    keys, compact separators, non-ASCII left as text - rather than through the
+    module under test, and the literal pins it byte for byte.
+    """
+    payload: dict[str, object] = {
+        "schema_version": "accepted-action-input-v2",
+        "intent": {"content": "r\u00e9sum\u00e9"},
+        "dispatch": {"thread_id": "run-1", "action": "ingest"},
+        "actor_tokens_required": False,
+    }
+    golden = "f633a05d67513e229bfabd182341b21ede89452f069dad701bd5cadc81db39ab"
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    assert len(golden) == 64
+    assert golden == hashlib.sha256(encoded).hexdigest()
+    assert control_action_payload_fingerprint(payload) == f"sha256:{golden}"
+
+
+@pytest.mark.asyncio
+async def test_both_readers_of_an_accepted_action_fingerprint_one_encoding(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    """One encoding decides whether a stored receipt matches its row.
+
+    The dispatch boundary fingerprints the payload as the row stores it. The
+    initial-authority read used to re-dump the model it had just validated,
+    which is a second derivation of the same digest - equal for every payload
+    that validates, and a difference nobody would see until a sound receipt
+    refused a run. Both readers now take the stored bytes, so the receipt a row
+    carries verifies the same way through either.
+    """
+    thread_id = "one-fingerprint-encoding"
+    async with session_factory() as session:
+        thread_id, _receipt = await seed_accepted_thread(
+            session, thread_id=thread_id, workspace=tmp_path
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        thread = await get_thread(session, thread_id)
+        action = await get_control_action_by_idempotency_key(
+            session,
+            thread_id=thread_id,
+            idempotency_key=thread_create_action_key(thread_id),
+        )
+        definition = await read_accepted_graph_definition(session, thread_id)
+    assert thread is not None
+    assert action is not None
+    assert action.payload_json is not None
+    stored = decode_json_object(action.payload_json)
+    assert stored is not None
+
+    bound = validate_current_graph_receipt(thread, action)
+    assert bound is not None
+    assert bound.payload_fingerprint == control_action_payload_fingerprint(stored)
+    assert definition.digest()

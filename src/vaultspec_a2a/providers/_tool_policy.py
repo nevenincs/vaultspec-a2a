@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from langgraph.errors import GraphBubbleUp
 
 from ..graph.acp_options import (
-    REJECT_OPTION_ID,
     is_approval,
     is_remembering,
     narrowest_option_id,
@@ -202,11 +201,16 @@ def _autonomous_answer(request: ToolPermissionRequest, *, covered: bool) -> str 
     grant the provider never put on the table. Coverage decides that an approval
     is PERMITTED; it does not invent one, so such a call is refused.
 
-    A refusal is the narrowest offered refusal, and otherwise
-    :data:`REJECT_OPTION_ID`. That id is a deliberate answer rather than a gap:
-    an id the agent does not recognise makes it decline the tool call, which is
-    the direction a refusal must fail in, while any scan that could land on an
-    approval turns one malformed option list into a grant.
+    A refusal is the ONCE-ONLY offered refusal and nothing else. The remembering
+    refusal is not a fallback here for the same reason it is not one on the human
+    path: the CLI persists ``reject_always`` as a rule in the operator's own
+    settings, where it outlives this call and narrows every later run on the
+    machine - including the unattended ones, whose whole posture is that nothing
+    is decided for them in advance. Nobody is even at the prompt to be told the
+    rule was written. Where the session offers no once-only refusal the call is
+    refused with ``None``, and each rung spells the abandonment its own lane's
+    way: a conventional refusal literal would instead name an option id the
+    request never listed, which the agent cannot match to anything it offered.
     """
     options = request.options
     if covered:
@@ -224,7 +228,7 @@ def _autonomous_answer(request: ToolPermissionRequest, *, covered: bool) -> str 
         "the run's composed surface",
         request.tool,
     )
-    return narrowest_option_id(options, approving=False) or REJECT_OPTION_ID
+    return option_id_of_kind(options, PermissionOptionKind.REJECT_ONCE)
 
 
 async def decide(
@@ -260,8 +264,8 @@ async def decide(
     # neighbour: the pinned ACP adapter sorts its options with the approvals
     # first, so substituting the first offered option resolved a refusal whose
     # id did not match to a grant. A request offering no usable id leaves
-    # nothing to check against, and the answer is forwarded as given - which for
-    # a refusal is the conventional literal the rung declines on.
+    # nothing to check against, and a human rung's answer is forwarded as given;
+    # the unattended rung names no id of its own in that case and refuses.
     valid_ids = valid_option_ids(request.options)
     if valid_ids and chosen not in valid_ids:
         logger.warning(

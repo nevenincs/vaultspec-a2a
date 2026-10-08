@@ -36,7 +36,6 @@ __all__ = [
     "APPROVAL_OPTIONS",
     "APPROVE_OPTION_ID",
     "OPTION_ID_KEYS",
-    "REJECT_OPTION_ID",
     "is_approval",
     "is_rejection",
     "is_remembering",

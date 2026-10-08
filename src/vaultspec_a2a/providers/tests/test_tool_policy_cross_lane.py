@@ -274,6 +274,81 @@ async def test_a_remembered_refusal_with_no_single_use_refusal_refuses_the_call(
 
 
 @pytest.mark.asyncio
+async def test_an_unattended_refusal_is_never_spelled_as_a_remembered_rule(
+    acp_session_context: AcpSessionContext, tmp_path: Path
+) -> None:
+    """The unattended rung refuses the same way the human rung's answer does.
+
+    Nobody is at the prompt, so the rule the CLI would persist for
+    ``reject_always`` could not even be reported, and it would narrow every
+    later run on the machine - including the unattended ones, whose posture is
+    that nothing is decided for them in advance. With no once-only refusal on
+    offer the lane is told the call is abandoned instead.
+    """
+    outcome = await acp_permission_outcome(
+        acp_session_context,
+        _config(str(tmp_path)),
+        tool_call={"title": "Edit", "rawInput": {}},
+        options=[
+            {"optionId": "allow_once", "kind": "allow_once"},
+            {"optionId": "reject_always", "kind": "reject_always"},
+        ],
+    )
+
+    assert outcome == _CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_an_unattended_refusal_never_names_an_option_nobody_offered(
+    acp_session_context: AcpSessionContext, tmp_path: Path
+) -> None:
+    """A request that offers nothing is answered by abandonment, not by a literal.
+
+    Answering the conventional refusal literal made the handler SELECT an
+    option id the request never listed, which is a decision the agent cannot
+    match to anything it put on the table.
+    """
+    outcome = await acp_permission_outcome(
+        acp_session_context,
+        _config(str(tmp_path)),
+        tool_call={"title": "Edit", "rawInput": {}},
+        options=[],
+    )
+
+    assert outcome == _CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_an_unattended_refusal_still_selects_the_once_only_refusal(
+    acp_session_context: AcpSessionContext, tmp_path: Path
+) -> None:
+    """Abandoning is the fallback; a refusal the agent can act on comes first.
+
+    Asserted on both rungs: the ACP lane selects its offered ``reject_once``,
+    and the Codex lane - whose two actions are always on offer - answers its
+    decline action. A refusal tells the model its call was denied while the turn
+    continues, which is strictly more than an abandonment says.
+    """
+    outcome = await acp_permission_outcome(
+        acp_session_context,
+        _config(str(tmp_path)),
+        tool_call={"title": "Edit", "rawInput": {}},
+        options=[
+            {"optionId": "reject_always", "kind": "reject_always"},
+            {"optionId": "reject_once", "kind": "reject_once"},
+        ],
+    )
+    codex_action = await _codex_action(
+        tool="write",
+        arguments={},
+        project_scope=RunProjectScope(str(tmp_path)),
+    )
+
+    assert outcome == {"outcome": "selected", "optionId": "reject_once"}
+    assert codex_action == DECLINE_ACTION
+
+
+@pytest.mark.asyncio
 async def test_a_remembered_refusal_is_narrowed_where_a_single_use_one_is_offered(
     acp_session_context: AcpSessionContext, tmp_path: Path
 ) -> None:

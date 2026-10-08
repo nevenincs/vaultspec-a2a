@@ -164,18 +164,21 @@ async def test_a_snake_case_option_is_selected_when_no_callback_decides(
 
 
 @pytest.mark.asyncio
-async def test_a_leading_option_without_an_id_does_not_crash_the_default_path(
+async def test_a_leading_option_without_an_id_abandons_rather_than_inventing_one(
     acp_session_context: AcpSessionContext,
 ) -> None:
-    """No usable id on offer means the conventional refusal literal.
+    """No usable id on offer means the protocol's own cancelled outcome.
 
-    The literal is the deliberate answer rather than a recovery: an id the agent
-    does not recognise makes it decline the call, which is the direction the
-    unsupervised path must fail in when it cannot name what it was offered.
+    The unsupervised path names only ids the request listed. Answering the
+    conventional refusal literal instead SELECTED an option the agent never
+    offered, which it cannot match to anything it put on the table; abandoning
+    the call says exactly what is true and still refuses the tool use.
     """
-    decision = await _decide([_MALFORMED], _config(), acp_session_context)
+    outcome = await acp_permission_outcome(
+        acp_session_context, _config(), options=[_MALFORMED]
+    )
 
-    assert decision == "reject"
+    assert outcome == {"outcome": "cancelled"}
 
 
 @pytest.mark.asyncio

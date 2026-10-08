@@ -68,7 +68,13 @@ def _refused_ahead_of_both_rungs(
     # has no authority to permit anything. Production always supplies the run's
     # bound project; absence is a construction defect, and the deny-by-default
     # direction is to refuse rather than to let the call through unmeasured.
-    if scope is None:
+    #
+    # A PRESENT scope that binds nothing is the same absence, and asking the
+    # scope is what makes that so: a run whose workspace root is missing, blank,
+    # or does not reduce to an absolute key yields a scope whose
+    # ``bound_project_root()`` is None, and a call naming no project argument
+    # passed the object test unmeasured straight to the human rung.
+    if scope is None or scope.bound_project_root() is None:
         logger.warning(
             "Refused a tool call with no project to measure it against: tool=%s",
             request.tool,
@@ -245,8 +251,8 @@ async def decide(
     is answered by the composed-surface rule. *covered* is consulted only on the
     unattended path, so a lane's coverage check runs - and logs - only for the
     calls it decides. *scope* is the project the run is bound to; a rung built
-    with ``None`` has no project to measure a call against and every call it
-    puts here is refused.
+    with ``None``, or with a scope that binds no project, has nothing to measure
+    a call against and every call it puts here is refused.
 
     ``None`` leaves the refusal to the rung, which spells it in its own lane's
     terms. ``GraphBubbleUp`` raised by *ask* propagates to the rung.

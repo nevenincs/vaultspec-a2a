@@ -47,7 +47,7 @@ _WITHHELD_REFUSAL = "Refused a withheld harness tool"
 
 
 def _config(
-    workspace_root: str,
+    workspace_root: str | None,
     *,
     permission_callback: PermissionCallback | None = None,
     allowed_tools: list[str] | None = None,
@@ -241,6 +241,67 @@ async def test_a_decision_with_no_project_to_measure_against_refuses(
         "no project to measure it against" in record.getMessage()
         for record in caplog.records
     ), [record.getMessage() for record in caplog.records]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("workspace_root", [None, "", "relative/project", "~/project"])
+async def test_a_scope_that_measures_nothing_refuses_as_no_scope_does(
+    workspace_root: str | None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A scope holding no usable project is no authority, exactly as none is.
+
+    The project scan is the first authority the shared decision consults, and a
+    scope whose root is absent, blank, or does not reduce to an absolute key
+    measures nothing: ``bound_project_root()`` answers ``None`` for every one of
+    these, so a call naming no project argument would otherwise pass the guard
+    unmeasured and be decided by a human rung or an allowlist that has nothing
+    to compare against.
+    """
+    with caplog.at_level("WARNING"):
+        decision = await decide(
+            ToolPermissionRequest(
+                tool="Edit",
+                arguments={"query": "anything"},
+                options=[
+                    {"optionId": "allow_once", "kind": "allow_once"},
+                    {"optionId": "reject_once", "kind": "reject_once"},
+                ],
+            ),
+            scope=RunProjectScope(workspace_root),
+            covered=lambda: True,
+            ask=_answering("allow_once"),
+        )
+
+    assert decision is None
+    assert any(
+        "no project to measure it against" in record.getMessage()
+        for record in caplog.records
+    ), [record.getMessage() for record in caplog.records]
+
+
+@pytest.mark.asyncio
+async def test_a_lane_whose_run_carries_no_project_refuses_a_human_approval(
+    acp_session_context: AcpSessionContext,
+) -> None:
+    """Driven through the real rung, because that is how the gap would arrive.
+
+    ``AcpModelConfig`` derives its scope from the run's ``workspace_root``, and
+    that field admits ``None``, so a config built without the run's project
+    produces a scope that binds nothing. The call names no project argument, so
+    nothing but the first-authority guard stands between it and the human rung's
+    approval.
+    """
+    outcome = await acp_permission_outcome(
+        acp_session_context,
+        _config(None, permission_callback=_returning("allow_once")),
+        tool_call={"title": "Edit", "rawInput": {"query": "anything"}},
+        options=[
+            {"optionId": "allow_once", "kind": "allow_once"},
+            {"optionId": "reject_once", "kind": "reject_once"},
+        ],
+    )
+
+    assert outcome == {"outcome": "selected", "optionId": "reject_once"}
 
 
 @pytest.mark.asyncio

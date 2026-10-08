@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:a35920290fa87c8d40aa7871f8d23e7dcf5f92383b8290622056d8067efe513a'
+body_hash: 'sha256:a796e0b0be53ae988b12a561fe1f8428cab01e1d689aba37f0c9c21086c53014'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -1291,3 +1291,48 @@ Status: open unless noted. Type: debt. `control/reconciliation.py` `repair_backl
 ### pv1-kimi-adr-mechanism | medium | The Kimi ADR's per-run config mechanism names a flag the installed CLI does not have
 
 Status: fixed 2026-10-08 (amendment to `2026-07-17-kimi-provider-adr`). Type: doc. `2026-07-17-kimi-provider-adr` names `--config-file <per-run>`; Kimi Code 0.36.1 has no such flag, and the per-run isolation commitment is met by `KIMI_CODE_HOME` (PV06, verified credential-free with `kimi doctor`).
+
+
+### consolidation-2026-10-08 | low | Branch integration preserves completed work without closing pending plans
+
+Status: fixed by the main consolidation. Type: integration review. The user's
+2026-10-08 request authorized committing all worktrees, merging all branches,
+pushing main, and pruning the merged worktrees and branches. The inventory found
+211 local branches and 38 worktrees, with two modified files in rt/pvy. Its atomic
+writer and regression test were committed as cfa337c5 after Ruff, formatting, Ty,
+and all 14 atomic writer tests passed on Windows. Main integrated the centralize
+branch, the additional rt/pvy and rt/pvx changes, the desktop privacy branch, and
+the remote dependency update. Desktop conflict review retained the already
+integrated privacy enforcement and its later StateLayout and shared-file-check
+refactors. Remaining worker commits were compared by patch equivalence and
+range-diff against their integrated counterparts before history-only merges;
+those merges left the integrated tree unchanged. Every local branch tip is now
+an ancestor of main. This Git consolidation does not close the outstanding
+remediation Steps or replace their full verification requirements.
+
+Integration verification on Windows: `uv run --no-sync ruff check src dev docs
+scripts packaging`, the matching `ruff format --check`, and `ty check` passed;
+formatting covered 1,178 Python files. Actionlint passed for the dependency-updated
+Claude workflow, and `git diff --check a9f519fa HEAD` passed. Focused pytest runs
+with `-q -o addopts=''` passed 145 tests across atomic writes, desktop state
+security/profile/migration, provider eligibility, permission option IDs, binary
+proof admission, Kimi permissions, team selection, and cross-lane tool policy;
+48 more passed across contended read endpoints, in-process worker fidelity,
+event handlers, permission leases, read settlement contention, checkpoint write
+contention, and store fixture fidelity. These results cover the additional
+rt/pvy and rt/pvx integrations and the desktop conflict resolution; they are not
+a new full-suite or live-provider certification.
+
+### consolidation-atomic-residue | low | A held temporary can remain after successful publication
+
+Status: open; follow-up to pv1-atomic-write-windows-sharing. Type: documentation
+and cleanup contract. The fresh-source retry in
+`src/vaultspec_a2a/utils/atomic_write.py` allows publication while another Windows
+process holds the first temporary without delete sharing. That source cannot be
+removed while held, and the implementation suppresses the unlink error. The new
+`test_a_retry_renames_from_a_source_the_holder_has_never_seen` explicitly proves
+this residue and removes it after releasing the holder. The module and function
+docstrings still promise no temporary residue. Follow-up should state the
+best-effort cleanup contract and assess an owner-scoped later cleanup policy;
+this consolidation preserves the tested implementation rather than changing
+that policy.

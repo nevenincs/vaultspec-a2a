@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Final
 from pydantic import ValidationError
 
 from ..ipc.schemas import DispatchApplicationReceiptPayload
-from ..thread import named_request_id
 from ..thread.action_receipts import GRAPH_ACTION_VERB
 from ..thread.enums import ControlActionType
 from ..thread.idempotency import ResumeIntent, resume_intent
@@ -23,7 +22,6 @@ if TYPE_CHECKING:
     from ..thread.action_receipts import GraphActionReceipt
 
 __all__ = [
-    "apply_relayed_permission_resolution",
     "commit_proven_application",
     "proven_application_receipt",
     "validated_application_receipt",
@@ -146,32 +144,6 @@ async def _apply_permission_resolution(
             approval_status=fx_res.approval_status,
             approval_request_id=request_id,
         )
-
-
-async def apply_relayed_permission_resolution(
-    db: AsyncSession,
-    thread_id: str,
-    payload: dict[str, object],
-) -> None:
-    """Settle the accepted response a relayed resolution event names.
-
-    The event names a request; the accepted response action for it is what
-    carries the answer, so this resolves that action and settles from it. One
-    request can have been asked more than once, so the answer settled is the one
-    that is still awaiting application. A resolution naming a request with no
-    such answer settles nothing: there is no decision left to apply.
-    """
-    from ._permission_response_contract import journaled_permission_asks
-
-    request_id = named_request_id(payload)
-    if request_id is None:
-        return
-    asks = await journaled_permission_asks(
-        db, thread_id=thread_id, request_id=request_id
-    )
-    if asks is None or asks.unanswered.accepted is None:
-        return
-    await _apply_permission_resolution(db, asks.unanswered.accepted)
 
 
 def validated_application_receipt(

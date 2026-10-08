@@ -198,12 +198,13 @@ PERMISSION_REQUEST_EVENT_TYPES: frozenset[str] = frozenset(
 
 
 def is_permission_event(payload: dict[str, Any]) -> bool:
-    """Return True if the payload is a permission request or resolution."""
-    event_type = wire_event_type(payload)
-    return (
-        event_type in PERMISSION_REQUEST_EVENT_TYPES
-        or event_type == "permission_resolved"
-    )
+    """Return True if the payload announces a permission or approval request.
+
+    Requests only. A permission is SETTLED from the application receipt of the
+    resume that carried its answer, never from an event announcing the
+    settlement, so there is no resolution type to classify here.
+    """
+    return wire_event_type(payload) in PERMISSION_REQUEST_EVENT_TYPES
 
 
 def classify_permission_pause_reason(tool_call: str | None) -> str:

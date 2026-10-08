@@ -260,10 +260,10 @@ def response_verdict(permission: ParkedPermission, option_id: str) -> str:
     """Report the decision a response carries without flattening it to pending.
 
     Reads the verdict from the shared predicate against the options the request
-    actually offered, so the status stamped here at submission is the same one the
-    ``permission_resolved`` projection recomputes later. Deriving it twice from
-    different fields is what previously let the projection overwrite a rejection
-    with an approval.
+    actually offered, so the status stamped here at submission is the same one
+    the settlement recomputes when the answer's receipt lands. Deriving it twice
+    from different fields is what previously let the settlement overwrite a
+    rejection with an approval.
 
     The thread's approval state and the durable audit log both read the verdict
     from here, for the same reason: two derivations of "was this approved" are

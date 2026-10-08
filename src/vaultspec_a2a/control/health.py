@@ -41,7 +41,13 @@ from ..database import (
     verify_wal_mode,
 )
 from ..utils.coercion import coerce_object_mapping
-from ._worker_health import WorkerState, probe_worker_health, worker_liveness
+from ._worker_health import (
+    WorkerHealthProbe,
+    WorkerState,
+    probe_worker_health,
+    worker_credential_authorized,
+    worker_liveness,
+)
 from .config import settings
 from .provider_execution import native_execution_refusal_reason
 from .readiness import (
@@ -729,16 +735,31 @@ async def _checkpoint_health_check(app_state: object) -> dict[str, str]:
 
 
 async def _worker_health_check(
-    worker_client: httpx.AsyncClient, *, include_pairing: bool
+    worker_client: httpx.AsyncClient, *, include_pairing: bool, owner_pid: int | None
 ) -> tuple[dict[str, str], dict[str, object]]:
+    # Ownership is settled before the credential, never by it: the app-pooled
+    # client carries the worker IPC bearer on every request it makes, so an
+    # occupant of the worker port that is not *owner_pid* or one of its
+    # descendants must not be probed at all. A withheld probe is reported exactly
+    # as an unreachable worker - this surface has no healthy observation either
+    # way - and the claim that withheld it is named in the gate's own log.
+    #
     # The pooled-client probe is the same readiness authority the watchdog reads:
     # an exact 200 whose body names the worker role and reports it ready, so this
     # surface and a restart decision can never disagree about the same worker.
-    worker_probe = await probe_worker_health(
-        settings.worker_url,
-        timeout=SERVICE_WORKER_PROBE_TIMEOUT_SECONDS,
-        client=worker_client,
-        internal_token=None,
+    worker_probe = (
+        await probe_worker_health(
+            settings.worker_url,
+            timeout=SERVICE_WORKER_PROBE_TIMEOUT_SECONDS,
+            client=worker_client,
+            internal_token=None,
+        )
+        if await worker_credential_authorized(
+            settings.worker_port,
+            owner_pid=owner_pid,
+            action="the service health worker probe",
+        )
+        else WorkerHealthProbe(healthy=False, body=None)
     )
     if worker_probe.healthy:
         worker_check = {"status": "ok"}
@@ -789,7 +810,9 @@ async def build_full_health(
         checkpoint_task = tasks.create_task(_checkpoint_health_check(app_state))
         worker_task = tasks.create_task(
             _worker_health_check(
-                transport.worker_client, include_pairing=include_pairing
+                transport.worker_client,
+                include_pairing=include_pairing,
+                owner_pid=transport.worker_spawner.owner_pid,
             )
         )
 

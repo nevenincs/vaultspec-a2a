@@ -204,6 +204,7 @@ if TYPE_CHECKING:
         LEASE_TTL_MS,
         Lease,
         LeaseAcquisitionTimeoutError,
+        frozen_lease_clock,
         hold_lease,
         lease_home,
         live_shared_holder_count,
@@ -615,6 +616,7 @@ _LAZY_EXPORTS = {
         "vaultspec_a2a.testing.leases",
         "LeaseAcquisitionTimeoutError",
     ),
+    "frozen_lease_clock": ("vaultspec_a2a.testing.leases", "frozen_lease_clock"),
     "hold_lease": ("vaultspec_a2a.testing.leases", "hold_lease"),
     "lease_home": ("vaultspec_a2a.testing.leases", "lease_home"),
     "live_shared_holder_count": (
@@ -898,6 +900,7 @@ __all__ = [
     "forfeits_purity",
     "free_port",
     "frozen_deterministic_selection",
+    "frozen_lease_clock",
     "gateway_process_env",
     "gateway_run_verbs",
     "gateway_script",

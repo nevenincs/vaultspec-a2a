@@ -20,6 +20,7 @@ from ..leases import (
     LEASE_TTL_MS,
     LeaseAcquisitionTimeoutError,
     acquire,
+    frozen_lease_clock,
     hold_lease,
     lease_home,
 )
@@ -66,29 +67,27 @@ def test_dead_holder_is_reclaimed_by_pid_liveness(tmp_path: Path) -> None:
     lease.release()
 
 
-def test_frozen_heartbeat_with_live_pid_is_reclaimed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_frozen_heartbeat_with_live_pid_is_reclaimed(tmp_path: Path) -> None:
     """A live-pid marker whose heartbeat froze past the TTL loses the lease.
 
     Mirrors the engine precedent: a live process with a dead heartbeat writer
     must not hold a resource forever. The stall is real - the marker's mtime
-    is genuinely old. A fixed clock forces both claims into the same
-    millisecond so release ownership cannot rely on the timestamp.
+    is genuinely old. ``frozen_lease_clock`` holds both claims to the same
+    instant - the module's official clock seam, never the stdlib ``time``
+    module - so release ownership cannot rely on the timestamp.
     """
     import os
 
-    fixed_now = time.time()
-    monkeypatch.setattr(time, "time", lambda: fixed_now)
-    lease = acquire("scratch-frozen", home=tmp_path, refresh_interval_s=3600.0)
-    stale_s = (LEASE_TTL_MS + 60_000) / 1000
-    old = time.time() - stale_s
-    os.utime(lease.path, times=(old, old))
-    successor = acquire("scratch-frozen", home=tmp_path, acquire_timeout_s=5.0)
-    # The displaced holder must not delete the successor's marker on release.
-    lease.release()
-    assert successor.path.exists()
-    successor.release()
+    with frozen_lease_clock(time.time()):
+        lease = acquire("scratch-frozen", home=tmp_path, refresh_interval_s=3600.0)
+        stale_s = (LEASE_TTL_MS + 60_000) / 1000
+        old = time.time() - stale_s
+        os.utime(lease.path, times=(old, old))
+        successor = acquire("scratch-frozen", home=tmp_path, acquire_timeout_s=5.0)
+        # The displaced holder must not delete the successor's marker on release.
+        lease.release()
+        assert successor.path.exists()
+        successor.release()
 
 
 def test_refresher_heartbeats_the_marker(tmp_path: Path) -> None:

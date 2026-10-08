@@ -21,7 +21,12 @@ from ._process_tree import (
 from .async_cleanup import complete_cleanup
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
+
+    #: Reads POSIX process-group liveness; defaults to :func:`_posix_group_is_live`.
+    #: A real-behavior test can install its own wrapper through
+    #: :meth:`ProcessContainment.create` instead of patching the module function.
+    GroupProbe = Callable[[int], bool | None]
 
 __all__ = [
     "ProcessContainment",
@@ -94,14 +99,16 @@ def _posix_group_is_live(pgid: int) -> bool | None:
     return None if members is None else bool(members)
 
 
-async def _await_posix_group_gone(pgid: int, *, timeout: float) -> bool:
+async def _await_posix_group_gone(
+    pgid: int, *, timeout: float, probe: GroupProbe = _posix_group_is_live
+) -> bool:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     empty_observations = 0
     while True:
         # The membership read scans the host's process table, which may block
         # for a while on a busy host.
-        if await asyncio.to_thread(_posix_group_is_live, pgid) is False:
+        if await asyncio.to_thread(probe, pgid) is False:
             empty_observations += 1
             if empty_observations == 2:
                 return True
@@ -191,20 +198,25 @@ class ProcessContainment:
     live root without one.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, group_probe: GroupProbe | None = None) -> None:
         self._pid: int | None = None
         self._pgid: int | None = None
         self._job: Any | None = None  # Windows job HANDLE (ctypes c_void_p)
         self._termination_task: asyncio.Task[bool] | None = None
+        self._group_probe: GroupProbe = group_probe or _posix_group_is_live
 
     @classmethod
-    def create(cls) -> ProcessContainment:
+    def create(cls, *, group_probe: GroupProbe | None = None) -> ProcessContainment:
         """Build a containment; on Windows this creates the KILL_ON_JOB_CLOSE job.
 
         A Windows job-creation failure is fatal to containment and raises; POSIX
         needs no OS object until :func:`spawn_contained` admits its root.
+
+        ``group_probe`` overrides the POSIX group-liveness read
+        (:func:`_posix_group_is_live` by default); a real-behavior test installs
+        its own wrapper here instead of patching the module function.
         """
-        self = cls()
+        self = cls(group_probe=group_probe)
         if sys.platform == "win32":
             self._job = self._create_win_job()
         return self
@@ -399,7 +411,7 @@ class ProcessContainment:
         pgid = self._pgid
         if pgid is None:
             return None
-        live = _posix_group_is_live(pgid)
+        live = self._group_probe(pgid)
         return None if live is None else not live
 
     async def terminate(
@@ -638,17 +650,21 @@ class ProcessContainment:
         # Confirm an empty snapshot before returning: the membership scan can
         # transiently miss a member while the root exits and is reparented.
         if (
-            await asyncio.to_thread(_posix_group_is_live, pgid) is False
-            and await asyncio.to_thread(_posix_group_is_live, pgid) is False
+            await asyncio.to_thread(self._group_probe, pgid) is False
+            and await asyncio.to_thread(self._group_probe, pgid) is False
         ):
             return True
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGTERM)
-        if await _await_posix_group_gone(pgid, timeout=term_timeout):
+        if await _await_posix_group_gone(
+            pgid, timeout=term_timeout, probe=self._group_probe
+        ):
             return True
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(pgid, signal.SIGKILL)
-        return await _await_posix_group_gone(pgid, timeout=kill_timeout)
+        return await _await_posix_group_gone(
+            pgid, timeout=kill_timeout, probe=self._group_probe
+        )
 
     def close(self) -> None:
         """Release the OS containment handle; idempotent.

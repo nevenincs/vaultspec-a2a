@@ -13,7 +13,6 @@ import psutil
 import pytest
 
 from ...utils import ProcessContainment, spawn_contained
-from ...utils import process as process_module
 from ...utils._process_tree import (
     descendant_pids,
     kill_pid_tree_async,
@@ -49,8 +48,10 @@ _STUBBORN_CHILD = (
 @contextlib.asynccontextmanager
 async def _owned_tree(
     child_source: str = _CHILD,
+    *,
+    containment: ProcessContainment | None = None,
 ) -> AsyncGenerator[tuple[ProcessContainment, subprocess.Popen[bytes], int]]:
-    containment = ProcessContainment.create()
+    containment = containment or ProcessContainment.create()
     parent: subprocess.Popen[bytes] | None = None
     child_pid: int | None = None
     try:
@@ -227,21 +228,30 @@ if sys.platform == "win32":
 else:
 
     @pytest.mark.asyncio
-    async def test_transient_empty_group_probe_does_not_abandon_live_child(
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        async with _owned_tree(_STUBBORN_CHILD) as (containment, parent, child_pid):
+    async def test_transient_empty_group_probe_does_not_abandon_live_child() -> None:
+        """One transient ``False`` reading must not retire a live group early.
+
+        ``probe`` is a real wrapper around the real :func:`_posix_group_is_live`,
+        installed through :meth:`ProcessContainment.create`'s official seam
+        rather than patched over the module function, so the containment under
+        test runs its genuine debounce logic against a deterministic one-false
+        sequence.
+        """
+        calls = 0
+
+        def probe(pgid: int) -> bool | None:
+            nonlocal calls
+            calls += 1
+            return False if calls == 1 else _posix_group_is_live(pgid)
+
+        containment = ProcessContainment.create(group_probe=probe)
+        async with _owned_tree(_STUBBORN_CHILD, containment=containment) as (
+            containment,
+            parent,
+            child_pid,
+        ):
             parent.kill()
             parent.wait(timeout=10)
-            real_probe = process_module._posix_group_is_live
-            calls = 0
-
-            def probe(pgid: int) -> bool | None:
-                nonlocal calls
-                calls += 1
-                return False if calls == 1 else real_probe(pgid)
-
-            monkeypatch.setattr(process_module, "_posix_group_is_live", probe)
             assert await containment.terminate(term_timeout=0.2, kill_timeout=5.0)
             assert calls >= 2
             assert not pid_is_live(child_pid)

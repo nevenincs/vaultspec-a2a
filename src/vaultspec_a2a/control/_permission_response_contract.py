@@ -29,6 +29,7 @@ __all__ = [
     "PermissionInput",
     "PermissionTransition",
     "RejectedResponse",
+    "accepted_answer_option",
     "audited_tool_name",
     "existing_rejection_error",
     "held_interrupt",
@@ -41,6 +42,22 @@ __all__ = [
 
 def response_payload(option_id: str, notes: str | None) -> dict[str, object]:
     return {"option_id": option_id, "notes": notes}
+
+
+def accepted_answer_option(intent: dict[str, object]) -> str | None:
+    """The option the accepted response action froze as the answer given.
+
+    Read beside :func:`response_payload`, which writes it, because the frozen
+    envelope of the accepted action is the only record of the answer the
+    settlement may act on. The request row's own resolution column is a second
+    copy of the same decision and is not read: a row rewritten after
+    acceptance - by a tamper or by a writer racing the settlement - must not be
+    able to change which option a run is settled under.
+
+    ``None`` means the envelope records no answer at all, which is a payload
+    the settlement refuses rather than guesses at.
+    """
+    return coerce_nonempty_str(intent.get("option_id"))
 
 
 def _is_json_object(value: object) -> TypeIs[dict[str, object]]:

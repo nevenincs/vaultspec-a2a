@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from ..thread.action_receipts import GraphActionReceipt
 
 __all__ = [
-    "apply_permission_resolution",
+    "apply_relayed_permission_resolution",
     "commit_proven_application",
     "proven_application_receipt",
     "validated_application_receipt",
@@ -42,54 +42,86 @@ _APPLIED_REPAIR_ACTION: Final[dict[str, ControlActionType]] = {
 }
 
 
-async def apply_permission_resolution(
+def _accepted_answer_option(submitted: ControlActionModel) -> str | None:
+    """The option *submitted* froze as the answer, or ``None`` if it froze none.
+
+    The accepted dispatch envelope of the response action is the one record of
+    the answer this settlement may act on, so a payload that is not the current
+    accepted shape, or carries no option, settles nothing instead of falling
+    back to the request row's own copy of the decision.
+    """
+    from ._permission_response_contract import accepted_answer_option
+    from .accepted_input import read_accepted_input
+
+    try:
+        accepted = read_accepted_input(submitted)
+    except (ValidationError, ValueError):
+        return None
+    return accepted_answer_option(accepted.intent)
+
+
+async def _apply_permission_resolution(
     db: AsyncSession,
-    thread_id: str,
-    payload: dict[str, object],
+    submitted: ControlActionModel,
 ) -> None:
     """Finalize a worker-applied permission resolution into the journal.
 
-    Only a request still in ``answered_pending_apply`` is settled: its row is
-    marked applied and the resolution is projected onto the applied control
-    action, repair state, and - for a plan approval - approval state. Any other
-    state is a no-op, matching the prior inline guard.
+    *submitted* is the accepted ``PERMISSION_RESPONSE_SUBMITTED`` action, and
+    its frozen envelope is where the answered option is read from:
+    ``permission_logs`` is the single durable record of a permission decision,
+    and the request row holds the request's lifecycle and the options it
+    offered, never the answer. Only a request still in
+    ``answered_pending_apply`` is settled: its row is marked applied and the
+    resolution is projected onto the applied control action, repair state, and
+    - for a plan approval - approval state. Any other state is a no-op.
     """
     from ..database import (
         create_control_action,
-        get_control_action_by_idempotency_key,
         get_permission_request,
         mark_control_action_applied,
         mark_permission_request_applied,
         set_thread_approval_state,
     )
-    from ..thread.enums import ControlActionResultStatus
-    from ..thread.idempotency import (
-        permission_response_action_key,
-        permission_response_applied_action_key,
-    )
+    from ..thread.enums import ControlActionResultStatus, PermissionRequestStatus
+    from ..thread.idempotency import permission_response_applied_action_key
     from .repair_transitions import apply_repair_transition
 
-    request_id = named_request_id(payload)
+    request_id = submitted.request_id
+    thread_id = submitted.thread_id
     if request_id is None:
         return
     permission = await get_permission_request(db, request_id)
-    if permission is None or permission.request_status != "answered_pending_apply":
+    if (
+        permission is None
+        or permission.request_status
+        != PermissionRequestStatus.ANSWERED_PENDING_APPLY.value
+    ):
+        return
+    option_id = _accepted_answer_option(submitted)
+    if option_id is None:
+        # Fail closed and leave the action unapplied: the durable recovery
+        # owner still holds it, and an answer nobody can read off its own
+        # acceptance must not be settled from a second copy of itself.
+        logger.warning(
+            "Refusing to settle permission %s on thread %s: its accepted action"
+            " records no answered option",
+            request_id,
+            thread_id,
+            extra={
+                "thread_id": thread_id,
+                "request_id": request_id,
+                "action": "unreadable_accepted_permission_answer",
+            },
+        )
         return
     fx_res = compute_permission_resolution_effects(
         permission.pause_reason_type,
-        rejected=response_is_rejection(
-            permission.allowed_options_json, permission.response_option_id
-        ),
+        rejected=response_is_rejection(permission.allowed_options_json, option_id),
     )
     await mark_permission_request_applied(
         db, request_id=request_id, status=fx_res.target_status
     )
-    submitted = await get_control_action_by_idempotency_key(
-        db,
-        thread_id=thread_id,
-        idempotency_key=permission_response_action_key(request_id),
-    )
-    if submitted is not None and submitted.applied_at is None:
+    if submitted.applied_at is None:
         await mark_control_action_applied(db, submitted.id)
     await create_control_action(
         db,
@@ -112,6 +144,34 @@ async def apply_permission_resolution(
             approval_status=fx_res.approval_status,
             approval_request_id=request_id,
         )
+
+
+async def apply_relayed_permission_resolution(
+    db: AsyncSession,
+    thread_id: str,
+    payload: dict[str, object],
+) -> None:
+    """Settle the accepted response a relayed resolution event names.
+
+    The event names a request; the accepted response action for it is what
+    carries the answer, so this resolves that action and settles from it. A
+    resolution naming a request with no accepted response settles nothing:
+    there is no decision to apply.
+    """
+    from ..database import get_control_action_by_idempotency_key
+    from ..thread.idempotency import permission_response_action_key
+
+    request_id = named_request_id(payload)
+    if request_id is None:
+        return
+    submitted = await get_control_action_by_idempotency_key(
+        db,
+        thread_id=thread_id,
+        idempotency_key=permission_response_action_key(request_id),
+    )
+    if submitted is None:
+        return
+    await _apply_permission_resolution(db, submitted)
 
 
 def validated_application_receipt(
@@ -255,9 +315,7 @@ async def commit_proven_application(
         action.action_type == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
         and action.request_id is not None
     ):
-        await apply_permission_resolution(
-            db, thread_id, {"request_id": action.request_id}
-        )
+        await _apply_permission_resolution(db, action)
         # The settlement moves no status: the run leaves its pause through the
         # pause recorder, which this receipt prompts once the settlement is
         # committed and which leaves a run whose turn already ended alone.

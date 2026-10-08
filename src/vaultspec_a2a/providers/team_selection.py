@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Annotated, Any, Final, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
@@ -315,13 +314,22 @@ class FrozenTeamSelection:
 
 
 def _require_selectable_record(record: ProviderRecord) -> None:
+    """Refuse a lane the serving catalog does not itself call selectable.
+
+    Two facts, both the service's own: the lane's derived selectability, and the
+    served catalog status. The catalog's ``expires_at`` is deliberately NOT a
+    third: it is the refresh cache's reuse window for a stored catalog, and the
+    records reaching here were just read through that cache. What binds a
+    selection to a catalog is the REVISION it names, checked by the caller - a
+    rediscovered catalog answers a new revision and the selection is refused as
+    stale, while an unchanged revision describes exactly the lane the client
+    chose. Comparing the window instead gave ``provider_catalog_ttl_seconds`` an
+    implicit floor: a short TTL had run start refuse the selection this same
+    process had served the client moments before, and a lane whose window really
+    has closed is re-described as ``stale`` and refused by the status below.
+    """
     state = record.catalog.state
-    if (
-        not record.health.selectable
-        or state.status is not CatalogStatus.AVAILABLE
-        or state.expires_at is None
-        or state.expires_at <= datetime.now(UTC)
-    ):
+    if not record.health.selectable or state.status is not CatalogStatus.AVAILABLE:
         raise TeamSelectionError(
             "selection names a provider lane that is not selectable"
         )

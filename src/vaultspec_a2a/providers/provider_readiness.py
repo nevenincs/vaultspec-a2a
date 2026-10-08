@@ -26,12 +26,29 @@ if TYPE_CHECKING:
     from ..context.harness import HarnessReadiness
 
 __all__ = [
+    "KIMI_NO_TEMPORARY_MODEL_REASON",
     "probe_harness_ready",
     "probe_provider_configuration",
     "probe_provider_readiness",
 ]
 
 logger = logging.getLogger(__name__)
+
+KIMI_NO_TEMPORARY_MODEL_REASON = (
+    "the Kimi lane runs in a per-run configuration home, which carries "
+    "no persisted login: configure the temporary model definition "
+    "(KIMI_MODEL_NAME, KIMI_MODEL_API_KEY, KIMI_MODEL_BASE_URL) for this "
+    "lane to authenticate"
+)
+"""Why Kimi refuses construction with no temporary-model definition.
+
+Shared verbatim between this probe's :func:`_kimi_configuration` and
+``factory._create_kimi_model``'s own construction-time refusal, so the two
+can never read differently for the same environment (PV06's per-run
+isolation left Kimi with no ambient credential a served run can fall back
+to, so there is exactly one way this lane authenticates and exactly one
+reason string for its absence).
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,9 +90,15 @@ def _present(present: bool, missing: str) -> _ProviderConfiguration:
 
 
 def _kimi_configuration() -> _ProviderConfiguration:
-    # Without a temporary definition Kimi runs on its persisted config or device
-    # session, which this probe cannot read; an explicit home names where that
-    # state lives. Only a partial definition is a refusal.
+    # Under PV06's per-run isolation the factory always launches Kimi inside a
+    # fresh, empty config home, so ``settings.kimi_code_home`` (read only for
+    # prompt-free catalog discovery against the OPERATOR's own home) names no
+    # credential a served run could ever authenticate from. Only the temporary
+    # model definition does, so readiness reads exactly that - the same
+    # presence check the factory's own construction refusal is built on - and
+    # never the operator's home. Only a partial definition is refused as
+    # malformed; a fully absent one is refused the same way the factory
+    # refuses construction, with its exact reason.
     key = settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else None
     reason = kimi_temporary_model_configuration_reason(
         kimi_api_key=key,
@@ -86,9 +109,11 @@ def _kimi_configuration() -> _ProviderConfiguration:
     )
     if reason is not None:
         return _ProviderConfiguration(state=HealthState.UNAVAILABLE, reason=reason)
-    if _has_text(key) or _has_text(settings.kimi_code_home):
+    if _has_text(key):
         return _ProviderConfiguration(state=HealthState.AVAILABLE)
-    return _ProviderConfiguration(state=HealthState.UNKNOWN)
+    return _ProviderConfiguration(
+        state=HealthState.UNAVAILABLE, reason=KIMI_NO_TEMPORARY_MODEL_REASON
+    )
 
 
 def _claude_configuration() -> _ProviderConfiguration:

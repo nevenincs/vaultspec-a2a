@@ -198,7 +198,13 @@ async def test_a_leading_option_without_an_id_does_not_crash_the_default_path(
 async def test_a_raising_callback_denies_without_subscripting_a_bad_option(
     acp_session_context: AcpSessionContext,
 ) -> None:
-    """The fail-closed denial path must not itself raise on malformed options."""
+    """The fail-closed denial path must not itself raise on malformed options.
+
+    The refusal on offer is the once-only one, which is the only refusal a
+    denial ever selects: a remembering refusal would have the CLI persist a rule
+    this run cannot retract, so it is never reached for, and a list offering only
+    that is answered with the cancelled outcome instead.
+    """
 
     async def callback(
         _name: str, _args: JsonObject, _options: list[JsonObject]
@@ -207,7 +213,7 @@ async def test_a_raising_callback_denies_without_subscripting_a_bad_option(
 
     options: list[JsonObject] = [
         {"optionId": "approve"},
-        {"optionId": "deny_always"},
+        {"optionId": "deny_once"},
         _MALFORMED,
     ]
 
@@ -215,7 +221,7 @@ async def test_a_raising_callback_denies_without_subscripting_a_bad_option(
         options, _config(permission_callback=callback), acp_session_context
     )
 
-    assert decision == "deny_always"
+    assert decision == "deny_once"
 
 
 @pytest.mark.asyncio

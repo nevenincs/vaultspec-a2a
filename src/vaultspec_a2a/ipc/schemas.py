@@ -112,6 +112,40 @@ def canonical_project_root(value: str | os.PathLike[str]) -> str:
 # put an unminted spelling on a dispatch.
 ActiveProjectRoot = Annotated[str, AfterValidator(canonical_project_root)]
 
+# Bounds local to one field below, named so none of them is a bare literal.
+# None of these cross a layer the way thread.constants' grammars do: each
+# shapes exactly one gateway<->worker IPC field and nothing else reads it.
+
+#: The dispatch envelope's own correlation id. Wider than the 64-character
+#: DispatchIdentity the immutable receipt type uses for the same concept -
+#: a known, accepted divergence (the shipped width predates that type and
+#: narrowing it is a separate, persisted-row-census question) - so this is
+#: named on its own rather than borrowed from that stricter type.
+_MAX_DISPATCH_ID_CHARS: int = 128
+
+#: Wider than the edge's published ``MAX_TEAM_PRESET_CHARS`` (64) on purpose:
+#: narrowing this internal field needs a census of persisted accepted-action
+#: rows for a preset id longer than 64 characters first, so it stays at its
+#: shipped width, named, until that census runs.
+_LEGACY_TEAM_PRESET_CHARS: int = 128
+
+#: Hard ceiling on the recursion budget one dispatch may carry, independent
+#: of ``domain_config.graph_recursion_limit`` (the operator-configured
+#: default a run is held to the lower of).
+_MAX_GRAPH_RECURSION_LIMIT: int = 500
+
+#: The worker's own self-minted liveness identity in one heartbeat.
+_MAX_WORKER_ID_CHARS: int = 128
+
+#: How many live thread ids one heartbeat may list.
+_MAX_HEARTBEAT_ACTIVE_THREADS: int = 1024
+
+#: The worker's monotonic stamp, carried as text.
+_MAX_HEARTBEAT_TIMESTAMP_CHARS: int = 128
+
+#: The checkpoint id a dispatch-applied receipt names.
+_MAX_DISPATCH_APPLIED_CHECKPOINT_ID_CHARS: int = 128
+
 
 class SeedTranscriptMessage(BaseModel):
     """A bounded conversation turn copied into a successor's first graph input."""
@@ -126,7 +160,9 @@ class DispatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dispatch_id: str = Field(
-        default_factory=lambda: uuid4().hex, min_length=1, max_length=128
+        default_factory=lambda: uuid4().hex,
+        min_length=1,
+        max_length=_MAX_DISPATCH_ID_CHARS,
     )
     action: Literal["ingest", "resume", "cancel"] = Field(
         description="'ingest' | 'resume' | 'cancel'"
@@ -143,7 +179,7 @@ class DispatchRequest(BaseModel):
     # (str for tool perms, dict for plan approval)
     option_id: str | dict[str, object] | None = None
     # For initial thread creation
-    team_preset: str | None = Field(default=None, max_length=128)
+    team_preset: str | None = Field(default=None, max_length=_LEGACY_TEAM_PRESET_CHARS)
     # The run's active project. Optional on the model because a cancel names no
     # project and a resume rejoins a graph that already holds one; an ingest
     # without it is refused below. Whatever spelling a construction site holds,
@@ -158,7 +194,9 @@ class DispatchRequest(BaseModel):
     # The budget one graph invocation runs under. A cancel enters no graph and
     # the worker never reads it there, so only the actions that run the graph
     # must carry it; that is refused below.
-    recursion_limit: int | None = Field(default=None, ge=1, le=500)
+    recursion_limit: int | None = Field(
+        default=None, ge=1, le=_MAX_GRAPH_RECURSION_LIMIT
+    )
     # SDD blackboard fields
     active_feature: str | None = None
     # feedback-loop: the OPAQUE engine feedback-batch id for a revision run,
@@ -273,11 +311,13 @@ class HeartbeatRequest(BaseModel):
     """Bound the worker liveness projection before updating gateway state."""
 
     type: Literal["heartbeat"] = "heartbeat"
-    worker_id: str = Field(default="", max_length=128)
+    worker_id: str = Field(default="", max_length=_MAX_WORKER_ID_CHARS)
     active_threads: list[
         Annotated[str, Field(min_length=1, max_length=MAX_RUN_ID_CHARS)]
-    ] = Field(default_factory=list, max_length=1024)
-    timestamp: str | None = Field(default=None, max_length=128)
+    ] = Field(default_factory=list, max_length=_MAX_HEARTBEAT_ACTIVE_THREADS)
+    timestamp: str | None = Field(
+        default=None, max_length=_MAX_HEARTBEAT_TIMESTAMP_CHARS
+    )
     uptime_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
@@ -299,7 +339,9 @@ class DispatchApplicationReceiptPayload(BaseModel):
     dispatch_id: str
     action: Literal["ingest", "resume"]
     graph_action_receipt: GraphActionReceipt
-    checkpoint_id: str = Field(min_length=1, max_length=128)
+    checkpoint_id: str = Field(
+        min_length=1, max_length=_MAX_DISPATCH_APPLIED_CHECKPOINT_ID_CHARS
+    )
 
 
 class ExecutionStateProjectionPayload(BaseModel):

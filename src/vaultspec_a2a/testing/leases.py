@@ -45,17 +45,49 @@ from ..lifecycle import procs_home
 from ..utils._process_tree import pid_is_live
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
     from pathlib import Path
 
 __all__ = [
     "LEASE_TTL_MS",
     "Lease",
     "LeaseAcquisitionTimeoutError",
+    "frozen_lease_clock",
     "hold_lease",
     "lease_home",
     "live_shared_holder_count",
 ]
+
+# The one clock every age/freshness read in this module consults. Swappable
+# only through :func:`frozen_lease_clock`, never patched directly: a
+# real-behavior test that must force two markers' ages into the same instant
+# (so an assertion cannot accidentally pass by relying on wall-clock drift
+# instead of the holder token) freezes it there.
+_clock: Callable[[], float] = time.time
+
+
+def _now_ms() -> int:
+    return int(_clock() * 1000)
+
+
+@contextlib.contextmanager
+def frozen_lease_clock(fixed_time: float) -> Generator[None]:
+    """Hold every lease age/freshness read in this module to *fixed_time*.
+
+    Restores the real clock on exit, even on failure.
+    """
+
+    def _fixed() -> float:
+        return fixed_time
+
+    global _clock
+    previous = _clock
+    _clock = _fixed
+    try:
+        yield
+    finally:
+        _clock = previous
+
 
 # Pid-reuse backstop only: the holder's refresher touches the marker every
 # REFRESH_INTERVAL_S, so a live holder's marker never approaches this age and a
@@ -159,7 +191,7 @@ def _write_marker_excl(path: Path, *, owner: str) -> str | None:
         {
             "pid": os.getpid(),
             "owner": owner,
-            "acquired_at_ms": int(time.time() * 1000),
+            "acquired_at_ms": _now_ms(),
             "release_token": secrets.token_hex(16),
         }
     )
@@ -186,7 +218,7 @@ def _live_shared_markers(root: Path, key: str) -> list[Path]:
     # reads a marker created mid-walk as future-dated.
     markers: list[Path] = []
     for marker in root.glob(f"{key}.*{_SHARED_SUFFIX}"):
-        fresh = int(time.time() * 1000)
+        fresh = _now_ms()
         _reap_dead_marker(marker, now_ms=fresh)
         if marker.exists() and _marker_is_live(marker, now_ms=fresh):
             markers.append(marker)
@@ -263,7 +295,7 @@ def _start_refresher(
 def _try_acquire_exclusive(
     root: Path, key: str, *, owner: str
 ) -> tuple[Path, str] | None:
-    now = int(time.time() * 1000)
+    now = _now_ms()
     exclusive = root / f"{key}{_EXCLUSIVE_SUFFIX}"
     _reap_dead_marker(exclusive, now_ms=now)
     if exclusive.exists():
@@ -285,7 +317,7 @@ def _try_acquire_exclusive(
 
 
 def _try_acquire_shared(root: Path, key: str, *, owner: str) -> tuple[Path, str] | None:
-    now = int(time.time() * 1000)
+    now = _now_ms()
     exclusive = root / f"{key}{_EXCLUSIVE_SUFFIX}"
     _reap_dead_marker(exclusive, now_ms=now)
     if exclusive.exists():
@@ -302,7 +334,7 @@ def _try_acquire_shared(root: Path, key: str, *, owner: str) -> tuple[Path, str]
         return None
     # Re-check: if an exclusive claimant won concurrently, retreat so the
     # stronger claim proceeds alone.
-    recheck_ms = int(time.time() * 1000)
+    recheck_ms = _now_ms()
     if exclusive.exists() and _marker_is_live(exclusive, now_ms=recheck_ms):
         with contextlib.suppress(OSError):
             mine.unlink()
@@ -311,7 +343,7 @@ def _try_acquire_shared(root: Path, key: str, *, owner: str) -> tuple[Path, str]
 
 
 def _contention_detail(root: Path, key: str) -> str:
-    now = int(time.time() * 1000)
+    now = _now_ms()
     exclusive = root / f"{key}{_EXCLUSIVE_SUFFIX}"
     parts: list[str] = []
     if exclusive.exists() and _marker_is_live(exclusive, now_ms=now):

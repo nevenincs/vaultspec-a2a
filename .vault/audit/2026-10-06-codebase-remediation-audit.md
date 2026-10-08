@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:9706e9f65f0055f235e1c2ec505604777fdb311b0079fb3462529874ce85703a'
+body_hash: 'sha256:d6909dd42cd7839ac3c6aedba85586e7d7223b2637c252739a3a5c970aa5b6f8'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -1488,3 +1488,38 @@ not a pinned CI prerequisite. This acceptance cannot be inferred from green
 unit, deterministic service, or provider readiness results. CI needs a compatible
 engine revision or artifact, a temporary engine workspace and discovery record,
 and a required-prerequisite invocation of the existing live verdict proof.
+### green-20261008-followon-autonomy | high | Follow-up dispatch lost the run's accepted autonomy
+
+Status: fixed under S99, reviewed during S116; updates
+`green-20261008-local-service-failures`. Type: production correctness, CE2.
+The shared follow-on builder omitted `autonomous`, causing the IPC model's false
+default to turn an accepted autonomous run into a supervised continuation.
+The builder now reads that boolean from the initial accepted input behind its
+immutable graph receipt, refuses non-boolean data, and freezes it into the new
+dispatch. Initial receipt lookup, stored-payload fingerprint, run identity,
+workspace and assignment checks are preserved. No current preset or service
+permission default supplies this authority.
+
+Independent actual-diff review found no critical or high implementation issue.
+Its low malformed-record coverage finding was addressed with real-database
+regressions for null, integer and string values. Ten final graph-authority tests
+pass, including ingest/resume with both boolean modes and receipt tampering;
+nine recovery-authority tests passed in the earlier 16-test combined run.
+Thirty clarification, permission and verdict regressions pass. All four live
+continuation tests pass with Docker required, including the exact queued-turn
+reproduction and gateway-restart promotion (32.71s). Ruff and scoped strict
+basedpyright pass. Review verdict: PASS for this correction and its scoped
+verification; S99 and S116 are not closed wholesale by this checkpoint.
+
+### green-20261008-worker-attachment | medium | Obsolete health fixture bypassed the intended provenance check
+
+Status: fixed; completes the two failure diagnoses in
+`green-20261008-local-service-failures`. Type: verification correctness.
+Both attachment tests used `status=healthy` without `service=worker`, while
+production now requires the canonical worker readiness body. The matching case
+failed readiness, and the mismatch case passed before reaching provenance.
+The real loopback child fixtures now emit `status=ok` and `service=worker`;
+the matching case additionally proves no process ownership is acquired. Both
+service tests pass (8.67s); their health-only request and surviving external
+process assertions remain. Independent review found the correction consistent
+with production readiness and attachment ownership. Review verdict: PASS.

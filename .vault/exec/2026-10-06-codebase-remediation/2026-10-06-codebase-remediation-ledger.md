@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:5e7436d2a29c0b7e43124f5339f2d95a5008c6e890a785bc4de589be28e3e4b3'
+body_hash: 'sha256:0959ce8b20df9db3dca8770c5fd902a7b2cd2fc7323bd377ef3442d0f6dd77dc'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -37,9 +37,18 @@ related:
 - `S116` `verify:` `just test-provider-gates --junitxml=.pytest-tmp/green-20261008/provider-gates-current.xml` -> `pass`
 - `S116` `verify:` `just check-workflow` -> `pass`
 - `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling basedpyright src/vaultspec_a2a/control/tests/test_provider_eligibility_credentials.py` -> `pass`
+- `S99` `M` `src/vaultspec_a2a/control/graph_definition.py`
+- `S99` `M` `src/vaultspec_a2a/control/leased_dispatch.py`
+- `S99` `M` `src/vaultspec_a2a/control/tests/test_graph_definition.py`
+- `S99` `M` `src/vaultspec_a2a/testing/seeding.py`
+- `S99` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- src/vaultspec_a2a/control/tests/test_graph_definition.py --junitxml=.pytest-tmp/green-20261008/autonomy-final.xml --no-showlocals -q` -> `pass`
+- `S99` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m service --require-prerequisite=docker src/vaultspec_a2a/service_tests/test_run_continuation_live.py --junitxml=.pytest-tmp/green-20261008/continuation-fixed.xml --no-showlocals` -> `pass`
+- `S116` `M` `src/vaultspec_a2a/service_tests/test_worker_attach_provenance.py`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- -m service src/vaultspec_a2a/service_tests/test_worker_attach_provenance.py --junitxml=.pytest-tmp/green-20261008/attachment-fixed.xml --no-showlocals` -> `pass`
 
 ## Notes
 
 - `S116` S116 remains open: full non-service baseline and functional gates are pending; this checkpoint records only the strict-type correction and its 16 passing focused tests.
 - `S116` Fresh tool-cores S15 verification repaired the missing checkpoint; metadata-only maintenance reviewed. Permissions service coverage gap recorded; S116 remains open.
 - `S116` Correction: the earlier wheel verification row containing `not_frozen_placeholder` is a transcription error, not an executed command, and must not be used as evidence. The following correctly transcribed selection passed three tests with one deselected; wheel-contents.log records the actual run.
+- `S99` Correction checkpoint only: S99 remains unchecked pending broader historical execution reconciliation.

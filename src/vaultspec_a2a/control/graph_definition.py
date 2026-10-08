@@ -12,20 +12,35 @@ from ..thread.action_receipts import (
 from ..thread.enums import ControlActionType
 from ..thread.idempotency import thread_create_action_key
 from ..utils.coercion import decode_json_object
-from .accepted_input import read_accepted_input
+from .accepted_input import AcceptedActionInput, read_accepted_input
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..thread.executable_graph import FrozenGraphDefinition
 
-__all__ = ["read_accepted_graph_definition"]
+__all__ = ["read_accepted_graph_definition", "read_initial_accepted_input"]
 
 
 async def read_accepted_graph_definition(
     db: AsyncSession, thread_id: str
 ) -> FrozenGraphDefinition:
     """Return the executable program the run was accepted under.
+
+    The initial input reader validates the immutable receipt before this
+    projection exposes the program to a later action or read surface.
+    """
+    accepted = await read_initial_accepted_input(db, thread_id)
+    definition = accepted.graph_definition
+    if definition is None:
+        raise ValueError("initial graph authority carries no graph definition")
+    return definition
+
+
+async def read_initial_accepted_input(
+    db: AsyncSession, thread_id: str
+) -> AcceptedActionInput:
+    """Read the initial non-secret run input behind its immutable receipt.
 
     The receipt is matched against the payload AS THE ROW STORES IT, which is
     what the other reader of a stored accepted action does. Re-dumping the model
@@ -36,7 +51,7 @@ async def read_accepted_graph_definition(
     Raises:
         ValueError: The run has no current initial graph authority, its payload
             or receipt is unreadable, the receipt does not match the row, or the
-            accepted authority belongs to another run or carries no program.
+            accepted authority belongs to another run.
     """
     action = await get_control_action_by_idempotency_key(
         db,
@@ -66,7 +81,4 @@ async def read_accepted_graph_definition(
         raise ValueError("initial graph authority does not match its receipt")
     if accepted.dispatch["thread_id"] != thread_id:
         raise ValueError("initial graph authority belongs to a different run")
-    definition = accepted.graph_definition
-    if definition is None:
-        raise ValueError("initial graph authority carries no graph definition")
-    return definition
+    return accepted

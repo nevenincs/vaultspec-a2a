@@ -31,7 +31,7 @@ from .action_lease import finalize_control_action_acceptance, record_dispatch_fa
 from .dispatch import safe_dispatch
 from .dispatch_receipts import bind_graph_action_receipt
 from .execution_authority import ExecutionAuthorityError, resolve_execution_authority
-from .graph_definition import read_accepted_graph_definition
+from .graph_definition import read_initial_accepted_input
 
 if TYPE_CHECKING:
     import httpx
@@ -134,7 +134,13 @@ async def build_followon_dispatch(
     if workspace_root is None:
         return DispatchRefusal(FailureType.NO_ACTIVE_PROJECT, _NO_ACTIVE_PROJECT)
     try:
-        graph_definition = await read_accepted_graph_definition(db, thread_id)
+        initial_input = await read_initial_accepted_input(db, thread_id)
+        graph_definition = initial_input.graph_definition
+        if graph_definition is None:
+            raise ValueError("initial graph authority carries no graph definition")
+        autonomous = initial_input.dispatch["autonomous"]
+        if not isinstance(autonomous, bool):
+            raise ValueError("initial graph authority carries invalid autonomy")
         execution_authority = resolve_execution_authority(thread_metadata)
     except (ExecutionAuthorityError, ValueError) as exc:
         return DispatchRefusal(FailureType.INCOMPATIBLE_STATE, str(exc))
@@ -143,6 +149,7 @@ async def build_followon_dispatch(
         thread_id=thread_id,
         team_preset=graph_definition.team_id,
         graph_definition=graph_definition,
+        autonomous=autonomous,
         workspace_root=workspace_root,
         recursion_limit=accepted_recursion_budget(graph_definition),
         model_assignment=execution_authority.model_assignment,

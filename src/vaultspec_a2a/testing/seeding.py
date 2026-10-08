@@ -146,6 +146,7 @@ async def seed_create_action(
     *,
     workspace: Path | None = None,
     team_preset: str = DEFAULT_TEAM_PRESET,
+    autonomous: bool = False,
     recovery_deadline_at: datetime | None = None,
 ) -> GraphActionReceipt:
     """Journal the accepted create action an existing thread's writer names.
@@ -164,6 +165,7 @@ async def seed_create_action(
         action="ingest",
         thread_id=thread_id,
         content=_CONTENT,
+        autonomous=autonomous,
         workspace_root=str(workspace),
         recursion_limit=25,
         team_preset=team_preset,

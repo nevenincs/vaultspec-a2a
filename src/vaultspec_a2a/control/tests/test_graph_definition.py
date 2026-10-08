@@ -56,6 +56,84 @@ _WRONG_FINGERPRINT = (
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("autonomous", [False, True])
+@pytest.mark.parametrize("action", [ControlActionType.INGEST, ControlActionType.RESUME])
+async def test_followon_preserves_the_initial_accepted_autonomy(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+    autonomous: bool,
+    action: ControlActionType,
+) -> None:
+    thread_id = "frozen-run-autonomy"
+    metadata = current_execution_metadata(tmp_path)
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            write_authority=RunWriteAuthority(
+                0, 1, ControlActionType.INGEST, "accepted"
+            ),
+            thread_id=thread_id,
+            metadata=metadata,
+        )
+        await seed_create_action(
+            session, thread_id, workspace=tmp_path, autonomous=autonomous
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        dispatch = await build_followon_dispatch(
+            session,
+            thread_id=thread_id,
+            thread_metadata=metadata,
+            action=action,
+            content="follow-up",
+        )
+
+    assert isinstance(dispatch, DispatchRequest)
+    assert dispatch.autonomous is autonomous
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("autonomous", [None, 1, "true"])
+async def test_followon_refuses_non_boolean_accepted_autonomy(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+    autonomous: object,
+) -> None:
+    async with session_factory() as session:
+        thread_id, receipt = await seed_accepted_thread(session, workspace=tmp_path)
+        action = await get_control_action_by_idempotency_key(
+            session,
+            thread_id=thread_id,
+            idempotency_key=thread_create_action_key(thread_id),
+        )
+        assert action is not None
+        assert action.payload_json is not None
+        payload = decode_json_object(action.payload_json)
+        assert payload is not None
+        dispatch_fields = payload["dispatch"]
+        assert isinstance(dispatch_fields, dict)
+        dispatch_fields["autonomous"] = autonomous
+        action.payload_json = json.dumps(payload)
+        action.graph_receipt_json = receipt.model_copy(
+            update={"payload_fingerprint": control_action_payload_fingerprint(payload)}
+        ).model_dump_json()
+        await session.commit()
+
+    async with session_factory() as session:
+        dispatch = await build_followon_dispatch(
+            session,
+            thread_id=thread_id,
+            thread_metadata=current_execution_metadata(tmp_path),
+            action=ControlActionType.RESUME,
+        )
+
+    assert not isinstance(dispatch, DispatchRequest)
+    assert dispatch.failure_type is FailureType.INCOMPATIBLE_STATE
+    assert dispatch.reason == "initial graph authority carries invalid autonomy"
+
+
+@pytest.mark.asyncio
 async def test_a_tampered_receipt_refuses_the_graph_definition_read(
     session_factory: async_sessionmaker[AsyncSession],
     tmp_path: Path,

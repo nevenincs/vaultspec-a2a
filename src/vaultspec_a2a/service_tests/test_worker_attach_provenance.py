@@ -39,7 +39,7 @@ def test_provenance_mismatch_fails_closed_without_eviction(
     assert foreign_gateway_url.rstrip("/") != settings.gateway_url.rstrip("/"), (
         "the modeled mismatch must actually differ from this gateway's URL"
     )
-    body = {"status": "healthy", "gateway_url": foreign_gateway_url}
+    body = {"status": "ok", "service": "worker", "gateway_url": foreign_gateway_url}
 
     request_log = tmp_path / f"worker-requests-{port}.log"
     with foreign_worker(port, body, request_log=request_log) as worker:
@@ -73,7 +73,7 @@ def test_matching_provenance_attaches(tmp_path: Path) -> None:
     from ..control.worker_management import LazyWorkerSpawner
 
     port = free_port()
-    body = {"status": "healthy", "gateway_url": settings.gateway_url}
+    body = {"status": "ok", "service": "worker", "gateway_url": settings.gateway_url}
 
     request_log = tmp_path / f"worker-requests-{port}.log"
     with foreign_worker(port, body, request_log=request_log) as worker:
@@ -83,6 +83,7 @@ def test_matching_provenance_attaches(tmp_path: Path) -> None:
         asyncio.run(spawner.ensure_worker())
 
         assert spawner.spawned is True
+        assert spawner.process is None
         requests = request_log.read_text(encoding="utf-8").splitlines()
         assert all(line.startswith("GET /health") for line in requests), requests
         assert worker.poll() is None

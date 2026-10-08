@@ -3,9 +3,9 @@ tags:
   - '#audit'
   - '#container-release'
 date: '2026-10-04'
-modified: '2026-10-04'
+modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:6a165a3131243834305e225b8c09a43e5ad8dae81743986b060c47fc25c04bcd'
+body_hash: 'sha256:626b88ca9d89197c0d35d517daa50d79adc56692ca02bd436e908aaa50b11feb'
 related:
   - "[[2026-10-04-container-release-plan]]"
 ---

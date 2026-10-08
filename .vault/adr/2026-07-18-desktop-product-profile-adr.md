@@ -3,8 +3,8 @@ tags:
   - '#adr'
   - '#desktop-product-profile'
 date: '2026-07-18'
-modified: '2026-10-07'
-body_hash: 'sha256:eae93bcbd9720c702ec99a910a15620cf5483e06676fa1c1fa127bb8a28ca909'
+modified: '2026-10-08'
+body_hash: 'sha256:9b8793e3a22a36ab179e6f1ccbf8341ccee0827c2ce653d7b47a61cf638c7450'
 related:
   - "[[2026-07-18-desktop-product-profile-research]]"
   - "[[2026-07-18-desktop-product-profile-reference]]"
@@ -326,7 +326,6 @@ behavior no longer stands in for product evidence.
 - Update transactions become more complex because database compatibility, process drain, receipt activation, and rollback are one product invariant.
 - The standalone MCP adapter remains independently invokable and therefore requires its own caller-owned lifecycle and certification path.
 - The profile creates a stable foundation for later size optimization, including a proven Bun-based provider payload, without making that optimization a prerequisite for shipment.
-
 
 Desktop execution restriction accepted 2026-10-04: until a proven desktop OS isolation backend exists, native provider, terminal and MCP launch paths refuse before child acquisition, and run admission reports blocked. Gateway health, lifecycle, queries and cancellation remain available. This temporarily restricts the execution availability described above; it does not weaken the real artifact/provider acceptance criteria. Grounding and authority: `2026-10-04-workspace-root-authority-desktop-native-admission-adr`.
 

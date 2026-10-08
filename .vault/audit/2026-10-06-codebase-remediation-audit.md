@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:ec9f108ea2663413f8db4ec28fb3044ec83ea69d09cbf22bd2424db7b5bdcb4f'
+body_hash: 'sha256:6848665a2b9443550809ee5bb48e211d771cdfba592e12b8e591297ad05136b8'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -1392,3 +1392,29 @@ double-freeze (dd210bee). Record fresh verification before closing their owning
 Steps; do not fabricate historical test results or infer completion from an
 unchecked plan. PV29's service rejection/reapproval reproduction and the
 paired history/SQLite service-load case still need post-fix evidence.
+### green-20261008-vault-recheck | low | Vault evidence and metadata repairs verified
+
+Status: fixed; supersedes the open status of consolidation-vault-evidence and
+consolidation-vault-hygiene. Type: workflow evidence and documentation metadata.
+The current S15 registry-vocabulary test passed through the resource-aware runner
+on 2026-10-08 (one test, report `.pytest-tmp/green-20261008/tool-cores-s15.xml`).
+The owning tool-cores ledger records that fresh command and explicitly states
+that historical execution evidence was not recovered. Owning Core markdown and
+modified-stamp maintenance repaired whitespace and body attestations. The full
+`uv run --no-sync vaultspec-core vault check all` now passes every check.
+Actual-diff review found only the fresh verification row, whitespace cleanup,
+and attestation updates; accepted decision text and Step state are unchanged.
+Review verdict: PASS for this bounded repair; remediation S116 stays open.
+
+### green-20261008-plan-revision-coverage | medium | Service rejection test covers a narrower contract than REVIEW-062
+
+Status: open; owner codebase-remediation S116 and the permissions service audit.
+Type: verification coverage. The current
+`test_supervisor_plan_rejection_requires_revision_before_reapproval` uses the
+real SQLite-backed service stack and checks a new supervisor approval pause.
+Its preset has no plan-phase worker, so it does not prove the worker-revision
+then fresh-supervisor-approval sequence specified by REVIEW-062 in
+`2026-03-31-integration-testing-smoke-tests-api-verification-review-audit`.
+A passing current test must not be reported as proof of that stronger sequence.
+The seven-test permissions service module is being rerun with Docker required;
+its outcome remains pending at this checkpoint.

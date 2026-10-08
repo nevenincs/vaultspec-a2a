@@ -21,9 +21,7 @@ the production coordinator.
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 import time
-from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
@@ -31,7 +29,7 @@ import pytest
 from ...conftest import SqlitePosture
 from ...database import get_thread
 from ...streaming import RelayHub
-from ...testing import seed_completed_authority, settings_override
+from ...testing import held_write_lock, seed_completed_authority, settings_override
 from ...thread.enums import DegradedReason, ThreadStatus
 from ..thread_state_service import capture_thread_state
 
@@ -70,22 +68,6 @@ def _short_lock_wait() -> Generator[None]:
         yield
 
 
-@contextmanager
-def _competing_writer(
-    database_file: Path, run_id: str
-) -> Generator[sqlite3.Connection]:
-    """Hold the application store's write lock from another real connection."""
-    holder = sqlite3.connect(database_file, isolation_level=None, timeout=10.0)
-    try:
-        holder.execute("PRAGMA busy_timeout=10000")
-        holder.execute("BEGIN IMMEDIATE")
-        holder.execute("UPDATE threads SET title = ? WHERE id = ?", ("held", run_id))
-        yield holder
-    finally:
-        holder.rollback()
-        holder.close()
-
-
 async def _capture_status(
     session_factory: SessionFactory,
     checkpointer: AsyncSqliteSaver,
@@ -115,7 +97,11 @@ async def test_a_read_answers_durable_truth_while_the_store_is_locked(
             session, checkpointer, title="contended read settlement"
         )
 
-    with _competing_writer(database_file, run_id):
+    with held_write_lock(
+        database_file,
+        statement="UPDATE threads SET title = ? WHERE id = ?",
+        parameters=("held", run_id),
+    ):
         status, degraded = await _capture_status(session_factory, checkpointer, run_id)
 
     # The durable row is what it was: the settlement was refused, not
@@ -161,7 +147,11 @@ async def test_a_transient_writer_costs_the_settlement_latency_not_the_read(
             session, checkpointer, title="transient read settlement"
         )
 
-    with _competing_writer(database_file, run_id) as holder:
+    with held_write_lock(
+        database_file,
+        statement="UPDATE threads SET title = ? WHERE id = ?",
+        parameters=("held", run_id),
+    ) as holder:
 
         async def release_after_one_attempt() -> None:
             await asyncio.sleep(_TRANSIENT_HOLD_SECONDS)

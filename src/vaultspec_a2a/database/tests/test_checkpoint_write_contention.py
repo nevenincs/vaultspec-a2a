@@ -23,18 +23,16 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 import time
-from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
 from langgraph.checkpoint.base import empty_checkpoint
 
-from ...testing import settings_override
+from ...testing import held_write_lock, settings_override
 from ..checkpoints import open_checkpointer
 from ..session import WriteContentionError, checkpoint_wal
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
@@ -65,20 +63,6 @@ def _competing_row(checkpoint_id: str) -> str:
     )
 
 
-@contextmanager
-def _competing_writer(store: Path) -> Generator[sqlite3.Connection]:
-    """Hold the checkpoint store's write lock from another real connection."""
-    holder = sqlite3.connect(store, isolation_level=None, timeout=10.0)
-    try:
-        holder.execute("PRAGMA busy_timeout=10000")
-        holder.execute("BEGIN IMMEDIATE")
-        holder.execute(_competing_row("held"))
-        yield holder
-    finally:
-        holder.rollback()
-        holder.close()
-
-
 @pytest.mark.asyncio
 async def test_a_transient_competing_writer_delays_a_checkpoint_write(
     tmp_path: Path,
@@ -90,7 +74,7 @@ async def test_a_transient_competing_writer_delays_a_checkpoint_write(
         sqlite_busy_timeout_ms=_BUSY_TIMEOUT_MS,
     ):
         async with open_checkpointer() as checkpointer:
-            with _competing_writer(store) as holder:
+            with held_write_lock(store, statement=_competing_row("held")) as holder:
 
                 async def release_after_one_attempt() -> None:
                     await asyncio.sleep(_TRANSIENT_HOLD_SECONDS)
@@ -131,7 +115,7 @@ async def test_exhausted_checkpoint_contention_leaves_no_transaction_open(
     ):
         async with open_checkpointer() as checkpointer:
             await checkpointer.aput(_run_config(), empty_checkpoint(), {}, {})
-            with _competing_writer(store) as holder:
+            with held_write_lock(store, statement=_competing_row("held")) as holder:
                 with pytest.raises(WriteContentionError) as refused:
                     await checkpointer.aput(_run_config(), empty_checkpoint(), {}, {})
                 holder.commit()

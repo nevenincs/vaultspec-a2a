@@ -14,6 +14,7 @@ from ...api.dependencies import (
     require_lifecycle_capability,
 )
 from ...api.routes import admin, gateway
+from ...desktop.credentials import MAX_CREDENTIAL_BYTES
 
 _CAPABILITY = "ownership-capability-token-abcdef0123456789"
 
@@ -116,3 +117,19 @@ async def test_unconfigured_capability_fails_closed() -> None:
     app = _app(capability=None)
     response = await _post(app, {LIFECYCLE_CAPABILITY_HEADER: _CAPABILITY})
     assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_an_over_long_capability_header_is_refused_at_the_edge() -> None:
+    """A header wider than the credential bound is refused before the compare.
+
+    The header was unbounded: an authenticated caller could demand an
+    unbounded constant-time comparison before anything refused it. Bounded at
+    MAX_CREDENTIAL_BYTES, the width every on-disk capability file is already
+    held to, so a real credential is never the one this refuses.
+    """
+    app = _app(capability=_CAPABILITY)
+    response = await _post(
+        app, {LIFECYCLE_CAPABILITY_HEADER: "a" * (MAX_CREDENTIAL_BYTES + 1)}
+    )
+    assert response.status_code == 422, response.text

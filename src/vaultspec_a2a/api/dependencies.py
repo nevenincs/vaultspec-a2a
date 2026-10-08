@@ -21,6 +21,7 @@ from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import Checkpointer, get_db
+from ..desktop.credentials import MAX_CREDENTIAL_BYTES
 from ..streaming import RelayHub
 
 # The header carrying the receipt-bound lifecycle ownership capability. Distinct
@@ -42,7 +43,11 @@ __all__ = [
 
 async def require_lifecycle_capability(
     request: Request,
-    capability: str | None = Header(default=None, alias=LIFECYCLE_CAPABILITY_HEADER),
+    capability: str | None = Header(
+        default=None,
+        alias=LIFECYCLE_CAPABILITY_HEADER,
+        max_length=MAX_CREDENTIAL_BYTES,
+    ),
 ) -> None:
     """Require the receipt-bound lifecycle ownership capability, in constant time.
 

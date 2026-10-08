@@ -554,7 +554,9 @@ class RunStatusResponse(BaseModel):
     proposal_ids: list[str] = Field(default_factory=list)
     changeset_ids: list[str] = Field(default_factory=list)
     approval_status: ApprovalStatus | None = None
-    approval_request_id: str | None = None
+    approval_request_id: str | None = Field(
+        default=None, max_length=MAX_APPROVAL_REQUEST_ID_CHARS
+    )
     checkpoint_id: str | None = None
     last_sequence: int
     # Whether this run's progress stream can be RESUMED from the id its frames

@@ -88,7 +88,7 @@ from typing import TYPE_CHECKING
 from ..graph.enums import Provider
 from ..thread.errors import ConfigError
 from .binary_version import next_minor_version, parse_binary_version
-from .execution_modes import EXTERNAL_EXECUTION_MODES
+from .execution_modes import ACP_BACKEND_LANES, EXTERNAL_EXECUTION_MODES
 from .in_process_catalog import in_process_catalog_key, in_process_lane
 from .lane_registry import registered_lanes
 from .provider_catalog import ProviderCatalogKey
@@ -349,24 +349,44 @@ def _launcher_admission(
 
     A lane's launcher is resolved by the provider factory, and each lane
     differently, because the binary that completed the turn is not always the
-    command the lane spawns: the Claude-backed lanes pin a CLI behind an ACP
-    wrapper, while Codex probes the service-path executable it hands its child.
-    The version comparison is therefore ASKED of the factory rather than
-    repeated here, and this function is only the pairing between a recorded
-    proof and the entry that checks it.
+    command the lane spawns: the Claude-backed lanes (:data:`ACP_BACKEND_LANES`)
+    pin a CLI behind an ACP wrapper, while Codex and Kimi probe the
+    service-path executable they hand their child. The version comparison is
+    therefore ASKED of the factory rather than repeated here, and this function
+    is only the pairing between a recorded proof and the entry that checks it.
+
+    This call site carries no run workspace - eligibility is asked independent
+    of any particular run - so every entry paired here is the factory's
+    workspace-free probe (:func:`~.factory.claude_binary_proof_reason`,
+    :func:`~.factory.codex_binary_proof_reason`,
+    :func:`~.factory.kimi_binary_proof_reason`), never the workspace-scoped
+    sibling catalog discovery uses.
 
     The pairing is hand-written beside the declaration for the same reason the
     declaration is: a proof is a claim about a binary identity, so a lane added
     above without an entry here carries no way to check the identity it claims,
     and :func:`served_lane_eligible` refuses it rather than serving it on the
-    proof alone. The factory is imported at call time because it reads this
-    declaration itself.
+    proof alone. Every lane this module can record proof for is paired, not
+    only the one with a proof entry today, so recording a future lane's proof
+    needs no second edit here. The factory is imported at call time because it
+    reads this declaration itself.
     """
-    if lane is not Provider.CODEX:
-        return None
-    from .factory import codex_binary_proof_reason
+    if lane in ACP_BACKEND_LANES:
+        from .factory import claude_binary_proof_reason
 
-    return codex_binary_proof_reason
+        def _claude_admission() -> ProviderRuntimeUnavailableReason | None:
+            return claude_binary_proof_reason(lane)
+
+        return _claude_admission
+    if lane is Provider.CODEX:
+        from .factory import codex_binary_proof_reason
+
+        return codex_binary_proof_reason
+    if lane is Provider.KIMI:
+        from .factory import kimi_binary_proof_reason
+
+        return kimi_binary_proof_reason
+    return None
 
 
 def served_lane_eligible(provider: Provider | str | None) -> bool:

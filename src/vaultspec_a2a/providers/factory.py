@@ -293,6 +293,31 @@ def _claude_binary_proof_reason(
     )
 
 
+def claude_binary_proof_reason(
+    provider: Provider,
+) -> ProviderRuntimeUnavailableReason | None:
+    """Resolve and probe a Claude-backed lane's launcher with no run workspace.
+
+    The public, workspace-free sibling of :func:`_claude_binary_proof_reason`.
+    A caller that admits a lane independent of any particular run - served-
+    profile eligibility (``lane_admission._launcher_admission``), asked with no
+    workspace at all - has nothing to build :func:`resolve_env_vars`'s
+    workspace-scoped environment from. ``pin_claude_executable`` only ever
+    reads ``CLAUDE_EXECUTABLE_ENV`` out of the env it is given, a name the
+    workspace scrub carries through unchanged, so the raw process environment
+    answers the same authority chain (capsule, explicit setting, inherited
+    environment, installed PATH, locked vendored asset) this lane's actual
+    launch resolves.
+    """
+    if provider not in PROVEN_TURN_LANES:
+        return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+    try:
+        resolved = pin_claude_executable(dict(os.environ))
+    except ProviderRuntimeUnavailableError as exc:
+        return exc.reason or ProviderRuntimeUnavailableReason.CLAUDE_CLI_UNAVAILABLE
+    return binary_proof_reason(provider, str(resolved.path), resolved.authority)
+
+
 def require_binary_proof(reason: ProviderRuntimeUnavailableReason | None) -> None:
     if reason is not None:
         raise ProviderRuntimeUnavailableError(

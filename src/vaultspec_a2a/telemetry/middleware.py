@@ -22,8 +22,8 @@ caller-supplied operation attributes remain diagnostic data.
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, override
+from contextlib import asynccontextmanager, contextmanager
+from typing import TYPE_CHECKING, Any, override
 
 from opentelemetry import context as otel_context
 from opentelemetry import propagate, trace
@@ -34,7 +34,7 @@ from ..utils import redact_url
 from .instrumentation import get_tracer, telemetry_settings
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Mapping
 
     from starlette.requests import Request
     from starlette.responses import Response
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "TelemetryMiddleware",
+    "open_internal_span",
     "operation_span",
     "trace_headers",
 ]
@@ -160,6 +161,43 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
             otel_context.detach(token)
 
 
+@contextmanager
+def open_internal_span(
+    tracer: trace.Tracer,
+    name: str,
+    attributes: Mapping[str, Any],
+) -> Generator[trace.Span]:
+    """Open ``name`` on ``tracer`` as an ``INTERNAL`` span and set ``attributes``.
+
+    The one span-opening body behind every in-process operation span this
+    process creates. ``INTERNAL`` is the correct kind for both callers: a
+    worker dispatch or graph compilation is work this process does to itself,
+    not a server handling an inbound request, and the streaming aggregator's
+    per-event spans were never inbound requests either (``SpanKind.SERVER``
+    is reserved for ``TelemetryMiddleware``, which spans a real inbound HTTP
+    request).
+
+    :func:`operation_span` wraps this in an async context manager for the
+    worker and gateway's in-process operations;
+    ``OTelAggregatorHook.start_span`` (``telemetry/aggregator_hook.py``) calls
+    it directly, keeping its own tracer scope (``vaultspec_a2a.streaming.aggregator``,
+    DECISIONS Q48) while sharing this opening logic (Q29) so the kind and the
+    attribute-setting loop cannot drift between the two callers.
+
+    Args:
+        tracer: The tracer to open the span on.
+        name: Span name.
+        attributes: String span attributes to set before yielding.
+
+    Yields:
+        The active OTel ``Span``.
+    """
+    with tracer.start_as_current_span(name, kind=SpanKind.INTERNAL) as span:
+        for key, value in attributes.items():
+            span.set_attribute(key, value)
+        yield span
+
+
 @asynccontextmanager
 async def operation_span(
     operation: str,
@@ -171,8 +209,10 @@ async def operation_span(
     ``TelemetryMiddleware`` spans each inbound HTTP request, but much of the
     work a request starts outlives it or runs where no request is in scope: a
     worker's dispatch, ingest, resume and graph compilation. Each gets its own
-    span from this helper. An exception leaving the block is recorded on the
-    span and marks it as an error before it propagates.
+    span from this helper, opened ``INTERNAL`` rather than ``SERVER`` because
+    none of it is a server handling an inbound request. An exception leaving
+    the block is recorded on the span and marks it as an error before it
+    propagates.
 
     Args:
         operation: Span name (e.g. ``"executor.ingest"``).
@@ -197,14 +237,10 @@ async def operation_span(
         yield trace.NonRecordingSpan(trace.INVALID_SPAN_CONTEXT)
         return
 
-    with _get_tracer().start_as_current_span(
-        operation,
-        kind=SpanKind.SERVER,
-    ) as span:
-        if thread_id is not None:
-            span.set_attribute("thread_id", thread_id)
-        for key, value in attributes.items():
-            span.set_attribute(key, value)
+    span_attributes: dict[str, Any] = dict(attributes)
+    if thread_id is not None:
+        span_attributes["thread_id"] = thread_id
+    with open_internal_span(_get_tracer(), operation, span_attributes) as span:
         yield span
 
 

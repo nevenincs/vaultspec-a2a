@@ -132,6 +132,83 @@ def test_status_with_dead_recorded_pid_reports_stopped(tmp_path: Path) -> None:
     assert status.pid == dead.pid
 
 
+def test_stop_leaves_a_stranger_that_inherited_the_recorded_pid_alone(
+    tmp_path: Path,
+) -> None:
+    """A reused pid is not the resident the record names, so it is not felled.
+
+    A crashed resident leaves its record behind, and the operating system is
+    free to hand that pid to anything. The record then names a live pid that was
+    never this service: pid-liveness alone reads it as the resident and fells
+    whatever now holds it - an unrelated build, editor, or another stack's
+    service - because the endpoint is free, which is the one claim that licenses
+    the kill outright.
+
+    The start fingerprint is what tells the two apart. The record here carries
+    the fingerprint of THIS process, a real identity belonging to a real but
+    different process, exactly as a pid-reuse record does.
+    """
+    from ...lifecycle.singleton import current_process_fingerprint
+
+    home = tmp_path / "home"
+    stranger = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        write_service_json(
+            service_json_path(home),
+            port=free_port(),
+            pid=stranger.pid,
+            start_fingerprint=current_process_fingerprint(),
+            allow_tokenless=True,
+        )
+
+        with settings_override(a2a_home=home):
+            status = stop_service(home)
+
+        assert pid_is_live(stranger.pid) is True, (
+            "stop felled the stranger that inherited the recorded pid"
+        )
+        assert status.state == "stopped"
+    finally:
+        stranger.kill()
+        stranger.wait(timeout=10)
+
+
+def test_stop_fells_the_recorded_resident_whose_fingerprint_still_matches(
+    tmp_path: Path,
+) -> None:
+    """The fingerprint check must not disarm the stop verb it guards.
+
+    Same shape as the reuse case above and the same free endpoint, differing
+    only in the one fact under test: the record names the process that is
+    actually running under that pid. That record is addressable, so the recorded
+    tree is felled.
+    """
+    home = tmp_path / "home"
+    resident = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        write_service_json(
+            service_json_path(home),
+            port=free_port(),
+            pid=resident.pid,
+            allow_tokenless=True,
+        )
+        recorded = read_resident_service(home)[1]
+        assert recorded is not None
+        assert recorded.start_fingerprint is not None, (
+            "the record published no start fingerprint to match against"
+        )
+
+        with settings_override(a2a_home=home):
+            stop_service(home)
+
+        wait_pid_gone(resident.pid, timeout=10)
+        assert pid_is_live(resident.pid) is False
+    finally:
+        if resident.poll() is None:
+            resident.kill()
+        resident.wait(timeout=10)
+
+
 def test_stop_sends_nothing_to_an_endpoint_the_recorded_pid_does_not_own(
     tmp_path: Path,
 ) -> None:

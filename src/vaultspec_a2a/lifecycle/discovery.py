@@ -59,7 +59,7 @@ from ..desktop._platform_acl import (
 )
 from ..desktop.credentials import MAX_CREDENTIAL_BYTES
 from ..utils import path_is_link_like
-from ..utils._process_tree import pid_is_live
+from ..utils._process_tree import pid_is_live, process_start_identity
 from ..utils.atomic_write import atomic_write_text
 from ..utils.coercion import coerce_int, coerce_object_mapping
 
@@ -77,6 +77,7 @@ __all__ = [
     "health_payload_ready",
     "probe_health",
     "read_resident_service",
+    "recorded_resident_is_live",
     "remove_service_json_if_owned",
     "service_json_path",
     "write_desktop_discovery",
@@ -102,13 +103,21 @@ class DiscoveryState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ServiceInfo:
-    """A parsed discovery record plus its validated local handoff credential."""
+    """A parsed discovery record plus its validated local handoff credential.
+
+    ``start_fingerprint`` is the kernel start stamp of the process the record
+    names, so a reader can tell the publishing process from an unrelated one
+    that has since inherited its pid. It is ``None`` for a record published
+    before this field existed, or on a platform without a cheap start-time
+    source; a reader then rests on pid-liveness alone.
+    """
 
     port: int
     pid: int | None = None
     last_heartbeat: int | None = None
     service_token: str | None = None
     handoff_reference: str | None = None
+    start_fingerprint: str | None = None
 
     @override
     def __repr__(self) -> str:
@@ -117,8 +126,41 @@ class ServiceInfo:
         return (
             f"ServiceInfo(port={self.port}, pid={self.pid}, "
             f"last_heartbeat={self.last_heartbeat}, service_token={token}, "
-            f"handoff_reference={self.handoff_reference!r})"
+            f"handoff_reference={self.handoff_reference!r}, "
+            f"start_fingerprint={self.start_fingerprint!r})"
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _RecordedResident:
+    """The process identity a discovery record published, for the liveness rule."""
+
+    pid: int
+    start_fingerprint: str | None
+
+
+def recorded_resident_is_live(info: ServiceInfo) -> bool:
+    """Whether the process that published *info* is provably still running.
+
+    Both halves of the record's process identity, judged by the one liveness
+    rule this package owns
+    (:func:`~vaultspec_a2a.lifecycle.singleton.recorded_process_is_live`): a pid
+    that is gone is dead, and a live pid carrying a different start fingerprint
+    is a REUSED pid now belonging to an unrelated process, never the resident the
+    record names. A record naming no pid names no process to be live.
+
+    This is the half of the resident clause the listener claim cannot supply.
+    Ownership of the recorded endpoint says who may receive a credential; this
+    says whether the record still describes anyone at all, which is what keeps a
+    stop verb from felling the stranger that inherited a crashed resident's pid.
+    """
+    from .singleton import recorded_process_is_live
+
+    if info.pid is None:
+        return False
+    return recorded_process_is_live(
+        _RecordedResident(pid=info.pid, start_fingerprint=info.start_fingerprint)
+    )
 
 
 def service_json_path(a2a_home: Path) -> Path:
@@ -271,12 +313,14 @@ def _service_info(info: dict[str, object], discovery_path: Path) -> ServiceInfo 
         return None
     reference = info.get("handoff_reference")
     token = _read_handoff_credential(discovery_path, reference)
+    fingerprint = info.get("start_fingerprint")
     return ServiceInfo(
         port=port,
         pid=coerce_int(info.get("pid")),
         last_heartbeat=coerce_int(info.get("last_heartbeat")),
         service_token=token,
         handoff_reference=reference if isinstance(reference, str) else None,
+        start_fingerprint=fingerprint if isinstance(fingerprint, str) else None,
     )
 
 
@@ -339,6 +383,7 @@ class _ServiceWriteOptional(TypedDict, total=False):
     service_token: str | None
     now_ms: int | None
     allow_tokenless: bool
+    start_fingerprint: str | None
 
 
 class _ServiceWriteArgs(_ServiceWriteOptional):
@@ -351,6 +396,14 @@ def write_service_json(path: Path, **kwargs: Unpack[_ServiceWriteArgs]) -> None:
 
     Writes to a sibling temp file then ``os.replace`` so a concurrent reader
     never observes a partially written record.
+
+    The record carries the start fingerprint of the pid it names, so a reader can
+    tell this resident from an unrelated process that later inherits its pid.
+    It is read for *pid* rather than taken from this process, because a publisher
+    may record a pid other than its own and the two identities must not be mixed;
+    a caller holding a fingerprint already may pass *start_fingerprint* instead.
+    A pid whose identity cannot be read publishes none, and a reader then rests
+    on pid-liveness alone.
 
     A publication without *service_token* is destructive rather than inert: it
     strips the handoff reference from the record and unlinks the credential
@@ -376,9 +429,13 @@ def write_service_json(path: Path, **kwargs: Unpack[_ServiceWriteArgs]) -> None:
             "unauthenticated; pass allow_tokenless=True to un-publish on purpose"
         )
     _harden_record_parent(path.parent)
+    fingerprint = kwargs.get("start_fingerprint")
+    if fingerprint is None:
+        fingerprint = process_start_identity(pid)
     record: dict[str, object] = {
         "port": port,
         "pid": pid,
+        "start_fingerprint": fingerprint,
         "last_heartbeat": now_ms if now_ms is not None else int(time.time() * 1000),
     }
     credential_path = path.parent.resolve(strict=True) / HANDOFF_CREDENTIAL

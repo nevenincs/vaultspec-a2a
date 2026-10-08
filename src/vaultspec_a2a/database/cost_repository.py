@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
@@ -28,46 +27,30 @@ async def append_cost_record(
     return await save_model(session, record)
 
 
-def _cost_totals_select() -> Select[tuple[int, int, Decimal]]:
-    """Build the shared token/cost aggregate projection.
-
-    ``estimated_cost`` coalesces to a ``Decimal`` zero rather than ``0.0``: the
-    literal is bound through the column's own ``MoneyAmount`` type, and a float
-    zero would reintroduce the very type the column exists to keep out.
-    """
+def _cost_totals_select() -> Select[tuple[int, int]]:
+    """Build the shared token aggregate projection."""
     return select(
         func.coalesce(func.sum(CostTrackingModel.input_tokens), 0),
         func.coalesce(func.sum(CostTrackingModel.output_tokens), 0),
-        func.coalesce(func.sum(CostTrackingModel.estimated_cost), Decimal(0)),
     )
 
 
 async def _cost_totals(
     session: AsyncSession, criterion: ColumnElement[bool]
-) -> dict[str, int | Decimal]:
-    """Return the summed token counts and exact summed cost of the matching rows.
-
-    ``estimated_cost`` is a ``Decimal``, never a float: the sum is aggregated
-    in the database over an exact column type and returned without ever
-    passing through IEEE-754.
-    """
+) -> dict[str, int]:
+    """Return the summed token counts of the matching rows."""
     row = (await session.execute(_cost_totals_select().where(criterion))).one()
     return {
         "input_tokens": row[0],
         "output_tokens": row[1],
-        "estimated_cost": row[2],
     }
 
 
-async def sum_cost_by_thread(
-    session: AsyncSession, thread_id: str
-) -> dict[str, int | Decimal]:
-    """Return summed token counts and exact summed cost for one thread."""
+async def sum_cost_by_thread(session: AsyncSession, thread_id: str) -> dict[str, int]:
+    """Return summed token counts for one thread."""
     return await _cost_totals(session, CostTrackingModel.thread_id == thread_id)
 
 
-async def sum_cost_by_agent(
-    session: AsyncSession, agent_id: str
-) -> dict[str, int | Decimal]:
-    """Return summed token counts and exact summed cost for one agent."""
+async def sum_cost_by_agent(session: AsyncSession, agent_id: str) -> dict[str, int]:
+    """Return summed token counts for one agent, across every thread it ran in."""
     return await _cost_totals(session, CostTrackingModel.agent_id == agent_id)

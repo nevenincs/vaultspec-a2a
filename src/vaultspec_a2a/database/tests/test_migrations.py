@@ -183,6 +183,61 @@ def _delete_refusal_row(db_path: Path, action_id: str = "refusal-action") -> Non
         conn.close()
 
 
+def _column_declaration(db_path: Path, table: str, column: str) -> tuple[str, int]:
+    """Return one column's declared SQL type and NOT NULL flag, via PRAGMA."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute("SELECT * FROM pragma_table_info(?)", (table,)).fetchall()
+    finally:
+        conn.close()
+    declared = {str(row[1]): (str(row[2]).upper(), int(row[3])) for row in rows}
+    assert column in declared, f"{table}.{column} is absent: {sorted(declared)}"
+    return declared[column]
+
+
+def _insert_measured_cost_row(db_path: Path) -> None:
+    """Write one accounting row carrying real counts and the structural zero cost."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT INTO cost_tracking (id, thread_id, agent_id, provider, model,"
+            " input_tokens, output_tokens, estimated_cost, created_at)"
+            " VALUES ('money-row','money-run','coder-1','codex','gpt-5.4',"
+            "210,35,0,'2026-10-08 00:00:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _measured_counts(db_path: Path) -> tuple[int, int]:
+    """Return the stored accounting row's input and output token counts."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT input_tokens, output_tokens FROM cost_tracking WHERE id = ?",
+            ("money-row",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None, "the accounting row did not survive the migration"
+    return (int(row[0]), int(row[1]))
+
+
+def _stored_money(db_path: Path) -> list[int]:
+    """Return the raw ``estimated_cost`` units a downgraded store holds."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        return [
+            int(row[0])
+            for row in conn.execute(
+                "SELECT estimated_cost FROM cost_tracking ORDER BY id"
+            )
+        ]
+    finally:
+        conn.close()
+
+
 def _stored_sql(db_path: Path, kind: str, name: str) -> str:
     conn = sqlite3.connect(str(db_path))
     try:
@@ -346,6 +401,36 @@ class TestAlembicUpgradeDowngrade:
                 key="still-owed-key",
                 result_status="accepted_not_applied",
             )
+
+    def test_the_unwritten_money_column_is_dropped_and_restored(
+        self, runtime_dir: Path
+    ) -> None:
+        """0028 retires the price column and steps back without losing counts.
+
+        The downgrade restores exactly the storage 0014 installed - a NOT NULL
+        ``BIGINT`` of scaled dollar units - back-filled with the structural zero
+        that is the only value the column ever held, because no writer ever set
+        it. The measured token counts must survive in both directions: a schema
+        operation may not destroy a real provider-reported measurement.
+        """
+        db = runtime_dir / "cost-money-retirement.db"
+        cfg = _make_config(db)
+        command.upgrade(cfg, "0027")
+        assert "estimated_cost" in _get_columns(db, "cost_tracking")
+        _insert_measured_cost_row(db)
+
+        command.upgrade(cfg, "0028")
+        assert "estimated_cost" not in _get_columns(db, "cost_tracking")
+        assert _measured_counts(db) == (210, 35)
+
+        command.downgrade(cfg, "0027")
+        restored = _column_declaration(db, "cost_tracking", "estimated_cost")
+        assert restored == ("BIGINT", 1), restored
+        assert _measured_counts(db) == (210, 35)
+        assert _stored_money(db) == [0]
+
+        command.upgrade(cfg, "0028")
+        assert "estimated_cost" not in _get_columns(db, "cost_tracking")
 
     def test_upgrade_head_creates_all_app_tables(self, runtime_dir: Path) -> None:
         db = runtime_dir / "test.db"

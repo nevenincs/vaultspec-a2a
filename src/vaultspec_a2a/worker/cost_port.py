@@ -6,13 +6,11 @@ layer's abstract :class:`~vaultspec_a2a.graph.protocols.CostPort`. The graph
 nodes depend only on the port; this adapter is injected at graph-compile time
 so the database layer never leaks into the domain graph.
 
-``estimated_cost`` is deliberately NOT written here. Both real provider lanes
-are subscription-authenticated CLI agents rather than metered per-token APIs,
-and the project holds no rate table for any model, so there is no price to
-apply. The column keeps its exact zero default until a priced lane exists;
-recording a fabricated or perpetually-zero cost as if it were measured would be
-worse than leaving it plainly unset. Token counts, by contrast, are real
-provider-reported facts and are persisted.
+What is persisted is token counts a lane actually reported, and nothing else.
+No price is applied: every served lane is a subscription-authenticated CLI
+agent rather than a metered per-token API, and the project holds no rate table
+for any model, so there is nothing true to record. The column that once invited
+one was retired in revision 0028 rather than left perpetually unwritten.
 """
 
 from __future__ import annotations

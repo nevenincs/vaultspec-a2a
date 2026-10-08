@@ -616,6 +616,41 @@ class CodexChatModel(ProcessChatModel):
             )
             await run_independent_cleanups(*cleanup_steps)
 
+    @staticmethod
+    def _raise_held_suspension(client: _CodexAppServerClient) -> None:
+        """Re-raise the suspension this session is holding, if it holds one.
+
+        A supervised run's human rung suspends the graph to ask a person, and the
+        session holds that suspension for the turn consumer to re-raise. It is
+        the OUTCOME of the turn, so it takes precedence over every other way the
+        frame wait can end - the idle backstop, the lane's deferred retry
+        condition, and the provider's own end of stream - and the precedence is
+        applied at each of those exits rather than once after the wait.
+
+        The end of the session is not evidence against a park, it is the
+        consequence of one: the request is answered with the lane's abandon
+        action and the session tree is released in the turn's ``finally``. A
+        parked run that reported the timeout or the closed stream instead
+        described the provider while losing the fact that it is waiting on a
+        person, and the run failed rather than parking.
+        """
+        suspension = client.pending_interrupt
+        if suspension is not None:
+            raise suspension
+
+    @staticmethod
+    def _deferred_condition(state: _TurnStreamState) -> _CodexProtocolError | None:
+        """Return the retry failure the lane last stated, or ``None``.
+
+        A stated retry failure is more useful than the later silence or bare EOF
+        that follows it, and it carries whatever the turn had already done by the
+        time it was raised.
+        """
+        if state.deferred is None:
+            return None
+        state.deferred.effects_may_have_occurred |= state.effects_may_have_occurred
+        return state.deferred
+
     async def _next_turn_message(
         self,
         client: _CodexAppServerClient,
@@ -628,23 +663,18 @@ class CodexChatModel(ProcessChatModel):
                 timeout=idle_limit if idle_limit > 0 else None,
             )
             if message is _STREAM_CLOSED:
-                # Prefer the lane's last stated retry failure to a bare EOF.
-                if state.deferred is not None:
-                    state.deferred.effects_may_have_occurred |= (
-                        state.effects_may_have_occurred
-                    )
-                    raise _carry_condition(state.deferred, None)
+                self._raise_held_suspension(client)
+                deferred = self._deferred_condition(state)
+                if deferred is not None:
+                    raise _carry_condition(deferred, None)
                 raise await client.unexpected_eof_error()
         except TimeoutError:
-            # A stated retry failure is more useful than later silence.
-            if state.deferred is not None:
-                state.deferred.effects_may_have_occurred |= (
-                    state.effects_may_have_occurred
-                )
-                raise state.deferred from None
+            self._raise_held_suspension(client)
+            deferred = self._deferred_condition(state)
+            if deferred is not None:
+                raise deferred from None
             raise
-        if client.pending_interrupt is not None:
-            raise client.pending_interrupt
+        self._raise_held_suspension(client)
         return message
 
     @staticmethod

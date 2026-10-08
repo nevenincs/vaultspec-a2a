@@ -16,6 +16,7 @@ from ..utils.coercion import coerce_nonempty_str
 from ._acp_request import encode_frame
 from ._cleanup import cancel_owned_tasks, run_independent_cleanups
 from ._codex_permission import (
+    CANCEL_ACTION,
     DECLINE_ACTION,
     ELICITATION_METHOD,
     CodexPermissionRung,
@@ -338,8 +339,9 @@ class _CodexAppServerClient:
 
         The reader must not block: a supervised decision can wait on a human, and
         codex keeps streaming other frames meanwhile. Every outcome answers the
-        request - a raised decision is a decline, never an unanswered frame that
-        would hang the turn until the idle backstop fired.
+        request - a failed decision is a decline and a suspended run abandons the
+        call, never an unanswered frame that would hang the turn until the idle
+        backstop fired.
         """
         rung = self._session.permission_rung
         if rung is None:
@@ -352,8 +354,16 @@ class _CodexAppServerClient:
                 action = await rung.decide(params)
             except GraphBubbleUp as exc:
                 # A supervised rung suspended the graph to ask a human. Hold it
-                # for the turn consumer to re-raise, and free the provider now.
+                # for the turn consumer to re-raise, and free the provider now -
+                # with the elicitation contract's ABANDON action, because that is
+                # what happened. A park does not pause the provider: the turn
+                # kills the session in its `finally` and the node re-runs from
+                # the top on resume, so this answer is the last thing the model
+                # is told. A decline would tell it a user refused a call no user
+                # has yet seen, and invite it to act on that denial in the same
+                # turn.
                 self.pending_interrupt = exc
+                action = CANCEL_ACTION
             except Exception:
                 logger.exception(
                     "Codex permission decision failed; declining (fail-closed)"

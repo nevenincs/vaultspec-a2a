@@ -472,6 +472,76 @@ async def test_enrich_snapshot_from_durable_state_recovers_valid_permission_sibl
     ] == ["allow_once", "reject_once"]
 
 
+@pytest.mark.asyncio
+async def test_enrich_snapshot_from_durable_state_degrades_a_corrupt_repair_status(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A corrupt repair_status column degrades the row instead of raising.
+
+    Nothing in the schema stops a legacy write or an out-of-band UPDATE from
+    leaving an unrecognised string in ``threads.repair_status``. One row like
+    that must not take the whole listing or run-status down with it.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-corrupt-repair-status",
+        )
+        thread.repair_status = "not-a-real-status"
+        await session.commit()
+        await session.refresh(thread)
+
+        snapshot = ThreadStateSnapshot(
+            thread_id=thread.id,
+            status=ThreadStatus(thread.status),
+            last_sequence=0,
+        )
+        projected = await enrich_snapshot_from_durable_state(
+            session,
+            thread=thread,
+            snapshot=snapshot,
+        )
+
+    assert projected.repair_status == RepairStatus.OPERATOR_INTERVENTION_REQUIRED
+    assert projected.execution_readiness == RepairStatus.OPERATOR_INTERVENTION_REQUIRED
+    assert DegradedReason.REPAIR_STATUS_UNREADABLE in projected.degraded_reasons
+
+
+@pytest.mark.asyncio
+async def test_enrich_snapshot_from_durable_state_ignores_a_corrupt_approval_column(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The durable approval answer comes from pending requests, never the column.
+
+    ``threads.approval_status`` is read as a plain string only, in the
+    terminal-residue check; a legacy or corrupt value in it must not reach an
+    enum coercion that could raise and take the read down with it.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(
+            session,
+            write_authority=make_test_write_authority(),
+            thread_id="thread-corrupt-approval-status",
+        )
+        thread.approval_status = "not-a-real-status"
+        await session.commit()
+        await session.refresh(thread)
+
+        snapshot = ThreadStateSnapshot(
+            thread_id=thread.id,
+            status=ThreadStatus(thread.status),
+            last_sequence=0,
+        )
+        projected = await enrich_snapshot_from_durable_state(
+            session,
+            thread=thread,
+            snapshot=snapshot,
+        )
+
+    assert projected.approval_status is None
+
+
 def test_apply_execution_state_projection_merges_normalized_fields() -> None:
     """Durable execution-state projection should enrich reconnect snapshots."""
     snapshot = ThreadStateSnapshot(

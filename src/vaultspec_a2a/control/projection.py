@@ -584,7 +584,19 @@ async def enrich_snapshot_from_durable_state(
     snapshot: ThreadStateSnapshot,
 ) -> ThreadStateSnapshot:
     """Merge durable gateway-owned state into a reconnect snapshot."""
-    record_repair_posture(snapshot, thread.repair_status)
+    try:
+        record_repair_posture(snapshot, thread.repair_status)
+    except ValueError:
+        # Nothing in the schema stops a legacy write or an out-of-band UPDATE
+        # from leaving a string RepairStatus does not know in this column. One
+        # row like that must not take the whole listing or run-status down
+        # with it: degrade the row instead of letting the ValueError escape
+        # the batch it was read in.
+        mark_degraded(
+            snapshot,
+            DegradedReason.REPAIR_STATUS_UNREADABLE,
+            repair=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+        )
     # Read before the terminal branch below returns, so a settled run reports
     # the truth rather than inheriting the default: a run that ends with
     # something still queued on it would be a defect, and this is where it
@@ -611,9 +623,13 @@ async def enrich_snapshot_from_durable_state(
             )
         return snapshot
 
-    approval = thread.approval_status
-    snapshot.approval_status = None if approval is None else ApprovalStatus(approval)
-    snapshot.approval_request_id = thread.approval_request_id
+    # The raw column is never coerced here: durable_approval below is the
+    # only write to these two fields on a live run (its result replaces
+    # whatever a prior coercion would have set), and thread.approval_status
+    # is otherwise read only as a plain string, in the terminal branch above.
+    # Coercing it here was dead - its result was always overwritten before
+    # a read - and a corrupt legacy value made that dead coercion raise and
+    # take the whole read down with it.
     pending = await actionable_pending_permissions(session, thread_id=thread.id)
     _merge_durable_permissions(snapshot, pending)
     snapshot.approval_status, snapshot.approval_request_id = durable_approval(pending)

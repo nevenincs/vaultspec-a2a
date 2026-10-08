@@ -165,6 +165,7 @@ class DegradedReason(StrEnum):
         "pending_permission_without_checkpoint_truth"
     )
     PERMISSION_PROJECTION_UNREADABLE = "permission_projection_unreadable"
+    REPAIR_STATUS_UNREADABLE = "repair_status_unreadable"
     TERMINAL_THREAD_PENDING_PERMISSION_RESIDUE = (
         "terminal_thread_pending_permission_residue"
     )

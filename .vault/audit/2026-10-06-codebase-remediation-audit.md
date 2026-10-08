@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:244b161eac9f165081e58f8cc729d079d186d9f068c55231ed4b2a7f3231d152'
+body_hash: 'sha256:a35920290fa87c8d40aa7871f8d23e7dcf5f92383b8290622056d8067efe513a'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -939,7 +939,7 @@ P18. Status: settled by V5 (2026-10-07). Serving the Layer-1 dataclasses under t
 
 ### p19-descendant-listener | medium | Check psutil descendant-listener detection without elevation
 
-P19. Status: passed on win32 2026-10-07 (PVD, unelevated): descendant listener inside our tree -> confirmed; listener outside our tree -> outside; our port read from a stranger root -> outside. Linux and macOS remain owner-run: `python -m pytest src/vaultspec_a2a/utils/tests/test_process.py -k ownership_classification -q`. Settles: R7-F3 and D13 per OS. Gates: H.2/S92. Run by: PR.2/S02. Command: scratch script: spawn a child HTTP listener; `psutil.Process(child).net_connections(kind="tcp")` on the Windows and Linux CI runners, and macOS if supported (O9).
+P19. Status: passed on win32 2026-10-07 (PVD, unelevated): descendant listener inside our tree -> confirmed; listener outside our tree -> outside; our port read from a stranger root -> outside. Linux and macOS passed 2026-10-08 (orchestrator, on the owner's hosts over the tailnet, refactor/centralize@281509ff, unprivileged users): `python -m pytest src/vaultspec_a2a/utils/tests/test_process.py -k ownership_classification -q` gave `4 passed` on Linux x86_64 (`gw-server-linux-runner`) and `4 passed` on macOS arm64 (`gw-laptop`). The Linux run also passed the utils, desktop and lifecycle trees (538 passed, 6 skipped, every skip Windows-only or a host refusal), including the Linux-only native-isolation path. Gate: go on every supported OS; O9 (macOS supported) is answered by the passing run. Settles: R7-F3 and D13 per OS. Gates: H.2/S92. Run by: PR.2/S02. Command: scratch script: spawn a child HTTP listener; `psutil.Process(child).net_connections(kind="tcp")` on the Windows and Linux CI runners, and macOS if supported (O9).
 
 ### p20-bounds-ci-skip | medium | Confirm the bounds agreement test skips in CI
 

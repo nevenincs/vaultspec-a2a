@@ -131,8 +131,9 @@ class DegradedReason(StrEnum):
     Membership follows the reader's fault lines: what could not be read
     (``*_UNAVAILABLE``, ``*_UNREADABLE``, ``*_TIMEOUT``), what was read but is
     not current (``*_STALE``), what should have been present and was not
-    (``*_MISSING``), and what was present but contradicts another store
-    (the permission residue and cross-store mismatch members).
+    (``*_MISSING``), what was present but contradicts another store (the
+    permission residue and cross-store mismatch members), and what the read
+    PROVED but could not write (``*_CONTENDED``).
     """
 
     AUTHORING_RUN_PRODUCED_NO_PROPOSAL = "authoring_run_produced_no_proposal"
@@ -165,6 +166,13 @@ class DegradedReason(StrEnum):
         "pending_permission_without_checkpoint_truth"
     )
     PERMISSION_PROJECTION_UNREADABLE = "permission_projection_unreadable"
+    # The read proved this run's turn had ended and every attempt at writing
+    # that settlement was refused by a competing writer. The status served is
+    # therefore the run's durable state before the settlement, and the
+    # settlement is still owed: a later pass makes it once the lock is free.
+    # Transient by nature, so a client reads the run again rather than treating
+    # the state as final.
+    SETTLEMENT_STORE_CONTENDED = "settlement_store_contended"
     TERMINAL_THREAD_PENDING_PERMISSION_RESIDUE = (
         "terminal_thread_pending_permission_residue"
     )

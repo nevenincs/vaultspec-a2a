@@ -9,34 +9,27 @@ checkpoint recovery may still need.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from langgraph.graph import END, START
 
-from ...control.accepted_input import freeze_accepted_input
-from ...database import ThreadModel, create_control_action, create_thread
+from ...database import ThreadModel, create_thread
 from ...graph.nodes._worker_permissions import (
     permission_callback_for,
     recorded_permission_answers,
 )
-from ...ipc.schemas import DispatchRequest
-from ...team.team_config import load_team_config
 from ...testing import (
-    DEFAULT_TEAM_PRESET,
     add_test_node,
     compile_test_graph,
     new_state_graph,
     seed_completed_authority,
+    seed_create_action,
 )
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread import RunWriteAuthority
 from ...thread.enums import ControlActionType, ThreadStatus
-from ...thread.executable_graph import freeze_graph_definition
-from ...thread.idempotency import thread_create_action_key
 from ...thread.state import TeamState
-from ..dispatch_receipts import prepare_graph_action_receipt
 from ..event_handlers import (
     CheckpointPruneRegistry,
     RelayServices,
@@ -216,33 +209,7 @@ async def test_a_stray_completed_terminal_does_not_settle_a_parked_run(
                 0, 1, ControlActionType.INGEST, "accepted"
             ),
         )
-        await create_control_action(
-            session,
-            thread_id=thread_id,
-            action_type=ControlActionType.INGEST,
-            idempotency_key=thread_create_action_key(thread_id),
-            dispatch_id="accepted",
-            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
-            payload=freeze_accepted_input(
-                DispatchRequest(
-                    action="ingest",
-                    thread_id=thread_id,
-                    content="work",
-                    workspace_root=str(tmp_path),
-                    recursion_limit=25,
-                    team_preset=DEFAULT_TEAM_PRESET,
-                    graph_definition=freeze_graph_definition(
-                        load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
-                        workspace_root=tmp_path,
-                    ),
-                ),
-                intent={"content": "work"},
-            ),
-        )
-        receipt = await prepare_graph_action_receipt(
-            session, thread_id=thread_id, dispatch_id="accepted"
-        )
-        assert receipt is not None
+        receipt = await seed_create_action(session, thread_id, workspace=tmp_path)
         await session.commit()
 
     config = cast("Any", {"configurable": {"thread_id": thread_id}})

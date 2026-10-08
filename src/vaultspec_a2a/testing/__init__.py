@@ -79,6 +79,7 @@ if TYPE_CHECKING:
         simulator_command,
     )
     from .antigravity import antigravity_credential_path
+    from .authoring_binding import authoring_tool_binding
     from .boot import (
         DEFAULT_ATTACH_CREDENTIAL,
         DEFAULT_OWNERSHIP_CAPABILITY,
@@ -297,6 +298,7 @@ if TYPE_CHECKING:
         register_session,
     )
     from .sse import SseFrame, SseReader, decode_frame, read_frame, read_frames_until
+    from .thread_state import captured_snapshot
     from .verbs import (
         RunVerbs,
         actor_tokens_body,
@@ -380,6 +382,10 @@ _LAZY_EXPORTS = {
     "antigravity_credential_path": (
         "vaultspec_a2a.testing.antigravity",
         "antigravity_credential_path",
+    ),
+    "authoring_tool_binding": (
+        "vaultspec_a2a.testing.authoring_binding",
+        "authoring_tool_binding",
     ),
     "DEFAULT_ATTACH_CREDENTIAL": (
         "vaultspec_a2a.testing.boot",
@@ -741,6 +747,7 @@ _LAZY_EXPORTS = {
         "serve_on_loopback_in_thread",
     ),
     "uvicorn_started": ("vaultspec_a2a.testing.http", "uvicorn_started"),
+    "captured_snapshot": ("vaultspec_a2a.testing.thread_state", "captured_snapshot"),
     "RunVerbs": ("vaultspec_a2a.testing.verbs", "RunVerbs"),
     "actor_tokens_body": ("vaultspec_a2a.testing.verbs", "actor_tokens_body"),
     "status_and_json": ("vaultspec_a2a.testing.verbs", "status_and_json"),
@@ -857,6 +864,7 @@ __all__ = [
     "async_fetch_in_process_selection",
     "async_fetch_provider_catalog",
     "async_run_start_body",
+    "authoring_tool_binding",
     "await_child",
     "await_gateway_ready",
     "await_ready",
@@ -864,6 +872,7 @@ __all__ = [
     "broker_gateway_env",
     "build_settings",
     "capacity_holders",
+    "captured_snapshot",
     "catalog_run_fields",
     "child_tree_progress",
     "clarification_graph",

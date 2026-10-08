@@ -19,14 +19,13 @@ from typing import TYPE_CHECKING
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ....authoring import AgentTool, CatalogSnapshot
 from ....control.config import settings
 from ....providers._acp_authoring import (
     AUTHORING_MCP_SERVER_NAME,
     AuthoringToolBinding,
     authoring_allowed_tool_names,
 )
-from ....testing import combined_output, simulator_command
+from ....testing import authoring_tool_binding, combined_output, simulator_command
 from ....thread.actor_tokens import ActorTokenBundle
 from ....worker.authoring_binding import AuthoringBindingProvider
 from ....worker.catalog_store import RunCatalogStore
@@ -89,35 +88,7 @@ def _make_state() -> TeamState:
 
 
 def binding(server_url: str = "http://127.0.0.1:8200/mcp") -> AuthoringToolBinding:
-    snapshot = CatalogSnapshot(
-        schema_version="authoring.semantic_tools.v1",
-        tools=(
-            AgentTool(
-                name="read_context",
-                description="read",
-                input_schema={"type": "object"},
-                risk_tier="read_only",
-                permission_requirement="auto_permitted",
-                idempotency_required=False,
-                commands=("read_context",),
-            ),
-            AgentTool(
-                name="propose_changeset",
-                description="propose",
-                input_schema={"type": "object"},
-                risk_tier="mutating",
-                permission_requirement="human_approval_required",
-                idempotency_required=True,
-                commands=("create_proposal",),
-            ),
-        ),
-    )
-    return AuthoringToolBinding(
-        snapshot=snapshot,
-        server_url=server_url,
-        bearer_token="machine-bearer-xyz",
-        actor_token="actor-token-abc",
-    )
+    return authoring_tool_binding(server_url=server_url)
 
 
 @pytest.mark.asyncio

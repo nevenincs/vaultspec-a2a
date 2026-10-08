@@ -41,6 +41,7 @@ from ...testing import (
     async_run_start_body,
     park_permission,
     read_frame,
+    seed_completed_authority,
     seed_live_thread,
     serve_on_loopback,
     wait_for_async,
@@ -1089,36 +1090,11 @@ async def test_run_status_carries_reconnect_cursor(
     ever reads run-status after a run has already ended.
     """
     from ...control.event_handlers import RelayServices, _handle_terminal_event
-    from ...thread.action_receipts import GraphCompletionReceipt
 
-    run_id, receipt = await seed_live_thread(session_factory, title="cursor")
-    config: RunnableConfig = {
-        "configurable": {"thread_id": run_id, "checkpoint_ns": ""}
-    }
-    checkpoint = await real_checkpoint()
-    checkpoint["id"] = f"cp-{run_id}"
-    checkpoint["channel_values"] = {
-        "active_graph_action_receipt": receipt.model_dump(mode="json"),
-        "graph_action_receipts": {receipt.dispatch_id: receipt.model_dump(mode="json")},
-        "graph_completion_receipts": {
-            receipt.dispatch_id: GraphCompletionReceipt(
-                schema_version="graph-completion-v1",
-                action=receipt,
-                outcome="completed",
-            ).model_dump(mode="json")
-        },
-    }
-    checkpoint["channel_versions"] = {
-        "active_graph_action_receipt": checkpointer.get_next_version(None, None),
-        "graph_action_receipts": checkpointer.get_next_version(None, None),
-        "graph_completion_receipts": checkpointer.get_next_version(None, None),
-    }
-    await checkpointer.aput(
-        config,
-        checkpoint,
-        {"source": "loop", "step": 1, "parents": {}},
-        checkpoint["channel_versions"],
-    )
+    async with session_factory() as session:
+        run_id, _receipt = await seed_completed_authority(
+            session, checkpointer, title="cursor"
+        )
 
     app, agg, _worker, _cp = make_app(session_factory, checkpointer)
     # The seat the relay route itself takes on its first batch: the real

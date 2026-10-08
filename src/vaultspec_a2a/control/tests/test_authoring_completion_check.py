@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ...control.thread_state_service import capture_thread_state
 from ...streaming import RelayHub
+from ...testing import captured_snapshot as _snapshot
 from ...testing import elect_status, seed_accepted_thread
 from ...tests._checkpoint_seeding import real_checkpoint
 from ...thread.enums import ThreadStatus
@@ -32,25 +32,6 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-    from ...thread.snapshots import ThreadStateSnapshot
-
-
-async def _snapshot(
-    session: AsyncSession,
-    *,
-    thread_id: str,
-    relay_hub: RelayHub,
-    checkpointer: AsyncSqliteSaver,
-) -> ThreadStateSnapshot | None:
-    """Project the live capture service to the snapshot these tests inspect."""
-    capture = await capture_thread_state(
-        session,
-        thread_id=thread_id,
-        relay_hub=relay_hub,
-        checkpointer=checkpointer,
-    )
-    return capture.snapshot if capture is not None else None
 
 
 @dataclass(frozen=True, slots=True)

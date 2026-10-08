@@ -1,8 +1,7 @@
 {
   "categories": {
     "test-arrangement-rhyme": "Two tests of one surface, or two phases of one scenario, sharing an arrange/act block above jscpd's token threshold. This repository's own policy already treats this as the expected shape of test code, not debt (see the sibling AST structural-duplication guard's _ACCEPTED_TESTS): collapsing it into one parametrized case would hide which configuration or phase failed.",
-    "migration-revision-boilerplate": "Each Alembic revision under database/migrations/versions/ is an immutable record of one schema change. The shared column, index and CHECK scaffolding across revisions is the migration convention, not debt: making a later revision depend on an earlier one's helper would break replay independence.",
-    "owed-test-fixture-fold": "Known debt, not accepted design. Each entry duplicates a helper, fixture builder or seeding routine that already exists (or belongs) elsewhere. Adjudicated here only because the duplicating file sits outside this guard's owned scope, and reported to the orchestrator as residue in the Step that widened this gate. Removing an entry without actually folding the duplicate it names is misuse of this category."
+    "migration-revision-boilerplate": "Each Alembic revision under database/migrations/versions/ is an immutable record of one schema change. The shared column, index and CHECK scaffolding across revisions is the migration convention, not debt: making a later revision depend on an earlier one's helper would break replay independence."
   },
   "accepted": [
     {
@@ -27,27 +26,11 @@
       "fragment_sha256": "01ab4a3ca88eb8306a43660da8a2b2322bd914af6888526f8bbf0808c679d16e"
     },
     {
-      "category": "owed-test-fixture-fold",
-      "lines": 22,
-      "first": {"path": "src/vaultspec_a2a/api/tests/test_gateway_live.py", "start": 1100},
-      "second": {"path": "src/vaultspec_a2a/testing/seeding.py", "start": 278},
-      "fragment_sha256": "d38e7d05709203c1edd9b80c34d164e1ff620123328245dc0b949f9d054cc6ab",
-      "note": "Re-derives the checkpoint-writing body of testing.seeding.seed_completed_authority inline instead of calling the landed seeding helper."
-    },
-    {
       "category": "test-arrangement-rhyme",
       "lines": 21,
       "first": {"path": "src/vaultspec_a2a/api/tests/test_internal.py", "start": 353},
       "second": {"path": "src/vaultspec_a2a/api/tests/test_internal.py", "start": 542},
       "fragment_sha256": "6c9ee463fee80cd5c133846ba74cfe792cea0ab8831a405abf417e4e15c6d28d"
-    },
-    {
-      "category": "owed-test-fixture-fold",
-      "lines": 21,
-      "first": {"path": "src/vaultspec_a2a/api/tests/test_thread_state_service.py", "start": 31},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_authoring_completion_check.py", "start": 36},
-      "fragment_sha256": "8663dd4bc42831574ee8055bbc6f515cef2db0a246eaa3e8e5b9bcde02c9804a",
-      "note": "Both modules define their own private _snapshot() projection helper, identical body; a shared test helper would serve both."
     },
     {
       "category": "test-arrangement-rhyme",
@@ -188,14 +171,6 @@
       "first": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py", "start": 721},
       "second": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py", "start": 790},
       "fragment_sha256": "006788adf100ebc0961b4bd0d801b7710804ef44e180c71d966751a2222d396d"
-    },
-    {
-      "category": "owed-test-fixture-fold",
-      "lines": 25,
-      "first": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_worker_authoring_wiring.py", "start": 92},
-      "second": {"path": "src/vaultspec_a2a/providers/tests/test_codex_config_home.py", "start": 573},
-      "fragment_sha256": "e1fff036037b5d9759a88027345ef1f3b661c927f014cb7c44d647e3b0ecb87a",
-      "note": "Both build the same two-tool AuthoringToolBinding/CatalogSnapshot fixture by hand; a shared authoring-binding test builder would serve both."
     },
     {
       "category": "test-arrangement-rhyme",

@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:6848665a2b9443550809ee5bb48e211d771cdfba592e12b8e591297ad05136b8'
+body_hash: 'sha256:4f05e288ac5bcb5c0a95636d53f21d99c420d85e85634179d5ee2cc5f4c48656'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -1418,3 +1418,36 @@ then fresh-supervisor-approval sequence specified by REVIEW-062 in
 A passing current test must not be reported as proof of that stronger sequence.
 The seven-test permissions service module is being rerun with Docker required;
 its outcome remains pending at this checkpoint.
+### green-20261008-docs-links | medium | Strict documentation build exposed stale module references
+
+Status: fixed in resumed S116 verification. Type: documentation correctness.
+`just build-all` built the wheel and source distribution and passed six docs
+tests, but strict Sphinx failed on three unresolved references after the module
+moves: the relay hub, the lane registry, and the live-state mirror. The API and
+streaming docstrings now name the relay hub's owning module; the module reference
+registers the lane-registry and run-state targets and the mirror class. Actual
+diff review confirmed reference-only edits with no runtime behavior or warning
+suppression. Ruff and `git diff --check` passed; `just docs-build` passed all six
+docs tests and the strict HTML build. Review verdict: PASS for this repair.
+
+### green-20261008-service-recheck | low | Historical permissions and paired history reproductions now pass
+
+Status: verified for the current reproduction; updates PV29 and
+v3-gateway-history-read-hang without closing the stronger REVIEW-062 coverage gap.
+Type: functional verification. On Windows with Docker required, all seven tests
+in `service_tests/test_permissions_resume.py` passed against the real local
+SQLite-backed gateway and worker. The audited pair was then run in one session:
+`test_supervisor_plan_rejection_requires_revision_before_reapproval`, followed
+by `test_stream_followup.py::test_sse_stream_and_followup_message`. Both passed
+in three separate attempts (37.30s, 51.78s, 34.22s); no 300-second history hang
+recurred. Reports are under `.pytest-tmp/green-20261008/history-paired-service*`.
+These runs use deterministic providers and do not certify paid-provider or
+external-engine integration. The running broad non-service suite also includes
+the six focused contention regressions from 8c04391c, ca6e11f7 and b452c823,
+which were already integrated in its starting revision 1ff26244.
+
+Additional current checks: 160 development harness tests passed; three packaging
+checks passed, including inspection of a freshly built wheel. The frozen onedir
+check was not selected because this checkout has no newly built runtime artifact.
+`just deps-check` passed and `just audit-deps` found no unaccepted advisories
+across 120 Node and 182 Python dependencies. Full-suite outcome remains pending.

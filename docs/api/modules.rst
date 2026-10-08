@@ -250,6 +250,9 @@ Provider construction
 
 .. py:class:: ProviderFactory
 
+.. py:module:: vaultspec_a2a.providers.lane_registry
+   :synopsis: Registration contract for explicitly armed in-process provider lanes.
+
 Event streaming
 ~~~~~~~~~~~~~~~
 
@@ -262,6 +265,11 @@ Event streaming
    :synopsis: The gateway's relay hub: subscriber queues, numbering, and live state.
 
 .. py:class:: RelayHub(telemetry=None)
+
+.. py:module:: vaultspec_a2a.streaming._run_state
+   :synopsis: Shared run-state mutations and gateway live-state projection.
+
+.. py:class:: RunLiveStateMirror
 
 Collaborating modules
 ---------------------

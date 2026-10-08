@@ -9,7 +9,7 @@ relays to its gateway. It composes the focused sub-modules:
 - ``emitters.BroadcastChannel`` - ordering numbers and the relay hooks
 - ``_run_state.RunLiveState`` - the run's agent, tool-call and node state
 
-The gateway side of the stream is :class:`vaultspec_a2a.streaming.RelayHub`.
+The gateway side of the stream is :class:`vaultspec_a2a.streaming.subscribers.RelayHub`.
 """
 
 import logging

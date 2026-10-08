@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:506f4e8905029c5432ef2297dddccaa07b5448216651f6cddeef811a40fb4c71'
+body_hash: 'sha256:b6c133dcb3a9a9d265e731551d0daa7d6e5903e90d38ca6ccf240cc11db8b2c4'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -22,8 +22,19 @@ related:
 - `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m dev.quality.types` -> `pass`
 - `S116` `verify:` `uv run --no-sync vaultspec-core vault check all` -> `pass`
 - `S116` `verify:` `PYTEST_ADDOPTS=--require-prerequisite=docker just test-service-path src/vaultspec_a2a/service_tests/test_permissions_resume.py` -> `pass`
+- `S116` `M` `docs/api/modules.rst`
+- `S116` `M` `src/vaultspec_a2a/api/__init__.py`
+- `S116` `M` `src/vaultspec_a2a/streaming/__init__.py`
+- `S116` `M` `src/vaultspec_a2a/streaming/aggregator.py`
+- `S116` `verify:` `just docs-build` -> `pass`
+- `S116` `verify:` `just test-harness` -> `pass`
+- `S116` `verify:` `just deps-check` -> `pass`
+- `S116` `verify:` `just audit-deps` -> `pass`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- packaging/tests/test_build_artifact_contents.py -k not_frozen_placeholder -q` -> `pass`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- packaging/tests/test_build_artifact_contents.py -k 'not frozen_onedir' -q` -> `pass`
 
 ## Notes
 
 - `S116` S116 remains open: full non-service baseline and functional gates are pending; this checkpoint records only the strict-type correction and its 16 passing focused tests.
 - `S116` Fresh tool-cores S15 verification repaired the missing checkpoint; metadata-only maintenance reviewed. Permissions service coverage gap recorded; S116 remains open.
+- `S116` Correction: the earlier wheel verification row containing `not_frozen_placeholder` is a transcription error, not an executed command, and must not be used as evidence. The following correctly transcribed selection passed three tests with one deselected; wheel-contents.log records the actual run.

@@ -5,7 +5,8 @@ A run's event stream has two halves, one per process.
 it ingests a graph run, buffers and emits its domain events, and hands each to
 the relay hooks. :class:`vaultspec_a2a.streaming.subscribers.RelayHub` is the
 gateway's: it projects and numbers every relayed payload, fans it out to the
-run's subscribers, and keeps the :class:`RunLiveStateMirror` the read surfaces
+run's subscribers, and keeps the
+:class:`vaultspec_a2a.streaming._run_state.RunLiveStateMirror` the read surfaces
 serve live agent, tool-call and node state from. Both record that state through
 one set of mutations. :mod:`vaultspec_a2a.streaming.types` defines the
 streamable graph protocol and tool-kind classification.

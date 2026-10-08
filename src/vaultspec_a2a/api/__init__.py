@@ -7,8 +7,8 @@ module that declares each one; this package root re-exports nothing. It doesn't
 own application orchestration or the event relay.
 
 Build the application with :func:`vaultspec_a2a.api.app.create_app`.
-:class:`vaultspec_a2a.streaming.RelayHub` owns the gateway's event relay, its
-subscribers and the live run-state mirror.
+:class:`vaultspec_a2a.streaming.subscribers.RelayHub` owns the gateway's event
+relay, its subscribers and the live run-state mirror.
 
 Request handling delegates orchestration to direct
 :mod:`vaultspec_a2a.control` service modules. The generated OpenAPI document

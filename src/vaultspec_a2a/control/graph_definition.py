@@ -11,6 +11,7 @@ from ..thread.action_receipts import (
 )
 from ..thread.enums import ControlActionType
 from ..thread.idempotency import thread_create_action_key
+from ..utils.coercion import decode_json_object
 from .accepted_input import read_accepted_input
 
 if TYPE_CHECKING:
@@ -24,6 +25,19 @@ __all__ = ["read_accepted_graph_definition"]
 async def read_accepted_graph_definition(
     db: AsyncSession, thread_id: str
 ) -> FrozenGraphDefinition:
+    """Return the executable program the run was accepted under.
+
+    The receipt is matched against the payload AS THE ROW STORES IT, which is
+    what the other reader of a stored accepted action does. Re-dumping the model
+    this read validated was a second derivation of one digest: equal to the
+    stored bytes for every payload that validates today, and a divergence
+    nobody would see until a run refused to resume on a receipt that is sound.
+
+    Raises:
+        ValueError: The run has no current initial graph authority, its payload
+            or receipt is unreadable, the receipt does not match the row, or the
+            accepted authority belongs to another run or carries no program.
+    """
     action = await get_control_action_by_idempotency_key(
         db,
         thread_id=thread_id,
@@ -35,6 +49,9 @@ async def read_accepted_graph_definition(
         or action.payload_json is None
     ):
         raise ValueError("run has no current initial graph authority")
+    stored_payload = decode_json_object(action.payload_json)
+    if stored_payload is None:
+        raise ValueError("initial graph authority stores no readable payload")
     accepted = read_accepted_input(action)
     if action.graph_receipt_json is None:
         raise ValueError("initial graph authority has no immutable receipt")
@@ -44,9 +61,7 @@ async def read_accepted_graph_definition(
         action_id=action.id,
         action_type=ControlActionType.INGEST,
         dispatch_id=action.dispatch_id,
-        payload_fingerprint=control_action_payload_fingerprint(
-            accepted.model_dump(mode="json")
-        ),
+        payload_fingerprint=control_action_payload_fingerprint(stored_payload),
     ):
         raise ValueError("initial graph authority does not match its receipt")
     if accepted.dispatch["thread_id"] != thread_id:

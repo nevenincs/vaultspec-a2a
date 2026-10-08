@@ -68,10 +68,11 @@ async def reconcile_threads_on_startup(
         unavailable += int(observed.condition == "checkpoint_unavailable")
         owned += int(observed.condition in PROMOTION_OWNED_CONDITIONS)
     return {
-        # A run a promoter is answerable for is not backlog: nobody has to
-        # look at it, and counting it would make an ordinary multi-turn
-        # conversation read as a boot that found damage.
-        "repair_backlog": len(thread_ids) - settled - owned,
+        # A run a promoter is answerable for is not backlog, and neither is one
+        # parked on a question: nobody has to look at either, and counting them
+        # would make an ordinary multi-turn conversation, or a run waiting on a
+        # human over a restart, read as a boot that found damage.
+        "repair_backlog": len(thread_ids) - settled - owned - paused,
         "paused_resumable": paused,
         "checkpoint_unavailable": unavailable,
         "owned_by_promotion": owned,

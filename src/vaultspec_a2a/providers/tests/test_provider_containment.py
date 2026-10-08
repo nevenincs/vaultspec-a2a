@@ -10,6 +10,7 @@ processes.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import sys
@@ -150,6 +151,50 @@ async def test_containment_reaps_child_after_provider_root_exits() -> None:
         assert pid_is_live(grandchild_pid)
         await kill_process_tree(process)
         _await_gone([grandchild_pid])
+    finally:
+        await _force_reap([grandchild_pid])
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_a_repeated_release_does_not_narrate_a_second_termination(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One provider tree, one reap, one termination in the log.
+
+    Releasing an already-reaped tree is a supported no-op, and every caller that
+    cannot know whether a sibling already released relies on it. What it must
+    not do is report work it did not perform: an operator reading two
+    "termination starting" lines for one pid sees two kills, and the second one
+    names a reap that the first call completed.
+    """
+    process = await spawn_acp_process(
+        [_base_interpreter(), "-c", _PROVIDER_WITH_GRANDCHILD],
+        env=os.environ.copy(),
+        cwd=os.getcwd(),
+        use_exec=True,
+    )
+    assert process.stdout is not None
+    grandchild_pid = int(
+        (await asyncio.wait_for(process.stdout.readline(), timeout=10.0)).strip()
+    )
+    try:
+        with caplog.at_level(logging.INFO, logger="vaultspec_a2a.providers"):
+            await kill_process_tree(process)
+            _await_gone([grandchild_pid])
+
+            await kill_process_tree(process)
+
+        narrated = [
+            record.message
+            for record in caplog.records
+            if record.message.startswith("ACP subprocess termination")
+            or record.message == "ACP subprocess terminated"
+        ]
+        assert narrated == [
+            "ACP subprocess termination starting",
+            "ACP subprocess terminated",
+        ], narrated
     finally:
         await _force_reap([grandchild_pid])
 

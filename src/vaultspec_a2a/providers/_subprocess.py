@@ -289,7 +289,12 @@ async def _kill_process_tree(
             "returncode": process.returncode,
         }
     )
-    logger.info("ACP subprocess termination starting", extra=log_extra)
+    # A repeat release fells nothing, so it must not narrate a termination: two
+    # "termination starting" lines for one process read as two kills, and the
+    # reap this one reports is the earlier call's.
+    reaping = not _release_is_repeated(process, containment)
+    if reaping:
+        logger.info("ACP subprocess termination starting", extra=log_extra)
     try:
         if containment is None:
             raise ProcessContainmentError(
@@ -307,6 +312,9 @@ async def _kill_process_tree(
             transport = getattr(process, "_transport", None)
             if transport is not None:
                 transport.close()
+    if not reaping:
+        logger.debug("ACP subprocess release repeated after its reap", extra=log_extra)
+        return
     logger.info(
         "ACP subprocess terminated",
         extra={
@@ -314,4 +322,22 @@ async def _kill_process_tree(
             "exit_code": process.returncode,
             "returncode": process.returncode,
         },
+    )
+
+
+def _release_is_repeated(
+    process: asyncio.subprocess.Process, containment: ProcessContainment | None
+) -> bool:
+    """Whether this release has nothing left to fell.
+
+    True only when the root has already been collected AND its containment
+    reports the owned tree empty - the state a completed reap leaves behind, so
+    that a second call terminates an empty containment and waits a handle that
+    was already waited. A root that exited while descendants are still running
+    is NOT this case: that tree is exactly what the containment has yet to fell.
+    """
+    return (
+        process.returncode is not None
+        and containment is not None
+        and containment.is_quiescent() is True
     )

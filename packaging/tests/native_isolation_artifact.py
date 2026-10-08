@@ -25,6 +25,7 @@ from vaultspec_a2a.desktop.native_isolation import (
 )
 from vaultspec_a2a.desktop.profile import derive_state_paths
 from vaultspec_a2a.testing import LivenessWatch, ProgressDeadline, wait_until
+from vaultspec_a2a.utils import ProcessContainment, reap_contained, spawn_contained
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -310,7 +311,8 @@ def test_frozen_owner_death_removes_detached_child(tmp_path: Path) -> None:
         cwd=str(authority.workspace.path),
         environment={},
     )
-    owner = subprocess.Popen(
+    containment = ProcessContainment.create()
+    owner = spawn_contained(
         [
             str(binary),
             "run-module",
@@ -321,11 +323,11 @@ def test_frozen_owner_death_removes_detached_child(tmp_path: Path) -> None:
             str(script),
             nonce,
         ],
+        containment,
         cwd=launch.cwd,
         env=dict(launch.environment),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=True,
     )
     try:
         ready = authority.workspace.path / "descendant-ready"
@@ -356,8 +358,7 @@ def test_frozen_owner_death_removes_detached_child(tmp_path: Path) -> None:
             except (FileNotFoundError, ProcessLookupError, PermissionError):
                 continue
         assert len(descendants) == 1
-        owner.kill()
-        owner.wait(timeout=5)
+        reap_contained(owner, containment)
         path, identity = descendants[0]
         observed = "unread"
 
@@ -383,6 +384,22 @@ def test_frozen_owner_death_removes_detached_child(tmp_path: Path) -> None:
             ),
         )
     finally:
-        if owner.poll() is None:
-            owner.kill()
-        owner.wait(timeout=5)
+        reap_contained(owner, containment)
+
+
+def test_the_frozen_owner_is_spawned_through_the_contained_lifecycle() -> None:
+    """The frozen owner is a contained spawn, not a raw, hand-reaped one (PV42).
+
+    Mirrors ``desktop/tests/test_native_isolation.py``'s
+    ``test_owner_death_removes_a_detached_native_descendant``: production
+    wraps every isolated launch command in ``spawn_contained`` too
+    (``providers/_subprocess.py``), and the reap this locks targets only the
+    owner's own session/group, same scope as the raw ``.kill()`` it replaces
+    - the detached descendant under test escapes that scope on purpose, which
+    is what proves the isolation mechanism, not this fixture, removes it.
+    This reads the test's own compiled code for both names rather than
+    asserting on behaviour identical either way.
+    """
+    names = test_frozen_owner_death_removes_detached_child.__code__.co_names
+    assert "spawn_contained" in names
+    assert "reap_contained" in names

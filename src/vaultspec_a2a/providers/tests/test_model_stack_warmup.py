@@ -18,8 +18,8 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from contextlib import contextmanager, suppress
-from typing import TYPE_CHECKING, Any
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any, cast
 
 import psutil
 import pytest
@@ -30,6 +30,7 @@ from ...testing import (
     inherited_environment,
     wait_until,
 )
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -95,13 +96,17 @@ def _representative_cpu_load() -> Generator[list[psutil.Process]]:
     # real interpreter. Measuring that idle redirector would make the load proof
     # vacuous, and signalling it would not identify the process burning CPU.
     python = getattr(sys, "_base_executable", sys.executable)
+    containments = [
+        ProcessContainment.create() for _ in range(_REPRESENTATIVE_BUSY_PROCESSES)
+    ]
     processes = [
-        subprocess.Popen(
+        spawn_contained(
             [python, "-c", "value = 1\nwhile True: value = value * 3 % 97"],
+            containment,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        for _ in range(_REPRESENTATIVE_BUSY_PROCESSES)
+        for containment in containments
     ]
     owners = [psutil.Process(process.pid) for process in processes]
     try:
@@ -116,16 +121,27 @@ def _representative_cpu_load() -> Generator[list[psutil.Process]]:
         )
         yield owners
     finally:
-        for process in processes:
-            if process.poll() is None:
-                with suppress(ProcessLookupError):
-                    process.terminate()
-        for process in processes:
-            try:
-                process.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5.0)
+        for process, containment in zip(processes, containments, strict=True):
+            reap_contained(process, containment)
+
+
+def test_the_representative_cpu_load_is_spawned_through_the_contained_lifecycle() -> (
+    None
+):
+    """The five busy processes are contained spawns, not raw, hand-reaped ones (PV42).
+
+    A raw ``Popen`` only kills the direct child it names; a descendant one of
+    the five spawned would survive teardown. ``spawn_contained`` seats each
+    under the project's one process-tree containment, which
+    ``reap_contained`` then fells whole. This reads the fixture's own compiled
+    code for both names rather than asserting on behaviour the unfixed
+    fixture already exhibited identically (a tight CPU loop spawns no
+    descendant of its own, so a behavioural probe would pass on either
+    implementation).
+    """
+    names = cast("Any", _representative_cpu_load).__wrapped__.__code__.co_names
+    assert "spawn_contained" in names
+    assert "reap_contained" in names
 
 
 @pytest.fixture(scope="module")

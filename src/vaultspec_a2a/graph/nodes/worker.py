@@ -525,7 +525,7 @@ async def _record_turn_usage(
     identity is recorded as genuinely unknown. ``type(model).__name__`` is
     deliberately NOT substituted here — a class name in a provider column would
     be indistinguishable from a real lane, which is the same fabricated-fact
-    problem that keeps ``estimated_cost`` unwritten.
+    problem that retired the priced column this table once carried.
     """
     if cost_port is None or not isinstance(thread_id, str) or not thread_id:
         return

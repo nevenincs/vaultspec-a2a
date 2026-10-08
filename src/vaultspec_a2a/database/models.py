@@ -7,17 +7,14 @@ journal, execution state and cost tracking. Uses ``DeclarativeBase`` with
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_EVEN, Decimal
-from typing import Any, override
+from typing import override
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
-    Numeric,
     String,
     Text,
     TypeDecorator,
@@ -26,7 +23,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy.types import TypeEngine
 
 from ..thread import RECEIPT_ID_MAX_LENGTH
 from ..thread.constants import MAX_FEATURE_TAG_LENGTH, MAX_WORKSPACE_ROOT_LENGTH
@@ -55,7 +51,6 @@ from .write_authority_schema import (
 )
 
 __all__ = [
-    "MONEY_SCALE",
     "AuthoringEventCursorModel",
     "Base",
     "ControlActionModel",
@@ -70,18 +65,6 @@ __all__ = [
     "ThreadModel",
     "utcnow",
 ]
-
-#: Decimal places kept for a monetary amount.
-#:
-#: Ten places resolve to 1e-10 USD — one ten-billionth of a dollar, or 1e-8 of
-#: a cent. Per-token LLM prices bottom out around 7.5e-8 USD/token (a cheap
-#: model at roughly $0.075 per million input tokens), so the smallest single
-#: token that can be priced today still lands about 750 storage units above the
-#: floor. Nothing at the small end truncates.
-MONEY_SCALE = 10
-
-_MONEY_QUANTUM = Decimal(1).scaleb(-MONEY_SCALE)
-_MONEY_UNITS_PER_DOLLAR = 10**MONEY_SCALE
 
 
 def utcnow() -> datetime:
@@ -129,69 +112,6 @@ class UTCDateTime(TypeDecorator[datetime]):
         if value is None:
             return None
         return value.replace(tzinfo=UTC)
-
-
-class MoneyAmount(TypeDecorator[Decimal]):
-    """Persist a monetary amount exactly, never via float.
-
-    The sibling of :class:`UTCDateTime`: the precise Python type is restored at
-    the application boundary. Here the hazard is IEEE-754 rather than
-    tz-naivety.
-
-    SQLite has no decimal type, and SQLAlchemy's plain ``Numeric`` copes by
-    round-tripping through ``float`` — which is precisely the defect this type
-    exists to remove, and which SQLAlchemy itself warns about at runtime. So
-    the amount is stored as a scaled ``int64`` instead: an exact integer count
-    of 1e-:data:`MONEY_SCALE` dollar units.
-
-    Integer storage buys more than lossless round-tripping. ``SUM()`` over
-    these rows is evaluated inside the database, and SQLite sums integers
-    exactly while it accumulates binary error over floats. Because SQLAlchemy
-    infers an aggregate's type from its argument, ``func.sum()`` over this
-    column returns through :meth:`process_result_value` and therefore yields a
-    ``Decimal`` — the aggregate is exact end to end, not just the individual
-    row.
-    """
-
-    impl = Numeric
-    cache_ok = True
-
-    @override
-    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
-        """Select scaled-integer storage."""
-        return dialect.type_descriptor(BigInteger())
-
-    @override
-    def process_bind_param(
-        self, value: Decimal | int | float | str | None, dialect: Dialect
-    ) -> int | None:
-        """Quantize to the stored scale, scaling to integer units.
-
-        ``float`` is accepted but converted through ``str`` so the decimal
-        literal the caller wrote is preserved instead of its binary expansion:
-        ``Decimal(0.05)`` is 0.05000000000000000277…, whereas
-        ``Decimal(str(0.05))`` is exactly ``0.05``. Callers computing real
-        money should hand over ``Decimal`` and keep float out of the
-        arithmetic entirely; this conversion makes the boundary safe, it does
-        not make upstream float arithmetic correct.
-        """
-        if value is None:
-            return None
-        amount = Decimal(str(value)) if isinstance(value, float) else Decimal(value)
-        if not amount.is_finite():
-            msg = f"MoneyAmount requires a finite amount, got: {value!r}"
-            raise ValueError(msg)
-        quantized = amount.quantize(_MONEY_QUANTUM, rounding=ROUND_HALF_EVEN)
-        return int(quantized.scaleb(MONEY_SCALE))
-
-    @override
-    def process_result_value(
-        self, value: Decimal | int | float | str | None, dialect: Dialect
-    ) -> Decimal | None:
-        """Restore an exact ``Decimal``, unscaling the stored integer form."""
-        if value is None:
-            return None
-        return (Decimal(int(value)) / _MONEY_UNITS_PER_DOLLAR).quantize(_MONEY_QUANTUM)
 
 
 class Base(DeclarativeBase):
@@ -793,7 +713,17 @@ class ProviderRuntimeIdentityModel(Base):
 
 
 class CostTrackingModel(Base):
-    """Token usage and estimated cost for LLM invocations."""
+    """One LLM invocation's provider-reported token accounting.
+
+    Counts only, and only counts a lane actually reported. The table once also
+    carried a priced ``estimated_cost`` column that no writer ever set, because
+    every served lane is a subscription-authenticated CLI agent and the project
+    holds no rate table for any model. It was retired in revision 0028: a
+    column recording a measurement nobody takes invites a reader to treat its
+    structural zero as a measured zero, and a summed structural zero as a
+    measured total. Pricing a metered lane would need its own decision naming
+    the rate source, the currency and the rounding rule.
+    """
 
     __tablename__ = "cost_tracking"
 
@@ -816,7 +746,6 @@ class CostTrackingModel(Base):
     cache_read_tokens: Mapped[int | None] = mapped_column(default=None)
     cache_write_tokens: Mapped[int | None] = mapped_column(default=None)
     reasoning_tokens: Mapped[int | None] = mapped_column(default=None)
-    estimated_cost: Mapped[Decimal] = mapped_column(MoneyAmount(), default=Decimal(0))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
     thread: Mapped["ThreadModel"] = relationship(

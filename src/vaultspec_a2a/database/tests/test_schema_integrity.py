@@ -21,6 +21,8 @@ each one a decision that would otherwise survive only as a comment:
 * That every reader of the workspace-root selector enforces the width the
   COLUMN declares, measured off the mapped column rather than off a number
   repeated in the test.
+* That the accounting table records provider-reported counts and nothing
+  priced or derived, in the model and in the migrated database alike.
 
 Everything drives real SQLite databases, the real revision chain, the real
 Pydantic models, and the real stream catalog.
@@ -199,6 +201,66 @@ class TestUnnamedForeignKeysAreTargetable:
             )
         finally:
             engine.dispose()
+
+
+#: Every column ``cost_tracking`` is allowed to carry: the row's identity, the
+#: lane that reported it, the five provider-reported counts, and when it landed.
+_ACCOUNTING_COLUMNS = frozenset(
+    {
+        "id",
+        "thread_id",
+        "agent_id",
+        "provider",
+        "model",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "reasoning_tokens",
+        "created_at",
+    }
+)
+
+
+class TestAccountingRecordsOnlyWhatAProviderReported:
+    """``cost_tracking`` holds measured counts and nothing priced or derived.
+
+    The decision this pins is one no comparison of the two schemas can state: no
+    column records a cost the system did not measure. Every served lane is a
+    subscription-authenticated CLI agent and the project holds no rate table for
+    any model, so a price column can only ever hold a structural zero - and a
+    SUM over structural zeros reads back as a measured total of zero dollars.
+    That is why a column recording a measurement nobody takes is worse than an
+    absent one, and why one was removed rather than left unwritten.
+
+    Asserted as an EXACT column set rather than as the absence of one name, so a
+    price re-added under any spelling fails here. Asserted against the migrated
+    database as well as the model, because the model alone cannot prove the
+    column left the stores that already have it.
+    """
+
+    def test_the_model_declares_exactly_the_reported_counts(self) -> None:
+        """The mapped table carries no priced or derived column."""
+        declared = set(Base.metadata.tables["cost_tracking"].columns.keys())
+
+        assert declared == set(_ACCOUNTING_COLUMNS), (
+            "cost_tracking's mapped columns are no longer exactly the "
+            f"provider-reported record: {sorted(declared ^ _ACCOUNTING_COLUMNS)}"
+        )
+
+    def test_the_migrated_table_declares_exactly_the_reported_counts(
+        self, migrated_connection: Connection
+    ) -> None:
+        """Head agrees, so the chain really dropped it rather than stopping writing."""
+        migrated = {
+            column["name"]
+            for column in inspect(migrated_connection).get_columns("cost_tracking")
+        }
+
+        assert migrated == set(_ACCOUNTING_COLUMNS), (
+            "the migrated cost_tracking table is no longer exactly the "
+            f"provider-reported record: {sorted(migrated ^ _ACCOUNTING_COLUMNS)}"
+        )
 
 
 class TestStatusDefaultsComeFromEnums:

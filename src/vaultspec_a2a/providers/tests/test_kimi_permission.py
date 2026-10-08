@@ -89,9 +89,12 @@ async def _decide(
     ],
 )
 async def test_autonomous_kimi_auto_approves_its_declared_reads(
-    acp_session_context: AcpSessionContext, title: str
+    acp_session_context: AcpSessionContext, title: str, tmp_path: Path
 ) -> None:
-    cfg = _config(acp_family="kimi")
+    # The run's own project, because the project scan is the first authority the
+    # shared decision consults: a config carrying no workspace root measures
+    # nothing, and a decision that cannot measure a call refuses it.
+    cfg = _config(acp_family="kimi", workspace_root=str(tmp_path))
     assert await _decide(title, cfg, acp_session_context) == "approve"
 
 
@@ -112,9 +115,11 @@ async def test_autonomous_kimi_auto_approves_its_declared_reads(
     ],
 )
 async def test_autonomous_kimi_rejects_everything_else(
-    acp_session_context: AcpSessionContext, title: str
+    acp_session_context: AcpSessionContext, title: str, tmp_path: Path
 ) -> None:
-    cfg = _config(acp_family="kimi")
+    # Bound to a real project, so the refusal under test is the uncovered-tool
+    # one rather than the first-authority guard refusing an unmeasurable call.
+    cfg = _config(acp_family="kimi", workspace_root=str(tmp_path))
     assert await _decide(title, cfg, acp_session_context) == "reject"
 
 

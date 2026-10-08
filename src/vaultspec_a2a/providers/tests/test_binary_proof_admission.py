@@ -200,6 +200,60 @@ async def test_claude_model_rechecks_withdrawn_proof_before_child_spawn(
 
 
 @pytest.mark.asyncio
+async def test_a_system_cli_acp_lane_rechecks_its_own_launcher_not_the_claude_pin(
+    tmp_path: Path,
+) -> None:
+    """Every proof-bound ACP lane re-probes the binary IT will hand its child.
+
+    The Claude family resolves its launcher through the profile's Claude pin; a
+    system-CLI ACP family (Kimi) names its launcher in its classified command,
+    exactly as the Codex lane does. Routing both through the pin made an
+    enrolled Kimi turn depend on a Claude CLI it never spawns: with no Claude
+    binary resolvable the lane was refused for a missing Claude CLI instead of
+    being measured against its own recorded proof.
+
+    The capsule here carries no Claude executable, so the pin cannot resolve
+    one, and the refusal has to come from the Kimi lane's own proof.
+    """
+    launcher = tmp_path / "kimi"
+    launcher.write_text("selected binary\n", encoding="utf-8")
+    marker = tmp_path / "spawned.txt"
+    model = AcpChatModel(
+        command=[
+            sys.executable,
+            "-c",
+            "from pathlib import Path; import sys; Path(sys.argv[1]).touch()",
+            str(marker),
+        ],
+        workspace_root=str(tmp_path),
+        provider=Provider.KIMI.value,
+        acp_family="kimi",
+        provider_command=ProviderCommand(
+            argv=(str(launcher), "acp"),
+            runtime_authority="system_cli",
+            command_origin="system_path_executable",
+            command_kind="kimi_cli",
+            command_executable=launcher.name,
+            command_target=str(launcher),
+        ),
+        version_proof_required=True,
+    )
+    empty_capsule = tmp_path / "capsule"
+    empty_capsule.mkdir()
+
+    with (
+        settings_override(
+            claude_cli_executable=None, capsule_assets_root=empty_capsule
+        ),
+        pytest.raises(ProviderRuntimeUnavailableError) as refusal,
+    ):
+        await model.ainvoke([HumanMessage(content="hello")])
+
+    assert refusal.value.reason is ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+    assert not marker.exists()
+
+
+@pytest.mark.asyncio
 async def test_model_rechecks_changed_launcher_before_child_spawn(
     tmp_path: Path,
 ) -> None:

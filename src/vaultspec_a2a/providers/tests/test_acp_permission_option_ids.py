@@ -29,10 +29,10 @@ _MALFORMED: JsonObject = {"label": "Nameless option", "kind": "allow_once"}
 
 
 def _config(
+    workspace_root: str,
     *,
     permission_callback: PermissionCallback | None = None,
     acp_family: str = "claude",
-    workspace_root: str | None = None,
 ) -> AcpModelConfig:
     return AcpModelConfig(
         agent_config=None,
@@ -77,6 +77,7 @@ def _returning(answer: str) -> PermissionCallback:
 @pytest.mark.asyncio
 async def test_an_empty_option_id_is_never_serialised_into_the_outcome(
     acp_session_context: AcpSessionContext,
+    tmp_path: Path,
 ) -> None:
     """A callback answer outside the offered ids refuses the call, never echoes it.
 
@@ -90,7 +91,7 @@ async def test_an_empty_option_id_is_never_serialised_into_the_outcome(
 
     outcome = await acp_permission_outcome(
         acp_session_context,
-        _config(permission_callback=_returning("")),
+        _config(str(tmp_path), permission_callback=_returning("")),
         options=options,
     )
 
@@ -101,6 +102,7 @@ async def test_an_empty_option_id_is_never_serialised_into_the_outcome(
 @pytest.mark.asyncio
 async def test_a_rejected_answer_falls_back_without_raising_key_error(
     acp_session_context: AcpSessionContext,
+    tmp_path: Path,
 ) -> None:
     """The fallback for a bad answer must survive the malformed input it exists for.
 
@@ -112,7 +114,7 @@ async def test_a_rejected_answer_falls_back_without_raising_key_error(
 
     decision = await _decide(
         options,
-        _config(permission_callback=_returning("hostile-option")),
+        _config(str(tmp_path), permission_callback=_returning("hostile-option")),
         acp_session_context,
     )
 
@@ -122,6 +124,7 @@ async def test_a_rejected_answer_falls_back_without_raising_key_error(
 @pytest.mark.asyncio
 async def test_a_snake_case_option_answered_in_kind_is_accepted(
     acp_session_context: AcpSessionContext,
+    tmp_path: Path,
 ) -> None:
     """A snake_case options list validates its own snake_case answer.
 
@@ -136,7 +139,7 @@ async def test_a_snake_case_option_answered_in_kind_is_accepted(
 
     decision = await _decide(
         options,
-        _config(permission_callback=_returning("reject_once")),
+        _config(str(tmp_path), permission_callback=_returning("reject_once")),
         acp_session_context,
     )
 
@@ -146,6 +149,7 @@ async def test_a_snake_case_option_answered_in_kind_is_accepted(
 @pytest.mark.asyncio
 async def test_a_snake_case_option_is_selected_when_no_callback_decides(
     acp_session_context: AcpSessionContext,
+    tmp_path: Path,
 ) -> None:
     """The unsupervised path reads the id it selects in either spelling.
 
@@ -158,29 +162,34 @@ async def test_a_snake_case_option_is_selected_when_no_callback_decides(
         {"option_id": "reject_once", "kind": "reject_once"},
     ]
 
-    decision = await _decide(options, _config(), acp_session_context)
+    decision = await _decide(options, _config(str(tmp_path)), acp_session_context)
 
     assert decision == "reject_once"
 
 
 @pytest.mark.asyncio
-async def test_a_leading_option_without_an_id_does_not_crash_the_default_path(
+async def test_a_leading_option_without_an_id_abandons_rather_than_inventing_one(
     acp_session_context: AcpSessionContext,
+    tmp_path: Path,
 ) -> None:
-    """No usable id on offer means the conventional refusal literal.
+    """No usable id on offer means the protocol's own cancelled outcome.
 
-    The literal is the deliberate answer rather than a recovery: an id the agent
-    does not recognise makes it decline the call, which is the direction the
-    unsupervised path must fail in when it cannot name what it was offered.
+    The unsupervised path names only ids the request listed. Answering the
+    conventional refusal literal instead SELECTED an option the agent never
+    offered, which it cannot match to anything it put on the table; abandoning
+    the call says exactly what is true and still refuses the tool use.
     """
-    decision = await _decide([_MALFORMED], _config(), acp_session_context)
+    outcome = await acp_permission_outcome(
+        acp_session_context, _config(str(tmp_path)), options=[_MALFORMED]
+    )
 
-    assert decision == "reject"
+    assert outcome == {"outcome": "cancelled"}
 
 
 @pytest.mark.asyncio
 async def test_a_raising_callback_denies_without_subscripting_a_bad_option(
     acp_session_context: AcpSessionContext,
+    tmp_path: Path,
 ) -> None:
     """The fail-closed denial path must not itself raise on malformed options.
 
@@ -202,7 +211,9 @@ async def test_a_raising_callback_denies_without_subscripting_a_bad_option(
     ]
 
     decision = await _decide(
-        options, _config(permission_callback=callback), acp_session_context
+        options,
+        _config(str(tmp_path), permission_callback=callback),
+        acp_session_context,
     )
 
     assert decision == "deny_once"
@@ -211,6 +222,7 @@ async def test_a_raising_callback_denies_without_subscripting_a_bad_option(
 @pytest.mark.asyncio
 async def test_a_denial_never_slides_onto_an_approval_on_a_bad_last_option(
     acp_session_context: AcpSessionContext,
+    tmp_path: Path,
 ) -> None:
     """Fail-closed means the cancelled outcome, never the surviving APPROVE id.
 
@@ -227,7 +239,9 @@ async def test_a_denial_never_slides_onto_an_approval_on_a_bad_last_option(
         raise RuntimeError("the human hung up")
 
     outcome = await acp_permission_outcome(
-        acp_session_context, _config(permission_callback=callback), options=options
+        acp_session_context,
+        _config(str(tmp_path), permission_callback=callback),
+        options=options,
     )
 
     assert outcome == {"outcome": "cancelled"}
@@ -242,7 +256,7 @@ async def test_the_kimi_autonomous_lane_reads_snake_case_options(
         {"option_id": "approve", "kind": "allow_once"},
         {"option_id": "reject", "kind": "reject_once"},
     ]
-    config = _config(acp_family="kimi", workspace_root=str(tmp_path))
+    config = _config(str(tmp_path), acp_family="kimi")
     read: JsonObject = {"path": "a.py"}
 
     assert (
@@ -268,6 +282,7 @@ async def test_the_kimi_autonomous_lane_reads_snake_case_options(
 @pytest.mark.asyncio
 async def test_a_remembered_approval_is_answered_as_a_single_use(
     acp_session_context: AcpSessionContext,
+    tmp_path: Path,
 ) -> None:
     """An "always" answer reaches the CLI as the once-only option it offered.
 
@@ -282,7 +297,7 @@ async def test_a_remembered_approval_is_answered_as_a_single_use(
 
     decision = await _decide(
         options,
-        _config(permission_callback=_returning("allow_always")),
+        _config(str(tmp_path), permission_callback=_returning("allow_always")),
         acp_session_context,
     )
 
@@ -292,6 +307,7 @@ async def test_a_remembered_approval_is_answered_as_a_single_use(
 @pytest.mark.asyncio
 async def test_a_single_use_approval_is_forwarded_unchanged(
     acp_session_context: AcpSessionContext,
+    tmp_path: Path,
 ) -> None:
     """Narrowing touches only the answers that would outlive their own call."""
     options: list[JsonObject] = [
@@ -301,7 +317,7 @@ async def test_a_single_use_approval_is_forwarded_unchanged(
 
     decision = await _decide(
         options,
-        _config(permission_callback=_returning("allow_once")),
+        _config(str(tmp_path), permission_callback=_returning("allow_once")),
         acp_session_context,
     )
 
@@ -311,6 +327,7 @@ async def test_a_single_use_approval_is_forwarded_unchanged(
 @pytest.mark.asyncio
 async def test_an_unoffered_answer_refuses_where_a_refusal_is_offered(
     acp_session_context: AcpSessionContext,
+    tmp_path: Path,
 ) -> None:
     """The adapter's own option list is answered with its reject option.
 
@@ -326,7 +343,7 @@ async def test_an_unoffered_answer_refuses_where_a_refusal_is_offered(
 
     decision = await _decide(
         options,
-        _config(permission_callback=_returning("no-such-option")),
+        _config(str(tmp_path), permission_callback=_returning("no-such-option")),
         acp_session_context,
     )
 
@@ -336,6 +353,7 @@ async def test_an_unoffered_answer_refuses_where_a_refusal_is_offered(
 @pytest.mark.asyncio
 async def test_an_unoffered_answer_cancels_when_every_option_is_an_approval(
     acp_session_context: AcpSessionContext,
+    tmp_path: Path,
 ) -> None:
     """With only approvals on offer the call is cancelled, not granted."""
     options: list[JsonObject] = [
@@ -345,7 +363,7 @@ async def test_an_unoffered_answer_cancels_when_every_option_is_an_approval(
 
     outcome = await acp_permission_outcome(
         acp_session_context,
-        _config(permission_callback=_returning("no-such-option")),
+        _config(str(tmp_path), permission_callback=_returning("no-such-option")),
         options=options,
     )
 
@@ -355,6 +373,7 @@ async def test_an_unoffered_answer_cancels_when_every_option_is_an_approval(
 @pytest.mark.asyncio
 async def test_an_uncovered_autonomous_call_is_never_granted_by_position(
     acp_session_context: AcpSessionContext,
+    tmp_path: Path,
 ) -> None:
     """The autonomous refusal never lands on an approval either.
 
@@ -368,7 +387,7 @@ async def test_an_uncovered_autonomous_call_is_never_granted_by_position(
     ]
 
     outcome = await acp_permission_outcome(
-        acp_session_context, _config(), options=options
+        acp_session_context, _config(str(tmp_path)), options=options
     )
 
     assert outcome == {"outcome": "cancelled"}

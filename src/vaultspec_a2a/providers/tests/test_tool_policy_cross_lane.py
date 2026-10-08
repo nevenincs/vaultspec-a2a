@@ -47,7 +47,7 @@ _WITHHELD_REFUSAL = "Refused a withheld harness tool"
 
 
 def _config(
-    workspace_root: str,
+    workspace_root: str | None,
     *,
     permission_callback: PermissionCallback | None = None,
     allowed_tools: list[str] | None = None,
@@ -244,6 +244,67 @@ async def test_a_decision_with_no_project_to_measure_against_refuses(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("workspace_root", [None, "", "relative/project", "~/project"])
+async def test_a_scope_that_measures_nothing_refuses_as_no_scope_does(
+    workspace_root: str | None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A scope holding no usable project is no authority, exactly as none is.
+
+    The project scan is the first authority the shared decision consults, and a
+    scope whose root is absent, blank, or does not reduce to an absolute key
+    measures nothing: ``bound_project_root()`` answers ``None`` for every one of
+    these, so a call naming no project argument would otherwise pass the guard
+    unmeasured and be decided by a human rung or an allowlist that has nothing
+    to compare against.
+    """
+    with caplog.at_level("WARNING"):
+        decision = await decide(
+            ToolPermissionRequest(
+                tool="Edit",
+                arguments={"query": "anything"},
+                options=[
+                    {"optionId": "allow_once", "kind": "allow_once"},
+                    {"optionId": "reject_once", "kind": "reject_once"},
+                ],
+            ),
+            scope=RunProjectScope(workspace_root),
+            covered=lambda: True,
+            ask=_answering("allow_once"),
+        )
+
+    assert decision is None
+    assert any(
+        "no project to measure it against" in record.getMessage()
+        for record in caplog.records
+    ), [record.getMessage() for record in caplog.records]
+
+
+@pytest.mark.asyncio
+async def test_a_lane_whose_run_carries_no_project_refuses_a_human_approval(
+    acp_session_context: AcpSessionContext,
+) -> None:
+    """Driven through the real rung, because that is how the gap would arrive.
+
+    ``AcpModelConfig`` derives its scope from the run's ``workspace_root``, and
+    that field admits ``None``, so a config built without the run's project
+    produces a scope that binds nothing. The call names no project argument, so
+    nothing but the first-authority guard stands between it and the human rung's
+    approval.
+    """
+    outcome = await acp_permission_outcome(
+        acp_session_context,
+        _config(None, permission_callback=_returning("allow_once")),
+        tool_call={"title": "Edit", "rawInput": {"query": "anything"}},
+        options=[
+            {"optionId": "allow_once", "kind": "allow_once"},
+            {"optionId": "reject_once", "kind": "reject_once"},
+        ],
+    )
+
+    assert outcome == {"outcome": "selected", "optionId": "reject_once"}
+
+
+@pytest.mark.asyncio
 async def test_a_remembered_refusal_with_no_single_use_refusal_refuses_the_call(
     tmp_path: Path,
 ) -> None:
@@ -271,6 +332,81 @@ async def test_a_remembered_refusal_with_no_single_use_refusal_refuses_the_call(
     )
 
     assert decision is None
+
+
+@pytest.mark.asyncio
+async def test_an_unattended_refusal_is_never_spelled_as_a_remembered_rule(
+    acp_session_context: AcpSessionContext, tmp_path: Path
+) -> None:
+    """The unattended rung refuses the same way the human rung's answer does.
+
+    Nobody is at the prompt, so the rule the CLI would persist for
+    ``reject_always`` could not even be reported, and it would narrow every
+    later run on the machine - including the unattended ones, whose posture is
+    that nothing is decided for them in advance. With no once-only refusal on
+    offer the lane is told the call is abandoned instead.
+    """
+    outcome = await acp_permission_outcome(
+        acp_session_context,
+        _config(str(tmp_path)),
+        tool_call={"title": "Edit", "rawInput": {}},
+        options=[
+            {"optionId": "allow_once", "kind": "allow_once"},
+            {"optionId": "reject_always", "kind": "reject_always"},
+        ],
+    )
+
+    assert outcome == _CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_an_unattended_refusal_never_names_an_option_nobody_offered(
+    acp_session_context: AcpSessionContext, tmp_path: Path
+) -> None:
+    """A request that offers nothing is answered by abandonment, not by a literal.
+
+    Answering the conventional refusal literal made the handler SELECT an
+    option id the request never listed, which is a decision the agent cannot
+    match to anything it put on the table.
+    """
+    outcome = await acp_permission_outcome(
+        acp_session_context,
+        _config(str(tmp_path)),
+        tool_call={"title": "Edit", "rawInput": {}},
+        options=[],
+    )
+
+    assert outcome == _CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_an_unattended_refusal_still_selects_the_once_only_refusal(
+    acp_session_context: AcpSessionContext, tmp_path: Path
+) -> None:
+    """Abandoning is the fallback; a refusal the agent can act on comes first.
+
+    Asserted on both rungs: the ACP lane selects its offered ``reject_once``,
+    and the Codex lane - whose two actions are always on offer - answers its
+    decline action. A refusal tells the model its call was denied while the turn
+    continues, which is strictly more than an abandonment says.
+    """
+    outcome = await acp_permission_outcome(
+        acp_session_context,
+        _config(str(tmp_path)),
+        tool_call={"title": "Edit", "rawInput": {}},
+        options=[
+            {"optionId": "reject_always", "kind": "reject_always"},
+            {"optionId": "reject_once", "kind": "reject_once"},
+        ],
+    )
+    codex_action = await _codex_action(
+        tool="write",
+        arguments={},
+        project_scope=RunProjectScope(str(tmp_path)),
+    )
+
+    assert outcome == {"outcome": "selected", "optionId": "reject_once"}
+    assert codex_action == DECLINE_ACTION
 
 
 @pytest.mark.asyncio

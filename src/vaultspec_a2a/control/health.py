@@ -551,6 +551,7 @@ def assemble_desktop_readiness(
     database_ready: bool | None = None,
     worker_probe_ready: bool | None = None,
     worker_adoptable: bool | None = None,
+    eligible_providers: list[str] | None = None,
 ) -> DesktopReadiness:
     """Assemble the five separate desktop readiness facts from one authority.
 
@@ -563,7 +564,11 @@ def assemble_desktop_readiness(
     demand is informational, not degradation. Callers that have already run the
     live database and worker probes pass their verdicts in (``database_ready``,
     ``worker_probe_ready``); the cheap sync surface leaves them ``None`` and the
-    fact is derived from seated application state. Run admission is the distinct
+    fact is derived from seated application state. ``eligible_providers`` is the
+    same arrangement for the one fact here that can SPAWN: deriving it resolves
+    each proven lane's launcher and may run a bounded ``--version`` child, so an
+    async caller computes it off the event loop and hands it in, and the
+    synchronous surfaces derive it here. Run admission is the distinct
     execution-readiness fact: a reachable worker plus an eligible provider is
     ``ready``; a cold or starting worker over a ready gateway is ``deferred``; a
     failed hard dependency is ``blocked``.
@@ -606,7 +611,8 @@ def assemble_desktop_readiness(
 
     # --- Provider eligibility via the credential-aware readiness probe. ---
     native_refusal = native_execution_refusal_reason()
-    eligible_providers = _eligible_provider_names()
+    if eligible_providers is None:
+        eligible_providers = _eligible_provider_names()
     if eligible_providers:
         provider_eligibility = ProviderEligibility.ELIGIBLE
     else:
@@ -656,6 +662,13 @@ async def probe_desktop_readiness(
     is the async entry point that runs that probe and hands the verdict to the
     single readiness authority; ``assemble_desktop_readiness`` remains available
     for the cheap synchronous surfaces that hold no session to probe through.
+
+    Provider eligibility is derived here too, in a worker thread. The predicate
+    behind it resolves each proven lane's launcher and runs a bounded
+    ``--version`` child for one it has not identified yet, which is blocking
+    work: cached per launch identity it costs the process once per lane, but that
+    once would otherwise land on the event loop and stall every other request
+    sharing it.
     """
     database_ready = await probe_database_ready(db)
     return assemble_desktop_readiness(
@@ -663,6 +676,7 @@ async def probe_desktop_readiness(
         database_ready=database_ready,
         worker_probe_ready=worker_probe_ready,
         worker_adoptable=worker_adoptable,
+        eligible_providers=await asyncio.to_thread(_eligible_provider_names),
     )
 
 

@@ -97,7 +97,7 @@ from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import AcpError
 from .binary_version import probe_binary_version
-from .cli_resolution import pin_claude_executable
+from .cli_resolution import ProviderRuntimeUnavailableReason, pin_claude_executable
 from .execution_modes import NODE_BACKEND
 from .kimi_config_home import (
     KIMI_CODE_HOME_ENV,
@@ -337,6 +337,43 @@ class AcpChatModel(ProcessChatModel):
         finally:
             self._state.session.session_busy = False
 
+    def _launcher_proof_reason(
+        self, env: dict[str, str]
+    ) -> ProviderRuntimeUnavailableReason | None:
+        """Return why this launch's binary is inadmissible, or None if it is not.
+
+        The one spawn-time re-probe every proof-bound ACP lane goes through, so a
+        binary replaced or withdrawn after the model was built cannot reach a
+        child. It dispatches on the family, because the family is what decides
+        WHERE the launcher comes from: the Claude family resolves it through the
+        profile's Claude pin, and a system-CLI family names it in its classified
+        command - which is how the Codex lane re-probes its own. Taking the pin
+        for every family made an enrolled Kimi turn depend on a Claude CLI it
+        never spawns, so a host without one refused the Kimi lane for the wrong
+        binary's absence instead of measuring its own.
+
+        A proof-bound family with no re-probe here is REFUSED rather than
+        spawned: adding one without its probe is a construction defect, and the
+        deny-by-default direction for a launch nothing measured is to refuse.
+        """
+        from ..graph.enums import Provider
+        from .factory import binary_proof_reason, kimi_binary_proof_reason
+
+        provider = Provider(self.provider)
+        if self._state.config.acp_family == "claude":
+            resolved = pin_claude_executable(env)
+            return binary_proof_reason(
+                provider,
+                str(resolved.path),
+                resolved.authority,
+                native_authority=self._native_authority,
+            )
+        if provider is Provider.KIMI:
+            return kimi_binary_proof_reason(
+                self.provider_command, native_authority=self._native_authority
+            )
+        return ProviderRuntimeUnavailableReason.BINARY_PROOF_MISSING
+
     async def _acp_environment(self) -> dict[str, str]:
         _ws_path = require_workspace_root(
             self.workspace_root, surface="ACP environment resolution"
@@ -544,18 +581,9 @@ class AcpChatModel(ProcessChatModel):
         # explicit auth and gateway overlay from ProviderFactory.
         env = await self._acp_environment()
         if self.version_proof_required:
-            from ..graph.enums import Provider
-            from .factory import binary_proof_reason, require_binary_proof
+            from .factory import require_binary_proof
 
-            resolved = pin_claude_executable(env)
-            require_binary_proof(
-                binary_proof_reason(
-                    Provider(self.provider),
-                    str(resolved.path),
-                    resolved.authority,
-                    native_authority=self._native_authority,
-                )
-            )
+            require_binary_proof(self._launcher_proof_reason(env))
 
         # The spawn and session setup run INSIDE the try so the finally below
         # is the single cleanup path: a spawn-time raise (missing binary,

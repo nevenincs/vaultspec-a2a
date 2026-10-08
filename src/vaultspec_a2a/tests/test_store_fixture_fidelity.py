@@ -15,27 +15,36 @@ real connections.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
+import time
 from typing import TYPE_CHECKING
 
 import pytest
 from langgraph.checkpoint.base import empty_checkpoint
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ..conftest import SqlitePosture
 from ..control.config import settings
-from ..database import checkpoint_pragmas
-from ..testing import settings_override
+from ..database import WriteContentionError, checkpoint_pragmas, open_checkpointer
+from ..testing import held_write_lock, settings_override
 
 if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
 
     from langchain_core.runnables import RunnableConfig
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 #: Deliberately not the configured default, so a posture that silently keeps
-#: the driver's own lock wait cannot pass this.
-_BUSY_TIMEOUT_MS = 7321
+#: the driver's own lock wait cannot pass this; small enough that the whole
+#: retry budget (four lock waits plus their growing pauses) finishes inside a
+#: test.
+_BUSY_TIMEOUT_MS = 321
+
+#: Held for longer than one attempt's lock wait and well inside the retry
+#: budget, so the checkpoint can only land by being retried once the lock comes
+#: free.
+_TRANSIENT_HOLD_SECONDS = 0.4
 
 
 def _run_config(run_id: str) -> RunnableConfig:
@@ -103,43 +112,108 @@ async def test_the_checkpointer_carries_the_served_pragma_posture(
     )
 
 
+@pytest.mark.asyncio
+async def test_the_fixture_yields_the_saver_the_service_serves(
+    checkpointer: AsyncSqliteSaver, tmp_path: Path
+) -> None:
+    """The fixture's saver is the one ``open_checkpointer`` builds, not the base.
+
+    Production never serves a bare ``AsyncSqliteSaver``: the factory wraps it in
+    the store's write-contention policy and seats the strict deserializer on it.
+    A fixture that handed suites the library saver let every claim about a
+    contended or a maliciously shaped checkpoint be made against a saver with
+    neither, so the posture is compared against a saver the production factory
+    opens right here rather than described.
+
+    The factory is pointed at a store of its own for the comparison, so this
+    never opens the developer's configured checkpoint store.
+    """
+    with settings_override(
+        checkpoint_database_url=f"sqlite+aiosqlite:///{tmp_path / 'served.sqlite'}"
+    ):
+        async with open_checkpointer() as served:
+            assert type(checkpointer) is type(served)
+            assert type(served) is not AsyncSqliteSaver
+
+
 @pytest.mark.sqlite_engine(SqlitePosture.APPLICATION)
 @pytest.mark.asyncio
-async def test_a_checkpoint_write_contends_with_an_application_writer(
+async def test_a_transient_application_writer_delays_a_fixture_checkpoint(
     database_file: Path,
     checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """The shared write lock is real, and the fixture's saver now meets it.
+    """The shared write lock is real, and the fixture's saver survives meeting it.
 
     The fact the separate-file fixture could not express at all: a real second
     connection takes the application store's write lock with a real row write
-    behind it, and the saver's checkpoint is refused for it.
+    behind it, and a checkpoint write runs straight into it.
 
-    Refused rather than waited out because the saver this fixture opens is the
-    LIBRARY'S, and the saver's connection already carries an implicit read
-    transaction - a write that upgrades one is refused outright without the lock
-    wait being consulted. The served saver answers exactly this condition with
-    the store's retry policy and a rollback between attempts
-    (``database.checkpoints``), which the fixture does not reproduce. That is
-    why a test holding an uncommitted application transaction ACROSS a
-    checkpoint write declares ``separate_checkpoint_store`` instead.
+    The library saver FAILED here. Its connection already carries an implicit
+    read transaction, and a write that upgrades one is refused outright without
+    the lock wait being consulted, so a moment of ordinary contention raised
+    ``database is locked`` out of the fixture. The served saver answers exactly
+    that condition with a rollback and the store's retry policy
+    (``database.checkpoints``), so the write costs latency and lands - which is
+    the behaviour every suite reaching a checkpoint through this fixture is
+    entitled to assume.
     """
-    holder = sqlite3.connect(str(database_file), isolation_level=None, timeout=10.0)
-    try:
-        holder.execute("PRAGMA busy_timeout=10000")
-        holder.execute("BEGIN IMMEDIATE")
-        holder.execute("UPDATE threads SET title = 'held' WHERE id = 'absent'")
-        with pytest.raises(sqlite3.OperationalError, match="locked"):
-            await checkpointer.aput(
-                _run_config("shared-lock"), empty_checkpoint(), {}, {}
-            )
-        holder.rollback()
-    finally:
-        holder.close()
+    with held_write_lock(
+        database_file,
+        statement="UPDATE threads SET title = ? WHERE id = ?",
+        parameters=("held", "absent"),
+    ) as holder:
 
-    # The lock is free again, so the same write lands: the refusal above was
-    # contention, not a store the fixture left broken.
-    await checkpointer.aput(_run_config("shared-lock"), empty_checkpoint(), {}, {})
+        async def release_after_one_attempt() -> None:
+            await asyncio.sleep(_TRANSIENT_HOLD_SECONDS)
+            holder.rollback()
+
+        releasing = asyncio.create_task(release_after_one_attempt())
+        started = time.monotonic()
+        await checkpointer.aput(_run_config("shared-lock"), empty_checkpoint(), {}, {})
+        waited = time.monotonic() - started
+        await releasing
+
+    # It really met the lock: a write that answered before the holder let go
+    # would mean the shared lock was never taken.
+    assert waited >= _TRANSIENT_HOLD_SECONDS
+
+    read = await checkpointer.aget_tuple(_run_config("shared-lock"))
+    assert read is not None
+
+
+@pytest.mark.sqlite_engine(SqlitePosture.APPLICATION)
+@pytest.mark.asyncio
+async def test_exhausted_contention_refuses_a_fixture_checkpoint_as_retryable(
+    database_file: Path,
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """Contention that outlasts the budget is the store's typed refusal.
+
+    The discriminating half: the library saver let the driver's own
+    ``database is locked`` out of the fixture, which is the same error a corrupt
+    store raises and carries no statement about retryability. The served saver
+    exhausts its budget and refuses with ``WriteContentionError``, which is what
+    the ``/v1`` verbs turn into a retryable refusal. A suite asserting on how the
+    service answers a busy store has to be given the saver that produces that
+    answer.
+    """
+    with (
+        held_write_lock(
+            database_file,
+            statement="UPDATE threads SET title = ? WHERE id = ?",
+            parameters=("held", "absent"),
+        ),
+        pytest.raises(WriteContentionError) as refused,
+    ):
+        await checkpointer.aput(
+            _run_config("exhausted-lock"), empty_checkpoint(), {}, {}
+        )
+
+    assert "nothing was applied" in str(refused.value)
+
+    # The store is writable again, so the refusal was contention rather than a
+    # connection the refused write left poisoned.
+    await checkpointer.aput(_run_config("exhausted-lock"), empty_checkpoint(), {}, {})
 
 
 @pytest.mark.separate_checkpoint_store

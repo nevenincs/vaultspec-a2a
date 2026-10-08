@@ -1092,21 +1092,34 @@ def checkpoint_file(
 
 @pytest_asyncio.fixture
 async def checkpointer(checkpoint_file: Path) -> AsyncIterator[AsyncSqliteSaver]:
-    """A real ``AsyncSqliteSaver`` over :func:`checkpoint_file`, set up.
+    """The SERVED checkpoint saver over :func:`checkpoint_file`.
 
-    In the posture ``open_checkpointer`` gives the served saver, from the one
-    statement source both production checkpoint writers consume, and applied
-    BEFORE ``setup()`` for the same reason production applies it there: the DDL
-    is the saver's first write and the configured lock wait has to be in force
-    for it.
+    Opened by the production factory, so a suite meets the saver the service
+    actually serves: the store's write-contention policy on every write, the
+    rollback that keeps a refusal from pinning the write-ahead log, the strict
+    deserializer, and the configured pragmas applied before ``setup()``'s DDL.
+    A restatement of that posture handed suites the LIBRARY saver, which has
+    none of it - so a contended checkpoint raised the driver's own error where
+    the service retries, and a hostile stored value came back whole where the
+    service degrades it. Neither divergence could fail at the point it was
+    introduced; it only changed what every suite above was allowed to conclude.
+
+    The store is named through ``checkpoint_database_url``, the configured field
+    the factory reads, and the override stands for the whole test: the service
+    serves ONE configured checkpoint store, so anything the test under way opens
+    through the factory finds the same file this saver holds.
     """
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from .control.config import settings
-    from .database import checkpoint_pragmas
+    from .database import open_checkpointer
+    from .testing import settings_override
 
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoint_file)) as saver:
-        for statement in checkpoint_pragmas(settings.sqlite_busy_timeout_ms):
-            await saver.conn.execute(statement)
-        await saver.setup()
-        yield saver
+    with settings_override(
+        checkpoint_database_url=f"sqlite+aiosqlite:///{checkpoint_file}"
+    ):
+        async with open_checkpointer() as saver:
+            # Narrows the factory's broad ``Checkpointer`` alias AND asserts the
+            # SQLite branch really yielded, so every suite's ``.conn`` is the
+            # real connection it is typed as.
+            assert isinstance(saver, AsyncSqliteSaver)
+            yield saver

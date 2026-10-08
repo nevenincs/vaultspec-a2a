@@ -27,7 +27,12 @@ from ...testing import (
     wait_until,
 )
 from ...tests.native_build import linux_isolation_helper
-from ...utils import ProcessContainmentError
+from ...utils import (
+    ProcessContainment,
+    ProcessContainmentError,
+    reap_contained,
+    spawn_contained,
+)
 from ..native_isolation import (
     NativeLaunchAuthority,
     decode_launch_environment,
@@ -496,13 +501,14 @@ def test_owner_death_removes_a_detached_native_descendant(tmp_path: Path) -> Non
         cwd=str(authority.workspace.path),
         environment={},
     )
-    owner = subprocess.Popen(
+    containment = ProcessContainment.create()
+    owner = spawn_contained(
         launch.command,
+        containment,
         env=launch.environment,
         cwd=launch.cwd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=True,
     )
     try:
         ready = authority.workspace.path / "descendant-ready"
@@ -533,8 +539,7 @@ def test_owner_death_removes_a_detached_native_descendant(tmp_path: Path) -> Non
             except (FileNotFoundError, ProcessLookupError, PermissionError):
                 continue
         assert len(descendants) == 1
-        owner.kill()
-        owner.wait(timeout=5)
+        reap_contained(owner, containment)
         path, identity = descendants[0]
         observed = "unread"
 
@@ -560,6 +565,23 @@ def test_owner_death_removes_a_detached_native_descendant(tmp_path: Path) -> Non
             ),
         )
     finally:
-        if owner.poll() is None:
-            owner.kill()
-        owner.wait(timeout=5)
+        reap_contained(owner, containment)
+
+
+def test_the_isolated_owner_is_spawned_through_the_contained_lifecycle() -> None:
+    """The isolated owner is a contained spawn, not a raw, hand-reaped one (PV42).
+
+    Production wraps every ``linux_isolated_launch`` command in
+    ``spawn_contained`` too (``providers/_subprocess.py``), so this also makes
+    the test faithful to the real pipeline rather than a bespoke
+    ``start_new_session=True`` Popen. The reap this locks targets only the
+    owner's own session/group, same as the raw ``.kill()`` it replaces: the
+    detached descendant under test escapes that scope on purpose (it calls
+    its own ``setsid`` through Node's ``detached: true``), which is exactly
+    what proves the isolation mechanism under test, not this fixture, removes
+    it. This reads the test's own compiled code for both names rather than
+    asserting on behaviour identical either way.
+    """
+    names = test_owner_death_removes_a_detached_native_descendant.__code__.co_names
+    assert "spawn_contained" in names
+    assert "reap_contained" in names

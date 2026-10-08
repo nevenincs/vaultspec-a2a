@@ -25,6 +25,7 @@ from ...testing import (
     inherited_environment,
     wait_until,
 )
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 from ...utils.enums import CodexWebSearchMode
 from .._codex_auth import (
     _MAX_RETURNED_AUTH_BYTES,
@@ -355,12 +356,13 @@ with _credential_lock(pathlib.Path({str(source)!r})):
     pathlib.Path({str(ready)!r}).write_text("held")
     time.sleep(3)
 """
-    child = subprocess.Popen(
+    containment = ProcessContainment.create()
+    child = spawn_contained(
         [sys.executable, "-c", holder],
+        containment,
         env=inherited_environment({"PYTHONPATH": str(_SOURCE_ROOT)}),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
     )
     try:
 
@@ -393,9 +395,24 @@ with _credential_lock(pathlib.Path({str(source)!r})):
             for record in caplog.records
         ), caplog.messages
     finally:
-        child.terminate()
-        child.wait(timeout=20)
+        reap_contained(child, containment)
 
     assert write_back_refreshed_credential(run_home) is True
     assert source.read_bytes() == refreshed
     cleanup_codex_config_home(run_home)
+
+
+def test_the_lock_holder_is_spawned_through_the_contained_lifecycle() -> None:
+    """The lock-holder child is a contained spawn, not a raw, hand-reaped one (PV42).
+
+    A raw ``Popen`` only kills the direct child it names; a descendant that
+    child spawned would survive its teardown. ``spawn_contained`` seats the
+    child under the project's one process-tree containment, which
+    ``reap_contained`` then fells whole. This reads the test's own compiled
+    code for both names rather than asserting on behaviour the unfixed test
+    already exhibited identically (the holder here spawns no descendant of
+    its own, so a behavioural probe would pass on either implementation).
+    """
+    names = test_a_write_back_serialises_against_another_process.__code__.co_names
+    assert "spawn_contained" in names
+    assert "reap_contained" in names

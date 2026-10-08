@@ -1,5 +1,6 @@
 """Run start, preparation, lease commit, and release endpoints."""
 
+import asyncio
 import hmac
 import logging
 from dataclasses import dataclass, replace
@@ -121,6 +122,18 @@ def _load_admitted_preset(body: RunStartRequest) -> tuple[Path | None, TeamConfi
         raise HTTPException(status_code=503, detail=reason)
     logger.info("commit step: load_preset")
     return ws_root, _load_preset_or_refuse(body.team_preset, ws_root)
+
+
+def _verdict_subscriber_running(state: Any) -> bool:
+    """Report whether this gateway holds a live authoring verdict subscriber.
+
+    The task itself is the evidence: the lifespan seats it only when an engine
+    record resolved, and a task that has finished - cancelled at shutdown, or
+    ended on an unrecoverable error - is no longer serving. Absence of the seat
+    is the answer for any app whose lifespan never ran.
+    """
+    task = getattr(state, "verdict_subscriber_task", None)
+    return isinstance(task, asyncio.Task) and not task.done()
 
 
 def _log_readiness_refusal(
@@ -329,9 +342,15 @@ async def _prepare_run_admission(
         team_config,
         feature_tag=effective_feature or None,
         actor_tokens=body.actor_tokens,
+        verdict_subscriber_running=_verdict_subscriber_running(request.app.state),
         harness=_probe_harness(team_config, ws_root),
     )
     if not eligibility.eligible:
+        if eligibility.failure is not None:
+            # Served by code as well as by sentence: a consumer must be able to
+            # tell a request it should fix from a topology this gateway cannot
+            # run at all.
+            raise refused_dispatch(eligibility.failure, eligibility.reason)
         raise HTTPException(status_code=422, detail=eligibility.reason)
 
     logger.info("commit step: validate_selection")

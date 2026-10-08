@@ -160,11 +160,14 @@ async def test_provisioned_workspace_clears_the_harness_gate_at_run_start(
             json=await _run_start_body(client, ws, run_id="harness-provisioned"),
         )
         # The harness gate is cleared: the run either dispatches (201) or is
-        # refused for a NON-harness reason (e.g. provider readiness), but never
-        # for the harness.
+        # refused for a NON-harness reason (provider readiness, or this gateway
+        # running no authoring verdict subscriber), but never for the harness.
+        # A refusal a consumer branches on carries a typed object instead of a
+        # sentence, so the reason is read out of whichever shape arrived.
         if resp.status_code != 201:
             detail = resp.json()["detail"]
-            assert "harness" not in detail.lower()
+            reason = detail["message"] if isinstance(detail, dict) else detail
+            assert "harness" not in reason.lower()
 
 
 @pytest.mark.asyncio(loop_scope="function")

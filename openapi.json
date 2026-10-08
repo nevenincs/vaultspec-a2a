@@ -4820,10 +4820,11 @@
           "conflict",
           "incompatible_state",
           "run_busy",
-          "queue_full"
+          "queue_full",
+          "authoring_subscriber_unavailable"
         ],
         "title": "RunMessageRefusalCode",
-        "description": "The conditions a run action can be refused for.\n\nA closed subset of the dispatch failure vocabulary, so the published\ncontract names only what this refusal can carry rather than every failure\nthe gateway knows. Each value is spelled as its failure-type counterpart.\n\nShared by every verb that reaches the worker through a run dispatch, not\nonly the follow-up turn: the same worker refusal must mean the same thing\nwhichever verb met it."
+        "description": "The conditions a run action can be refused for.\n\nA closed subset of the typed refusal vocabulary, so the published contract\nnames only what a refusal can carry rather than every failure the gateway\nknows. Each value is spelled as its failure-type counterpart.\n\nShared by every verb that reaches the worker through a run dispatch, not\nonly the follow-up turn: the same worker refusal must mean the same thing\nwhichever verb met it. One member instead names a condition run start\nsettles before any dispatch, so a client branches on one code set per verb\nrather than on a second vocabulary for the pre-dispatch half."
       },
       "RunMessageRefusalDetail": {
         "properties": {

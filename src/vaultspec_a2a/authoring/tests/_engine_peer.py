@@ -7,6 +7,8 @@ import os
 import time
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 from ...desktop._platform_acl import harden_credential_path
@@ -24,10 +26,28 @@ from .._engine_trust import (
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-    from pathlib import Path
 
 TEST_BEARER = "test-engine-bearer-0123456789abcdef0123456789abcdef"
 _STARTED_MS = 1
+
+
+@contextmanager
+def private_engine_dir() -> Generator[Path]:
+    """Hold trusted producer state outside any repository under a private ACL.
+
+    A discovery record is read only from an owner-restricted directory that no
+    repository content controls, so a record a test wants resolved cannot live
+    under the session seat: that seat is inside this checkout. Every consumer of
+    the record shares this one seat so the provenance rule is satisfied the same
+    way wherever it is exercised.
+    """
+    # storage-anchor-ok: trusted producer fixtures must be outside any repository.
+    with TemporaryDirectory(  # storage-anchor-ok
+        prefix="vaultspec-engine-security-"
+    ) as directory:
+        path = Path(directory)
+        harden_credential_path(path)
+        yield path
 
 
 def write_engine_record(path: Path, port: int, bearer: str = TEST_BEARER) -> None:

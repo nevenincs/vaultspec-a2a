@@ -390,10 +390,10 @@ EXTERNAL_PREREQUISITES: tuple[ExternalPrerequisite, ...] = (
         "loopback-stack",
         what="a reachable loopback engine plus a2a gateway and worker",
         supply=(
-            "boot a workspace-local `vaultspec serve --no-seat` engine plus this "
-            "branch's a2a gateway and worker with "
-            "VAULTSPEC_A2A_AUTHORING_SUBSCRIBER_ENABLED=true (runbook), then export "
-            "VAULTSPEC_A2A_ENGINE_SERVICE_JSON and select -m service"
+            "boot a workspace-local `vaultspec serve --no-seat` engine, export "
+            "VAULTSPEC_A2A_ENGINE_SERVICE_JSON so the gateway discovers it (which "
+            "is what runs the verdict subscriber), then boot this branch's a2a "
+            "gateway and worker and select -m service"
         ),
         probe=None,
     ),

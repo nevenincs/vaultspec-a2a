@@ -383,9 +383,10 @@ async def _run_completion(tmp_path: Path, plan: _CompletionPlan) -> _ReviewBundl
         )
         await _set_autonomous_mode(authoring, reviewer_token)
 
-        with certified_gateway(
-            tmp_path, VAULTSPEC_A2A_AUTHORING_SUBSCRIBER_ENABLED="true"
-        ) as gateway:
+        # The subscriber needs no arming: this stack has a discoverable engine
+        # record (asserted while the plan was built) and the gateway runs the
+        # subscriber for exactly that reason.
+        with certified_gateway(tmp_path) as gateway:
             _start_completion_run(gateway, plan, tokens)
             materialized = await _await_materialized_documents(
                 plan.vault_root, plan.feature_tag, timeout=180.0

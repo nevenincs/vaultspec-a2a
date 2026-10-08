@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
 from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from ..authoring import resolve_engine
 from ..control._verdict_subscriber_config import VerdictSubscriberConfig
@@ -631,17 +631,44 @@ async def _reconcile_gateway_startup(app: FastAPI, checkpointer: Checkpointer) -
         await db.commit()
 
 
-def _start_verdict_subscriber(
+async def _start_verdict_subscriber(
+    app: FastAPI,
+    session_factory: async_sessionmaker[AsyncSession],
     checkpointer: Checkpointer,
     worker_client: httpx.AsyncClient,
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: LazyWorkerSpawner,
 ) -> asyncio.Task[None] | None:
-    if not settings.authoring_subscriber_enabled:
+    """Run the authoring verdict subscriber when an engine record resolves.
+
+    Discovery IS the start condition. The subscriber exists to resume document
+    gates through an engine, so a gateway that can discover none runs none - and
+    run start then refuses a document-authoring topology outright rather than
+    admitting work whose gates nothing would resume. There is no enablement
+    setting, so an operator cannot configure a gateway that parks runs it cannot
+    finish. The boundary is the one every other authoring caller uses, which is
+    why a repository-controlled, linked, public, legacy, stale or unproven
+    record is not an engine here either.
+
+    The resolved endpoint is the gate and nothing more: the loop re-resolves on
+    every pass, so a subscriber that started self-heals across engine restarts.
+    Resolution reads a file and probes a socket, so it runs off the loop.
+
+    The task is seated on the application, because that is where the run-start
+    verb reads whether a subscriber is serving; a finished task answers that
+    question for itself.
+    """
+    endpoint = await asyncio.to_thread(resolve_engine)
+    if endpoint is None:
+        app.state.verdict_subscriber_task = None
+        logger.info(
+            "No authoring engine record is discoverable: no verdict subscriber "
+            "is running, and document-authoring runs are refused at run start"
+        )
         return None
     verdict_subscriber = VerdictSubscriber(
         VerdictSubscriberConfig(
-            session_factory=get_session_factory(),
+            session_factory=session_factory,
             checkpointer=checkpointer,
             worker_client=worker_client,
             circuit_breaker=circuit_breaker,
@@ -654,7 +681,8 @@ def _start_verdict_subscriber(
         )
     )
     task = asyncio.create_task(verdict_subscriber.run())
-    logger.info("Authoring verdict subscriber enabled")
+    app.state.verdict_subscriber_task = task
+    logger.info("Authoring verdict subscriber started against a discovered engine")
     return task
 
 
@@ -797,8 +825,13 @@ async def _gateway_lifespan(app: FastAPI) -> AsyncGenerator[None]:
             _start_gateway_discovery(app)
         )
 
-        verdict_subscriber_task = _start_verdict_subscriber(
-            checkpointer, worker_client, circuit_breaker, worker_spawner
+        verdict_subscriber_task = await _start_verdict_subscriber(
+            app,
+            get_session_factory(),
+            checkpointer,
+            worker_client,
+            circuit_breaker,
+            worker_spawner,
         )
         replay_retention_task = _start_replay_retention()
 

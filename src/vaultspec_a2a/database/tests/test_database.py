@@ -465,7 +465,7 @@ class TestThreadCRUD:
 
     @pytest.mark.asyncio
     async def test_supersede_permission_requests(self, session: AsyncSession) -> None:
-        """Earlier plan-approval requests should be markable as superseded."""
+        """A request the checkpoint still holds survives; the residue retires."""
         thread = await create_thread(
             session,
             write_authority=make_test_write_authority(),
@@ -493,8 +493,7 @@ class TestThreadCRUD:
         updated = await supersede_permission_requests(
             session,
             thread_id=thread.id,
-            pause_reason_type="plan_approval",
-            except_request_id="approval-new",
+            held_request_ids=("approval-new",),
         )
         old_request = await get_permission_request(session, "approval-old")
         new_request = await get_permission_request(session, "approval-new")

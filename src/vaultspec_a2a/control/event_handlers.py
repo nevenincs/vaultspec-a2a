@@ -779,12 +779,26 @@ _APPROVAL_GATE_INTERRUPT_TYPES: frozenset[str] = frozenset(
 )
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _HeldPause:
+    """What one checkpoint read says about the request a frame announces.
+
+    *announced* is the interrupt held under the request id the frame named.
+    *held_request_ids* is every request the same read found the run parked on,
+    carried beside it so the journal's retirement of stale rows is decided from
+    the same checkpoint that admitted this one rather than from a second read.
+    """
+
+    announced: ProjectedInterrupt
+    held_request_ids: frozenset[str]
+
+
 async def _held_request_interrupt(
     thread_id: str,
     payload: dict[str, object],
     checkpointer: Checkpointer | None,
-) -> ProjectedInterrupt | None:
-    """The checkpoint interrupt a relayed permission request announces.
+) -> _HeldPause | None:
+    """The checkpoint pause a relayed permission request announces.
 
     The checkpoint is the pause authority for every interrupt kind, so the kind
     a request is journaled under, and whether it is still open at all, are read
@@ -805,7 +819,10 @@ async def _held_request_interrupt(
         )
         return None
     from ..database import read_latest_checkpoint
-    from ._permission_response_contract import held_interrupt
+    from ._permission_response_contract import (
+        held_interrupt,
+        held_permission_request_ids,
+    )
     from .pause import project_checkpoint_read
 
     projection = project_checkpoint_read(
@@ -824,7 +841,11 @@ async def _held_request_interrupt(
                 "action": "permission_request_not_held",
             },
         )
-    return held
+        return None
+    return _HeldPause(
+        announced=held,
+        held_request_ids=held_permission_request_ids(projection),
+    )
 
 
 def _permission_request_fields(
@@ -857,7 +878,7 @@ async def _persist_permission_request(
     thread_id: str,
     payload: dict[str, object],
     *,
-    held: ProjectedInterrupt,
+    pause: _HeldPause,
 ) -> None:
     """Record a fresh permission or approval request in the durable journal.
 
@@ -865,8 +886,8 @@ async def _persist_permission_request(
     request's lifecycle and cache its description and offered options for
     disclosure. Whether the run is parked on it is the checkpoint's to say, so
     the pause recorder projects the pause and this writes no run state, and
-    *held* - the interrupt that checkpoint holds under this request id - names
-    the pause kind the row records.
+    *pause* - what that checkpoint holds - names both the pause kind the row
+    records and which other rows this ask retires.
 
     A request whose creation action is already reserved has been journaled
     before, so this is either a replayed event or a RE-ASK: a run holding the
@@ -885,9 +906,9 @@ async def _persist_permission_request(
     )
     from ..thread.enums import ControlActionType
 
-    request_id = held.interrupt_id
+    request_id = pause.announced.interrupt_id
     tool_call, pause_reason_type, description = _permission_request_fields(
-        payload, held
+        payload, pause.announced
     )
     if await get_thread(db, thread_id) is None:
         return
@@ -919,7 +940,7 @@ async def _persist_permission_request(
     await supersede_permission_requests(
         db,
         thread_id=thread_id,
-        except_request_id=request_id,
+        held_request_ids=pause.held_request_ids,
     )
     await record_permission_request(
         db,
@@ -961,12 +982,12 @@ async def _handle_permission_event(
             await _apply_relayed_permission_resolution(db, thread_id, payload)
             await db.commit()
         return
-    held = await _held_request_interrupt(thread_id, payload, checkpointer)
-    if held is None:
+    pause = await _held_request_interrupt(thread_id, payload, checkpointer)
+    if pause is None:
         return
     async with factory() as db:
         await begin_write_transaction(db)
-        await _persist_permission_request(db, thread_id, payload, held=held)
+        await _persist_permission_request(db, thread_id, payload, pause=pause)
         await db.commit()
 
 

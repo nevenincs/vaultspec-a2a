@@ -318,8 +318,12 @@ async def test_a_held_request_is_answerable_whatever_its_journal_row_says(
         session_factory, thread_id=thread_id, request_id=held_request_id
     )
     async with session_factory() as session:
+        # Retired against a reading that found the run holding nothing: the
+        # stored state a foreign writer, or a reader whose checkpoint read lost
+        # the race, can still leave behind. The respond verb reads the
+        # checkpoint itself and must not inherit that reading.
         await supersede_permission_requests(
-            session, thread_id=thread_id, except_request_id=f"{thread_id}:other"
+            session, thread_id=thread_id, held_request_ids=()
         )
         await session.commit()
 

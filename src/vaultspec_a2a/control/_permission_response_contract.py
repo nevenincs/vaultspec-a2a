@@ -37,6 +37,7 @@ __all__ = [
     "audited_tool_name",
     "existing_rejection_error",
     "held_interrupt",
+    "held_permission_request_ids",
     "journaled_permission_asks",
     "rejected_payload",
     "rejected_permission_error",
@@ -207,6 +208,34 @@ class ParkedPermission:
         )
 
 
+def _held_permission_interrupts(
+    projection: CheckpointProjection | None,
+) -> tuple[ProjectedInterrupt, ...]:
+    """Every permission or approval interrupt a checkpoint holds, in its order.
+
+    The plural reading of what a run is parked on, for the decisions that are
+    about the whole set rather than about one request: a fan-out stage parks on
+    several tool calls at once, and each of them is a question still waiting for
+    its own answer. A projection that could not be made holds nothing.
+    """
+    if projection is None:
+        return ()
+    return tuple(
+        interrupt
+        for interrupt in projection.pending_interrupts
+        if interrupt.interrupt_type in PERMISSION_REQUEST_EVENT_TYPES
+    )
+
+
+def held_permission_request_ids(
+    projection: CheckpointProjection | None,
+) -> frozenset[str]:
+    """The request ids a checkpoint holds an unanswered permission pause under."""
+    return frozenset(
+        interrupt.interrupt_id for interrupt in _held_permission_interrupts(projection)
+    )
+
+
 def held_interrupt(
     projection: CheckpointProjection | None, request_id: str
 ) -> ProjectedInterrupt | None:
@@ -217,14 +246,11 @@ def held_interrupt(
     not waiting for an answer, whatever the journal says about it. A projection
     that could not be made holds nothing.
     """
-    if projection is None:
-        return None
     return next(
         (
             interrupt
-            for interrupt in projection.pending_interrupts
+            for interrupt in _held_permission_interrupts(projection)
             if interrupt.interrupt_id == request_id
-            and interrupt.interrupt_type in PERMISSION_REQUEST_EVENT_TYPES
         ),
         None,
     )

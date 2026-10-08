@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 from dataclasses import asdict
+from datetime import timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -99,6 +100,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "_DEGRADED_CHECK_STATUSES",
+    "_body_against_frozen_selection",
     "_body_with_frozen_selection",
     "_bool_field",
     "_canonical_replay_body",
@@ -133,10 +135,17 @@ _DEGRADED_CHECK_STATUSES: frozenset[str] = frozenset(
 
 
 def provider_catalog_service(app: FastAPI) -> ProviderCatalogService:
-    """Return the process-wide bounded provider-catalog service."""
+    """Return the process-wide bounded provider-catalog service.
+
+    Built with the operator's catalog lifetime, so how long a served catalog -
+    and therefore a client's selection of it - stays current is one configured
+    answer rather than a constant compiled into the service.
+    """
     service = getattr(app.state, "provider_catalog_service", None)
     if service is None:
-        service = ProviderCatalogService()
+        service = ProviderCatalogService(
+            ttl=timedelta(seconds=domain_config.provider_catalog_ttl_seconds)
+        )
         app.state.provider_catalog_service = service
     return service
 
@@ -368,14 +377,23 @@ def _body_with_frozen_selection(
     )
 
 
-def _canonical_replay_body(
-    metadata_json: str | None, body: RunStartRequest
+def _body_against_frozen_selection(
+    frozen: FrozenTeamSelection, body: RunStartRequest, *, mismatch: str
 ) -> RunStartRequest:
-    """Canonicalize a replay from persisted defaults, without live discovery."""
+    """Canonicalize *body*'s selection against an already accepted freeze.
+
+    No catalog is consulted: the freeze is the authority here, so the only
+    question left is whether this request names what was frozen - a control the
+    freeze took from a catalog default may be omitted or stated, and either
+    spelling normalizes to the frozen one. A request that names something else
+    is a different run wearing the same identity, and is refused with *mismatch*
+    alone: every refusal the comparison raises says only that it did not match,
+    so serving the sentence twice would add nothing.
+
+    The one home for both readings of a freeze that already exists: a replay
+    meeting a durable run, and a commit consuming its reservation.
+    """
     try:
-        frozen = read_frozen_team_selection(metadata_json)
-        if frozen is None:
-            return body
         selection, overrides, fallbacks = normalize_replay_selection(
             frozen=frozen,
             selection=_selection_reference(body.selection),
@@ -386,7 +404,7 @@ def _canonical_replay_body(
             fallbacks=tuple(_selection_reference(item) for item in body.fallbacks),
         )
     except (TeamSelectionError, ValueError) as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail=mismatch) from exc
     return body.model_copy(
         update={
             "selection": _wire_reference(selection),
@@ -396,6 +414,26 @@ def _canonical_replay_body(
             },
             "fallbacks": [_wire_reference(reference) for reference in fallbacks],
         }
+    )
+
+
+def _canonical_replay_body(
+    metadata_json: str | None, body: RunStartRequest
+) -> RunStartRequest:
+    """Canonicalize a replay from persisted defaults, without live discovery.
+
+    A stored selection that cannot be validated is refused with what the read
+    says about it: that is a fact about the durable run rather than about this
+    request, and the sentence is the only account of it anyone gets.
+    """
+    try:
+        frozen = read_frozen_team_selection(metadata_json)
+    except (TeamSelectionError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if frozen is None:
+        return body
+    return _body_against_frozen_selection(
+        frozen, body, mismatch="replay selection does not match the accepted run"
     )
 
 

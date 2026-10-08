@@ -16,7 +16,7 @@ from ...api.schemas.gateway import RunStartRequest
 from ...context.metadata import ThreadMetadata
 from ...control.admission import AdmissionBroker, _Reservation
 from ...providers.provider_catalog import SELECTION_SCHEMA_VERSION
-from ...testing import DEFAULT_TEAM_PRESET
+from ...testing import DEFAULT_TEAM_PRESET, frozen_deterministic_selection
 
 
 def _selection() -> dict[str, object]:
@@ -97,6 +97,7 @@ async def test_eligibility_failure_releases_an_omitted_default_prepare() -> None
         reservation_id="resv-ineligible",
         lease_id="lease-ineligible",
         required_roles=("coder",),
+        frozen_selection=frozen_deterministic_selection(("coder",)),
         binding_digest=request_digest(canonical_commit, prepared=True),
         release_digest=_release_binding_digest(omitted_prepare),
         expires_monotonic=10.0,

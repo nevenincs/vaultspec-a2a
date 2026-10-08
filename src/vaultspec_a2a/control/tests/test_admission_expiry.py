@@ -7,6 +7,9 @@ from ...control.admission import (
     ReservationState,
     _Reservation,
 )
+from ...testing import frozen_deterministic_selection
+
+_ROLES = ("vaultspec-coder",)
 
 
 def test_expired_uncertain_commit_releases_capacity() -> None:
@@ -14,7 +17,8 @@ def test_expired_uncertain_commit_releases_capacity() -> None:
     uncertain = _Reservation(
         reservation_id="resv-uncertain",
         lease_id="lease-uncertain",
-        required_roles=("vaultspec-coder",),
+        required_roles=_ROLES,
+        frozen_selection=frozen_deterministic_selection(_ROLES),
         binding_digest="a" * 64,
         expires_monotonic=10.0,
         state=ReservationState.COMMITTING,
@@ -33,7 +37,8 @@ async def test_release_uses_client_binding_not_canonical_commit_binding() -> Non
     reservation = _Reservation(
         reservation_id="resv-release",
         lease_id="lease-release",
-        required_roles=("vaultspec-coder",),
+        required_roles=_ROLES,
+        frozen_selection=frozen_deterministic_selection(_ROLES),
         binding_digest="canonical-selection",
         release_digest="client-selection-with-omitted-default",
         expires_monotonic=10.0,
@@ -56,7 +61,8 @@ async def test_failed_commit_cleanup_uses_canonical_binding() -> None:
     reservation = _Reservation(
         reservation_id="resv-refused-commit",
         lease_id="lease-refused-commit",
-        required_roles=("vaultspec-coder",),
+        required_roles=_ROLES,
+        frozen_selection=frozen_deterministic_selection(_ROLES),
         binding_digest="canonical-selection",
         release_digest="client-selection-with-omitted-default",
         expires_monotonic=10.0,

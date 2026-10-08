@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -44,18 +45,22 @@ from ..testing import (
     ProgressDeadline,
     booted_gateway,
     broker_gateway_env,
+    fetch_in_process_selection_at,
     gateway_run_verbs,
     gateway_script,
     seat_app_home,
     status_and_json,
     wait_for,
 )
+from ._drifting_lane import MARKER_NAME
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-    from pathlib import Path
 
     from ..testing import RunVerbs
+
+#: The lane plugin a catalog-drift scenario arms its gateway with.
+_DRIFTING_LANE = "vaultspec_a2a.desktop_tests._drifting_lane"
 
 _SPAWN_LINE = "Auto-spawning worker on port"
 
@@ -361,6 +366,83 @@ def test_release_commit_race_is_linearized(tmp_path: Path) -> None:
         tmp_path, VAULTSPEC_A2A_MAX_CONCURRENT_THREADS="3"
     ) as verbs:
         _assert_release_commit_race(verbs)
+
+
+def _served_revision(verbs: RunVerbs) -> str:
+    """Read the catalog revision the gateway serves for this workspace NOW."""
+    served = fetch_in_process_selection_at(
+        verbs.base_url,
+        verbs.workspace_root,
+        headers={"Authorization": verbs.authorization},
+        cache=False,
+    )
+    revision = served["catalog_revision"]
+    assert isinstance(revision, str) and revision, served
+    return revision
+
+
+def test_commit_consumes_the_prepared_freeze_after_the_catalog_moves(
+    tmp_path: Path,
+) -> None:
+    """A catalog that moves between prepare and commit no longer breaks the commit.
+
+    The prepare is where a run's selection is validated and frozen; the
+    reservation carries that freeze, and the commit binding is the digest of it.
+    A commit that validated the selection a second time was therefore answering
+    a question already settled - and answering it against a LATER catalog, which
+    refuses the exact request the reservation was issued for and strands the slot
+    until it expires.
+
+    Real drift, not a timer: the lane plugin adds a selector once this test
+    creates the marker file, so the lane's revision - a digest of its model list
+    - genuinely changes, and the test waits until the gateway's own
+    provider-catalog verb serves the new one before it commits. The short
+    catalog lifetime is the product's own setting, so the rediscovery under
+    proof is the one that ships. It cannot be shortened at will: a served record
+    carries its own expiry, and a selection is refused as unselectable once that
+    passes, so the lifetime has to outlast a lane discovery and the request that
+    uses its result.
+
+    The commit must then be admitted on the freeze the prepare took, and the run
+    must carry that revision rather than the one the catalog moved to.
+    """
+    with _admission_gateway(
+        tmp_path,
+        VAULTSPEC_A2A_LANE_PLUGINS=_DRIFTING_LANE,
+        VAULTSPEC_A2A_PROVIDER_CATALOG_TTL_SECONDS="15",
+    ) as verbs:
+        run_id = "run-catalog-drift"
+        prepared_revision = _served_revision(verbs)
+        status, prepared = status_and_json(verbs.prepare(run_id))
+        assert status == 201, prepared
+
+        # Move the catalog, then WAIT for the gateway to serve the new revision:
+        # the drift has to be a fact before the commit, not a hope.
+        (Path(verbs.workspace_root).parent / MARKER_NAME).write_text(
+            "", encoding="utf-8"
+        )
+        drifted_revision = wait_for(
+            lambda: (
+                served
+                if (served := _served_revision(verbs)) != prepared_revision
+                else None
+            ),
+            deadline=ProgressDeadline(idle_window_s=60.0),
+            interval_s=1.0,
+        )
+        assert drifted_revision != prepared_revision
+
+        status, committed = status_and_json(
+            verbs.commit(run_id, prepared["reservation_id"])
+        )
+
+    assert status == 201, committed
+    assert committed["run_id"] == run_id
+    revisions = {
+        assignment["catalog_revision"]
+        for assignment in committed["frozen_assignment"]["assignments"]
+    }
+    assert revisions == {prepared_revision}, committed
 
 
 def test_prepare_refuses_when_real_worker_is_not_execution_ready(

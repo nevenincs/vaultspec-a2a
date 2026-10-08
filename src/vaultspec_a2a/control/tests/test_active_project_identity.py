@@ -470,6 +470,34 @@ class TestOneWorkspaceOneGraphEntry:
             catalog_store=RunCatalogStore(),
         )
 
+    class _ControlledManager(GraphLifecycleManager):
+        """A manager whose ``_compile_graph`` blocks until released, counting entries.
+
+        Shared by the three concurrent-dispatch races below, which differ only in
+        which requests they race and what they assert about the result - the gate
+        that lets the test control when a compile "finishes" is identical.
+        """
+
+        def __init__(self) -> None:
+            super().__init__(
+                checkpointer=InMemorySaver(),
+                bridge=WorkerBridge(api_url="http://127.0.0.1:1", worker_id="identity"),
+                producer=RunEventProducer(),
+                token_store=RunTokenStore(),
+                catalog_store=RunCatalogStore(),
+            )
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.compile_count = 0
+
+        @override
+        async def _compile_graph(self, req: DispatchRequest) -> RegisteredCompiledGraph:
+            del req
+            self.compile_count += 1
+            self.started.set()
+            await self.release.wait()
+            return TestOneWorkspaceOneGraphEntry._graph()
+
     @staticmethod
     def _graph() -> RegisteredCompiledGraph:
         def finish_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -706,32 +734,7 @@ class TestOneWorkspaceOneGraphEntry:
     async def test_concurrent_first_dispatches_bind_once_and_reject_a_competitor(
         self, workspace: Path
     ) -> None:
-        class ControlledManager(GraphLifecycleManager):
-            def __init__(self) -> None:
-                super().__init__(
-                    checkpointer=InMemorySaver(),
-                    bridge=WorkerBridge(
-                        api_url="http://127.0.0.1:1", worker_id="identity"
-                    ),
-                    producer=RunEventProducer(),
-                    token_store=RunTokenStore(),
-                    catalog_store=RunCatalogStore(),
-                )
-                self.started = asyncio.Event()
-                self.release = asyncio.Event()
-                self.compile_count = 0
-
-            @override
-            async def _compile_graph(
-                self, req: DispatchRequest
-            ) -> RegisteredCompiledGraph:
-                del req
-                self.compile_count += 1
-                self.started.set()
-                await self.release.wait()
-                return TestOneWorkspaceOneGraphEntry._graph()
-
-        manager = ControlledManager()
+        manager = TestOneWorkspaceOneGraphEntry._ControlledManager()
 
         def request(assignment: dict[str, FrozenLaneAssignment]) -> DispatchRequest:
             return DispatchRequest(
@@ -761,32 +764,7 @@ class TestOneWorkspaceOneGraphEntry:
     async def test_concurrent_equal_first_dispatches_share_the_compilation(
         self, workspace: Path
     ) -> None:
-        class ControlledManager(GraphLifecycleManager):
-            def __init__(self) -> None:
-                super().__init__(
-                    checkpointer=InMemorySaver(),
-                    bridge=WorkerBridge(
-                        api_url="http://127.0.0.1:1", worker_id="identity"
-                    ),
-                    producer=RunEventProducer(),
-                    token_store=RunTokenStore(),
-                    catalog_store=RunCatalogStore(),
-                )
-                self.started = asyncio.Event()
-                self.release = asyncio.Event()
-                self.compile_count = 0
-
-            @override
-            async def _compile_graph(
-                self, req: DispatchRequest
-            ) -> RegisteredCompiledGraph:
-                del req
-                self.compile_count += 1
-                self.started.set()
-                await self.release.wait()
-                return TestOneWorkspaceOneGraphEntry._graph()
-
-        manager = ControlledManager()
+        manager = TestOneWorkspaceOneGraphEntry._ControlledManager()
         req = DispatchRequest(
             action="ingest",
             thread_id="run-equal-race",
@@ -807,32 +785,7 @@ class TestOneWorkspaceOneGraphEntry:
     async def test_concurrent_runs_of_one_compilation_identity_compile_apart(
         self, workspace: Path
     ) -> None:
-        class ControlledManager(GraphLifecycleManager):
-            def __init__(self) -> None:
-                super().__init__(
-                    checkpointer=InMemorySaver(),
-                    bridge=WorkerBridge(
-                        api_url="http://127.0.0.1:1", worker_id="identity"
-                    ),
-                    producer=RunEventProducer(),
-                    token_store=RunTokenStore(),
-                    catalog_store=RunCatalogStore(),
-                )
-                self.started = asyncio.Event()
-                self.release = asyncio.Event()
-                self.compile_count = 0
-
-            @override
-            async def _compile_graph(
-                self, req: DispatchRequest
-            ) -> RegisteredCompiledGraph:
-                del req
-                self.compile_count += 1
-                self.started.set()
-                await self.release.wait()
-                return TestOneWorkspaceOneGraphEntry._graph()
-
-        manager = ControlledManager()
+        manager = TestOneWorkspaceOneGraphEntry._ControlledManager()
 
         def request(thread_id: str) -> DispatchRequest:
             return DispatchRequest(

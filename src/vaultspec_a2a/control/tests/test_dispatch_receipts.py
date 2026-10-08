@@ -67,6 +67,38 @@ async def _seed(
     return witness
 
 
+def _resume_claim_request(
+    witness: ThreadWriteExpectation,
+    tmp_path: Path,
+    *,
+    dispatch_id: str = "resume",
+    idempotency_key: str = "resume",
+) -> ControlActionClaimRequest:
+    """The resume claim this module's receipt races repeat against *witness*."""
+    return ControlActionClaimRequest(
+        thread_id="run",
+        action_type=ControlActionType.RESUME,
+        idempotency_key=idempotency_key,
+        payload=freeze_accepted_input(
+            DispatchRequest(
+                action="resume",
+                thread_id="run",
+                option_id="yes",
+                recursion_limit=25,
+                team_preset=DEFAULT_TEAM_PRESET,
+                graph_definition=freeze_graph_definition(
+                    load_team_config(DEFAULT_TEAM_PRESET, workspace_root=tmp_path),
+                    workspace_root=tmp_path,
+                ),
+            ),
+            intent={"option_id": "yes"},
+        ),
+        dispatch_id=dispatch_id,
+        write_expectation=witness,
+        recovery_timeout_seconds=60,
+    )
+
+
 @pytest.mark.asyncio
 async def test_delivery_cannot_create_missing_acceptance_evidence(
     session_factory: async_sessionmaker[AsyncSession], tmp_path: Path
@@ -108,31 +140,7 @@ async def test_retry_preserves_original_receipt_after_state_revision(
     witness = await _seed(session_factory)
     async with session_factory() as db:
         claim = await prepare_control_action_claim(
-            db,
-            request=ControlActionClaimRequest(
-                thread_id="run",
-                action_type=ControlActionType.RESUME,
-                idempotency_key="resume",
-                payload=freeze_accepted_input(
-                    DispatchRequest(
-                        action="resume",
-                        thread_id="run",
-                        option_id="yes",
-                        recursion_limit=25,
-                        team_preset=DEFAULT_TEAM_PRESET,
-                        graph_definition=freeze_graph_definition(
-                            load_team_config(
-                                DEFAULT_TEAM_PRESET, workspace_root=tmp_path
-                            ),
-                            workspace_root=tmp_path,
-                        ),
-                    ),
-                    intent={"option_id": "yes"},
-                ),
-                dispatch_id="resume",
-                write_expectation=witness,
-                recovery_timeout_seconds=60,
-            ),
+            db, request=_resume_claim_request(witness, tmp_path)
         )
         assert claim.acquired
         await finalize_control_action_acceptance(db, claim)
@@ -273,31 +281,7 @@ async def test_recovery_cannot_promote_old_action_and_stale_witness_loses(
         await db.commit()
     async with session_factory() as db:
         claim = await prepare_control_action_claim(
-            db,
-            request=ControlActionClaimRequest(
-                thread_id="run",
-                action_type=ControlActionType.RESUME,
-                idempotency_key="resume",
-                payload=freeze_accepted_input(
-                    DispatchRequest(
-                        action="resume",
-                        thread_id="run",
-                        option_id="yes",
-                        recursion_limit=25,
-                        team_preset=DEFAULT_TEAM_PRESET,
-                        graph_definition=freeze_graph_definition(
-                            load_team_config(
-                                DEFAULT_TEAM_PRESET, workspace_root=tmp_path
-                            ),
-                            workspace_root=tmp_path,
-                        ),
-                    ),
-                    intent={"option_id": "yes"},
-                ),
-                dispatch_id="resume",
-                write_expectation=witness,
-                recovery_timeout_seconds=60,
-            ),
+            db, request=_resume_claim_request(witness, tmp_path)
         )
         assert not claim.acquired
         assert not claim.authority_matches
@@ -323,31 +307,7 @@ async def test_requested_projection_and_receipt_share_acceptance_commit(
     witness = await _seed(session_factory)
     async with session_factory() as db:
         claim = await prepare_control_action_claim(
-            db,
-            request=ControlActionClaimRequest(
-                thread_id="run",
-                action_type=ControlActionType.RESUME,
-                idempotency_key="resume",
-                payload=freeze_accepted_input(
-                    DispatchRequest(
-                        action="resume",
-                        thread_id="run",
-                        option_id="yes",
-                        recursion_limit=25,
-                        team_preset=DEFAULT_TEAM_PRESET,
-                        graph_definition=freeze_graph_definition(
-                            load_team_config(
-                                DEFAULT_TEAM_PRESET, workspace_root=tmp_path
-                            ),
-                            workspace_root=tmp_path,
-                        ),
-                    ),
-                    intent={"option_id": "yes"},
-                ),
-                dispatch_id="resume",
-                write_expectation=witness,
-                recovery_timeout_seconds=60,
-            ),
+            db, request=_resume_claim_request(witness, tmp_path)
         )
         assert claim.acquired
         row = await get_thread(db, "run")

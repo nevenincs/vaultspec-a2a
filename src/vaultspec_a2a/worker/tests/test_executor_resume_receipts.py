@@ -39,6 +39,8 @@ from .test_executor import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from langchain_core.runnables import RunnableConfig
 
     from ...ipc.schemas import DispatchRequest
@@ -58,6 +60,37 @@ def _bound_permission_callback(state: Any) -> Any:
     sees the answers the executor recorded.
     """
     return permission_callback_for(recorded_permission_answers(state))
+
+
+def _compile_and_register_single_node_graph(
+    executor: Executor,
+    request: DispatchRequest,
+    worker_node: Callable[[Any], Awaitable[dict[str, Any]]],
+) -> RegisteredCompiledGraph:
+    """Compile a one-node graph around *worker_node* and register it for *request*.
+
+    Shared by the two-approval and blocking-permission graph builders below,
+    which differ only in what their worker node does.
+    """
+    builder = new_state_graph()
+    add_test_node(builder, "worker", worker_node)
+    builder.add_edge("__start__", "worker")
+    builder.add_edge("worker", "__end__")
+    graph: RegisteredCompiledGraph = compile_test_graph(
+        builder, checkpointer=executor._checkpointer
+    )
+    executor.register_compiled_graph(
+        request.thread_id,
+        (
+            request.require_graph_definition().team_id,
+            request.workspace_root,
+            request.autonomous,
+            model_assignment_digest(request.model_assignment),
+            request.require_graph_definition().digest(),
+        ),
+        graph,
+    )
+    return graph
 
 
 def _install_two_permission_graph(
@@ -82,25 +115,7 @@ def _install_two_permission_graph(
         )
         return {"messages": [AIMessage(content="done")], "next": "FINISH"}
 
-    builder = new_state_graph()
-    add_test_node(builder, "worker", worker_node)
-    builder.add_edge("__start__", "worker")
-    builder.add_edge("worker", "__end__")
-    graph: RegisteredCompiledGraph = compile_test_graph(
-        builder, checkpointer=executor._checkpointer
-    )
-    executor.register_compiled_graph(
-        request.thread_id,
-        (
-            request.require_graph_definition().team_id,
-            request.workspace_root,
-            request.autonomous,
-            model_assignment_digest(request.model_assignment),
-            request.require_graph_definition().digest(),
-        ),
-        graph,
-    )
-    return graph
+    return _compile_and_register_single_node_graph(executor, request, worker_node)
 
 
 def _resume_dispatch(
@@ -318,25 +333,7 @@ def _install_blocking_permission_graph(
             await asyncio.Event().wait()
         return {"messages": [AIMessage(content="done")], "next": "FINISH"}
 
-    builder = new_state_graph()
-    add_test_node(builder, "worker", worker_node)
-    builder.add_edge("__start__", "worker")
-    builder.add_edge("worker", "__end__")
-    graph: RegisteredCompiledGraph = compile_test_graph(
-        builder, checkpointer=executor._checkpointer
-    )
-    executor.register_compiled_graph(
-        request.thread_id,
-        (
-            request.require_graph_definition().team_id,
-            request.workspace_root,
-            request.autonomous,
-            model_assignment_digest(request.model_assignment),
-            request.require_graph_definition().digest(),
-        ),
-        graph,
-    )
-    return graph
+    return _compile_and_register_single_node_graph(executor, request, worker_node)
 
 
 @pytest.mark.asyncio(loop_scope="function")

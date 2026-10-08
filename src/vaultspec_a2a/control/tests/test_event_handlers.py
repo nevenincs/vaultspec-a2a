@@ -214,6 +214,86 @@ async def _seed_unapplied_leased_action(
     return action, receipt, checkpoint_id
 
 
+async def _answered_bash_permission_awaiting_apply(
+    session: AsyncSession,
+    checkpointer: AsyncSqliteSaver,
+    *,
+    title: str,
+) -> tuple[ThreadModel, str, ControlActionModel, GraphActionReceipt, str]:
+    """Seat a parked-then-submitted bash permission, unapplied, ready to apply.
+
+    Shared by the two ``dispatch_applied``-after-submission tests below, which
+    differ only in what they do to the thread's status AFTER this arrangement.
+    """
+    thread = await create_thread(
+        session,
+        write_authority=make_test_write_authority(),
+        title=title,
+        status="input_required",
+    )
+    request_id = f"{thread.id}:perm-1"
+    await record_permission_request(
+        session,
+        request_id=request_id,
+        thread_id=thread.id,
+        pause_reason_type="bash",
+        description="Allow action?",
+        allowed_options=[
+            {"option_id": "allow_once", "name": "Allow once", "kind": "allow_once"}
+        ],
+        tool_call="bash",
+    )
+    await record_permission_response_submission(
+        session,
+        request_id=request_id,
+        option_id="allow_once",
+        idempotency_key="response-1",
+    )
+    (
+        submitted,
+        submitted_receipt,
+        submitted_checkpoint,
+    ) = await _seed_unapplied_leased_action(
+        session,
+        checkpointer,
+        thread_id=thread.id,
+        spec=_SeedActionSpec(
+            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+            idempotency_key=permission_response_action_key(request_id),
+            request_id=request_id,
+        ),
+    )
+    return thread, request_id, submitted, submitted_receipt, submitted_checkpoint
+
+
+async def _apply_submitted_permission_response(
+    thread_id: str,
+    submitted: ControlActionModel,
+    submitted_receipt: GraphActionReceipt,
+    submitted_checkpoint: str,
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """Relay the dispatch_applied progress event for a submitted permission response.
+
+    Shared by the replay-guard and failed-turn tests below, which differ only
+    in what they assert after the application lands.
+    """
+    await _handle_progress_event(
+        thread_id,
+        {
+            "type": "dispatch_applied",
+            "dispatch_id": submitted.dispatch_id,
+            "action": "resume",
+            "graph_action_receipt": submitted_receipt.model_dump(mode="json"),
+            "checkpoint_id": submitted_checkpoint,
+        },
+        session_factory=session_factory,
+        checkpointer=checkpointer,
+    )
+
+
 async def _park_on_interrupt(
     checkpointer: AsyncSqliteSaver, *, thread_id: str, payload: dict[str, object]
 ) -> None:
@@ -809,59 +889,22 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
 ) -> None:
     """A replayed permission_resolved event must not append a second applied action."""
     async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Replay Guard",
-            status="input_required",
-        )
-        request_id = f"{thread.id}:perm-1"
-        await record_permission_request(
-            session,
-            request_id=request_id,
-            thread_id=thread.id,
-            pause_reason_type="bash",
-            description="Allow action?",
-            allowed_options=[
-                {
-                    "option_id": "allow_once",
-                    "name": "Allow once",
-                    "kind": "allow_once",
-                }
-            ],
-            tool_call="bash",
-        )
-        await record_permission_response_submission(
-            session,
-            request_id=request_id,
-            option_id="allow_once",
-            idempotency_key="response-1",
-        )
         (
+            thread,
+            request_id,
             submitted,
             submitted_receipt,
             submitted_checkpoint,
-        ) = await _seed_unapplied_leased_action(
-            session,
-            checkpointer,
-            thread_id=thread.id,
-            spec=_SeedActionSpec(
-                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-                idempotency_key=permission_response_action_key(request_id),
-                request_id=request_id,
-            ),
+        ) = await _answered_bash_permission_awaiting_apply(
+            session, checkpointer, title="Replay Guard"
         )
         await session.commit()
 
-    await _handle_progress_event(
+    await _apply_submitted_permission_response(
         thread.id,
-        {
-            "type": "dispatch_applied",
-            "dispatch_id": submitted.dispatch_id,
-            "action": "resume",
-            "graph_action_receipt": submitted_receipt.model_dump(mode="json"),
-            "checkpoint_id": submitted_checkpoint,
-        },
+        submitted,
+        submitted_receipt,
+        submitted_checkpoint,
         session_factory=session_factory,
         checkpointer=checkpointer,
     )
@@ -927,61 +970,24 @@ async def test_an_answer_applied_by_a_turn_that_then_failed_leaves_the_run_faile
     transition that would fail the relay.
     """
     async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Applied After Failure",
-            status="input_required",
-        )
-        request_id = f"{thread.id}:perm-1"
-        await record_permission_request(
-            session,
-            request_id=request_id,
-            thread_id=thread.id,
-            pause_reason_type="bash",
-            description="Allow action?",
-            allowed_options=[
-                {
-                    "option_id": "allow_once",
-                    "name": "Allow once",
-                    "kind": "allow_once",
-                }
-            ],
-            tool_call="bash",
-        )
-        await record_permission_response_submission(
-            session,
-            request_id=request_id,
-            option_id="allow_once",
-            idempotency_key="response-1",
-        )
         (
+            thread,
+            request_id,
             submitted,
             submitted_receipt,
             submitted_checkpoint,
-        ) = await _seed_unapplied_leased_action(
-            session,
-            checkpointer,
-            thread_id=thread.id,
-            spec=_SeedActionSpec(
-                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-                idempotency_key=permission_response_action_key(request_id),
-                request_id=request_id,
-            ),
+        ) = await _answered_bash_permission_awaiting_apply(
+            session, checkpointer, title="Applied After Failure"
         )
         await elect_status(session, thread.id, ThreadStatus.RUNNING)
         await elect_status(session, thread.id, ThreadStatus.FAILED)
         await session.commit()
 
-    await _handle_progress_event(
+    await _apply_submitted_permission_response(
         thread.id,
-        {
-            "type": "dispatch_applied",
-            "dispatch_id": submitted.dispatch_id,
-            "action": "resume",
-            "graph_action_receipt": submitted_receipt.model_dump(mode="json"),
-            "checkpoint_id": submitted_checkpoint,
-        },
+        submitted,
+        submitted_receipt,
+        submitted_checkpoint,
         session_factory=session_factory,
         checkpointer=checkpointer,
     )

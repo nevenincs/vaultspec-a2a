@@ -150,6 +150,22 @@ async def _park_real_run(
         await bridge.close()
 
 
+async def _start_run(client: httpx.AsyncClient) -> str:
+    """Start one run, giving each call its own id so the two tests never collide."""
+    start = await client.post(
+        "/v1/runs",
+        json={
+            "team_preset": DEFAULT_TEAM_PRESET,
+            "message": "plan it",
+            "autonomous": True,
+            "run_id": f"clarify-sse-{next(_RUN_SEQ):02d}",
+            **await async_catalog_run_fields(client),
+        },
+    )
+    assert start.status_code == 201, start.text
+    return str(start.json()["run_id"])
+
+
 @pytest.mark.asyncio(loop_scope="function")
 async def test_the_nudge_arrives_on_the_sse_stream_carrying_no_questions(
     session_factory: SessionFactory, checkpointer: AsyncSqliteSaver
@@ -166,18 +182,7 @@ async def test_the_nudge_arrives_on_the_sse_stream_carrying_no_questions(
         serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=15.0) as client,
     ):
-        start = await client.post(
-            "/v1/runs",
-            json={
-                "team_preset": DEFAULT_TEAM_PRESET,
-                "message": "plan it",
-                "autonomous": True,
-                "run_id": f"clarify-sse-{next(_RUN_SEQ):02d}",
-                **await async_catalog_run_fields(client),
-            },
-        )
-        assert start.status_code == 201, start.text
-        run_id = str(start.json()["run_id"])
+        run_id = await _start_run(client)
 
         async with client.stream("GET", f"/v1/runs/{run_id}/stream") as resp:
             assert resp.status_code == 200
@@ -218,18 +223,7 @@ async def test_the_questions_live_on_run_status_not_on_the_relay(
         serve_on_loopback(app) as base,
         httpx.AsyncClient(base_url=base, timeout=15.0) as client,
     ):
-        start = await client.post(
-            "/v1/runs",
-            json={
-                "team_preset": DEFAULT_TEAM_PRESET,
-                "message": "plan it",
-                "autonomous": True,
-                "run_id": f"clarify-sse-{next(_RUN_SEQ):02d}",
-                **await async_catalog_run_fields(client),
-            },
-        )
-        assert start.status_code == 201, start.text
-        run_id = str(start.json()["run_id"])
+        run_id = await _start_run(client)
 
         async with client.stream("GET", f"/v1/runs/{run_id}/stream") as resp:
             lines = resp.aiter_lines()

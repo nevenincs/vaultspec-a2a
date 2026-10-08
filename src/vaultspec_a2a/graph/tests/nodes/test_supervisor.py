@@ -716,9 +716,15 @@ async def test_a_re_asked_plan_approval_takes_a_fresh_request_id() -> None:
     assert approved["plan_approvals_asked"] == [first_id, second_ask["request_id"]]
 
 
-@pytest.mark.asyncio
-async def test_supervisor_rejection_clears_consumed_approval_request_id() -> None:
-    """Rejected plan resumes must not leave the consumed approval request active."""
+def _plan_approval_rejection_fixture(
+    thread_id: str = "test-supervisor-reject",
+) -> tuple[Any, "RunnableConfig", TeamState]:
+    """The supervisor graph, config and initial state the plan-approval tests share.
+
+    Each caller mutates the returned *state* with the one field that makes its
+    scenario (a stale request id, a stale current plan, nothing) before
+    invoking *graph*.
+    """
     model = _StaticSupervisorModel("vaultspec-coder")
     node = create_supervisor_node(
         model=model,
@@ -738,11 +744,18 @@ async def test_supervisor_rejection_clears_consumed_approval_request_id() -> Non
         ["vaultspec-plan-author", "vaultspec-coder"],
         {"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
     )
-    config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-reject"}}
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
 
     state = _make_state_for_plan_approval(
         vault_index={"plan": [".vault/plan/plan.md"]},
     )
+    return graph, config, state
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejection_clears_consumed_approval_request_id() -> None:
+    """Rejected plan resumes must not leave the consumed approval request active."""
+    graph, config, state = _plan_approval_rejection_fixture()
     state["approval_request_id"] = "approval-1"
 
     first = await graph.ainvoke(state, config=config)
@@ -788,30 +801,7 @@ async def test_supervisor_clean_finish_clears_active_agent_owner() -> None:
 @pytest.mark.asyncio
 async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
     """Rejected reroutes must replace stale plan summaries with the new owner."""
-    model = _StaticSupervisorModel("vaultspec-coder")
-    node = create_supervisor_node(
-        model=model,
-        system_prompt="You are a supervisor.",
-        workers=["vaultspec-plan-author", "vaultspec-coder"],
-        options=SupervisorOptions(
-            worker_phase_map={
-                "vaultspec-plan-author": "plan",
-                "vaultspec-coder": "exec",
-            },
-            autonomous=False,
-        ),
-    )
-
-    graph = _build_approval_graph(
-        node,
-        ["vaultspec-plan-author", "vaultspec-coder"],
-        {"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
-    )
-    config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-reject"}}
-
-    state = _make_state_for_plan_approval(
-        vault_index={"plan": [".vault/plan/plan.md"]},
-    )
+    graph, config, state = _plan_approval_rejection_fixture()
     state["current_plan"] = [
         {"content": "Route to vaultspec-coder", "status": "in_progress"}
     ]
@@ -844,31 +834,8 @@ async def test_plan_approval_node_no_longer_accepts_retired_approved_boolean() -
     nothing: the gate parks again on the same request rather than reading it
     as an approval or spending a revision on it.
     """
-    model = _StaticSupervisorModel("vaultspec-coder")
-    node = create_supervisor_node(
-        model=model,
-        system_prompt="You are a supervisor.",
-        workers=["vaultspec-plan-author", "vaultspec-coder"],
-        options=SupervisorOptions(
-            worker_phase_map={
-                "vaultspec-plan-author": "plan",
-                "vaultspec-coder": "exec",
-            },
-            autonomous=False,
-        ),
-    )
-
-    graph = _build_approval_graph(
-        node,
-        ["vaultspec-plan-author", "vaultspec-coder"],
-        {"vaultspec-plan-author": "plan", "vaultspec-coder": "exec"},
-    )
-    config: RunnableConfig = {
-        "configurable": {"thread_id": "test-supervisor-retired-boolean-shape"}
-    }
-
-    state = _make_state_for_plan_approval(
-        vault_index={"plan": [".vault/plan/plan.md"]},
+    graph, config, state = _plan_approval_rejection_fixture(
+        thread_id="test-supervisor-retired-boolean-shape"
     )
 
     first = await graph.ainvoke(state, config=config)

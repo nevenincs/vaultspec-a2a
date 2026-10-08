@@ -162,6 +162,39 @@ def _stdio_binding(
     )
 
 
+async def _run_stdio_worker_turn(
+    tmp_path: Path, record_file: Path, *, record_flag: str, env_vars: dict[str, str]
+) -> None:
+    """Drive one worker turn through the real subprocess, recording *record_flag*.
+
+    Shared by the stdio session-advertisement test and the actor-scope-hoisting
+    test below, which differ only in which simulator recording they capture and
+    the env vars the armed run carries.
+    """
+    from ....providers.acp_chat_model import AcpChatModel
+
+    model = AcpChatModel(
+        command=simulator_command(
+            "--response",
+            "authored",
+            record_flag,
+            str(record_file),
+        ),
+        env_vars=env_vars,
+        workspace_root=str(tmp_path),
+    )
+    node = create_worker_node(
+        model=model,
+        system_prompt="You are a coder.",
+        name="coder",
+        options=WorkerNodeOptions(
+            autonomous=True, authoring_binding_provider=stdio_provider()
+        ),
+    )
+
+    await node(_make_state())
+
+
 @pytest.mark.asyncio
 async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
     tmp_path: Path,
@@ -176,33 +209,18 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
     env carries the run's engine facts — proving the wiring reaches a subprocess.
     """
     from ....providers._acp_authoring import AUTHORING_MCP_SERVER_NAME
-    from ....providers.acp_chat_model import AcpChatModel
 
     record_file = tmp_path / "session_new.json"
-    model = AcpChatModel(
-        command=simulator_command(
-            "--response",
-            "authored",
-            "--record-session-new",
-            str(record_file),
-        ),
+    await _run_stdio_worker_turn(
+        tmp_path,
+        record_file,
+        record_flag="--record-session-new",
         # Armed run: an env auth token so config-home isolation engages (matching
         # test_stdio_binding_surfaces_bridge_into_isolated_home), which the
         # harness-armed spawn assertion now requires. Production-faithful: a real
         # armed run always carries its lane token.
         env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},
-        workspace_root=str(tmp_path),
     )
-    node = create_worker_node(
-        model=model,
-        system_prompt="You are a coder.",
-        name="coder",
-        options=WorkerNodeOptions(
-            autonomous=True, authoring_binding_provider=stdio_provider()
-        ),
-    )
-
-    await node(_make_state())
 
     params = json.loads(record_file.read_text(encoding="utf-8"))
     servers = params["mcpServers"]
@@ -245,29 +263,10 @@ async def test_stdio_binding_hoists_actor_scope_without_machine_bearer(
     tmp_path: Path,
 ) -> None:
     """The real child gets actor-scoped relay access and no workspace projection."""
-    from ....providers.acp_chat_model import AcpChatModel
-
     record_file = tmp_path / "config_home.json"
-    model = AcpChatModel(
-        command=simulator_command(
-            "--response",
-            "authored",
-            "--record-config-home",
-            str(record_file),
-        ),
-        env_vars={},
-        workspace_root=str(tmp_path),
+    await _run_stdio_worker_turn(
+        tmp_path, record_file, record_flag="--record-config-home", env_vars={}
     )
-    node = create_worker_node(
-        model=model,
-        system_prompt="You are a coder.",
-        name="coder",
-        options=WorkerNodeOptions(
-            autonomous=True, authoring_binding_provider=stdio_provider()
-        ),
-    )
-
-    await node(_make_state())
 
     recorded = json.loads(record_file.read_text(encoding="utf-8"))
     # No config-home redirect: the child inherits the operator's own setting,

@@ -13,15 +13,21 @@ failures are produced by genuinely unwritable or contended filesystem state.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import subprocess
+import sys
+import time
 from typing import TYPE_CHECKING
 
 import pytest
 
 from ...testing import plant_link_to_file
+from ...utils import ProcessContainment, reap_contained, spawn_contained
 from ..atomic_write import atomic_write_text
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from pathlib import Path
 
 
@@ -206,6 +212,111 @@ def test_neither_write_path_follows_a_link_planted_at_the_temporary(
         f"a {kind} planted at the temporary name redirected the write"
     )
     assert not target.exists()
+
+
+# Holds a real read handle on the target for a measured interval, announcing the
+# handle before the wait so the publisher races a reader that is already there.
+# On Windows a handle opened this way carries no delete sharing, which is exactly
+# what denies the rename - the contention the retry exists for, produced by a
+# real second process rather than described.
+_READER_HOLDING_THE_TARGET = (
+    "import sys, time\n"
+    "with open(sys.argv[1], 'rb') as handle:\n"
+    "    print('HELD', flush=True)\n"
+    "    time.sleep(float(sys.argv[2]))\n"
+    "    handle.read()\n"
+)
+
+
+@contextlib.contextmanager
+def _reader_holding(path: Path, hold_seconds: float) -> Generator[None]:
+    """Run a real process holding *path* open, releasing it after *hold_seconds*."""
+    containment = ProcessContainment.create()
+    process = spawn_contained(
+        [
+            getattr(sys, "_base_executable", sys.executable),
+            "-c",
+            _READER_HOLDING_THE_TARGET,
+            str(path),
+            str(hold_seconds),
+        ],
+        containment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        assert process.stdout is not None
+        announced = process.stdout.readline().decode("utf-8").strip()
+        assert announced == "HELD", f"the reader never opened the target: {announced!r}"
+        yield
+    finally:
+        reap_contained(process, containment, term_timeout=2.0, kill_timeout=2.0)
+        with contextlib.suppress(OSError):
+            if process.stdout is not None:
+                process.stdout.close()
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="only Windows denies a rename over an open target"
+)
+def test_a_publication_rides_out_a_real_reader_holding_the_target(
+    tmp_path: Path,
+) -> None:
+    """A reader that holds the target open delays the publication, never fails it.
+
+    The whole reason this helper retries: on Windows a reader's handle on the
+    target denies ``os.replace`` outright, and a publisher that took the first
+    denial as final would fail every time a reader happened to be mid-read.
+
+    The elapsed assertion is what makes this discriminating. Without it the test
+    would also pass on a host where the rename was never denied at all, which
+    would prove nothing about the retry; a publication that returns only after
+    the holder let go has demonstrably ridden out a real denial.
+    """
+    target = tmp_path / "record.json"
+    atomic_write_text(target, '{"generation": "first"}')
+    hold_seconds = 0.5
+
+    started = time.monotonic()
+    with _reader_holding(target, hold_seconds):
+        atomic_write_text(target, '{"generation": "second"}')
+    elapsed = time.monotonic() - started
+
+    assert elapsed >= hold_seconds / 2, (
+        f"the publication did not wait for the holder ({elapsed:.4f}s): "
+        "the rename was never denied, so the retry was not exercised"
+    )
+    assert target.read_text(encoding="utf-8") == '{"generation": "second"}'
+    assert _temporaries(tmp_path) == []
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="only Windows denies a rename over an open target"
+)
+def test_a_zero_budget_publication_attempts_the_rename_exactly_once(
+    tmp_path: Path,
+) -> None:
+    """Zero patience means one attempt, and a denied one leaves the record intact.
+
+    The budget is waiting time rather than elapsed time, which only means
+    anything if zero still buys no waiting at all: a caller that cannot afford to
+    block - a shutdown path, a probe - must get its answer back immediately. The
+    holder stays for far longer than this publication may take, so a returned
+    failure can only be the first attempt's.
+    """
+    target = tmp_path / "record.json"
+    atomic_write_text(target, '{"generation": "first"}')
+
+    with _reader_holding(target, 5.0):
+        started = time.monotonic()
+        with pytest.raises(PermissionError):
+            atomic_write_text(target, '{"generation": "second"}', retry_seconds=0.0)
+        elapsed = time.monotonic() - started
+
+    assert elapsed < 0.5, f"a zero budget still waited {elapsed:.4f}s"
+    assert target.read_text(encoding="utf-8") == '{"generation": "first"}'
+    assert _temporaries(tmp_path) == []
 
 
 def test_the_temporary_is_named_for_the_writing_process(tmp_path: Path) -> None:

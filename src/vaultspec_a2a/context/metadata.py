@@ -13,6 +13,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..domain_config import domain_config
 from ..thread import sha256_hex
+from ..thread.constants import (
+    MAX_CALLEE_CHARS,
+    MAX_FEEDBACK_BATCH_ID_CHARS,
+    MAX_SOURCE_BRANCH_CHARS,
+)
 from .stage import VAULT_STAGE_PATTERNS
 
 __all__ = [
@@ -52,8 +57,8 @@ class ThreadMetadata(BaseModel):
     # --- Provenance ---
     workspace_root: str
     source_repo: str = ""
-    source_branch: str = ""
-    callee: str = ""
+    source_branch: str = Field(default="", max_length=MAX_SOURCE_BRANCH_CHARS)
+    callee: str = Field(default="", max_length=MAX_CALLEE_CHARS)
     continues_run_id: str | None = None
 
     # --- SDD Pipeline Context ---
@@ -63,7 +68,7 @@ class ThreadMetadata(BaseModel):
     # persisted so a worker restart re-retrieves the same batch. a2a transports
     # the id only and never owns batch content; empty when the run
     # is not feedback-driven.
-    feedback_batch_id: str = ""
+    feedback_batch_id: str = Field(default="", max_length=MAX_FEEDBACK_BATCH_ID_CHARS)
 
     @field_validator("nickname")
     @classmethod

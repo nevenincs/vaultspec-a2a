@@ -61,6 +61,7 @@ from ...thread.clarification import (
 from ...thread.constants import (
     MAX_AGENT_ID_CHARS,
     MAX_APPROVAL_REQUEST_ID_CHARS,
+    MAX_CALLEE_CHARS,
     MAX_DISCOVERY_RESULTS,
     MAX_FEATURE_TAG_LENGTH,
     MAX_FEEDBACK_BATCH_ID_CHARS,
@@ -69,6 +70,7 @@ from ...thread.constants import (
     MAX_RUN_ID_CHARS,
     MAX_RUN_MESSAGE_CHARS,
     MAX_RUN_TITLE_CHARS,
+    MAX_SOURCE_BRANCH_CHARS,
     MAX_TEAM_PRESET_CHARS,
     RUN_ID_PATTERN,
 )
@@ -461,8 +463,8 @@ class RunSummaryRecord(BaseModel):
     )
     created_at: datetime
     updated_at: datetime
-    source_branch: str | None = Field(default=None, max_length=256)
-    callee: str | None = Field(default=None, max_length=128)
+    source_branch: str | None = Field(default=None, max_length=MAX_SOURCE_BRANCH_CHARS)
+    callee: str | None = Field(default=None, max_length=MAX_CALLEE_CHARS)
 
 
 class RunSummariesResponse(BaseModel):

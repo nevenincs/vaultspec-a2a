@@ -25,7 +25,11 @@ if TYPE_CHECKING:
 
 
 def _group(
-    lines: int, first: tuple[str, int], second: tuple[str, int]
+    lines: int,
+    first: tuple[str, int],
+    second: tuple[str, int],
+    *,
+    digest: str = "digest",
 ) -> dup.CloneGroup:
     return dup.CloneGroup(
         lines=lines,
@@ -33,6 +37,7 @@ def _group(
         first_start=first[1],
         second_path=second[0],
         second_start=second[1],
+        fragment_sha256=digest,
     )
 
 
@@ -41,7 +46,12 @@ def _baseline(*entries: dup.BaselineEntry, categories: dict[str, str]) -> dup.Ba
 
 
 def _entry(
-    lines: int, first: tuple[str, int], second: tuple[str, int], *, category: str
+    lines: int,
+    first: tuple[str, int],
+    second: tuple[str, int],
+    *,
+    category: str,
+    digest: str = "digest",
 ) -> dup.BaselineEntry:
     return dup.BaselineEntry(
         category=category,
@@ -50,6 +60,7 @@ def _entry(
         first_start=first[1],
         second_path=second[0],
         second_start=second[1],
+        fragment_sha256=digest,
     )
 
 
@@ -101,6 +112,30 @@ def test_a_different_span_at_the_same_lines_does_not_match() -> None:
     assert stale == (entry,)
 
 
+def test_an_entry_still_matches_after_its_clone_moves_down_the_file() -> None:
+    """Identity is content: an unrelated edit above a clone must not stale it."""
+    group = _group(25, ("a.py", 41), ("b.py", 60), digest="same-fragment")
+    entry = _entry(
+        25, ("a.py", 1), ("b.py", 10), category="cat", digest="same-fragment"
+    )
+    baseline = _baseline(entry, categories=CATEGORIES)
+    new, stale = dup.diff_against_baseline([group], baseline)
+    assert new == ()
+    assert stale == ()
+
+
+def test_an_entry_stops_matching_when_one_token_of_the_fragment_changes() -> None:
+    """A clone whose code changes must still stop matching, even at the same lines."""
+    group = _group(25, ("a.py", 1), ("b.py", 10), digest="changed-fragment")
+    entry = _entry(
+        25, ("a.py", 1), ("b.py", 10), category="cat", digest="original-fragment"
+    )
+    baseline = _baseline(entry, categories=CATEGORIES)
+    new, stale = dup.diff_against_baseline([group], baseline)
+    assert new == (group,)
+    assert stale == (entry,)
+
+
 def test_load_baseline_reads_a_well_formed_file(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
     path.write_text(
@@ -113,6 +148,7 @@ def test_load_baseline_reads_a_well_formed_file(tmp_path: Path) -> None:
                         "lines": 25,
                         "first": {"path": "a.py", "start": 1},
                         "second": {"path": "b.py", "start": 10},
+                        "fragment_sha256": "deadbeef",
                     }
                 ],
             }
@@ -123,6 +159,7 @@ def test_load_baseline_reads_a_well_formed_file(tmp_path: Path) -> None:
     assert baseline.categories == {"cat": REASON}
     assert len(baseline.entries) == 1
     assert baseline.entries[0].category == "cat"
+    assert baseline.entries[0].fragment_sha256 == "deadbeef"
 
 
 def test_load_baseline_refuses_a_category_with_no_reason(tmp_path: Path) -> None:
@@ -155,6 +192,31 @@ def test_load_baseline_refuses_an_entry_naming_an_undeclared_category(
     )
     with pytest.raises(ValueError, match="undeclared category"):
         dup.load_baseline(path)
+
+
+def test_parse_report_digest_ignores_trailing_whitespace_but_not_content() -> None:
+    """The digest normalises trailing whitespace per line; everything else is exact."""
+
+    def _payload(fragment: str) -> dict[str, object]:
+        return {
+            "statistics": {"total": {"sources": 2, "percentage": 1.0}},
+            "duplicates": [
+                {
+                    "lines": 2,
+                    "fragment": fragment,
+                    "firstFile": {"name": "a.py", "start": 1},
+                    "secondFile": {"name": "b.py", "start": 10},
+                }
+            ],
+        }
+
+    base = dup.parse_report(_payload("line one\nline two")).groups[0].fragment_sha256
+    trailing_ws = (
+        dup.parse_report(_payload("line one  \nline two\t")).groups[0].fragment_sha256
+    )
+    changed = dup.parse_report(_payload("line one\nline TWO")).groups[0].fragment_sha256
+    assert trailing_ws == base
+    assert changed != base
 
 
 def test_the_committed_baseline_loads_and_every_entry_has_a_reason() -> None:

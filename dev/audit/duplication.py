@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import tempfile
 from dataclasses import dataclass
@@ -130,6 +131,10 @@ class CloneGroup:
         first_start: One-based start line of the first occurrence.
         second_path: Repository-relative path of the second occurrence.
         second_start: One-based start line of the second occurrence.
+        fragment_sha256: SHA-256 of the matched text (see :func:`_fragment_digest`),
+            the clone's content identity. ``first_start``/``second_start`` are
+            navigation only - an unrelated edit above the clone moves them without
+            changing this digest.
     """
 
     lines: int
@@ -137,6 +142,7 @@ class CloneGroup:
     first_start: int
     second_path: str
     second_start: int
+    fragment_sha256: str
 
     def render(self) -> str:
         """Render the clone as one console line."""
@@ -282,6 +288,18 @@ def _relative(path: str) -> str:
     return forward.removeprefix(prefix)
 
 
+def _fragment_digest(fragment: str) -> str:
+    """SHA-256 of a clone's matched text, a content identity line position is not.
+
+    Each line's trailing whitespace is stripped before hashing - it carries no
+    semantic weight, and an editor can rewrite it incidentally - but everything
+    else, including leading indentation, stays exact: a changed token still
+    changes the digest.
+    """
+    normalised = "\n".join(line.rstrip() for line in fragment.splitlines())
+    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+
+
 def parse_report(payload: Any) -> DuplicationResult:
     """Turn jscpd's JSON report into the typed result.
 
@@ -309,6 +327,7 @@ def parse_report(payload: Any) -> DuplicationResult:
                 first_start=int(first.get("start", 0)),
                 second_path=_relative(str(second.get("name", "?"))),
                 second_start=int(second.get("start", 0)),
+                fragment_sha256=_fragment_digest(str(row.get("fragment", ""))),
             ),
         )
     return DuplicationResult.observed(
@@ -442,6 +461,7 @@ def result_as_json(result: DuplicationResult) -> str:
                     "lines": g.lines,
                     "first": {"path": g.first_path, "line": g.first_start},
                     "second": {"path": g.second_path, "line": g.second_start},
+                    "fragment_sha256": g.fragment_sha256,
                 }
                 for g in result.groups
             ],
@@ -459,9 +479,13 @@ class BaselineEntry:
         category: A key into the baseline's ``categories`` reasons.
         lines: How many lines the clone spans, as last adjudicated.
         first_path: Repository-relative path of the first occurrence.
-        first_start: One-based start line of the first occurrence.
+        first_start: One-based start line of the first occurrence, kept for
+            navigation only; it plays no part in :meth:`key`.
         second_path: Repository-relative path of the second occurrence.
-        second_start: One-based start line of the second occurrence.
+        second_start: One-based start line of the second occurrence, kept for
+            navigation only; it plays no part in :meth:`key`.
+        fragment_sha256: SHA-256 of the adjudicated clone's matched text (see
+            :func:`_fragment_digest`), the identity :meth:`key` matches on.
         note: An optional entry-specific detail beyond the category reason.
     """
 
@@ -471,18 +495,15 @@ class BaselineEntry:
     first_start: int
     second_path: str
     second_start: int
+    fragment_sha256: str
     note: str = ""
 
     def key(self) -> _CloneKey:
         """The identity :func:`_clone_key` must reproduce for this to match."""
         return (
-            frozenset(
-                {
-                    (self.first_path, self.first_start),
-                    (self.second_path, self.second_start),
-                }
-            ),
+            frozenset({self.first_path, self.second_path}),
             self.lines,
+            self.fragment_sha256,
         )
 
 
@@ -494,23 +515,23 @@ class Baseline:
     entries: tuple[BaselineEntry, ...]
 
 
-#: A clone's identity for baseline matching: the two occurrences as an
-#: UNORDERED pair, plus the span. Unordered because jscpd's own ordering of
-#: "first" versus "second" is not a guarantee this module can lean on across
-#: runs or versions, and a swap must still match the same baseline entry.
-_CloneKey = tuple[frozenset[tuple[str, int]], int]
+#: A clone's identity for baseline matching: the two occurrences' paths as an
+#: UNORDERED pair, the span, and the fragment's content digest. Unordered
+#: because jscpd's own ordering of "first" versus "second" is not a guarantee
+#: this module can lean on across runs or versions, and a swap must still
+#: match the same baseline entry. Start lines are deliberately excluded: they
+#: are navigation, not identity, so an unrelated edit above the clone cannot
+#: stale the entry that describes it. A clone whose code changes still stops
+#: matching, because the digest changes.
+_CloneKey = tuple[frozenset[str], int, str]
 
 
 def _clone_key(group: CloneGroup) -> _CloneKey:
     """The same identity :meth:`BaselineEntry.key` computes, from a live clone."""
     return (
-        frozenset(
-            {
-                (group.first_path, group.first_start),
-                (group.second_path, group.second_start),
-            }
-        ),
+        frozenset({group.first_path, group.second_path}),
         group.lines,
+        group.fragment_sha256,
     )
 
 
@@ -562,6 +583,7 @@ def load_baseline(path: Path = BASELINE_PATH) -> Baseline:
                 first_start=int(raw["first"]["start"]),
                 second_path=str(raw["second"]["path"]),
                 second_start=int(raw["second"]["start"]),
+                fragment_sha256=str(raw["fragment_sha256"]),
                 note=str(raw.get("note", "")),
             )
         )

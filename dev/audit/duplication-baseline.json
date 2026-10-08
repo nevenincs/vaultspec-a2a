@@ -9,196 +9,228 @@
       "category": "test-arrangement-rhyme",
       "lines": 27,
       "first": {"path": "src/vaultspec_a2a/api/tests/test_clarification_edge.py", "start": 80},
-      "second": {"path": "src/vaultspec_a2a/api/tests/test_clarification_edge.py", "start": 431}
+      "second": {"path": "src/vaultspec_a2a/api/tests/test_clarification_edge.py", "start": 431},
+      "fragment_sha256": "9e1b2281abbd347b3ecb7c35eda5d7d40fa50bb67646e5f8a459ec0b38995fd0"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 27,
       "first": {"path": "src/vaultspec_a2a/api/tests/test_clarification_edge.py", "start": 80},
-      "second": {"path": "src/vaultspec_a2a/api/tests/test_clarification_relay_sse.py", "start": 89}
+      "second": {"path": "src/vaultspec_a2a/api/tests/test_clarification_relay_sse.py", "start": 89},
+      "fragment_sha256": "9e1b2281abbd347b3ecb7c35eda5d7d40fa50bb67646e5f8a459ec0b38995fd0"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 21,
       "first": {"path": "src/vaultspec_a2a/api/tests/test_clarification_relay_sse.py", "start": 162},
-      "second": {"path": "src/vaultspec_a2a/api/tests/test_clarification_relay_sse.py", "start": 214}
+      "second": {"path": "src/vaultspec_a2a/api/tests/test_clarification_relay_sse.py", "start": 214},
+      "fragment_sha256": "01ab4a3ca88eb8306a43660da8a2b2322bd914af6888526f8bbf0808c679d16e"
     },
     {
       "category": "owed-test-fixture-fold",
       "lines": 22,
       "first": {"path": "src/vaultspec_a2a/api/tests/test_gateway_live.py", "start": 1100},
       "second": {"path": "src/vaultspec_a2a/testing/seeding.py", "start": 278},
+      "fragment_sha256": "d38e7d05709203c1edd9b80c34d164e1ff620123328245dc0b949f9d054cc6ab",
       "note": "Re-derives the checkpoint-writing body of testing.seeding.seed_completed_authority inline instead of calling the landed seeding helper."
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 21,
-      "first": {"path": "src/vaultspec_a2a/api/tests/test_internal.py", "start": 354},
-      "second": {"path": "src/vaultspec_a2a/api/tests/test_internal.py", "start": 543}
+      "first": {"path": "src/vaultspec_a2a/api/tests/test_internal.py", "start": 353},
+      "second": {"path": "src/vaultspec_a2a/api/tests/test_internal.py", "start": 542},
+      "fragment_sha256": "6c9ee463fee80cd5c133846ba74cfe792cea0ab8831a405abf417e4e15c6d28d"
     },
     {
       "category": "owed-test-fixture-fold",
       "lines": 21,
-      "first": {"path": "src/vaultspec_a2a/api/tests/test_thread_state_service.py", "start": 30},
+      "first": {"path": "src/vaultspec_a2a/api/tests/test_thread_state_service.py", "start": 31},
       "second": {"path": "src/vaultspec_a2a/control/tests/test_authoring_completion_check.py", "start": 36},
+      "fragment_sha256": "8663dd4bc42831574ee8055bbc6f515cef2db0a246eaa3e8e5b9bcde02c9804a",
       "note": "Both modules define their own private _snapshot() projection helper, identical body; a shared test helper would serve both."
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 21,
       "first": {"path": "src/vaultspec_a2a/api/tests/test_thread_stream.py", "start": 57},
-      "second": {"path": "src/vaultspec_a2a/api/tests/test_thread_stream.py", "start": 189}
+      "second": {"path": "src/vaultspec_a2a/api/tests/test_thread_stream.py", "start": 189},
+      "fragment_sha256": "ac676f2f11783211efaa4f5d7e787a21cc7a84b2cfecbd7ef8da51349a3eb619"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 29,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_active_project_identity.py", "start": 706},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_active_project_identity.py", "start": 761}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_active_project_identity.py", "start": 761},
+      "fragment_sha256": "86085ad28726c02349c132e4f1025179cf514fc060784f1b362a4d551b53f480"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 31,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_active_project_identity.py", "start": 706},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_active_project_identity.py", "start": 807}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_active_project_identity.py", "start": 807},
+      "fragment_sha256": "8c27fe0964367def97d2accc2908adf78ac0e5098beffe42ad2e54d8b5886fbc"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 22,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_direct_control_leases.py", "start": 108},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_direct_control_leases.py", "start": 177}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_direct_control_leases.py", "start": 177},
+      "fragment_sha256": "2c89166055ef5b4fea052414f3dcbd6ed8034f6f4cd71b8221873c98686d16da"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 31,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 107},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 322}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 322},
+      "fragment_sha256": "853011491e9fd871f3f2c1fdc1acad828b908105d98d265023901bae350bbb0c"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 30,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 108},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 273}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 273},
+      "fragment_sha256": "b530fedb61c871e3fdc46a6a67ef9b63bc776b0832ba1d265267930c55a9368b"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 22,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 117},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 332}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_dispatch_receipts.py", "start": 332},
+      "fragment_sha256": "0f23913bdfcec84994cbb77d785c13594395c9d88c12666651d2e79ac9277dee"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 40,
-      "first": {"path": "src/vaultspec_a2a/control/tests/test_event_handlers.py", "start": 680},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_event_handlers.py", "start": 798}
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_event_handlers.py", "start": 815},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_event_handlers.py", "start": 933},
+      "fragment_sha256": "7c82eb6287688eede6a302804fbdb0b00d7b6b1d3e6f402ebbd8e54440fd6309"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 21,
-      "first": {"path": "src/vaultspec_a2a/control/tests/test_event_handlers.py", "start": 718},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_event_handlers.py", "start": 838}
+      "first": {"path": "src/vaultspec_a2a/control/tests/test_event_handlers.py", "start": 853},
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_event_handlers.py", "start": 973},
+      "fragment_sha256": "d498742403f1cebab2232a0b2dc30eed358ce09cc5aca0ef93aa36b50dba25a3"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 21,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py", "start": 332},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py", "start": 406}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py", "start": 406},
+      "fragment_sha256": "eb46eb3dcd1150aaced1aa65201c10587d8be697ebbbea7912b77ae67f0f7154"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 33,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py", "start": 452},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py", "start": 520}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_redispatch_failure_ladder.py", "start": 520},
+      "fragment_sha256": "0327fa7c278c053e64bdf447bd43868a82cd79486d00422aeced5e29934e2916"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 22,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 340},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 390}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 390},
+      "fragment_sha256": "6fcb8650bdb41a8c832ebab617379942893d236625233ae58f6f99cd53c75236"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 21,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 340},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 441}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 441},
+      "fragment_sha256": "f23185f2c7e99fca26b4a7206af67cb8e62285eb19827dfa027342f557de6915"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 21,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 340},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 632}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 632},
+      "fragment_sha256": "f23185f2c7e99fca26b4a7206af67cb8e62285eb19827dfa027342f557de6915"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 22,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 389},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 485}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_thread_service_tokens.py", "start": 485},
+      "fragment_sha256": "e8b065b0ca3cf407e7a044977906415cd5a29074935417ac7412118c38b4d1ef"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 27,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_verdict_subscriber.py", "start": 135},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py", "start": 511}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py", "start": 511},
+      "fragment_sha256": "9f06df4ea6776125c3cfbb38e5dd87245a5b0da19c15a1f0b98541c30a90bcf1"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 22,
       "first": {"path": "src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py", "start": 648},
-      "second": {"path": "src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py", "start": 761}
+      "second": {"path": "src/vaultspec_a2a/control/tests/test_verdict_subscriber_live.py", "start": 761},
+      "fragment_sha256": "9ed8157b7ad0950cbb5126e0a06cac11bf942d9281dd636565f55585d8d2b7ff"
     },
     {
       "category": "migration-revision-boilerplate",
       "lines": 31,
       "first": {"path": "src/vaultspec_a2a/database/migrations/versions/0006_task_queue_entries.py", "start": 22},
-      "second": {"path": "src/vaultspec_a2a/database/migrations/versions/0026_remediation_schema_retirement.py", "start": 291}
+      "second": {"path": "src/vaultspec_a2a/database/migrations/versions/0026_remediation_schema_retirement.py", "start": 291},
+      "fragment_sha256": "907eec36400d48c087642e6f1eb68477ea2f04d15b87cad34af62f86952f3f6b"
     },
     {
       "category": "migration-revision-boilerplate",
       "lines": 38,
       "first": {"path": "src/vaultspec_a2a/database/migrations/versions/0008_active_run_selectors.py", "start": 101},
-      "second": {"path": "src/vaultspec_a2a/database/migrations/versions/0009_active_run_partial_indexes.py", "start": 102}
+      "second": {"path": "src/vaultspec_a2a/database/migrations/versions/0009_active_run_partial_indexes.py", "start": 102},
+      "fragment_sha256": "3f08cc2a926669a984c6654664d3588e31b6f884ae61338250d137f7ced9a5a5"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 26,
-      "first": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py", "start": 623},
-      "second": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py", "start": 692}
+      "first": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py", "start": 721},
+      "second": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py", "start": 790},
+      "fragment_sha256": "006788adf100ebc0961b4bd0d801b7710804ef44e180c71d966751a2222d396d"
     },
     {
       "category": "owed-test-fixture-fold",
       "lines": 25,
       "first": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_worker_authoring_wiring.py", "start": 92},
       "second": {"path": "src/vaultspec_a2a/providers/tests/test_codex_config_home.py", "start": 573},
+      "fragment_sha256": "e1fff036037b5d9759a88027345ef1f3b661c927f014cb7c44d647e3b0ecb87a",
       "note": "Both build the same two-tool AuthoringToolBinding/CatalogSnapshot fixture by hand; a shared authoring-binding test builder would serve both."
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 25,
       "first": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_worker_authoring_wiring.py", "start": 128},
-      "second": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_worker_authoring_wiring.py", "start": 208}
+      "second": {"path": "src/vaultspec_a2a/graph/tests/nodes/test_worker_authoring_wiring.py", "start": 208},
+      "fragment_sha256": "72b43a7fa527b84302ccad91fee3505955217db95efbb9069c935f1c6b82b753"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 21,
       "first": {"path": "src/vaultspec_a2a/streaming/tests/test_stream_connection_cap.py", "start": 11},
-      "second": {"path": "src/vaultspec_a2a/streaming/tests/test_subscription_cap.py", "start": 10}
+      "second": {"path": "src/vaultspec_a2a/streaming/tests/test_subscription_cap.py", "start": 10},
+      "fragment_sha256": "5eb06d562524924c99873e1979e960f626a47b4c469c2c87e515ba82e2139cd2"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 21,
       "first": {"path": "src/vaultspec_a2a/worker/tests/test_authoring_binding.py", "start": 239},
-      "second": {"path": "src/vaultspec_a2a/worker/tests/test_authoring_binding.py", "start": 290}
+      "second": {"path": "src/vaultspec_a2a/worker/tests/test_authoring_binding.py", "start": 290},
+      "fragment_sha256": "21026f5af48e3ea2511ee193b31d0693091b941cc161f0ce6d2a8a18d51d1f90"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 21,
-      "first": {"path": "src/vaultspec_a2a/worker/tests/test_executor.py", "start": 769},
-      "second": {"path": "src/vaultspec_a2a/worker/tests/test_executor.py", "start": 1122}
+      "first": {"path": "src/vaultspec_a2a/worker/tests/test_executor.py", "start": 807},
+      "second": {"path": "src/vaultspec_a2a/worker/tests/test_executor.py", "start": 1160},
+      "fragment_sha256": "0edf934124f2e1313d38045b3a8a356509912f6e275b46e6e2c3dcdab2f70ead"
     },
     {
       "category": "test-arrangement-rhyme",
       "lines": 22,
       "first": {"path": "src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py", "start": 82},
-      "second": {"path": "src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py", "start": 318}
+      "second": {"path": "src/vaultspec_a2a/worker/tests/test_executor_resume_receipts.py", "start": 318},
+      "fragment_sha256": "ea0f4d4da3d7c2dd59b783073135ebdb90bd50aff84d548934e05ab7a81440b3"
     }
   ]
 }

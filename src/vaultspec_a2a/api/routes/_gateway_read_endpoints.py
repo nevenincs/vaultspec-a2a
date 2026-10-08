@@ -34,9 +34,12 @@ from ...control.thread_state_service import (
 )
 from ...database import (
     Checkpointer,
+    TokenUsageTotals,
     get_db,
     get_permission_logs_by_thread,
     resolve_session_factory,
+    sum_cost_by_role,
+    sum_cost_by_thread,
 )
 from ...streaming import RelayHub, catalog_json_schema
 from ...thread.constants import (
@@ -72,6 +75,8 @@ from ..schemas.gateway import (
     RunStatusResponse,
     RunSummariesResponse,
     RunSummaryRecord,
+    RunTokenUsage,
+    RunUsage,
     TeamStatusV1Response,
     TopologyPosition,
 )
@@ -414,6 +419,44 @@ _TRANSCRIPT_FAULTS: frozenset[TranscriptAvailability] = frozenset(
 )
 
 
+async def _read_run_usage(db: AsyncSession, run_id: str) -> RunUsage | None:
+    """Project one run's token accounting, or ``None`` when it recorded none.
+
+    Both reads are scoped to this run and are the ONLY production readers of
+    the accounting table: the counts were written on every turn and served
+    nowhere, which is what made three sites each look like an unfinished
+    feature. The per-role split is grouped inside the same run rather than
+    aggregated by role id, because a role id is a team-preset seat and the same
+    seat appears in every run that has one.
+
+    A run with no rows is reported as no accounting at all. Serving a zeroed
+    object instead would invite a reviewer to read a structural zero as a
+    measured one, which is the same mistake that retired the priced column.
+    """
+    totals = await sum_cost_by_thread(db, run_id)
+    if totals is None:
+        return None
+    by_role = await sum_cost_by_role(db, run_id)
+    return RunUsage(
+        total=_token_usage(totals),
+        by_role={
+            agent_id: _token_usage(role_totals)
+            for agent_id, role_totals in by_role.items()
+        },
+    )
+
+
+def _token_usage(totals: TokenUsageTotals) -> RunTokenUsage:
+    """Carry one summed aggregate onto the wire, breakdown nulls intact."""
+    return RunTokenUsage(
+        input_tokens=totals.input_tokens,
+        output_tokens=totals.output_tokens,
+        cache_read_tokens=totals.cache_read_tokens,
+        cache_write_tokens=totals.cache_write_tokens,
+        reasoning_tokens=totals.reasoning_tokens,
+    )
+
+
 async def run_history_endpoint(
     run_id: PathSafeRunId,
     db: AsyncSession = Depends(get_db),
@@ -439,6 +482,11 @@ async def run_history_endpoint(
 
     The state snapshot is embedded rather than restated, so this response cannot
     drift from the snapshot it reports.
+
+    The two durable artifacts this verb discloses that no other surface serves -
+    the settled permission decisions and the token accounting - are here for the
+    same reason: both were recorded on every run and readable nowhere, and
+    reporting the record is this verb's whole job.
     """
     capture = await capture_thread_state(
         db,
@@ -486,6 +534,7 @@ async def run_history_endpoint(
             )
             for decision in decisions
         ],
+        usage=await _read_run_usage(db, run_id),
     )
 
 

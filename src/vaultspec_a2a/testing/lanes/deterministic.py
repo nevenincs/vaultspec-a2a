@@ -22,6 +22,10 @@ factory injects:
   held until its test releases it, each selected by the bundled agent that
   names it.
 
+Every completing turn reports token usage, as a real provider lane does, derived
+from the turn's own text. Reporting nothing would leave the whole accounting
+path unreachable on the only lane a test may use.
+
 A scenario that follows a script reads it from its agent's persona, one entry
 per non-blank line. The scripted supervisor's entries are its routing replies,
 given in order, the last repeating once the others are spent. The branch
@@ -50,6 +54,7 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
 )
+from langchain_core.messages.ai import UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
@@ -342,6 +347,41 @@ def path_writer(path: Path) -> AgentConfig:
     return _scripted_preset(_PATH_WRITER_ID, (str(Path(path).resolve()),))
 
 
+#: Characters of text this lane counts as one reported token. The ratio is the
+#: rough industry average; the exact figure is immaterial, because what the
+#: accounting path needs is a count that varies with the turn rather than a
+#: constant that any arithmetic error would survive.
+_CHARS_PER_REPORTED_TOKEN = 4
+
+
+def _reported_tokens(text: str) -> int:
+    """Return the token count this lane reports for *text*, at least one."""
+    return max(1, -(-len(text) // _CHARS_PER_REPORTED_TOKEN))
+
+
+def _reported_usage(messages: list[BaseMessage], content: str) -> UsageMetadata:
+    """Report this turn's token usage the way a provider lane reports it.
+
+    A lane that reports nothing leaves the whole accounting path - the worker's
+    extraction, the ``token_usage`` channel, the durable row and the served
+    reading - unreachable on the only lane a test may use, which is how that
+    path once came to be built in three places and dead in all three. So this
+    lane reports, and reports counts derived from the turn's OWN text, so the
+    numbers are a real function of the turn instead of a constant.
+
+    Only the two counts every lane reports are given. No cache or reasoning
+    breakdown is claimed: this lane has neither, and an unreported breakdown is
+    a different fact from a measured zero.
+    """
+    input_tokens = sum(_reported_tokens(str(message.content)) for message in messages)
+    output_tokens = _reported_tokens(content)
+    return UsageMetadata(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=input_tokens + output_tokens,
+    )
+
+
 def _research_branch(messages: list[BaseMessage]) -> str:
     """Return the research branch the producer stated for this turn."""
     for message in messages:
@@ -605,11 +645,18 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: object,
     ) -> ChatResult:
-        """Return the turn's content as a single AIMessage."""
+        """Return the turn's content as a single AIMessage, with its usage."""
         del stop, run_manager, kwargs  # interface-required, unused
         content = await self._turn_content(messages)
         return ChatResult(
-            generations=[ChatGeneration(message=AIMessage(content=content))]
+            generations=[
+                ChatGeneration(
+                    message=AIMessage(
+                        content=content,
+                        usage_metadata=_reported_usage(messages, content),
+                    )
+                )
+            ]
         )
 
     @override
@@ -641,4 +688,12 @@ class DeterministicResearchAdrChatModel(BaseChatModel):
                 yield chunk
             raise AssertionError("deterministic loop unexpectedly ended")
         content = await self._turn_content(messages)
-        yield ChatGenerationChunk(message=AIMessageChunk(content=content))
+        # The usage rides the ONE chunk this path yields. Chunk addition sums
+        # usage metadata, so attaching it to each of several chunks would
+        # multiply-count the same turn - which is why the burst and loop
+        # scenarios above, whose streams never terminate anyway, report none.
+        yield ChatGenerationChunk(
+            message=AIMessageChunk(
+                content=content, usage_metadata=_reported_usage(messages, content)
+            )
+        )

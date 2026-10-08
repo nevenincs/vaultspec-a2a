@@ -31,16 +31,12 @@ from ..thread.enums import TERMINAL_STATUS_VALUES, InterruptType, ThreadStatus
 from ..thread.failure_evidence import GraphFailureEvidence
 from ..thread.idempotency import permission_request_action_key
 from ..thread.snapshots import (
-    PERMISSION_REQUEST_EVENT_TYPES,
     classify_permission_pause_reason,
     is_permission_event,
     is_terminal_event,
     wire_event_type,
 )
 from ..utils.coercion import decode_json_object
-from ._event_application import (
-    apply_relayed_permission_resolution as _apply_relayed_permission_resolution,
-)
 from ._event_application import (
     commit_proven_application as _commit_proven_application,
 )
@@ -960,13 +956,16 @@ async def _handle_permission_event(
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     checkpointer: Checkpointer | None = None,
 ) -> None:
-    """Persist worker permission events into the durable journal.
+    """Journal the permission or approval request a worker event announces.
 
-    Validates the payload as a permission event, then dispatches to the request
-    persistence stage or the resolution stage under one committed transaction.
     A request is journaled only against the interrupt its run's checkpoint
     holds, so the checkpoint read happens before the write transaction opens
     rather than while it holds the store's write lock.
+
+    Requests are the only permission events there are. An ANSWER is settled from
+    the application receipt that proved its resume landed - see
+    :func:`_handle_progress_event` - which is the receipt the checkpoint
+    incorporated, so no event announcing a resolution is believed or needed.
     """
     if not is_permission_event(payload):
         return
@@ -975,12 +974,6 @@ async def _handle_permission_event(
     factory = _session_factory(session_factory)
     if factory is None:
         _skip_without_database("the durable permission journal", thread_id)
-        return
-    if wire_event_type(payload) not in PERMISSION_REQUEST_EVENT_TYPES:
-        async with factory() as db:
-            await begin_write_transaction(db)
-            await _apply_relayed_permission_resolution(db, thread_id, payload)
-            await db.commit()
         return
     pause = await _held_request_interrupt(thread_id, payload, checkpointer)
     if pause is None:

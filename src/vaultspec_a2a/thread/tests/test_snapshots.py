@@ -177,11 +177,23 @@ def test_is_terminal_event_false_unknown_status() -> None:
 
 def test_is_permission_event_true() -> None:
     assert is_permission_event({"type": "permission_request"})
-    assert is_permission_event({"type": "permission_resolved"})
+    assert is_permission_event({"type": "plan_approval_request"})
+    assert is_permission_event({"type": "document_approval_request"})
 
 
 def test_is_permission_event_false() -> None:
     assert not is_permission_event({"type": "agent_status"})
+
+
+def test_a_retired_resolution_event_is_not_a_permission_event() -> None:
+    """``permission_resolved`` is not a type any producer emits.
+
+    The journal settles an answer from the application receipt of the resume
+    that carried it, so nothing ever announced the settlement as an event of its
+    own. Admitting the type kept a relay branch alive that only tests reached,
+    and a frame naming it must now classify as the unknown event it is.
+    """
+    assert not is_permission_event({"type": "permission_resolved"})
 
 
 def test_classify_permission_pause_reason_plan_approval() -> None:

@@ -902,11 +902,16 @@ async def test_malformed_failure_evidence_is_refused_without_settling(
 
 
 @pytest.mark.asyncio
-async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
+async def test_a_replayed_application_receipt_appends_no_second_applied_action(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """A replayed permission_resolved event must not append a second applied action."""
+    """Re-delivering the receipt that settled an answer settles nothing twice.
+
+    The receipt is the only announcement of a landed answer, and the worker may
+    deliver it more than once, so the settlement's own idempotence is what keeps
+    the journal one record of one decision.
+    """
     async with session_factory() as session:
         (
             thread,
@@ -953,10 +958,13 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
         assert submitted_action.applied_at is not None
         assert submitted_action.claim_token is None
 
-    await _handle_permission_event(
+    await _apply_submitted_permission_response(
         thread.id,
-        {"type": "permission_resolved", "request_id": request_id},
+        submitted,
+        submitted_receipt,
+        submitted_checkpoint,
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     async with session_factory() as session:
@@ -1563,24 +1571,24 @@ _KIMI_OPTIONS: list[dict[str, object]] = [
 
 
 @pytest.mark.asyncio
-async def test_plan_rejection_survives_the_resolution_projection(
+async def test_plan_rejection_survives_the_settlement_the_receipt_prompts(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """The resolution handler must not overwrite a denial with an approval.
+    """The settlement must not overwrite a denial with an approval.
 
     The control service stamps the thread REJECTED when the response is submitted.
-    The ``permission_resolved`` projection then recomputes the verdict, and used to
-    recompute it from a rejecting-*kind* set matched against the response option
-    *id* -- so the bare ``"reject"`` the plan gate mints read as an approval and was
-    written straight over the correct state.
+    The settlement the application receipt prompts then recomputes the verdict,
+    and used to recompute it from a rejecting-*kind* set matched against the
+    response option *id* -- so the bare ``"reject"`` the plan gate mints read as
+    an approval and was written straight over the correct state.
     """
     (
         thread_id,
         request_id,
-        _dispatch_id,
-        _receipt,
-        _checkpoint,
+        dispatch_id,
+        receipt,
+        checkpoint_id,
     ) = await _answered_rejection(
         session_factory,
         checkpointer,
@@ -1592,10 +1600,17 @@ async def test_plan_rejection_survives_the_resolution_projection(
         ),
     )
 
-    await _handle_permission_event(
+    await _handle_progress_event(
         thread_id,
-        {"type": "permission_resolved", "request_id": request_id},
+        {
+            "type": "dispatch_applied",
+            "dispatch_id": dispatch_id,
+            "action": "resume",
+            "graph_action_receipt": receipt.model_dump(mode="json"),
+            "checkpoint_id": checkpoint_id,
+        },
         session_factory=session_factory,
+        checkpointer=checkpointer,
     )
 
     async with session_factory() as session:
@@ -1648,7 +1663,7 @@ async def test_generic_progress_does_not_settle_an_answered_permission(
 
 
 @pytest.mark.asyncio
-async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
+async def test_a_kimi_tool_denial_settles_as_rejected(
     session_factory: async_sessionmaker[AsyncSession],
     checkpointer: AsyncSqliteSaver,
 ) -> None:
@@ -1659,28 +1674,6 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
     the ACP agent does receive ``"reject"`` and the tool is refused, so recording
     it as applied corrupts the journal rather than authorising anything.
     """
-    (
-        resolved_thread,
-        resolved_request,
-        _resolved_dispatch,
-        _resolved_receipt,
-        _resolved_checkpoint,
-    ) = await _answered_rejection(
-        session_factory,
-        checkpointer,
-        spec=_RejectionSpec(
-            title="Kimi denial via resolution",
-            pause_reason_type="bash",
-            options=_KIMI_OPTIONS,
-            stamp_thread_rejected=False,
-        ),
-    )
-    await _handle_permission_event(
-        resolved_thread,
-        {"type": "permission_resolved", "request_id": resolved_request},
-        session_factory=session_factory,
-    )
-
     (
         progress_thread,
         progress_request,
@@ -1711,48 +1704,15 @@ async def test_a_kimi_tool_denial_settles_as_rejected_on_both_paths(
     )
 
     async with session_factory() as session:
-        for request_id in (resolved_request, progress_request):
-            permission = await get_permission_request(session, request_id)
-            assert permission is not None
-            assert permission.request_status == "rejected"
+        permission = await get_permission_request(session, progress_request)
+        assert permission is not None
+        assert permission.request_status == "rejected"
 
-        # A tool permission carries no plan approval state, so neither path may
-        # invent one on the thread.
-        for thread_id in (resolved_thread, progress_thread):
-            thread = await session.get(ThreadModel, thread_id)
-            assert thread is not None
-            assert thread.approval_status is None
-
-
-@pytest.mark.asyncio
-async def test_permission_resolution_for_unknown_request_is_a_clean_noop(
-    session_factory: async_sessionmaker[AsyncSession],
-) -> None:
-    """The resolution stage no-ops when no matching request row exists.
-
-    After the split into a validation-then-dispatch handler, the resolution
-    stage's missing-permission guard is exercised directly through the handler:
-    a permission_resolved event for a request that was never recorded must
-    settle nothing and append no control action.
-    """
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Unknown Resolution",
-        )
-        await session.commit()
-        thread_id = thread.id
-
-    await _handle_permission_event(
-        thread_id,
-        {"type": "permission_resolved", "request_id": f"{thread_id}:never-recorded"},
-        session_factory=session_factory,
-    )
-
-    async with session_factory() as session:
-        actions = (await session.execute(select(ControlActionModel))).scalars().all()
-        assert actions == []
+        # A tool permission carries no plan approval state, so the settlement
+        # may not invent one on the thread.
+        thread = await session.get(ThreadModel, progress_thread)
+        assert thread is not None
+        assert thread.approval_status is None
 
 
 @pytest.mark.asyncio

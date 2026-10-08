@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:2c1d161392b8cfe89855e08c82d69522932cb08e7f9ac489cda4b1009a15070c'
+body_hash: 'sha256:dee00ce507069896d8e94ccdcc40d6e33bafd63f42a629848a28a9f1a672dc03'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -62,6 +62,12 @@ related:
 - `S83` `M` `Justfile`
 - `S83` `verify:` `just test-frozen-contents` -> `pass`
 - `S83` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m dev lint all` -> `pass`
+- `S116` `M` `src/vaultspec_a2a/control/tests/test_verdict_loop_live.py`
+- `S116` `M` `src/vaultspec_a2a/service_tests/_dashboard_engine.py`
+- `S116` `M` `src/vaultspec_a2a/service_tests/test_dashboard_provider_catalog_live.py`
+- `S116` `M` `src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python .pytest-tmp/green-20261008/engine_verdict_probe.py` -> `pass`
+- `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m dev test parallel` -> `fail`
 
 ## Notes
 
@@ -70,3 +76,4 @@ related:
 - `S116` Correction: the earlier wheel verification row containing `not_frozen_placeholder` is a transcription error, not an executed command, and must not be used as evidence. The following correctly transcribed selection passed three tests with one deselected; wheel-contents.log records the actual run.
 - `S99` Correction checkpoint only: S99 remains unchecked pending broader historical execution reconciliation.
 - `S83` Corrected real Windows onedir excludes Core test fixtures; build smoke and actual bundled Core help pass. Independent review PASS. Broader S83 historical closure is not inferred from this correction.
+- `S116` Contained local engine probe: live verdict and receipt-role tests 2 passed. Full nonservice 5859 passed/16 RAG-version failures/11 skipped. Independent review PASS with low mutable-buffer observation queued. Engine source pin/CI provisioning remains open S115; shared RAG choice pending.

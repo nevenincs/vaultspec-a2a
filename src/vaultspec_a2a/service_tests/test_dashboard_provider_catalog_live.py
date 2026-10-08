@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from ..authoring.tests._engine_peer import private_engine_dir
 from ..providers.team_selection import FROZEN_SELECTION_SCHEMA_VERSION
 from ..service_tests._live_desktop_gateway import armed_gateway
 from ..testing import (
@@ -281,17 +282,17 @@ def test_dashboard_catalog_selection_completes_and_replays_with_frozen_assignmen
     scenario = _dashboard_scenario(tmp_path)
 
     with (
+        private_engine_dir() as engine_discovery,
         armed_gateway(
             tmp_path,
-            VAULTSPEC_A2A_ENGINE_SERVICE_JSON=str(
-                scenario.workspace / ".vault" / "data" / "engine-data" / "service.json"
-            ),
+            VAULTSPEC_A2A_ENGINE_SERVICE_JSON=str(engine_discovery / "service.json"),
         ) as (gateway_base, auth),
         dashboard_engine(
             tmp_path,
             workspace=scenario.workspace,
             engine_port=scenario.engine_port,
             engine_log=scenario.engine_log,
+            engine_service_json=engine_discovery / "service.json",
             a2a_port=int(gateway_base.rsplit(":", 1)[1]),
         ) as token,
     ):

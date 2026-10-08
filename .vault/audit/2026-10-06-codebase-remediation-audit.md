@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:0082028c08d809d432b2ece4d63ac0a78a315260a7ab921ad8b0f219d4e0f2ec'
+body_hash: 'sha256:1abcc65b3f86a4d40c3e7601348f9266d761736986b0715add00d2b7863b5d99'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -1605,3 +1605,67 @@ CI recipe contract pass; full `python -m dev lint all` passes. Reports are under
 `.pytest-tmp/green-20261008/frozen-*.log`. This proves the locally built Windows
 artifact, not successful release execution on the other native targets. S83's
 broader historical plan checkpoint remains to be reconciled. Review verdict: PASS.
+
+### green-20261008-engine-discovery-fixture | medium | Cross-repository harness read retired workspace discovery
+
+Status: fixed under S116. Type: verification contract drift. The real engine
+started, but the harness awaited the retired workspace-local service record.
+The accepted engine-discovery-security contract requires private external state.
+Both engine-owning callers now share the existing hardened OS temporary-directory
+helper, pass its record to the gateway, and give its directory to the engine.
+Readiness uses production authenticated discovery and verifies the expected
+listener before returning the bearer. No legacy fallback was added. A low review
+finding caught raw string assignment through `settings_override`; the final
+helper supplies the declared Path type. Context ordering keeps private state
+alive until contained shutdown. Independent static review found no remaining
+blocking issue; scoped strict types, Ruff and format pass.
+
+### green-20261008-live-verdict-fixture | medium | Live verdict fixture omitted journal and settlement contracts
+
+Status: fixed under S116; local evidence advances S115 but does not close its CI
+requirement. Type: verification correctness. With the real engine available,
+the fixture first lacked the required recovery deadline, then sent its dispatch
+without the committed graph receipt. It now journals a bounded deadline and
+calls the production receipt binder after commit. The old callback target also
+acknowledged and discarded application receipts, leaving the durable permission
+pending even though the graph resumed. The test now matches the real worker's
+receipt to the persisted verdict action dispatch ID and passes it through
+production `relay_event`, which validates receipt/checkpoint evidence before
+settlement. Original approved graph, resumed message and durable APPLIED/status
+assertions remain. The worker fixture owns and closes its bridge.
+
+A temporary contained engine/A2A probe ran the existing live verdict and receipt
+role modules with `-m service --require-prerequisite=loopback-stack`: two passed
+in 11.24s. Engine executable SHA-256:
+`2fb7fd3b18bb83ea2fee833a820efef78df4f2050e45f853df34e7cfc8efafb7`.
+This is evidence for that local artifact, not the dirty sibling source checkout
+or a pinned CI artifact. S115 still needs engine provisioning in CI. Report:
+`.pytest-tmp/green-20261008/live-engine.xml`; launcher transcript:
+`.pytest-tmp/green-20261008/live-engine-6.log`. Final scoped strict types and Ruff
+pass; integrated lint passed, with scoped checks repeated after the final fixture
+edit. Independent actual-diff review found no blocking issue. Review verdict: PASS.
+
+### green-20261008-receipt-buffer-proof | low | Shared live receipt waiter observes a mutable bridge buffer
+
+Status: open; follow-up owned by S115 verification. Type: test reliability.
+Independent review notes `_wait_for_receipt` can briefly miss a receipt while
+`flush_events` holds it for delivery before requeue. The local loop uses an
+unreachable loopback target and passed, and dispatch-ID matching prevents false
+settlement evidence. A capturing callback sink would make delivery observation
+deterministic for both live-verdict consumers; do not weaken their receipt or
+checkpoint checks to address a timeout.
+
+### green-20261008-integrated-rerun | high | Remaining non-service failures share the RAG version prerequisite
+
+Status: measured; environment blocker remains open. Type: test status evidence.
+A fresh resource-aware run started at c786dcd5 with the repaired non-service
+sources and seven added authority cases. It completed 5,886 cases in 1017.68s:
+5,859 passed, 16 failed, 11 skipped. All sixteen failures report client 0.6.0
+versus shared RAG service 0.5.3, including the additional registry-resolved probe
+case. The five unrelated original baseline failures no longer occur. The same
+nine platform skips and two unavailable selection/engine prerequisites remain;
+the separate contained-engine proof above is recorded separately, not substituted
+for those skipped assertions. Log:
+`.pytest-tmp/green-20261008/nonservice-current.log`. No shared RAG service was
+upgraded or stopped; the shared-service/private-service choice remains pending.
+This result is not an all-green claim.

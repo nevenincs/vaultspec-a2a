@@ -40,16 +40,13 @@ from __future__ import annotations
 import pathlib
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
-import httpx
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI, Request
-from fastapi.responses import Response
-from httpx import ASGITransport
 from langchain_core.messages import AIMessage
 
 from ...authoring import (
@@ -59,11 +56,15 @@ from ...authoring import (
     LifecycleEvent,
 )
 from ...control.accepted_input import freeze_accepted_input
-from ...control.dispatch_receipts import prepare_graph_action_receipt
+from ...control.dispatch_receipts import (
+    bind_graph_action_receipt,
+    prepare_graph_action_receipt,
+)
 from ...control.execution_authority import resolve_execution_authority
 from ...database import (
     create_control_action,
     create_thread,
+    get_control_action_by_idempotency_key,
     get_permission_request,
     get_thread,
     record_permission_request,
@@ -87,20 +88,22 @@ from ...tests._write_authority import make_test_write_authority
 from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from ...thread.executable_graph import FrozenGraphDefinition, freeze_graph_definition
-from ...thread.idempotency import thread_create_action_key
-from ...worker.ipc import WorkerBridge
+from ...thread.idempotency import authoring_verdict_action_key, thread_create_action_key
 from .._verdict_subscriber_config import VerdictSubscriberConfig
 from ..circuit_breaker import WorkerCircuitBreaker
+from ..event_handlers import RelayServices, relay_event
 from ..verdict_subscriber import VerdictSubscriber
 from .test_verdict_subscriber_live import (
     _decide,
     _DecisionRequest,
     _submit_proposal,
+    _wait_for_receipt,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    import httpx
     from langchain_core.runnables import RunnableConfig
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -108,6 +111,7 @@ if TYPE_CHECKING:
     from ...providers.team_selection import FrozenLaneAssignment
     from ...thread.state import TeamState
     from ...worker.graph_lifecycle import GraphCompilationKey, RegisteredCompiledGraph
+    from ...worker.ipc import WorkerBridge
 
 # Every dispatch names an active project, as a real one does. This package's own
 # repository is real, absolute, and present on either platform.
@@ -143,6 +147,7 @@ class _VerdictIngestContext:
 class _VerdictResumeContext:
     client: AuthoringClient
     worker_client: httpx.AsyncClient
+    bridge: WorkerBridge
     resources: _LiveVerdictResources
     identity: _LiveVerdictIdentity
     config: RunnableConfig
@@ -163,33 +168,6 @@ async def client(live_engine: EngineEndpoint):
         live_engine.base_url, live_engine.bearer_token
     ) as authoring_client:
         yield authoring_client
-
-
-def _bridge_stub() -> WorkerBridge:
-    """A real ASGI-backed bridge whose gateway target just accepts callbacks.
-
-    What is under test is engine -> subscriber -> worker -> graph, not the
-    worker -> gateway event relay (already proven in ``worker/tests/test_executor.py``'s
-    settle-ordering suite), so the callback target only needs to be real and
-    accept the calls, not assert on them.
-    """
-    app = FastAPI()
-
-    @app.post("/internal/events/batch")
-    async def _batch(request: Request) -> Response:
-        return Response(content='{"status":"ok"}', media_type="application/json")
-
-    @app.post("/internal/heartbeat")
-    async def _heartbeat(request: Request) -> Response:
-        return Response(content='{"status":"ok"}', media_type="application/json")
-
-    bridge = WorkerBridge(
-        api_url="http://control:8000", worker_id="verdict-loop-worker"
-    )
-    bridge._client = httpx.AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://control:8000"
-    )
-    return bridge
 
 
 def _verdict_loop_graph(
@@ -301,6 +279,7 @@ async def _ingest_live_verdict_run(
             action_type=authority.action_type,
             idempotency_key=thread_create_action_key(context.identity.thread_id),
             dispatch_id=authority.action_receipt_id,
+            recovery_deadline_at=datetime.now(UTC) + timedelta(minutes=5),
             payload=freeze_accepted_input(
                 ingest, intent={"content": "drive to the gate"}
             ),
@@ -312,6 +291,8 @@ async def _ingest_live_verdict_run(
         )
         assert receipt is not None
         await db.commit()
+        ingest = await bind_graph_action_receipt(db, ingest)
+        assert ingest.graph_action_receipt is not None
     response = await context.worker_client.post(
         "/dispatch", json=ingest.model_dump(mode="json")
     )
@@ -406,6 +387,27 @@ async def _resume_live_verdict_run(
         for m in cast("list[object]", messages)
     ), "the finish node never observed the real resume"
 
+    # Settle the worker's actual receipt through the gateway's production
+    # handler; graph completion alone does not authorize a durable verdict.
+    async with context.resources.session_factory() as db:
+        action = await get_control_action_by_idempotency_key(
+            db,
+            thread_id=context.identity.thread_id,
+            idempotency_key=authoring_verdict_action_key(
+                context.identity.info["proposal_id"]
+            ),
+        )
+    assert action is not None and action.dispatch_id is not None
+    receipt = await _wait_for_receipt(context.bridge, dispatch_id=action.dispatch_id)
+    await relay_event(
+        context.identity.thread_id,
+        receipt,
+        services=RelayServices(
+            session_factory=context.resources.session_factory,
+            checkpointer=context.resources.checkpointer,
+        ),
+    )
+
     # The durable gate row resolved and the thread left INPUT_REQUIRED.
     async with context.resources.session_factory() as db:
         gate_row = await get_permission_request(
@@ -447,7 +449,6 @@ async def _run_live_verdict_a2a(
     )
     async with served_worker(
         checkpointer,
-        bridge=_bridge_stub(),
         graphs={identity.thread_id: (key, graph)},
         drain_dispatches=True,
     ) as worker:
@@ -462,6 +463,7 @@ async def _run_live_verdict_a2a(
             _VerdictResumeContext(
                 client=client,
                 worker_client=worker.client,
+                bridge=worker.bridge,
                 resources=resources,
                 identity=identity,
                 config=config,

@@ -9,7 +9,6 @@ engine lifecycle, so they are built here once rather than per proof.
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
@@ -20,13 +19,14 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from ..authoring.discovery import resolve_engine
 from ..lifecycle.discovery import write_service_json
 from ..testing import (
     DEFAULT_ATTACH_CREDENTIAL,
     LivenessWatch,
     ProgressDeadline,
     inherited_environment,
-    json_object,
+    settings_override,
     wait_for,
 )
 from ..utils import ProcessContainment, bearer_header, reap_contained, spawn_contained
@@ -120,32 +120,19 @@ def _engine_command(port: int, workspace: Path) -> list[str]:
 
 
 def _wait_for_engine(
-    workspace: Path, base_url: str, process: subprocess.Popen[bytes]
+    discovery: Path, base_url: str, process: subprocess.Popen[bytes]
 ) -> str:
-    """Return the engine's service token once it answers ``/status`` with it."""
-    discovery = workspace / ".vault" / "data" / "engine-data" / "service.json"
-    last_error = "not started"
+    """Resolve the private record through production's authenticated discovery."""
+    last_error = "private engine discovery is not ready"
 
     def _ready() -> str | None:
         nonlocal last_error
-        try:
-            record = json_object(
-                json.loads(discovery.read_text(encoding="utf-8")),
-                at="engine discovery record",
-            )
-            token = record.get("service_token")
-            if not isinstance(token, str):
-                raise KeyError("service_token")
-            response = httpx.get(
-                f"{base_url}/status",
-                headers=bearer_header(token),
-                timeout=2,
-            )
-            if response.status_code == HTTPStatus.OK:
-                return token
-            last_error = response.text
-        except (OSError, KeyError, json.JSONDecodeError, httpx.HTTPError) as exc:
-            last_error = repr(exc)
+        with settings_override(engine_service_json=discovery):
+            endpoint = resolve_engine(liveness_timeout=2)
+        if endpoint is not None:
+            if endpoint.base_url == base_url:
+                return endpoint.bearer_token
+            last_error = "private discovery names an unexpected engine listener"
         return None
 
     def _exited() -> str | None:
@@ -201,6 +188,7 @@ def dashboard_engine(
     workspace: Path,
     engine_port: int,
     engine_log: Path,
+    engine_service_json: Path,
     a2a_port: int,
 ) -> Generator[str]:
     """Run the declared production engine against the A2A listening on *a2a_port*.
@@ -224,6 +212,7 @@ def dashboard_engine(
             "VAULTSPEC_A2A_DESKTOP_APP_HOME": None,
             "VAULTSPEC_A2A_HOME": str(discovery_home),
             "VAULTSPEC_APP_HOME": str(tmp_path / "dashboard-product-home"),
+            "VAULTSPEC_ENGINE_DISCOVERY_DIR": str(engine_service_json.parent),
         }
     )
     with engine_log.open("wb") as output:
@@ -239,7 +228,7 @@ def dashboard_engine(
                 stdout=output,
                 stderr=subprocess.STDOUT,
             )
-            token = _wait_for_engine(workspace, engine_base, process)
+            token = _wait_for_engine(engine_service_json, engine_base, process)
             yield token
         finally:
             if process is None:

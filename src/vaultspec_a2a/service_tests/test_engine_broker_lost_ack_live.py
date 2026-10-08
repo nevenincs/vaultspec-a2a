@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, TextIO, TypedDict, Unpack, override
 import httpx
 import pytest
 
+from ..authoring.tests._engine_peer import private_engine_dir
 from ..desktop.profile import derive_state_paths
 from ..service_tests._live_desktop_gateway import armed_gateway
 from ..testing import (
@@ -438,11 +439,10 @@ def test_production_engine_recovers_lost_run_start_ack_exactly_once(
     engine_base = f"http://127.0.0.1:{engine_port}"
 
     with (
+        private_engine_dir() as engine_discovery,
         armed_gateway(
             tmp_path,
-            VAULTSPEC_A2A_ENGINE_SERVICE_JSON=str(
-                workspace / ".vault" / "data" / "engine-data" / "service.json"
-            ),
+            VAULTSPEC_A2A_ENGINE_SERVICE_JSON=str(engine_discovery / "service.json"),
         ) as (
             gateway_base,
             auth,
@@ -455,6 +455,7 @@ def test_production_engine_recovers_lost_run_start_ack_exactly_once(
             workspace=workspace,
             engine_port=engine_port,
             engine_log=tmp_path / "engine.log",
+            engine_service_json=engine_discovery / "service.json",
             a2a_port=int(relay.server_address[1]),
         ) as token,
     ):

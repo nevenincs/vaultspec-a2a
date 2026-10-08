@@ -230,10 +230,35 @@ def _admission_readiness(
 async def _probe_admission_readiness(
     app_state: Any, worker_client: httpx.AsyncClient
 ) -> AdmissionReadiness:
-    from ...control._worker_health import probe_worker_health, worker_ready_and_ours
+    from ...control._worker_health import (
+        WorkerHealthProbe,
+        probe_worker_health,
+        worker_credential_authorized,
+        worker_ready_and_ours,
+    )
 
-    probe = await probe_worker_health(
-        settings.worker_url, client=worker_client, internal_token=None
+    # The generation must come from the spawner that issued it. It is the highest
+    # generation this gateway has minted, and a worker reporting a HIGHER one
+    # classifies as unidentified - so defaulting it to zero here would disown our
+    # own restarted worker on its own admission path.
+    spawner = getattr(app_state, "worker_spawner", None)
+    generation = getattr(spawner, "generation", 0)
+    owner_pid = getattr(spawner, "owner_pid", None)
+    # Ownership precedes the credential: the app-pooled client carries the worker
+    # IPC bearer on every request it makes, so a listener the owner's process tree
+    # does not hold is never probed. A withheld probe is a decisive non-observation
+    # of OUR worker, not an unfinished one, so it reports unreachable (and, by the
+    # short circuit below, unadoptable) rather than indeterminate.
+    probe = (
+        await probe_worker_health(
+            settings.worker_url, client=worker_client, internal_token=None
+        )
+        if await worker_credential_authorized(
+            settings.worker_port,
+            owner_pid=owner_pid,
+            action="a run-admission readiness probe",
+        )
+        else WorkerHealthProbe(healthy=False, body=None)
     )
     reachable = probe.healthy
     # An indeterminate probe (the worker did not answer inside the budget) is not
@@ -247,13 +272,6 @@ async def _probe_admission_readiness(
     # both: "some process holds this port" is exactly what a squatting orphan
     # satisfies. Only asked when the port answered at all, so the refusal path
     # costs nothing extra.
-    #
-    # The generation must come from the spawner that issued it. It is the highest
-    # generation this gateway has minted, and a worker reporting a HIGHER one
-    # classifies as unidentified - so defaulting it to zero here would disown our
-    # own restarted worker on its own admission path.
-    spawner = getattr(app_state, "worker_spawner", None)
-    generation = getattr(spawner, "generation", 0)
     adoptable: bool | None
     if probe.indeterminate:
         # Provenance is unknown for the same reason health is; the promotion this
@@ -265,7 +283,7 @@ async def _probe_admission_readiness(
             settings.worker_port,
             current_generation=generation,
             internal_token=getattr(app_state, "internal_token", None),
-            owner_pid=getattr(spawner, "owner_pid", None),
+            owner_pid=owner_pid,
         )
     return _admission_readiness(
         app_state, worker_probe_ready=probe_verdict, worker_adoptable=adoptable

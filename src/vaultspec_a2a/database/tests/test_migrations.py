@@ -5,8 +5,10 @@ Verifies:
 2. Downgrade base removes all app-owned tables
 3. LangGraph checkpoint tables are excluded from migrations
 4. run_migrations() programmatic API works
+5. No revision script describes the schema through the application package
 """
 
+import ast
 import asyncio
 import hashlib
 import json
@@ -588,6 +590,69 @@ class TestAlembicUpgradeDowngrade:
             "ix_threads_active_feature_order",
             "ix_threads_active_workspace_feature_order",
         } <= partial_indexes
+
+
+class TestRevisionsAreSelfContained:
+    """No revision describes the schema through the application package.
+
+    A version script states the schema at ONE moment in the chain. Importing the
+    application package replaces that statement with whatever the package means
+    today: deleting a model symbol breaks a historical revision outright, and
+    changing one silently rewrites the DDL history already replayed into every
+    existing store. So every structural fact a revision needs - a constant, a
+    predicate, a custom column type - is spelled inside the revision, frozen at
+    the moment it describes, even when that duplicates a live symbol.
+
+    Asserted over the whole chain rather than over one script, because the rule
+    is the chain's and a new revision is exactly where it gets broken next.
+    """
+
+    @staticmethod
+    def _package_references(script: Path) -> list[str]:
+        """Return every import in *script* that reaches the application package.
+
+        A relative import counts as a reference even though Alembic loads these
+        scripts by location and would raise on one: the rule is about reaching
+        into the package at all, not about which spelling happens to fail.
+        """
+        root = _migrations_package.__name__.partition(".")[0]
+        found: list[str] = []
+        for node in ast.walk(ast.parse(script.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                found.extend(
+                    alias.name
+                    for alias in node.names
+                    if alias.name.partition(".")[0] == root
+                )
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if node.level:
+                    found.append("." * node.level + module)
+                elif module.partition(".")[0] == root:
+                    found.append(module)
+        return sorted(found)
+
+    def test_no_revision_imports_the_application_package(self) -> None:
+        """Every packaged revision is self-contained."""
+        versions = migration_script_location() / "versions"
+        scripts = sorted(
+            path for path in versions.glob("*.py") if path.name != "__init__.py"
+        )
+        assert len(scripts) >= 27, (
+            f"only {len(scripts)} revision scripts were found under {versions}; "
+            "this guard compared almost nothing"
+        )
+
+        offenders = {
+            script.name: references
+            for script in scripts
+            if (references := self._package_references(script))
+        }
+
+        assert offenders == {}, (
+            "these revisions re-describe the schema through the application "
+            f"package instead of freezing what they ship: {offenders}"
+        )
 
 
 class TestPackageResourceResolution:

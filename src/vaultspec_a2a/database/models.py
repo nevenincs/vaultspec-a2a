@@ -60,7 +60,6 @@ __all__ = [
     "Base",
     "ControlActionModel",
     "CostTrackingModel",
-    "MoneyAmount",
     "PermissionLogModel",
     "PermissionRequestModel",
     "ProviderRuntimeIdentityModel",

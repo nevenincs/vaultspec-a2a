@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 from typing import TYPE_CHECKING
 
 from ..utils import ProcessContainmentError
 from ..utils.async_cleanup import complete_cleanup
 
 if TYPE_CHECKING:
-    import subprocess
-
     from ..lifecycle.shutdown import ShutdownDeadline
     from ..utils import ProcessContainment
 
@@ -21,6 +20,10 @@ __all__ = [
 ]
 
 logger = logging.getLogger("vaultspec_a2a.control.worker_management")
+
+# The root handle's wait only collects an exit status; the containment already
+# bounded the reap of the tree, so this window stays short.
+_ROOT_REAP_TIMEOUT = 0.1
 
 
 async def _stop_worker_tree(
@@ -38,7 +41,29 @@ async def _stop_worker_tree(
                 f"Worker process tree {process.pid} did not terminate"
             )
     finally:
-        await asyncio.to_thread(process.wait, 0.1)
+        await _reap_root_handle(process)
+
+
+async def _reap_root_handle(process: subprocess.Popen[bytes]) -> None:
+    """Collect the root's exit status without replacing the reap's own outcome.
+
+    The containment, not this handle, is authoritative for the tree, so this
+    wait exists only to clear the root from the process table. It runs after a
+    reap that proved the tree gone, or after one whose
+    :class:`ProcessContainmentError` is the diagnostic the caller needs; a root
+    can still be in the window in either case (a loaded host, or a tree an
+    earlier pass already reaped). Letting ``TimeoutExpired`` out of the
+    enclosing ``finally`` would raise on a clean shutdown and discard a real
+    failure's cause, so it is logged instead.
+    """
+    try:
+        await asyncio.to_thread(process.wait, _ROOT_REAP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "Worker root (PID %d) did not report its exit status within %.1fs",
+            process.pid,
+            _ROOT_REAP_TIMEOUT,
+        )
 
 
 async def _shutdown_worker_process(

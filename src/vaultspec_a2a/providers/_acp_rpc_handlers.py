@@ -19,7 +19,8 @@ from langgraph.errors import GraphBubbleUp
 from ..control.config import settings
 from ..control.workspace import configured_workspace_boundary
 from ..desktop._filesystem_authority import confined_file_descriptor
-from ..graph.acp_options import narrowest_option_id, valid_option_ids
+from ..graph.acp_options import option_id_of_kind, valid_option_ids
+from ..graph.enums import PermissionOptionKind
 from ._acp_client_requests import AcpSessionRequest
 from ._acp_fs_read import AcpFileReadRange, AcpFileReadRequest, read_text_lines
 from ._acp_request import jsonrpc_error, jsonrpc_result
@@ -286,21 +287,43 @@ def _selected_outcome(rpc_id: AcpRpcId, option_id: str) -> JsonObject:
     )
 
 
+def _cancelled_outcome(rpc_id: AcpRpcId) -> JsonObject:
+    """Build the response frame that abandons one tool call.
+
+    The protocol's own ``cancelled`` outcome carries no option id at all, so it
+    cannot be mistaken for a selection, and the adapter aborts the tool use
+    without the model being told that anybody decided anything. It is the answer
+    wherever there IS no decision to report: a run that suspended to ask a
+    person, and a refusal the session can only spell in a way that would outlive
+    the call it answered.
+    """
+    return jsonrpc_result(rpc_id, {"outcome": {"outcome": "cancelled"}})
+
+
 def _refused_outcome(rpc_id: AcpRpcId, options: list[JsonObject]) -> JsonObject:
     """Build the response frame that refuses one tool call.
 
-    A refusal is expressed by SELECTING the narrowest offered refusal wherever
-    the request offers one, because that is the answer the agent can act on: the
-    pinned adapter turns it into a denial the model is told about while the turn
-    continues. Where the request offers nothing to refuse with, the protocol's
-    own ``cancelled`` outcome is the answer - it carries no option id at all, so
-    it cannot be mistaken for a selection, and the adapter aborts the tool use.
+    A refusal is expressed by SELECTING the offered ONCE-ONLY refusal, because
+    that is the answer the agent can act on: the pinned adapter turns it into a
+    denial the model is told about while the turn continues.
+
+    The remembering refusal is deliberately NOT a fallback. The CLI persists
+    ``reject_always`` as a permission rule in the operator's own settings, where
+    it outlives this call, narrows every later run on the machine - including the
+    unattended ones, whose whole posture is that nothing is approved or denied
+    for them in advance - and cannot be seen or retracted by any run. The shared
+    decision already refuses a remembered answer rather than forward it for that
+    reason, so selecting it here would write the exact rule that refusal exists
+    to avoid. Where the session offers no once-only refusal the call is ABANDONED
+    instead: that costs the model the distinction between "refused" and "not
+    decided", and costs the operator nothing.
+
     Never an approval, and never an empty frame.
     """
-    refusal = narrowest_option_id(options, approving=False)
+    refusal = option_id_of_kind(options, PermissionOptionKind.REJECT_ONCE)
     if refusal is not None:
         return _selected_outcome(rpc_id, refusal)
-    return jsonrpc_result(rpc_id, {"outcome": {"outcome": "cancelled"}})
+    return _cancelled_outcome(rpc_id)
 
 
 def _floor_call_is_confined(
@@ -426,15 +449,21 @@ async def on_request_permission(
             ask=None if callback is None else lambda: callback(name, args, options),
         )
     except GraphBubbleUp as exc:
-        # The human rung suspended the run to ask a person. The turn re-raises
-        # the suspension, and the still-open request is answered with a
-        # well-formed denial rather than an empty frame.
+        # The human rung suspended the run to ask a person. A park does not
+        # pause the provider: the turn re-raises the suspension, the session
+        # tree is released in its `finally`, and the node re-runs from the top
+        # on resume - so whatever this still-open request is answered with is
+        # the LAST thing the model is told before its session ends. Answering a
+        # refusal would tell it a human said no to a call no human has yet seen,
+        # and invite it to act on that denial inside the same turn. The
+        # abandonment is answered unconditionally, whatever the request offered:
+        # it is what is true, and the option list has no bearing on it.
         ctx.interrupt_exc.append(exc)
         try:
             ctx.chunk_queue.put_nowait(None)
         except asyncio.QueueFull:
             logger.warning("Chunk queue full — dropping interrupt sentinel")
-        return _refused_outcome(rpc_id, options)
+        return _cancelled_outcome(rpc_id)
     if option_id is None:
         # A denial outcome rather than a JSON-RPC error, so the ACP subprocess
         # can cleanly decline the tool call.

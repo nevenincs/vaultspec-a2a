@@ -875,10 +875,9 @@ def _create_kimi_model(
     selected_controls: dict[str, str],
 ) -> BaseChatModel:
     from .acp_chat_model import AcpChatModel
-    from .kimi_config_home import KIMI_CODE_HOME_ENV, build_kimi_config_home
 
-    # The lane's own proof first, before a launcher is resolved or a home is
-    # created: Kimi is unenrolled, so this refuses every construction today.
+    # The lane's own proof first, before a launcher is resolved: Kimi is
+    # unenrolled, so this refuses every construction today.
     require_binary_proof(kimi_binary_proof_reason(workspace_root=workspace_root))
     # The exact catalog alias travels through Kimi's own -m option.
     classified = classify_provider_command(Provider.KIMI)
@@ -908,8 +907,10 @@ def _create_kimi_model(
         raise ProviderRuntimeUnavailableError(KIMI_NO_TEMPORARY_MODEL_REASON)
     # Per-run isolation: the operator's home holds their own provider table and
     # every ambient MCP server they configured, and an agent's tool surface must
-    # be exactly the declared set.
-    env_vars[KIMI_CODE_HOME_ENV] = str(build_kimi_config_home())
+    # be exactly the declared set. ``AcpChatModel`` builds and tears down its
+    # own fresh ``KIMI_CODE_HOME`` for every session (``acp_chat_model.py``),
+    # so this construction never bakes a single home into ``env_vars`` that a
+    # later turn on the same model instance could outlive.
     logger.debug("[%s] Instantiating Kimi ACP agent.", Provider.KIMI)
     return AcpChatModel(
         command=command,

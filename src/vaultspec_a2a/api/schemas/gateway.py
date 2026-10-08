@@ -59,7 +59,6 @@ from ...thread.clarification import (
 )
 from ...thread.constants import (
     MAX_AGENT_ID_CHARS,
-    MAX_APPROVAL_REQUEST_ID_CHARS,
     MAX_CALLEE_CHARS,
     MAX_DISCOVERY_RESULTS,
     MAX_FEATURE_TAG_LENGTH,
@@ -83,7 +82,12 @@ from ...thread.enums import (
     ThreadStatus,
     TranscriptAvailability,
 )
-from ...thread.snapshots import QueuedMessageCount, RepairReason, ThreadStateSnapshot
+from ...thread.snapshots import (
+    ApprovalRequestId,
+    QueuedMessageCount,
+    RepairReason,
+    ThreadStateSnapshot,
+)
 
 __all__ = [
     "ActiveRunRecord",
@@ -489,9 +493,7 @@ class RunSummaryRecord(BaseModel):
     repair_status: RepairStatus | None = None
     execution_readiness: RepairStatus | None = None
     approval_status: ApprovalStatus | None = None
-    approval_request_id: str | None = Field(
-        default=None, max_length=MAX_APPROVAL_REQUEST_ID_CHARS
-    )
+    approval_request_id: ApprovalRequestId | None = None
     created_at: datetime
     updated_at: datetime
     source_branch: str | None = Field(default=None, max_length=MAX_SOURCE_BRANCH_CHARS)
@@ -581,7 +583,7 @@ class RunStatusResponse(BaseModel):
     proposal_ids: list[str] = Field(default_factory=list)
     changeset_ids: list[str] = Field(default_factory=list)
     approval_status: ApprovalStatus | None = None
-    approval_request_id: str | None = None
+    approval_request_id: ApprovalRequestId | None = None
     checkpoint_id: str | None = None
     last_sequence: int
     # Whether this run's progress stream can be RESUMED from the id its frames

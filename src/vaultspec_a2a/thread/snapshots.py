@@ -34,6 +34,7 @@ from ..graph.enums import (
 from ..utils.coercion import coerce_object_mapping
 from .action_receipts import sha256_hex
 from .clarification import ClarificationRequest
+from .constants import MAX_APPROVAL_REQUEST_ID_CHARS
 from .enums import (
     TERMINAL_STATUS_VALUES,
     ApprovalStatus,
@@ -51,6 +52,7 @@ __all__ = [
     "PERMISSION_REQUEST_EVENT_TYPES",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "AgentSnapshot",
+    "ApprovalRequestId",
     "ArtifactSnapshot",
     "CheckpointProjection",
     "ExecutionStateProjection",
@@ -300,6 +302,13 @@ QueuedMessageCount = Annotated[int, Ge(0)]
 #: disclosure stays a sentence rather than a log.
 RepairReason = Annotated[str, MaxLen(MAX_REPAIR_REASON_CHARS)]
 
+#: The approval handle a run is parked on, at the width the respond verb admits
+#: it. Declared here because this is the read model every surface reporting the
+#: handle derives from: bounded on the listing record alone, the published
+#: contract said the field was capped or uncapped depending on which read a
+#: caller happened to make.
+ApprovalRequestId = Annotated[str, MaxLen(MAX_APPROVAL_REQUEST_ID_CHARS)]
+
 
 @dataclass(slots=True, kw_only=True)
 class ToolCallLocation:
@@ -521,7 +530,7 @@ class ThreadStateSnapshot:
     execution_readiness: RepairStatus | None = None
     pause_cause: str | None = None
     approval_status: ApprovalStatus | None = None
-    approval_request_id: str | None = None
+    approval_request_id: ApprovalRequestId | None = None
     # The capped, single-line reason this run last failed, or None (never
     # failed, or the durable record predates the failure_reason column).
     # Sourced straight from the durable threads.failure_reason column — never

@@ -179,6 +179,32 @@ def test_the_approval_handle_is_admitted_at_the_width_it_is_reported_at(
     assert admitted == reported
 
 
+def test_every_surface_reporting_the_approval_handle_publishes_one_width(
+    document: dict[str, Any],
+) -> None:
+    """The listing and run-status report the handle at the same width.
+
+    Three surfaces carry this id - the listing record, the run-status response
+    and the run read model run-history serves - and a caller round-trips it from
+    whichever one it read. Bounded on one and unbounded on the others, the
+    published contract told a consumer the field was capped or uncapped
+    depending on which read it happened to make, and only the capped surface
+    stated the cap the respond verb actually admits.
+    """
+    schemas = document["components"]["schemas"]
+    widths = {
+        component: _branch(
+            {"schema": schemas[component]["properties"]["approval_request_id"]}
+        ).get("maxLength")
+        for component in (
+            "RunSummaryRecord",
+            "RunStatusResponse",
+            "ThreadStateSnapshot",
+        )
+    }
+    assert set(widths.values()) == {MAX_APPROVAL_REQUEST_ID_CHARS}, widths
+
+
 def test_every_verb_publishes_one_width_for_the_idempotency_key(
     document: dict[str, Any],
 ) -> None:

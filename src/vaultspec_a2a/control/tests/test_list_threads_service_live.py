@@ -15,9 +15,10 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from sqlalchemy import update
 
 from ...control.thread_listing import list_threads_service
-from ...database import create_thread
+from ...database import ThreadModel, create_thread
 from ...testing import settings_override
 from ...tests._write_authority import make_test_write_authority
 from ...thread.enums import RepairStatus
@@ -122,6 +123,33 @@ async def test_an_uncertain_checkpoint_degrades_the_thread(
         s.repair_status == RepairStatus.CHECKPOINT_UNAVAILABLE.value
         for s in result.threads
     ), result.threads
+
+
+@pytest.mark.asyncio
+async def test_a_corrupt_repair_status_column_degrades_instead_of_failing_the_page(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """One row with an out-of-vocabulary repair_status must not fail the page.
+
+    Nothing in the schema enforces the column's vocabulary, so a legacy value
+    or an out-of-band write can leave a string RepairStatus does not know.
+    That row must degrade, not take the whole listing down with it.
+    """
+    await _seed(session_factory, 2)
+    async with session_factory() as session:
+        await session.execute(
+            update(ThreadModel)
+            .where(ThreadModel.id == "t00")
+            .values(repair_status="not-a-real-status")
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        result = await list_threads_service(session, checkpointer=None)
+
+    assert result.total == 2
+    corrupted = next(s for s in result.threads if s.thread_id == "t00")
+    assert corrupted.repair_status == RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
 
 
 @pytest.mark.asyncio

@@ -309,6 +309,18 @@ class DomainSettingsConfig(ProjectSettings):
             "expires and frees its bounded slot when no commit binds it."
         ),
     )
+    provider_catalog_ttl_seconds: float = Field(
+        default=300.0,
+        description=(
+            "How long a discovered provider catalog is served before the next "
+            "read rediscovers its lanes. A lane reports no expiry of its own, so "
+            "this alone decides when a served catalog goes stale - and a run's "
+            "selection names the revision it was read at, so this is also how "
+            "long a client's reading of the catalog stays usable. Shortening it "
+            "makes every read probe every registered lane again, over subprocess "
+            "spawns and network calls."
+        ),
+    )
     run_start_catalog_budget_seconds: float = Field(
         default=120.0,
         description=(

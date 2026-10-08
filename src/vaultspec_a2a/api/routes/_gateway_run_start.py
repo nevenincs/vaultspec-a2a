@@ -3,6 +3,7 @@
 import asyncio
 import hmac
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -21,7 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...context.metadata import ThreadMetadata
 from ...control._thread_metadata import RunLeaseBinding, stored_run_lease_binding
 from ...control._worker_health import worker_liveness
-from ...control.admission import AdmissionBroker, AdmissionReadiness
+from ...control.admission import (
+    RESERVATION_UNAVAILABLE,
+    AdmissionBroker,
+    AdmissionReadiness,
+)
 from ...control.execution_authority import read_frozen_team_selection
 from ...control.leased_dispatch import DispatchTransport
 from ...control.provider_execution import native_execution_refusal_reason
@@ -85,6 +90,7 @@ from ..schemas.gateway import (
     RunStartResponse,
 )
 from .gateway import (
+    _body_against_frozen_selection,
     _body_with_frozen_selection,
     _canonical_replay_body,
     _load_preset_or_refuse,
@@ -314,14 +320,59 @@ async def _existing_run_replay(
     )
 
 
+#: Resolves the freeze a prepared reservation holds, or ``None`` when no live
+#: reservation can serve the commit.
+type _ReservedSelection = Callable[[], Awaitable[FrozenTeamSelection | None]]
+
+
+def _reserved_selection_for(
+    reserved: FrozenTeamSelection, team_config: TeamConfig
+) -> FrozenTeamSelection:
+    """Return *reserved*, once it still describes the team being committed.
+
+    A freeze covers an exact role set, and the run is dispatched with one
+    assignment per role taken from it. The preset is read again at commit, so a
+    preset edited between the two calls would otherwise hand the worker a team
+    with a role its frozen selection never assigned. That is the one thing the
+    second freeze used to notice, and it is cheaper to compare here.
+    """
+    if tuple(required_role_ids(team_config)) != reserved.roles:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "the preset's required roles changed after this reservation "
+                "was prepared"
+            ),
+        )
+    return reserved
+
+
 async def _prepare_run_admission(
-    request: Request, body: RunStartRequest
+    request: Request,
+    body: RunStartRequest,
+    *,
+    reserved_selection: _ReservedSelection | None = None,
 ) -> _RunAdmission:
     """Admit a new run once, refusing before any durable state is created.
 
     An unloadable preset, a document-authoring preset with no target feature, an
     actor-token bundle that does not cover the preset's roles, or a selection the
     current catalog no longer serves all raise a 4xx here.
+
+    *reserved_selection* resolves the freeze a prepared reservation already
+    holds. Given one, this admission CONSUMES that freeze and reads no catalog:
+    validating the selection and fixing it is what the prepare did, and the
+    reservation's binding digest is the digest of that result, so freezing again
+    would re-answer a settled question against a catalog that may have moved -
+    refusing the exact request the reservation was issued for. The request is
+    still held to that freeze, and to the role set it was frozen for, so a
+    commit cannot quietly adopt a selection or a team its prepare never
+    validated.
+
+    It is a callable rather than a value so the reservation is consulted at THIS
+    point in the sequence: a request naming a workspace outside this gateway's
+    authority, or an unloadable preset, is refused as the client error it is
+    before any reservation is read, exactly as on the unstaged path.
     """
     run_id = body.run_id
     # Thread the target feature onto the metadata so it reaches dispatch and the
@@ -353,11 +404,23 @@ async def _prepare_run_admission(
             raise refused_dispatch(eligibility.failure, eligibility.reason)
         raise HTTPException(status_code=422, detail=eligibility.reason)
 
-    logger.info("commit step: validate_selection")
-    frozen = await _validate_and_freeze_selection_or_refuse(
-        request.app, body, team_config, ws_root
-    )
-    canonical_body = _body_with_frozen_selection(body, frozen)
+    if reserved_selection is None:
+        logger.info("commit step: validate_selection")
+        frozen = await _validate_and_freeze_selection_or_refuse(
+            request.app, body, team_config, ws_root
+        )
+        canonical_body = _body_with_frozen_selection(body, frozen)
+    else:
+        logger.info("commit step: reserved_selection")
+        reserved = await reserved_selection()
+        if reserved is None:
+            raise HTTPException(status_code=409, detail=RESERVATION_UNAVAILABLE)
+        frozen = _reserved_selection_for(reserved, team_config)
+        canonical_body = _body_against_frozen_selection(
+            frozen,
+            body,
+            mismatch="commit selection does not match the prepared reservation",
+        )
     metadata_json = _persist_team_selection(metadata_json, frozen)
     # Persist what this run was started with, so a later replay is compared
     # against the whole request rather than one field of it. The stamped form
@@ -610,12 +673,14 @@ async def _run_prepare(
 ) -> RunPrepareResponse:
     """Reserve a bounded admission slot and report execution readiness.
 
-    Loads the preset only to derive the bounded required-role set the later
-    commit must cover, then reserves through the process-wide broker. The broker
-    triggers the gateway-owned worker's single-flight startup and probes seated
-    readiness before assigning capacity; no token is accepted and no durable run
-    is created. A capacity-exhausted or role-invalid prepare is refused with a
-    503 carrying the safe reason.
+    Loads the preset to derive the bounded required-role set the later commit
+    must cover, validates the request's selection against the catalog served for
+    its workspace, and reserves through the process-wide broker. This is the ONE
+    catalog validation of a staged run: the reservation keeps the freeze, and the
+    commit consumes it. The broker triggers the gateway-owned worker's
+    single-flight startup and probes seated readiness before assigning capacity;
+    no token is accepted and no durable run is created. A capacity-exhausted or
+    role-invalid prepare is refused with a 503 carrying the safe reason.
     """
     ws_root, team_config = _load_admitted_preset(body)
     frozen = await _validate_and_freeze_selection_or_refuse(
@@ -630,6 +695,9 @@ async def _run_prepare(
             request.app.state, worker_client
         ),
         binding_digest=request_digest(canonical_body, prepared=True),
+        # The reservation keeps this freeze, so its commit consumes the exact
+        # selection validated here instead of validating a second time.
+        frozen_selection=frozen,
         release_digest=_release_binding_digest(body),
     )
     if (
@@ -810,9 +878,17 @@ async def _run_commit_locked(
     existing = await get_thread(db, run_id)
     if existing is not None:
         return await _commit_replay(existing, body, broker, reservation_id)
-    # Not held across the catalog freeze and live worker probe below.
+    # Not held across the live worker probe below.
     await db.rollback()
-    prepared = await _prepare_run_admission(request, body)
+    # The freeze this commit binds is its own reservation's, read where the
+    # admission needs it. No reservation can serve the commit once it is
+    # unknown, expired, released or consumed, which is the same refusal the
+    # binding check below gives.
+    prepared = await _prepare_run_admission(
+        request,
+        body,
+        reserved_selection=lambda: broker.admitted_selection(reservation_id),
+    )
     await _require_commit_execution_ready(
         request, runtime, reservation_id, prepared.canonical_body
     )

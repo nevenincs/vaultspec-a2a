@@ -748,12 +748,7 @@ async def _record_permission_transition(
             approval_status=context.replay_approval_status,
         )
 
-    await record_permission_response_submission(
-        db,
-        request_id=context.request_id,
-        option_id=context.option_id,
-        idempotency_key=context.resolved_idempotency_key,
-    )
+    await record_permission_response_submission(db, request_id=context.request_id)
     # The audit entry is written here and nowhere else: this is the one point the
     # response is applied to the pending request, and it sits behind the claim
     # election above, so a retried or losing caller returns before reaching it and

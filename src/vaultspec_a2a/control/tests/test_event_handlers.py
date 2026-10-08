@@ -262,12 +262,7 @@ async def _answered_bash_permission_awaiting_apply(
         ],
         tool_call="bash",
     )
-    await record_permission_response_submission(
-        session,
-        request_id=request_id,
-        option_id="allow_once",
-        idempotency_key="response-1",
-    )
+    await record_permission_response_submission(session, request_id=request_id)
     (
         submitted,
         submitted_receipt,
@@ -1505,12 +1500,7 @@ async def _answered_rejection(
             allowed_options=spec.options,
             tool_call=spec.pause_reason_type,
         )
-        await record_permission_response_submission(
-            session,
-            request_id=request_id,
-            option_id="reject",
-            idempotency_key="response-reject-1",
-        )
+        await record_permission_response_submission(session, request_id=request_id)
         (
             submitted,
             submitted_receipt,
@@ -1789,108 +1779,3 @@ async def test_persisted_description_matches_what_the_stream_showed(
     assert stored is not None
     assert len(stored.description) < len(oversize)
     assert stored.description == streamed["description"]
-
-
-@pytest.mark.asyncio
-async def test_a_tampered_request_row_cannot_change_the_applied_decision(
-    session_factory: async_sessionmaker[AsyncSession],
-    checkpointer: AsyncSqliteSaver,
-) -> None:
-    """The accepted envelope decides the resolution; the request row never does.
-
-    ``permission_logs`` is the single durable record of a permission decision,
-    and the answered option the apply path settles comes from the accepted
-    dispatch envelope of the response action. The request row's own resolution
-    column is therefore not a second source: a row edited after acceptance -
-    by a tamper, or by a writer racing the settlement - must leave what is
-    applied exactly as the operator decided it.
-    """
-    offered: list[dict[str, object]] = [
-        {"option_id": "allow_once", "name": "Allow once", "kind": "allow_once"},
-        {"option_id": "reject_once", "name": "Reject once", "kind": "reject_once"},
-    ]
-    async with session_factory() as session:
-        thread = await create_thread(
-            session,
-            write_authority=make_test_write_authority(),
-            title="Tampered Decision",
-            status="input_required",
-        )
-        request_id = f"{thread.id}:perm-1"
-        await record_permission_request(
-            session,
-            request_id=request_id,
-            thread_id=thread.id,
-            pause_reason_type="bash",
-            description="Allow action?",
-            allowed_options=offered,
-            tool_call="bash",
-        )
-        # The envelope records ``allow_once`` (the seeded accepted intent), so
-        # this is the decision the operator actually gave.
-        await record_permission_response_submission(
-            session,
-            request_id=request_id,
-            option_id="allow_once",
-            idempotency_key="response-1",
-        )
-        (
-            submitted,
-            submitted_receipt,
-            submitted_checkpoint,
-        ) = await _seed_unapplied_leased_action(
-            session,
-            checkpointer,
-            thread_id=thread.id,
-            spec=_SeedActionSpec(
-                action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
-                idempotency_key=permission_response_action_key(request_id),
-                request_id=request_id,
-            ),
-        )
-        await session.commit()
-
-    # The second copy of the decision, rewritten to the opposite verdict.
-    async with session_factory() as session:
-        tampered = await get_permission_request(session, request_id)
-        assert tampered is not None
-        tampered.response_option_id = "reject_once"
-        await session.commit()
-
-    await _handle_progress_event(
-        thread.id,
-        {
-            "type": "dispatch_applied",
-            "dispatch_id": submitted.dispatch_id,
-            "action": "resume",
-            "graph_action_receipt": submitted_receipt.model_dump(mode="json"),
-            "checkpoint_id": submitted_checkpoint,
-        },
-        session_factory=session_factory,
-        checkpointer=checkpointer,
-    )
-
-    async with session_factory() as session:
-        settled = await get_permission_request(session, request_id)
-        applied = (
-            (
-                await session.execute(
-                    select(ControlActionModel).where(
-                        ControlActionModel.request_id == request_id,
-                        ControlActionModel.action_type
-                        == ControlActionType.PERMISSION_RESPONSE_APPLIED.value,
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        settled_thread = await get_thread(session, thread.id)
-
-    assert settled is not None
-    assert settled.request_status == PermissionRequestStatus.APPLIED.value
-    assert len(applied) == 1
-    assert settled_thread is not None
-    assert settled_thread.last_applied_action == (
-        ControlActionType.PERMISSION_RESPONSE_APPLIED.value
-    )

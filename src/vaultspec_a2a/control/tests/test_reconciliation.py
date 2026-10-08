@@ -260,10 +260,7 @@ async def test_answered_pending_apply_with_checkpoint_is_not_marked_resumable(
             tool_call=None,
         )
         await record_permission_response_submission(
-            session,
-            request_id=f"{thread.id}:perm-1",
-            option_id="approve",
-            idempotency_key="idem-reconcile-answered-pending-apply",
+            session, request_id=f"{thread.id}:perm-1"
         )
         await session.commit()
 

@@ -851,10 +851,7 @@ async def test_answered_pending_apply_permission_does_not_surface_in_thread_stat
             tool_call=None,
         )
         await record_permission_response_submission(
-            session,
-            request_id="perm-answered-pending-apply",
-            option_id="approve",
-            idempotency_key="idem-answered-pending-apply",
+            session, request_id="perm-answered-pending-apply"
         )
         await session.commit()
 

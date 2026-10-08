@@ -26,6 +26,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ...control.accepted_input import read_accepted_input
 from ...database import (
     PermissionRequestModel,
     ThreadExecutionStateModel,
@@ -588,10 +589,7 @@ class TestListThreads:
                     tool_call=None,
                 )
                 await record_permission_response_submission(
-                    session,
-                    request_id="perm-list-answered-pending-apply",
-                    option_id="approve",
-                    idempotency_key="idem-list-answered-pending-apply",
+                    session, request_id="perm-list-answered-pending-apply"
                 )
                 await session.commit()
 
@@ -1306,10 +1304,7 @@ class TestThreadState:
                     tool_call=None,
                 )
                 await record_permission_response_submission(
-                    session,
-                    request_id="perm-thread-state-answered-pending-apply",
-                    option_id="approve",
-                    idempotency_key="idem-thread-state-answered-pending-apply",
+                    session, request_id="perm-thread-state-answered-pending-apply"
                 )
                 await session.commit()
 
@@ -1666,10 +1661,7 @@ class TestTeamStatus:
                     tool_call=None,
                 )
                 await record_permission_response_submission(
-                    session,
-                    request_id="team-status-answered-pending-apply:perm-1",
-                    option_id="approve",
-                    idempotency_key="idem-team-status-answered-pending-apply",
+                    session, request_id="team-status-answered-pending-apply:perm-1"
                 )
                 await session.commit()
 
@@ -2207,8 +2199,7 @@ class TestPermissionRespond:
                 permission = await session.get(PermissionRequestModel, request_id)
                 assert permission is not None
                 assert permission.request_status == "pending"
-                assert permission.response_option_id is None
-                assert permission.idempotency_key is None
+                assert permission.responded_at is None
 
         asyncio.run(_assert_state())
 
@@ -2902,8 +2893,7 @@ class TestDeleteThread:
                     assert thread is not None
                     assert thread.status == status_before
                     assert permission.request_status == "pending"
-                    assert permission.response_option_id is None
-                    assert permission.idempotency_key is None
+                    assert permission.responded_at is None
                     # Identity is stable across the retry; only OWNERSHIP was
                     # released, which is what makes the request answerable again.
                     action = await get_control_action_by_idempotency_key(
@@ -2978,13 +2968,18 @@ class TestDeleteThread:
                     permission = await session.get(PermissionRequestModel, request_id)
                     assert permission is not None
                     assert permission.request_status == "answered_pending_apply"
-                    assert permission.response_option_id == "allow_once"
+                    assert permission.responded_at is not None
                     action = await get_control_action_by_idempotency_key(
                         session,
                         thread_id=thread_id,
                         idempotency_key=permission_response_action_key(request_id),
                     )
                     assert action is not None
+                    # The answer itself is retained where it is owned: the frozen
+                    # envelope of the accepted action, which the settlement reads.
+                    assert read_accepted_input(action).intent["option_id"] == (
+                        "allow_once"
+                    )
                     assert action.claim_token is not None
                     assert action.claim_expires_at is not None
 

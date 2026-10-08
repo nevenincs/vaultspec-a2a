@@ -32,12 +32,16 @@ from ..thread.snapshots import stamp_message_created_at
 from ._graph_lifecycle_state import GraphLifecyclePorts, GraphLifecycleState
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from langchain_core.runnables import RunnableConfig
     from langgraph.types import Command, Interrupt
 
-    from ..authoring import DocumentProposalSubmitter, FeedbackContextReader
+    from ..authoring import (
+        DocumentProposalSubmitter,
+        EngineEndpoint,
+        FeedbackContextReader,
+    )
     from ..database import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from ..streaming import RunEventProducer
@@ -45,6 +49,12 @@ if TYPE_CHECKING:
     from .catalog_store import RunCatalogStore
     from .ipc import WorkerBridge
     from .token_store import RunTokenStore
+
+    #: A real, blocking engine-discovery callable, offloaded via
+    #: ``asyncio.to_thread``. Defaults to ``resolve_engine_with_retry``; a
+    #: real-behavior test can install its own bounded stand-in instead of
+    #: patching the production resolver.
+    EngineResolver = Callable[[], EngineEndpoint | None]
 
 __all__ = [
     "GraphCacheKey",
@@ -157,6 +167,7 @@ class _GraphLifecycleOptions(_GraphLifecycleRequired, total=False):
     """Keyword options of ``GraphLifecycleManager`` beyond its three collaborators."""
 
     checkpoint_read_timeout_seconds: float | None
+    engine_resolver: EngineResolver | None
 
 
 class GraphLifecycleManager:
@@ -201,6 +212,7 @@ class GraphLifecycleManager:
         self._cost_port = SqlCostPort(get_session_factory())
         self._runtime_identity_port = SqlRuntimeIdentityPort(get_session_factory())
         self._state = GraphLifecycleState()
+        self._engine_resolver: EngineResolver | None = options.get("engine_resolver")
 
     # ------------------------------------------------------------------
     # Public accessors
@@ -692,7 +704,8 @@ class GraphLifecycleManager:
         # stall watchdog exist precisely because a blocking call here used to
         # freeze the whole worker (heartbeats included) for the full retry
         # window on every first compile of a preset+workspace cache key.
-        engine = await asyncio.to_thread(resolve_engine_with_retry)
+        resolver = self._engine_resolver or resolve_engine_with_retry
+        engine = await asyncio.to_thread(resolver)
         if engine is None:
             raise EngineUnavailableError(
                 "research_adr run requires a reachable authoring engine to submit "
@@ -741,7 +754,8 @@ class GraphLifecycleManager:
         from ..authoring import EngineUnavailableError, resolve_engine_with_retry
         from .authoring_binding import AuthoringBindingProvider
 
-        engine = await asyncio.to_thread(resolve_engine_with_retry)
+        resolver = self._engine_resolver or resolve_engine_with_retry
+        engine = await asyncio.to_thread(resolver)
         if engine is None:
             raise EngineUnavailableError(
                 "authoring_bridge run requires a reachable engine to fetch the "

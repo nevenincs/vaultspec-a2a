@@ -37,6 +37,7 @@ from ...database import (
     ThreadModel,
     ThreadStatusElectionOutcome,
     acquire_control_action_lease,
+    actionable_pending_permissions,
     create_control_action,
     create_thread,
     decode_allowed_options,
@@ -59,6 +60,7 @@ from ...testing import (
     compile_test_graph,
     elect_status,
     new_state_graph,
+    park_permissions,
     seed_accepted_thread,
 )
 from ...tests._checkpoint_seeding import real_checkpoint
@@ -1323,6 +1325,70 @@ async def test_document_approval_request_is_persisted_as_durable_pending_permiss
         assert thread.status == "input_required"
         assert thread.approval_status == "pending"
         assert thread.approval_request_id == request_id
+
+
+@pytest.mark.asyncio
+async def test_a_fan_out_of_two_tool_calls_supersedes_neither_held_request(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """Two requests one checkpoint holds together both stay answerable.
+
+    A worker turn that asks for two tool calls at once parks the run on both,
+    and the relay journals them one frame at a time. Superseding "every earlier
+    outstanding request" on the second frame retired a row whose request the run
+    is still parked on: the question left every pending-permission surface while
+    the checkpoint went on waiting for an answer to it, so the run could never
+    be resumed. The checkpoint decides instead - a request it holds is never
+    superseded - which is the same rule the journal already reads a request's
+    pause kind and its very existence from.
+    """
+    async with session_factory() as session:
+        thread_id, _receipt = await seed_accepted_thread(session, status="running")
+        await session.commit()
+
+    request_ids = await park_permissions(
+        checkpointer,
+        thread_id=thread_id,
+        calls=[("bash", {"command": "ls"}), ("write_file", {"path": "notes.md"})],
+    )
+    assert len(request_ids) == 2, request_ids
+
+    for request_id in request_ids:
+        await relay_event(
+            thread_id,
+            {
+                "type": "permission_request",
+                "request_id": request_id,
+                "description": "Allow action?",
+                "options": [
+                    {
+                        "optionId": "allow_once",
+                        "name": "Allow once",
+                        "kind": "allow_once",
+                    },
+                    {
+                        "optionId": "reject_once",
+                        "name": "Reject once",
+                        "kind": "reject_once",
+                    },
+                ],
+                "tool_call": "bash",
+            },
+            services=RelayServices(
+                session_factory=session_factory, checkpointer=checkpointer
+            ),
+        )
+
+    async with session_factory() as session:
+        for request_id in request_ids:
+            permission = await get_permission_request(session, request_id)
+            assert permission is not None, request_id
+            assert permission.request_status == (
+                PermissionRequestStatus.PENDING.value
+            ), request_id
+        live = await actionable_pending_permissions(session, thread_id=thread_id)
+        assert {pending.request.request_id for pending in live} == set(request_ids)
 
 
 @pytest.mark.asyncio

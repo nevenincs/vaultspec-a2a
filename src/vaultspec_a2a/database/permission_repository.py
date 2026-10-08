@@ -389,20 +389,30 @@ async def supersede_permission_requests(
     session: AsyncSession,
     *,
     thread_id: str,
-    pause_reason_type: str | None = None,
-    except_request_id: str | None = None,
+    held_request_ids: Collection[str],
 ) -> int:
-    """Mark earlier pending permission requests as superseded."""
+    """Retire every outstanding request the run is no longer parked on.
+
+    ``held_request_ids`` is the set of requests the caller read off the run's
+    live checkpoint, which is the only authority on what a run is still being
+    asked. A row for one of them is never superseded, however old it is: a
+    fan-out stage parks on several tool calls at once, and retiring the earlier
+    ones hid questions the checkpoint went on waiting for - they left every
+    pending-permission surface while the run could not resume without them.
+
+    Rows for requests the checkpoint does NOT hold are residue of a pause the
+    run has left, and they are what this retires. Pass an empty collection for a
+    run holding nothing.
+    """
     stmt = select(PermissionRequestModel).where(
         PermissionRequestModel.thread_id == thread_id,
         PermissionRequestModel.request_status.in_(_OUTSTANDING_PERMISSION_STATUSES),
     )
-    if pause_reason_type is not None:
-        stmt = stmt.where(PermissionRequestModel.pause_reason_type == pause_reason_type)
+    held = frozenset(held_request_ids)
     permissions = (await session.execute(stmt)).scalars().all()
     updated = 0
     for permission in permissions:
-        if permission.request_id == except_request_id:
+        if permission.request_id in held:
             continue
         permission.request_status = PermissionRequestStatus.SUPERSEDED.value
         permission.applied_at = permission.applied_at or utcnow()

@@ -101,6 +101,8 @@ from .cli_resolution import pin_claude_executable
 from .execution_modes import NODE_BACKEND
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ..graph.protocols import RuntimeIdentityRecordArgs
 
 __all__ = ["AcpChatModel"]
@@ -559,7 +561,26 @@ class AcpChatModel(ProcessChatModel):
         process: asyncio.subprocess.Process | None = None
         stdout_task: asyncio.Task[None] | None = None
         stderr_task: asyncio.Task[None] | None = None
+        kimi_config_home: Path | None = None
         try:
+            if self.acp_family == "kimi":
+                # Built fresh for THIS session and torn down in the finally
+                # below, mirroring the Codex chat model's own per-turn home
+                # (``_build_codex_config_home`` / ``cleanup_codex_config_home``
+                # in ``codex_chat_model.py``): a model instance can be invoked
+                # for more than one turn, so a home baked in once at
+                # construction time could not be removed here without
+                # breaking the next turn's isolation. Building and cleaning up
+                # within the same session call keeps every turn isolated and
+                # leaves nothing for the 24h orphan sweep to reclaim.
+                from .kimi_config_home import (
+                    KIMI_CODE_HOME_ENV,
+                    build_kimi_config_home,
+                    cleanup_kimi_config_home,
+                )
+
+                kimi_config_home = build_kimi_config_home()
+                env[KIMI_CODE_HOME_ENV] = str(kimi_config_home)
             process = await _spawn_acp_process(
                 self.command,
                 env,
@@ -647,11 +668,12 @@ class AcpChatModel(ProcessChatModel):
                 yield chunk
         finally:
             # Independent cleanup: a failure in any one release must not skip
-            # the rest. MCP surfacing writes nothing to the workspace or the
-            # config home, so the session tree is the only thing to release;
-            # unisolated CLI transcript stays in the operator's config tree.
-            # A prepared native role's surrounding owner removes its fresh home
-            # only after this session cleanup finishes.
+            # the rest. MCP surfacing writes nothing to the workspace, so the
+            # session tree and (for the kimi family) its per-session config
+            # home are the only things to release; unisolated CLI transcript
+            # stays in the operator's config tree. A prepared native role's
+            # surrounding owner removes its fresh home only after this
+            # session cleanup finishes.
             cleanup_steps: list[CleanupStep] = []
             if ctx is not None:
                 session_ctx, out_task, err_task = ctx, stdout_task, stderr_task
@@ -667,6 +689,18 @@ class AcpChatModel(ProcessChatModel):
                     (
                         "acp-partial-startup",
                         lambda: _kill_process_tree(orphaned_process),
+                    )
+                )
+            if kimi_config_home is not None:
+                # Off the loop: mirrors the Codex config-home release, which
+                # keeps a filesystem removal from blocking the event loop
+                # another run's teardown may be sharing.
+                cleanup_steps.append(
+                    (
+                        "kimi-config-home",
+                        lambda: asyncio.to_thread(
+                            cleanup_kimi_config_home, kimi_config_home
+                        ),
                     )
                 )
             await run_independent_cleanups(*cleanup_steps)

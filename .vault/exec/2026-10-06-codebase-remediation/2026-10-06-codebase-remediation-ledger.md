@@ -5,7 +5,7 @@ tags:
 date: '2026-10-06'
 modified: '2026-10-08'
 body_schema: 'body-v2'
-body_hash: 'sha256:dee00ce507069896d8e94ccdcc40d6e33bafd63f42a629848a28a9f1a672dc03'
+body_hash: 'sha256:c199c9ec31d552aa83462766a2fb94036e772d52f44dc55933040c57390401f0'
 related:
   - "[[2026-10-06-codebase-remediation-plan]]"
 ---
@@ -68,6 +68,7 @@ related:
 - `S116` `M` `src/vaultspec_a2a/service_tests/test_engine_broker_lost_ack_live.py`
 - `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python .pytest-tmp/green-20261008/engine_verdict_probe.py` -> `pass`
 - `S116` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m dev test parallel` -> `fail`
+- `S15` `verify:` `uv run --no-sync --frozen --no-default-groups --group tooling python -m vaultspec_a2a.testing.runner -- src/vaultspec_a2a/control/tests/test_worker_provenance.py --junitxml=.pytest-tmp/green-20261008/worker-provenance-s15.xml --no-showlocals` -> `pass`
 
 ## Notes
 
@@ -77,3 +78,4 @@ related:
 - `S99` Correction checkpoint only: S99 remains unchecked pending broader historical execution reconciliation.
 - `S83` Corrected real Windows onedir excludes Core test fixtures; build smoke and actual bundled Core help pass. Independent review PASS. Broader S83 historical closure is not inferred from this correction.
 - `S116` Contained local engine probe: live verdict and receipt-role tests 2 passed. Full nonservice 5859 passed/16 RAG-version failures/11 skipped. Independent review PASS with low mutable-buffer observation queued. Engine source pin/CI provisioning remains open S115; shared RAG choice pending.
+- `S15` Fresh verification at ca0a690a: 10 passed in 12.87s, including no requests/credentials to a foreign subprocess and no unarmed eviction. Original implementation c401d7bf is on main. Current source review confirms ancestry precedes credentialed readiness and eviction. S15 remains unchecked: reconcile B5 pre-spawn unauthenticated wording against accepted descendant-first behavior and full audit/closure requirements; do not invent historical verification.

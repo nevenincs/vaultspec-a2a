@@ -71,6 +71,7 @@ __all__ = [
     "create_worker_app",
     "main",
     "verify_dispatch_token",
+    "worker_health_body",
 ]
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,49 @@ async def verify_dispatch_token(
             detail=detail,
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+def worker_health_body(*, gateway_pairing_warning: str | None) -> dict[str, object]:
+    """Build the body the worker serves on ``GET /health``.
+
+    The one home for the worker's health shape. The gateway's readiness verdict is
+    not a status code: ``health_payload_ready`` requires the body to NAME its role
+    and report ``status`` ``"ok"``, so a body missing ``service`` reads as a worker
+    that is not ready even though it answered ``200``. An in-process worker that
+    hand-writes a shorter body therefore stops being probe-ready the moment the
+    rule tightens, with no failure at the point of divergence. Every caller that
+    serves a worker health body builds it here instead.
+
+    Reports the worker's configured heartbeat target (``gateway_url``) so a
+    spawning gateway can tell a worker that points at *this* gateway apart from a
+    stale orphan still pointing at a dead dev-band gateway. Without this
+    provenance the spawn path would blindly adopt the orphan and it would
+    heartbeat a dead port forever.
+
+    *gateway_pairing_warning* surfaces the non-fatal half of the worker's own
+    boot-time pairing guard (``resolve_worker_gateway_target``): a band worker
+    whose target could not be learned unambiguously and fell back to the
+    auto-derived default. ``None`` when the target was explicit, learned, or the
+    worker is not on a band port.
+    """
+    return {
+        "status": "ok",
+        "service": "worker",
+        "gateway_url": settings.gateway_url,
+        "gateway_pairing_warning": gateway_pairing_warning,
+        "worker_port": settings.worker_port,
+        "database_backend": settings.database_backend,
+        "checkpoint_backend": settings.checkpoint_backend,
+        # Pairing identity, reported not asserted. A URL cannot distinguish a
+        # gateway from its own restart on the same port, so a worker naming only
+        # its target looks correctly paired to a gateway that no longer exists.
+        # These two say WHICH gateway incarnation started this worker and which
+        # spawn attempt it was. Empty when the worker was started by something
+        # other than a gateway spawn - the process registry, an operator, or a
+        # test - which is itself the honest answer rather than a default.
+        "paired_gateway_lifetime": settings.gateway_lifetime_id,
+        "worker_generation": settings.worker_generation,
+    }
 
 
 async def _probe_gateway(bridge: WorkerBridge) -> None:
@@ -502,39 +546,12 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         probes present the shared bearer) reads the worker's provenance. In a
         DEVELOPMENT gateway with no token the shared bearer rule leaves it open.
 
-        Reports the worker's configured heartbeat target (``gateway_url``) so
-        a spawning gateway can tell a worker that points at *this* gateway apart
-        from a stale orphan still pointing at a dead dev-band gateway. Without
-        this provenance the spawn path would blindly adopt the orphan and it
-        would heartbeat a dead port forever.
-
-        ``gateway_pairing_warning`` surfaces the non-fatal half of the worker's
-        own boot-time pairing guard (``resolve_worker_gateway_target``): a band
-        worker whose target could not be learned unambiguously and fell back to
-        the auto-derived default. ``None`` when the target was explicit, learned,
-        or the worker is not on a band port.
+        The body itself is built by :func:`worker_health_body`, the one home for
+        the worker's health shape.
         """
-        return {
-            "status": "ok",
-            "service": "worker",
-            "gateway_url": settings.gateway_url,
-            "gateway_pairing_warning": getattr(
-                app.state, "gateway_pairing_warning", None
-            ),
-            "worker_port": settings.worker_port,
-            "database_backend": settings.database_backend,
-            "checkpoint_backend": settings.checkpoint_backend,
-            # Pairing identity, reported not asserted. A URL cannot distinguish a
-            # gateway from its own restart on the same port, so a worker naming
-            # only its target looks correctly paired to a gateway that no longer
-            # exists. These two say WHICH gateway incarnation started this worker
-            # and which spawn attempt it was. Empty when the worker was started
-            # by something other than a gateway spawn - the process registry, an
-            # operator, or a test - which is itself the honest answer rather than
-            # a default.
-            "paired_gateway_lifetime": settings.gateway_lifetime_id,
-            "worker_generation": settings.worker_generation,
-        }
+        return worker_health_body(
+            gateway_pairing_warning=getattr(app.state, "gateway_pairing_warning", None),
+        )
 
     @app.post(
         "/admin/shutdown",

@@ -47,12 +47,12 @@ from ..lifecycle.discovery import (
     another_resident_is_live,
     probe_health,
     read_resident_service,
+    recorded_resident_is_live,
 )
 from ..lifecycle.manager import spawn, tree_kill
 from ..utils._process_tree import (
     PortClaim,
     classify_port_claim,
-    pid_is_live,
     wait_pid_gone,
 )
 from ..utils.runtime_exec import self_command
@@ -115,7 +115,7 @@ def service_status(app_home: Path | None = None) -> ServiceStatus:
             state="stopped", pid=None, port=None, healthy=False, base_url=None
         )
     base_url = f"http://127.0.0.1:{info.port}"
-    if info.pid is None or not pid_is_live(info.pid):
+    if not recorded_resident_is_live(info):
         return ServiceStatus(
             state="stopped",
             pid=info.pid,
@@ -289,13 +289,17 @@ def stop_service(
 ) -> ServiceStatus:
     """Stop the resident gateway: authenticated drain first, tree kill fallback.
 
-    Idempotent: no record or a dead pid reports the stopped state without
-    failing.
+    Idempotent: no record, a dead pid, or a pid that has since been reused by an
+    unrelated process reports the stopped state without failing.
 
-    A live recorded pid is not yet a resident this verb may address. The
-    listener on the recorded endpoint must be held by that process or one of its
-    descendants first; only then is it asked to drain through the authenticated
-    ``/admin/shutdown`` verb, and only then may it be felled. When the
+    A live recorded pid is not yet a resident this verb may address, and it takes
+    two independent facts to become one. The record's process identity must still
+    describe a running process - the pid alive AND carrying the start fingerprint
+    the record published, so a stranger that inherited a crashed resident's pid is
+    never felled on the strength of that record. The listener on the recorded
+    endpoint must then be held by that process or one of its descendants; only
+    then is it asked to drain through the authenticated ``/admin/shutdown`` verb,
+    and only then may it be felled. When the
     authenticated path is unavailable, refused, or the process outlives
     *timeout*, the whole process tree is felled - a stop verb that can hang or
     silently fail would break the dashboard's restart contract.
@@ -313,7 +317,7 @@ def stop_service(
     """
     home = _resolved_app_home(app_home)
     _, info = read_resident_service(home)
-    if info is None or info.pid is None or not pid_is_live(info.pid):
+    if info is None or info.pid is None or not recorded_resident_is_live(info):
         return service_status(home)
     claim = classify_port_claim(
         info.port, info.pid, timeout=_PORT_PROBE_TIMEOUT_SECONDS

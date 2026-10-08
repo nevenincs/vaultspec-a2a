@@ -141,16 +141,19 @@ def test_the_stop_verb_addresses_the_path_the_gateway_actually_serves() -> None:
     invisible because a non-202 is indistinguishable from a refusal there.
 
     Asserting the CLI's own source rather than a copied constant is deliberate:
-    a constant shared by both sides would move together and prove nothing.
+    a constant shared by both sides would move together and prove nothing. The
+    whole module is read, not one function: the drain request has since moved
+    into a helper of its own, and a source read scoped to ``stop_service``
+    reported the binding as gone rather than as broken.
     """
     import inspect
     import re
 
     from ...cli import service as service_verbs
 
-    source = inspect.getsource(service_verbs.stop_service)
+    source = inspect.getsource(service_verbs)
     posted = re.search(r'f"\{base_url\}(/[^"]*shutdown)"', source)
-    assert posted is not None, "stop_service no longer posts a shutdown path"
+    assert posted is not None, "the stop verb no longer posts a shutdown path"
 
     served = {
         signature.partition(" ")[2]

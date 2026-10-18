@@ -4,23 +4,29 @@ name: Release Please
 #
 # - PROPOSAL. Every commit that lands on main refreshes the release pull
 #   request. `always-update` in the config rebuilds its branch on main's newest
-#   head every time, so the proposal is never behind main. This path never
-#   creates a release, a tag or a publication, and merging the proposal by hand
-#   does not release it either.
+#   head every time, so the proposal is never behind main, and the lock's own
+#   version entry moves inside release-please's commit through `extra-files`.
+#   The release App opens and updates the pull request, so its own
+#   pull-request events run the full merge gate like any trusted author's. This
+#   path never creates a release, a tag or a publication, and merging the
+#   proposal does not release it either.
 # - CUT. A maintainer dispatches this workflow when a release is wanted. It
-#   proves the proposal's head with the full merge gate, squash-merges it, and
-#   has release-please force the tag and create the draft release seconds
-#   later, then starts the release lane. The draft is published last, by that
-#   lane, once every archive it claims is attached and its provenance verified.
+#   requires the proposal's own merge gate to have passed on its exact head,
+#   squash-merges it, and has release-please force the tag and create the draft
+#   release seconds later, then starts the release lane. The draft is published
+#   last, by that lane, once every archive it claims is attached and its
+#   provenance verified.
 #
 # The proof comes before the merge because a release tag cannot be deleted: a
 # release commit that fails its gate after its tag exists stays a permanent tag
 # of a commit nobody can ship.
 #
-# The tag follows the merge with nothing in between because the default token
-# cannot create a tag on a commit whose `.github/workflows` differ from main's
-# head. A workflow change that lands between a merge and its tag leaves the
-# release untaggable by any later run.
+# Tags and releases stay on the default token: GitHub starts no workflow for a
+# ref or release that token creates, so nothing listening for them can start a
+# second copy of the lane. The tag follows the merge with nothing in between
+# because the default token cannot create a tag on a commit whose
+# `.github/workflows` differ from main's head. A workflow change that lands
+# between a merge and its tag leaves the release untaggable by any later run.
 on:
   push:
     branches: [main]
@@ -45,88 +51,33 @@ jobs:
     env:
       CI_EXEC_BUDGET_MINUTES: 30
     timeout-minutes: 150
-    # Opens and rewrites the release pull request, pushes its lock refresh and
-    # dispatches its gate.
+    # Every write is the release App's; the default token only reads.
     permissions:
-      contents: write
-      pull-requests: write
-      actions: write
+      contents: read
     steps:
+      # A pull request opened or pushed with the default token starts no
+      # workflow runs and is attributed to an untrusted bot, so the proposal
+      # would never report its required merge gate. The App is the one bot the
+      # trust rule admits. There is deliberately no fallback to the default
+      # token: a proposal that cannot be gated must fail here, not later.
+      - name: Mint the release App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Run release-please
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
+          token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           # Releases are cut on dispatch only.
           skip-github-release: true
-
-      - name: Check out the release branch
-        if: steps.release.outputs.pr
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName || '' }}
-          # The lockfile commit below is pushed with this checkout's token.
-          persist-credentials: true
-
-      - name: Set up uv
-        if: steps.release.outputs.pr
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          prune-cache: false
-          enable-cache: false
-          version: "0.11.29"
-
-      - name: Set up just
-        if: steps.release.outputs.pr
-        uses: taiki-e/install-action@6012bba2f8e3e666a2b212f8823c06831704ce92 # just
-        with:
-          tool: just@1.38.0
-
-      # release-please bumps pyproject.toml but cannot rewrite the lock's own
-      # entry, so every `--locked` job would fail on main once the proposal
-      # merges. The branch is regenerated on each push to main, so this is
-      # re-applied each time and is a no-op when the lock already agrees.
-      - name: Refresh the release branch lockfile
-        if: steps.release.outputs.pr
-        run: |
-          just deps-lock
-          if git diff --quiet uv.lock; then
-            echo "uv.lock already matches the proposed version"
-            exit 0
-          fi
-          # The proposal may move only this package's own version. Anything
-          # else means the lock drifted on main, which a release must not carry.
-          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)"
-          # --text: .gitattributes marks *.lock -diff, which otherwise
-          # reduces this diff to "Binary files differ".
-          changed="$(git diff --text -U0 uv.lock | grep -E '^[-+][^-+]' || true)"
-          if [ "$(printf '%s\n' "$changed" | grep -c .)" -ne 2 ] \
-            || ! printf '%s\n' "$changed" | grep -qx "+version = \"$version\""; then
-            echo "::error::uv.lock changed beyond this package's version:" >&2
-            printf '%s\n' "$changed" >&2
-            exit 1
-          fi
-          just hooks-bootstrap
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add uv.lock
-          git commit -m "chore: update uv.lock for release"
-          git push
-
-      # Pushes and pull requests made with the default token start no workflow
-      # runs, so the proposal would never report its required merge gate. A
-      # dispatch is exempt. No `ref` input is passed: the gate then checks out
-      # its own run's commit, which is the commit its check is reported on, so
-      # a branch that moves meanwhile cannot have one commit validated and
-      # another marked green. `pr` is guarded because a step's env is evaluated
-      # before its `if`. Last, so it validates the lockfile commit pushed above.
-      - name: Dispatch the merge gate for the release pull request
-        if: steps.release.outputs.pr
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_BRANCH: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName || '' }}
-        run: gh workflow run merge-gate.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_BRANCH"
 
   candidate:
     name: "Check: Release candidate (Linux)"
@@ -135,13 +86,14 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      checks: read
       pull-requests: read
     outputs:
       number: ${{ steps.find.outputs.number }}
       sha: ${{ steps.find.outputs.sha }}
       merged: ${{ steps.find.outputs.merged }}
     steps:
-      # A proposal merged by hand and not yet tagged is finished first:
+      # A proposal already merged and not yet tagged is finished first:
       # release-please opens no new proposal while one is pending, so it is the
       # only candidate there can be.
       - name: Find the release pull request and the commit to prove
@@ -182,6 +134,17 @@ jobs:
             echo "::error::release pull request #${number} resolved to no commit"
             exit 1
           fi
+          # The proposal's own pull-request run is the proof. The newest
+          # completed verdict on the exact head decides, as branch protection
+          # does, so an older success cannot outvote a newer failure.
+          if [ "${state}" = "false" ]; then
+            verdict=$(gh api "repos/$GITHUB_REPOSITORY/commits/${sha}/check-runs?check_name=Check:%20Merge%20gate%20(Linux)&filter=all&per_page=100" \
+              --jq '[.check_runs[] | select(.status == "completed")] | sort_by(.completed_at) | last | .conclusion // "missing"')
+            if [ "${verdict}" != "success" ]; then
+              echo "::error::release pull request #${number} has no passing Check: Merge gate (Linux) on ${sha} (newest: ${verdict}); let its own run finish, then dispatch again"
+              exit 1
+            fi
+          fi
           {
             echo "number=${number}"
             echo "sha=${sha}"
@@ -189,23 +152,11 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "cutting #${number} at ${sha} (merged=${state})"
 
-  # The full merge gate, on the exact head that will merge.
-  prove-gate:
-    name: "Test: Release gate (Linux)"
-    needs: candidate
-    uses: ./.github/workflows/merge-gate.yml
-    permissions:
-      contents: read
-      checks: read
-      pull-requests: write
-    with:
-      ref: ${{ needs.candidate.outputs.sha }}
-
-  # Reached only when the gate passed: a job's default condition is the success
-  # of everything it needs, and a called workflow's result is its gate job's.
+  # Reached only when the candidate's gate passed: a job's default condition is
+  # the success of everything it needs.
   cut:
     name: "Build: Release cut (Linux)"
-    needs: [candidate, prove-gate]
+    needs: [candidate]
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
     env:
@@ -228,7 +179,7 @@ jobs:
           set -euo pipefail
           if [ "${MERGED}" = "true" ]; then
             echo "commit=${SHA}" >> "$GITHUB_OUTPUT"
-            echo "#${NUMBER} was merged by hand at ${SHA}"
+            echo "#${NUMBER} was already merged at ${SHA}"
             exit 0
           fi
           head=$(gh pr view "${NUMBER}" --repo "$GITHUB_REPOSITORY" \
@@ -243,7 +194,7 @@ jobs:
             exit 1
           fi
           gh pr merge "${NUMBER}" --repo "$GITHUB_REPOSITORY" --squash --match-head-commit "${SHA}" || {
-            echo "::error::could not merge #${NUMBER}. Merge it by hand and dispatch again: the cut then tags the merged commit."
+            echo "::error::could not merge #${NUMBER} at ${SHA}; the ruleset admits it only once its required check has passed on that head"
             exit 1
           }
           commit=$(gh pr view "${NUMBER}" --repo "$GITHUB_REPOSITORY" --json mergeCommit --jq '.mergeCommit.oid')

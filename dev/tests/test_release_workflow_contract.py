@@ -41,11 +41,11 @@ def test_release_please_owns_reviewable_version_proposals() -> None:
     assert manifest["."] == project["project"]["version"]
 
     steps = _workflow("release-please.yml")["jobs"]["release-please"]["steps"]
-    assert re.fullmatch(
-        r"googleapis/release-please-action@[0-9a-f]{40}", steps[0]["uses"]
-    )
-    for step in steps[1:]:
-        assert step["if"] == "steps.release.outputs.pr"
+    for step in steps:
+        assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", step["uses"]), (
+            f"{step['name']} must run a commit-pinned action"
+        )
+    assert steps[-1]["uses"].startswith("googleapis/release-please-action@")
 
 
 def test_nothing_starts_itself_from_a_tag_or_a_release() -> None:
@@ -137,15 +137,6 @@ def test_full_validation_checks_out_the_requested_release_ref() -> None:
         )
         if checkout is not None:
             assert checkout["with"]["ref"] == "${{ inputs.ref || github.sha }}"
-
-
-def test_merge_gate_accepts_an_explicit_release_ref() -> None:
-    """Bind reusable release validation to the immutable requested tag."""
-    workflow = _workflow("merge-gate.yml")
-    triggers = _triggers(workflow)
-    assert triggers["workflow_call"]["inputs"]["ref"]["required"] is True
-    checkout = workflow["jobs"]["basic"]["steps"][0]
-    assert checkout["with"]["ref"] == "${{ inputs.ref || github.sha }}"
 
 
 def test_release_qualifies_native_artifacts_without_container_publication() -> None:

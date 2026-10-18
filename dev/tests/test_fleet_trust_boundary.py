@@ -1,16 +1,19 @@
 """Only a trusted author's code reaches the self-hosted fleet.
 
 Every runner this repository uses is self-hosted, which `dev/ci_contract.py`
-enforces separately. So a pull request that starts any job at all runs its own
-tree on hardware the maintainer owns, and "which pull requests may start a job"
-is the whole access-control question.
+enforces separately. So a pull request that starts any job at all runs on
+hardware the maintainer owns, and "which pull requests may start a job" is the
+whole access-control question.
 
-The answer has two clauses. The author must be the owner or a collaborator, or a
-user - never a bot - must have applied `ci:full`, which takes triage rights. A
-fork's pull request runs the fork's own copy of these files, so the fork clause
-only backs up the repository's approval requirement for outside contributors;
-for every other author, including Dependabot, whose `author_association` is
-CONTRIBUTOR, the author clause is the control itself.
+The answer is one clause, written identically in every repository of the
+fleet: the pull request comes from a branch of this repository, and its author
+is the owner, a collaborator, or the release App that opens the release pull
+request. A `ci:full` label additionally counts only when a user - never a bot -
+applied it. Forks, outside contributors, Dependabot (whose `author_association`
+is CONTRIBUTOR) and every other bot start nothing. A fork's pull request runs
+the fork's own copy of these files, so the fork clause only backs up the
+repository's approval requirement for outside contributors; for every other
+author the clause is the control itself.
 
 The clauses are written as plain equality rather than through `contains` over a
 parsed list so that the same string appears in every repository and so that an
@@ -19,6 +22,7 @@ expression evaluator can decide it.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any, cast
 
 import yaml
@@ -30,27 +34,33 @@ if TYPE_CHECKING:
 
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
-#: The pull request authors whose code may reach the fleet unreviewed. This is a
-#: personal account, so there are no organisation members: MEMBER is not here,
-#: and neither is CONTRIBUTOR, which is what Dependabot's pull requests carry.
+#: The bot the release App acts as. It opens the release pull request, which
+#: must run the required gate like a maintainer's.
+RELEASE_BOT = "nevenincs-release[bot]"
+
+#: The pull request authors whose code may reach the fleet, byte-identical
+#: across the fleet. This is a personal account, so there are no organisation
+#: members: MEMBER is not here, and neither is CONTRIBUTOR, which is what
+#: Dependabot's pull requests carry.
 TRUSTED_AUTHOR = (
     "(github.event.pull_request.author_association == 'OWNER' || "
-    "github.event.pull_request.author_association == 'COLLABORATOR')"
+    "github.event.pull_request.author_association == 'COLLABORATOR' || "
+    f"github.event.pull_request.user.login == '{RELEASE_BOT}')"
 )
 
 #: Applying a label takes triage rights; a bot applying `ci:full` does not count.
 LABEL_BY_USER = "github.event.sender.type == 'User'"
 
-#: The label that asks for one full run on an otherwise untrusted commit.
+#: The label that asks for one more full run of a trusted pull request.
 FULL_LABEL = "ci:full"
 
 #: Reached only when the fork's own copy of a workflow is not the one running.
 SAME_REPOSITORY = "github.event.pull_request.head.repo.full_name == github.repository"
 
-#: The one job that must run for every pull-request event, including a label
-#: that starts nothing. A required check whose job is skipped counts as PASSED,
-#: so this job cannot carry the trust rule in its condition and refuses an
-#: untrusted author inside its script instead.
+#: The sole required status check, and the name the verdict job reports under
+#: whenever the trust clause withholds it instead.
+REQUIRED_CHECK = "Check: Merge gate (Linux)"
+WITHHELD_CHECK = "Admission withheld (Linux)"
 VERDICT_JOB = ("merge-gate.yml", "gate")
 
 
@@ -81,6 +91,11 @@ def _workflow(path: Path) -> dict[str, Any]:
     return cast("dict[str, Any]", loaded)
 
 
+def _flat(expression: object) -> str:
+    """Return *expression* with its whitespace runs collapsed to one space."""
+    return " ".join(str(expression).split())
+
+
 def _pull_request_workflows() -> list[Path]:
     """Return every workflow a pull request can start."""
     return [
@@ -108,104 +123,165 @@ def test_no_workflow_runs_a_pull_request_with_the_base_repositorys_secrets() -> 
         )
 
 
-def test_only_a_trusted_author_or_a_users_label_reaches_the_fleet() -> None:
-    """Every pull-request job but the verdict carries the full trust rule.
+def test_every_pull_request_job_carries_the_fleet_trust_clause() -> None:
+    """No job a pull request can start reaches the fleet without the clause.
 
-    Every runner is self-hosted, so there is no job in a pull-request workflow
-    that may start for an untrusted author. The `labeled` event is in each
-    workflow's trigger list because the label clause is the only way a
-    collaborator can release a run for an author the first clause refuses.
+    Every runner is self-hosted, so every job in a pull-request workflow - the
+    verdict job included - must carry the same-repository clause and the
+    fleet's exact trusted-author clause, and a workflow that listens for labels
+    must admit only `ci:full`, and only from a user.
 
-    Mutation proof: dropping the author clause from `migrate`'s condition in
-    migrations.yml makes this fail naming that job; restoring it makes this pass.
+    Mutation proof: dropping the release-bot login term from `migrate`'s
+    condition in migrations.yml makes this fail on the trusted-author assertion
+    naming that job; deleting the `sender.type == 'User'` term from `basic` in
+    merge-gate.yml makes it fail on the label assertion naming that job;
+    restoring each makes this pass.
     """
     checked: list[str] = []
     for path in _pull_request_workflows():
         workflow = _workflow(path)
         events = cast("dict[str, Any]", workflow["on"]["pull_request"] or {})
-        assert "labeled" in cast("list[str]", events.get("types", [])), (
-            f"{path.name} never sees the `{FULL_LABEL}` label, so a collaborator "
-            f"has no way to release a run for an author the trust rule refuses"
-        )
+        labelled = "labeled" in cast("list[str]", events.get("types", []))
         for job_id, job in cast("dict[str, Any]", workflow["jobs"]).items():
-            if (path.name, job_id) == VERDICT_JOB:
-                continue
-            condition = str(job.get("if", ""))
+            condition = _flat(job.get("if", ""))
             where = f"`{job_id}` in {path.name}"
-            assert "github.event_name != 'pull_request'" in condition, (
-                f"{where} has no pull-request clause, so it either never runs "
-                f"outside one or runs for everyone inside one"
-            )
             assert SAME_REPOSITORY in condition, (
                 f"{where} would run a fork's code on the self-hosted fleet"
             )
             assert TRUSTED_AUTHOR in condition, (
-                f"{where} would run a pull request by any author on the "
-                f"self-hosted fleet, Dependabot included"
+                f"{where} lacks the fleet's exact trusted-author clause, so it "
+                f"either admits an author the fleet refuses or refuses the "
+                f"release App"
             )
-            assert f"github.event.label.name == '{FULL_LABEL}'" in condition, (
-                f"{where} would be started by any label, not only `{FULL_LABEL}`"
-            )
-            assert LABEL_BY_USER in condition, (
-                f"{where} would let a bot's `{FULL_LABEL}` label start it"
-            )
+            # The verdict job measures nothing; it must judge every trusted
+            # event, an unrelated label included, so it carries no label term.
+            if labelled and (path.name, job_id) != VERDICT_JOB:
+                assert f"github.event.label.name == '{FULL_LABEL}'" in condition, (
+                    f"{where} would be started by any label, not only `{FULL_LABEL}`"
+                )
+                assert LABEL_BY_USER in condition, (
+                    f"{where} would let a bot's `{FULL_LABEL}` label start it"
+                )
             checked.append(where)
     assert checked, "no pull-request job was examined, so this guard proved nothing"
 
 
-def test_the_gate_always_reaches_a_verdict_and_refuses_an_untrusted_author() -> None:
-    """The required check is never skipped, and it names who it refused.
+def test_no_condition_admits_another_author_or_bot() -> None:
+    """The clause is the whole allowance: no wider association, no other bot.
 
-    A required check whose job is skipped counts as passed, so the gate runs for
-    every pull-request event - an unrelated label included - and decides. A label
-    that started nothing is not a failure: the gate finds its own earlier success
-    on the same commit. Only when there is no such verdict does the author matter,
-    and then the refusal says whose commit it is and what releases it.
+    A term appended beside the clause - `MEMBER`, `CONTRIBUTOR`, or a second
+    bot login such as Dependabot's - widens the rule while the clause itself
+    stays intact, so the assertion above would still pass.
 
-    Mutation proof: deleting the untrusted-author refusal from the judgement
-    makes this fail on that refusal; restoring it makes this pass.
+    Mutation proof: appending `|| github.actor == 'dependabot[bot]'` to
+    `migrate`'s condition in migrations.yml makes this fail on the bot-login
+    assertion naming that job; removing it makes this pass.
+    """
+    for path in _pull_request_workflows():
+        jobs = cast("dict[str, Any]", _workflow(path)["jobs"])
+        for job_id, job in jobs.items():
+            expressions = _flat(f"{job.get('if', '')} {job.get('name', '')}")
+            where = f"`{job_id}` in {path.name}"
+            for association in ("MEMBER", "CONTRIBUTOR", "NONE", "FIRST_TIME"):
+                assert f"'{association}" not in expressions, (
+                    f"{where} admits {association}, which the fleet never trusts"
+                )
+            logins = set(re.findall(r"'([^']+\[bot\])'", expressions))
+            assert logins <= {RELEASE_BOT}, (
+                f"{where} admits {sorted(logins - {RELEASE_BOT})}; the release "
+                f"App is the only bot that may reach the fleet"
+            )
+
+
+def test_a_push_reaches_the_fleet_only_from_main() -> None:
+    """A branch push never starts a job; only main's history does.
+
+    Dependabot and every bot that can write a branch of this repository raise
+    `push` events for it. A push trigger that matches any branch but main
+    therefore runs a bot's tree on the fleet with no pull-request clause in the
+    way.
+
+    Mutation proof: widening migrations.yml's push trigger to
+    `branches: ['**']` makes this fail naming that workflow; restoring
+    `branches: [main]` makes this pass.
+    """
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        triggers = _workflow(path)["on"]
+        if "push" not in triggers:
+            continue
+        push = cast("dict[str, Any]", triggers["push"] or {})
+        assert push.get("branches") == ["main"], (
+            f"{path.name} runs on pushes to {push.get('branches')}; a bot's "
+            f"branch push would reach the self-hosted fleet"
+        )
+
+
+def test_the_merge_gate_runs_only_for_pull_requests() -> None:
+    """The required check is reported only by the pull request's own events.
+
+    A dispatched or called run of the gate links its checks to no pull request,
+    so it can never satisfy the ruleset, and a workflow that dispatches it is a
+    workaround for a pull request that cannot run its own gate.
+
+    Mutation proof: adding a `workflow_dispatch` trigger to merge-gate.yml makes
+    this fail on the trigger set; removing it makes this pass.
+    """
+    name, _ = VERDICT_JOB
+    triggers = cast("dict[str, Any]", _workflow(WORKFLOWS / name)["on"])
+    assert set(triggers) == {"pull_request"}, (
+        f"{name} must start only from pull-request events, but also declares "
+        f"{sorted(set(triggers) - {'pull_request'})}"
+    )
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        assert f"gh workflow run {name}" not in text, (
+            f"{path.name} dispatches {name}; its checks would attach to no pull request"
+        )
+        assert f"uses: ./.github/workflows/{name}" not in text, (
+            f"{path.name} calls {name}; its checks would attach to no pull request"
+        )
+
+
+def test_a_withheld_verdict_never_reports_the_required_check() -> None:
+    """The required check is never reported by a skipped job.
+
+    A required check whose job is skipped counts as passed. So the verdict job
+    carries the trust rule in its condition AND in its name: when the clause
+    refuses a pull request the job is skipped as `Admission withheld (Linux)`,
+    the required check stays expected, and the commit cannot merge. For a
+    trusted pull request it runs on every event, and a label that started
+    nothing finds this check's own earlier success on the same commit.
+
+    Mutation proof: replacing the gate's name expression with the literal
+    `Check: Merge gate (Linux)` makes this fail on the name assertion; restoring
+    it makes this pass.
     """
     name, job_id = VERDICT_JOB
-    gate = _workflow(WORKFLOWS / name)["jobs"][job_id]
-    assert gate["if"] == "always()", (
-        "the required check must run for every event; a skipped required check "
-        "counts as passed"
+    jobs = cast("dict[str, Any]", _workflow(WORKFLOWS / name)["jobs"])
+    gate = jobs[job_id]
+    admitted = f"({SAME_REPOSITORY} && {TRUSTED_AUTHOR})"
+    assert _flat(gate["name"]) == (
+        f"${{{{ {admitted} && '{REQUIRED_CHECK}' || '{WITHHELD_CHECK}' }}}}"
+    ), (
+        "the verdict job must report the required check only when the trust "
+        "clause admits the pull request, and another name when it withholds it"
     )
-
-    env = cast("dict[str, str]", gate["env"])
-    assert env["ASSOCIATION"] == "${{ github.event.pull_request.author_association }}"
-    assert env["AUTHOR"] == "${{ github.event.pull_request.user.login }}"
-    assert env["HEAD_REPO"] == "${{ github.event.pull_request.head.repo.full_name }}"
-    assert env["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
+    assert _flat(gate["if"]) == f"always() && {SAME_REPOSITORY} && {TRUSTED_AUTHOR}", (
+        "the verdict must run for every trusted event; `always()` keeps a "
+        "failed measuring job from skipping it"
+    )
+    for other_id, other in jobs.items():
+        if other_id != job_id:
+            assert REQUIRED_CHECK not in str(other.get("name", "")), (
+                f"`{other_id}` also reports {REQUIRED_CHECK}"
+            )
 
     steps = {str(step.get("name")): step for step in gate["steps"]}
     script = str(steps["Judge the required checks"]["run"])
-
-    fork = script.index('[ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]')
-    assert fork < script.index("exit 0"), (
-        "a fork pull request must be refused before any path can pass the gate"
-    )
-
-    verdict = script.index("check_name=Check:%20Merge%20gate%20(Linux)")
     assert "commits/$HEAD_SHA/check-runs?check_name=Check:%20Merge%20gate" in script, (
         "an earlier verdict counts only when it was reached on the same commit, "
         "and only under the required check's exact name"
     )
-
-    marker = 'case "$ASSOCIATION" in OWNER | COLLABORATOR) ;;'
-    assert marker in script, (
-        "the gate no longer refuses a commit by an author who is neither the "
-        "owner nor a collaborator"
-    )
-    untrusted = script.index(marker)
-    assert verdict < untrusted, (
-        "an untrusted author's commit that a collaborator's ci:full already "
-        "proved must keep its verdict"
-    )
-    assert f"applies the {FULL_LABEL} label" in script[untrusted:], (
-        "the refusal must name what releases the commit, not only that it was refused"
-    )
-
     release = steps[f"Release the {FULL_LABEL} label"]
     assert "|| true" in str(release["run"]), (
         "a label another run already removed must not redden the gate"

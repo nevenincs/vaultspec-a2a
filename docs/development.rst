@@ -202,16 +202,20 @@ Cut a release
 Write conventional commit subjects such as ``feat:``, ``fix:``, and ``feat!:``.
 release-please keeps a release pull request open with the next version and the
 changelog it derives, and rebuilds that branch on ``main``'s newest head after
-every commit that lands. That path releases nothing, and merging the pull
-request by hand doesn't release it either.
+every commit that lands. The ``nevenincs-release`` GitHub App opens and
+updates that pull request, and release-please moves ``uv.lock``'s own version
+entry in the same commit, so the pull request's own events run the full merge
+gate exactly as they do for a maintainer's. That path releases nothing, and
+merging the pull request doesn't release it either.
 
 To release, dispatch the **Release Please** workflow. Its cut:
 
 #. Finds the pending release pull request and refuses a candidate that is behind
    ``main`` or ambiguous.
-#. Proves that pull request's exact head with the full merge gate. A release tag
-   can't be deleted, so the proof comes first: a release commit that failed its
-   gate after being tagged would be a permanent tag of a commit nobody can ship.
+#. Requires that pull request's own ``Check: Merge gate (Linux)`` to have passed
+   on its exact head. A release tag can't be deleted, so the proof comes first:
+   a release commit that failed its gate after being tagged would be a permanent
+   tag of a commit nobody can ship.
 #. Squash-merges only that head, then refuses the merge if the landed tree isn't
    the proven one.
 #. Has release-please force the tag into existence and create an unpublished
@@ -238,7 +242,7 @@ A cut can stop in ``Create the release for the merged proposal`` with ``Resource
 not accessible by integration``. Its ``Name a release this token cannot tag``
 step then names the tag and the workflow files that block it. This happens when
 a workflow change lands between the release commit's merge and its tag, as when
-a release pull request merged by hand waits for a cut. No rerun and no later cut
+a release pull request merged outside the cut waits for one. No rerun and no later cut
 can finish it.
 
 Finish it with your own credentials, as the cut would have. Relabel the pull

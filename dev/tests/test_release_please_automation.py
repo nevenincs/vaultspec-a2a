@@ -1,10 +1,11 @@
 """Contract checks for A2A's release-please proposal and cut.
 
 The proposal path keeps the release pull request on main's newest head and
-creates nothing. The dispatched cut is the single release authority: it proves
-the proposal's head with the full merge gate, merges it, tags it, and starts the
-release lane. These checks cover that boundary locally because exercising it
-would create an irreversible tag.
+creates nothing; the release App opens it so its own events run the merge gate.
+The dispatched cut is the single release authority: it requires the proposal's
+own gate to have passed on its head, merges it, tags it, and starts the release
+lane. These checks cover that boundary locally because exercising it would
+create an irreversible tag.
 """
 
 from __future__ import annotations
@@ -22,6 +23,13 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 RELEASE_PLEASE_ACTION = (
     "googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7"
 )
+APP_TOKEN_ACTION = re.compile(r"actions/create-github-app-token@[0-9a-f]{40}")
+APP_TOKEN = "${{ steps.app-token.outputs.token }}"
+
+#: release-please's TOML updater parses each scalar into a node whose text is
+#: under `.value`, so a filter on `@.name` alone compares an object to a string,
+#: matches nothing, and leaves the lock's version behind with only a warning.
+LOCK_VERSION_PATH = "$.package[?(@.name.value==='{name}')].version"
 
 
 def _workflow(name: str) -> dict[str, Any]:
@@ -34,7 +42,19 @@ def _workflow(name: str) -> dict[str, Any]:
 
 
 def test_release_please_config_tracks_the_python_package_version() -> None:
-    """The release PR advances its package and manifest; the lock follows."""
+    """The release PR advances its package, manifest and lock in one commit.
+
+    The lock's own version entry moves inside release-please's commit, so the
+    release pull request has one head and one gate run, and no second writer
+    pushes to its branch. Every `--locked` job on main fails if it does not.
+
+    Mutation proof: dropping `.value` from the lock selector makes this fail on
+    the extra-files assertion; restoring it makes this pass. The selector
+    itself was proven against release-please 17.6.0, the version the pinned
+    action bundles, by running its TOML updater over this repository's uv.lock:
+    with `.value` it rewrote exactly this package's version line, without it
+    it modified nothing.
+    """
     config = json.loads(
         (REPO_ROOT / "release-please-config.json").read_text(encoding="utf-8")
     )
@@ -55,9 +75,13 @@ def test_release_please_config_tracks_the_python_package_version() -> None:
     assert package["package-name"] == project["project"]["name"]
     assert manifest == {".": project["project"]["version"]}
     assert lock_package["version"] == project["project"]["version"]
-    # release-please's toml updater left the lock at the old version on the
-    # 0.3.1 proposal; the workflow regenerates the lock on the branch instead.
-    assert "extra-files" not in package
+    assert package["extra-files"] == [
+        {
+            "type": "toml",
+            "path": "uv.lock",
+            "jsonpath": LOCK_VERSION_PATH.format(name=project["project"]["name"]),
+        }
+    ], "release-please must move the lock's own version entry in its commit"
     assert package["include-component-in-tag"] is False
     assert package["bump-minor-pre-major"] is True
     assert package["bump-patch-for-minor-pre-major"] is True
@@ -138,12 +162,12 @@ def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def test_the_proposal_keeps_up_and_never_releases() -> None:
-    """The push path refreshes the pull request and dispatches its own gate.
+    """The push path refreshes the pull request and nothing else.
 
     `always-update` is what keeps the proposal on main's newest head, so a cut
     never has to wait for a rebuild. The proposal itself creates nothing: the
-    action runs with `skip-github-release`, and the merge gate is dispatched
-    last so it validates the lockfile commit the step before it pushed.
+    action runs with `skip-github-release`, and it is the job's only writer, so
+    the pull request's own events are what run its merge gate.
 
     Mutation proof: removing `always-update` from the configuration makes this
     fail on that setting; restoring it makes this pass.
@@ -167,21 +191,67 @@ def test_the_proposal_keeps_up_and_never_releases() -> None:
     proposal = _release_please_jobs()["release-please"]
     assert proposal["if"] == "github.event_name == 'push'"
     assert proposal["name"] == "Build: Release proposal (Linux)"
+    assert proposal["permissions"] == {"contents": "read"}, (
+        "every write on the proposal path is the release App's"
+    )
     steps = _steps(proposal)
-    action = next(step for step in steps if step.get("id") == "release")
+    assert [step.get("id") for step in steps] == ["app-token", "release"], (
+        "the proposal path mints the App token and runs release-please; a later "
+        "step that pushed to the branch would be a second writer and a second "
+        "gate run"
+    )
+    action = steps[-1]
     assert action["uses"] == RELEASE_PLEASE_ACTION
     assert action["with"]["skip-github-release"] == "true"
-    assert "token" not in action["with"]
-
-    by_name = {str(step.get("name")): step for step in steps}
-    refresh = by_name["Refresh the release branch lockfile"]["run"]
-    assert refresh.index("just deps-lock") < refresh.index("just hooks-bootstrap")
-    assert refresh.index("just hooks-bootstrap") < refresh.index("git commit")
-    dispatch = by_name["Dispatch the merge gate for the release pull request"]
-    assert str(dispatch["run"]).startswith("gh workflow run merge-gate.yml ")
-    assert steps[-1] is dispatch, (
-        "the gate dispatch must be last so it validates the refreshed lock"
+    authority = (WORKFLOWS / "release-please.yml").read_text(encoding="utf-8")
+    assert "git push" not in authority, (
+        "nothing but release-please writes to the release branch"
     )
+
+
+def test_the_release_pull_request_is_opened_by_the_release_app() -> None:
+    """The proposal is the release App's, with no fallback to the default token.
+
+    A pull request opened or updated with the default token is attributed to
+    `github-actions[bot]`: its runs wait for approval, the trust rule withholds
+    its gate, and nothing can merge it. The App is the one bot the trust rule
+    admits. The cut's release creation stays on the default token, so the tag
+    and the release it creates start no workflow of their own.
+
+    Mutation proof: changing the proposal step's token to
+    `${{ steps.app-token.outputs.token || github.token }}` makes this fail on
+    the token assertion; restoring it makes this pass.
+    """
+    steps = _steps(_release_please_jobs()["release-please"])
+    mint = next(step for step in steps if step.get("id") == "app-token")
+    assert APP_TOKEN_ACTION.fullmatch(str(mint["uses"])), (
+        "the App token must come from GitHub's own action, pinned to a commit"
+    )
+    assert mint["with"] == {
+        "client-id": "${{ vars.RELEASE_APP_CLIENT_ID }}",
+        "private-key": "${{ secrets.RELEASE_APP_PRIVATE_KEY }}",
+        "permission-contents": "write",
+        "permission-pull-requests": "write",
+    }, "the App token must be scoped to exactly what the proposal writes"
+
+    for job_id, job in _release_please_jobs().items():
+        for step in _steps(job):
+            if not str(step.get("uses", "")).startswith(
+                "googleapis/release-please-action@"
+            ):
+                continue
+            options = cast("dict[str, str]", step.get("with", {}))
+            where = f"`{step.get('name')}` in `{job_id}`"
+            if options.get("skip-github-pull-request") == "true":
+                assert "token" not in options, (
+                    f"{where} creates tags and releases, which stay on the "
+                    f"default token so they start no second release lane"
+                )
+            else:
+                assert options.get("token") == APP_TOKEN, (
+                    f"{where} writes the release pull request and must do so as "
+                    f"the release App, with no fallback"
+                )
 
 
 def test_only_the_dispatched_cut_creates_a_release() -> None:
@@ -226,35 +296,46 @@ def test_only_the_dispatched_cut_creates_a_release() -> None:
     assert dispatch in authority, (
         "the cut no longer dispatches the release lane with its immutable tag"
     )
-    assert re.findall(r"gh workflow run (\S+)", authority) == [
-        "merge-gate.yml",
-        "release.yml",
-    ], "the cut starts the release lane and nothing else"
+    assert re.findall(r"gh workflow run (\S+)", authority) == ["release.yml"], (
+        "the cut starts the release lane and nothing else"
+    )
 
 
 def test_the_release_is_proven_before_anything_is_tagged() -> None:
     """The cut merges and tags only the head the full merge gate passed.
 
-    A release tag cannot be deleted, so the proof comes before it. The cut waits
-    on the merge gate called on the candidate's exact head, carries no condition
-    that could override that success, merges only that head, and refuses a
-    merged tree that differs from the proven one before release-please creates
+    A release tag cannot be deleted, so the proof comes before it. The proof is
+    the release pull request's own `Check: Merge gate (Linux)` on the
+    candidate's exact head, decided by the newest completed run as branch
+    protection decides it. The cut waits on the candidate, carries no condition
+    that could override its success, merges only that head, and refuses a merged
+    tree that differs from the proven one before release-please creates
     anything.
 
-    Mutation proof: removing `prove-gate` from the cut's `needs` makes this fail
-    on the gate dependency; restoring it makes this pass.
+    Mutation proof: deleting the `[ "${verdict}" != "success" ]` refusal from
+    the candidate's script makes this fail on the verdict assertion; restoring
+    it makes this pass.
     """
     jobs = _release_please_jobs()
-    prove = jobs["prove-gate"]
-    assert prove["uses"] == "./.github/workflows/merge-gate.yml"
-    assert cast("dict[str, str]", prove["with"])["ref"] == (
-        "${{ needs.candidate.outputs.sha }}"
-    ), "the release gate must prove the candidate's exact head"
+    candidate = jobs["candidate"]
+    find = next(step for step in _steps(candidate) if step.get("id") == "find")
+    script = str(find["run"])
+    query = "commits/${sha}/check-runs?check_name=Check:%20Merge%20gate%20(Linux)"
+    assert query in script, (
+        "the cut must read the required check on the candidate's exact head"
+    )
+    assert "sort_by(.completed_at) | last" in script, (
+        "the newest completed verdict decides, so an older success cannot "
+        "outvote a newer failure"
+    )
+    refusal = '[ "${verdict}" != "success" ]'
+    assert refusal in script, "the cut must refuse a head its gate did not pass"
+    assert script.index(refusal) < script.index("GITHUB_OUTPUT"), (
+        "the candidate must be refused before it is handed to the cut"
+    )
 
     cut = jobs["cut"]
-    assert "prove-gate" in cast("list[str]", cut["needs"]), (
-        "the cut must wait on the release gate"
-    )
+    assert cut["needs"] == ["candidate"], "the cut must wait on the proven candidate"
     assert "if" not in cut, (
         "a condition on the cut would override the default success check and "
         "let a failed gate tag a release"

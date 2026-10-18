@@ -20,11 +20,6 @@ bootstrap-branch.yml:Bootstrap local worktree
 # intelligible even when checkout or environment setup failed.
 merge-gate.yml:Judge the required checks
 
-# Commits the refreshed lock onto the release-please branch. The lock itself is
-# `just deps-lock`; the rest is git bookkeeping on a branch only CI writes, with
-# no local meaning.
-release-please.yml:Refresh the release branch lockfile
-
 # The release cut. Each of these reads or writes GitHub's own state - a pull
 # request's head, its merge commit's tree, a tag's target, a manifest blob at a
 # commit - through `gh`, and reaches it through a shell conditional because the
